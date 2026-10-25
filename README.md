@@ -1,39 +1,50 @@
 # AM for TV
 
-An independent Apple Music client for Android TV, licensed under [MIT](LICENSE).
+**The smoothest Apple Music client for Android TV**
 
-- Native MusicKit playback and remote navigation.
-- Albums, playlists, search, playback history and a selectable queue.
-- Synchronized lyrics and an artwork-colored background that responds to the music.
-- Apple Music / YouTube Music recommendations.
-- Configurable cover and lyrics caching.
+Offers an experience close to the native Apple Music app on Apple TV.
+
+English · [繁體中文](README.zh-TW.md) · [简体中文](README.zh-CN.md)
+
+## Features
+
+- Library, search, playlists, playback queue, and listening history
+- Word-by-word lyrics (backing vocals, long notes, interludes, timing offset)
+- Artwork colors, animated backgrounds, and audio spectrum bars
+- Autoplay recommendations (Apple Music / YouTube Music)
+- Artwork and lyric caches; English, Traditional Chinese, and Simplified Chinese
 
 ## Install
 
-Install the APK on Android TV 9 or later and sign in with your own Apple Music
-account. Internet access and an Apple Music subscription are required. The APK
-runs independently; no workstation or local server is needed.
+Android TV 9+ and an Apple Music subscription required. Install the APK and sign in to Apple Music.
+
+## Screenshots
+
+| Home | Player |
+| --- | --- |
+| ![Home screen](docs/assets/home.png) | ![Player with lyrics](docs/assets/player-lyrics.png) |
+
+| Playlist | Queue |
+| --- | --- |
+| ![Playlist tracks](docs/assets/playlist.png) | ![Playback queue](docs/assets/queue.png) |
+
+![Playback demo](docs/assets/player-demo.webp)
+
+## Microphone permission
+
+`RECORD_AUDIO` is used to analyze playback audio for the visualizer. The physical microphone is not used.
 
 ## Build
 
-Requires JDK 17 and Android SDK 36. For live playback, download the official
-MusicKit SDK and configure your own developer credential: [setup](docs/musickit-setup.md).
+Requires JDK 17, Android SDK 36, and the official [MusicKit Android SDK](https://developer.apple.com/musickit/android/). See [MusicKit setup](docs/musickit-setup.md) for credentials.
 
 ```sh
 ./gradlew :app:assembleDebug
 tools/build-standalone.sh
 ```
 
-The shareable APK is written to `dist/`. An unconfigured debug build uses demo
-data. Keep the signing key for future updates.
+The standalone APK is written to `dist/`. See [APK and source distribution](docs/standalone-distribution.md) for signing and packaging.
 
-See [distribution](docs/standalone-distribution.md) for APK and source packaging.
+## License
 
-The app caches covers and lyrics, not protected audio. Station and music-video
-playback are not supported. Lyrics and optional YouTube Music recommendations
-use undocumented upstream interfaces and may change.
-
-Apple SDK binaries, credentials, account data and generated artifacts are not
-included in source releases. Use `tools/export-source.sh` to create a source-only
-archive. Third-party components retain their own
-[licenses](app/src/main/assets/licenses/NOTICE.txt). This project is not affiliated with Apple.
+[MIT](LICENSE) · [Third-party licenses](app/src/main/assets/licenses/NOTICE.txt)
