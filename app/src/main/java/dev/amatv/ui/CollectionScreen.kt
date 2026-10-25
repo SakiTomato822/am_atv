@@ -15,6 +15,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import dev.amatv.R
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -94,16 +97,20 @@ internal fun CollectionScreen(
                 )
                 Text(
                     when {
-                        state.loading -> "正在讀取曲目…"
-                        state.error != null -> "無法載入曲目"
-                        else -> "${state.tracks.size} 首歌曲 · ${collectionDuration(duration)}"
+                        state.loading -> stringResource(R.string.browse_tracks_loading)
+                        state.error != null -> stringResource(R.string.browse_tracks_unavailable)
+                        else -> stringResource(
+                            R.string.browse_collection_summary,
+                            pluralStringResource(R.plurals.browse_song_count, state.tracks.size, state.tracks.size),
+                            collectionDuration(duration),
+                        )
                     },
                     color = Color.White.copy(alpha = 0.48f), fontSize = 12.sp,
                     modifier = Modifier.fillMaxWidth().padding(top = 5.dp, bottom = 12.dp),
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     CollectionAction(
-                        "播放", Icons.Rounded.PlayArrow, { onPlay(0, false) }, enabled = ready, retainFocus = true,
+                        stringResource(R.string.browse_play), Icons.Rounded.PlayArrow, { onPlay(0, false) }, enabled = ready, retainFocus = true,
                         modifier = Modifier.automationId("collection-play").weight(1f).height(42.dp).focusRequester(playFocus)
                             .onPreviewKeyEvent { event ->
                                 if (ready && event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&
@@ -124,7 +131,7 @@ internal fun CollectionScreen(
                             },
                     )
                     CollectionAction(
-                        "隨機播放", Icons.Rounded.Shuffle,
+                        stringResource(R.string.browse_shuffle), Icons.Rounded.Shuffle,
                         { onPlay(state.tracks.indices.random(), true) }, enabled = ready,
                         modifier = Modifier.automationId("collection-shuffle").weight(1f).height(42.dp).focusRequester(shuffleFocus)
                             .onPreviewKeyEvent { event ->
@@ -152,14 +159,14 @@ internal fun CollectionScreen(
                     ) {
                         CircularProgressIndicator(color = Color.White.copy(alpha = 0.8f), strokeWidth = 2.dp,
                             modifier = Modifier.size(26.dp))
-                        Text("正在讀取曲目…", color = Color.White.copy(alpha = 0.6f), fontSize = 15.sp)
+                        Text(stringResource(R.string.browse_tracks_loading), color = Color.White.copy(alpha = 0.6f), fontSize = 15.sp)
                     }
                     state.error != null -> Column(
                         Modifier.align(Alignment.Center).padding(20.dp),
                         verticalArrangement = Arrangement.spacedBy(18.dp),
                     ) {
-                        Text(state.error, color = Color.White.copy(alpha = 0.7f), fontSize = 16.sp)
-                        CollectionAction("重新載入", null, onRetry, modifier = Modifier.width(150.dp).height(42.dp).focusRequester(retryFocus)
+                        Text(stringResource(state.error), color = Color.White.copy(alpha = 0.7f), fontSize = 16.sp)
+                        CollectionAction(stringResource(R.string.browse_reload), null, onRetry, modifier = Modifier.width(150.dp).height(42.dp).focusRequester(retryFocus)
                             .focusProperties {
                                 left = playFocus
                                 up = playFocus
@@ -168,7 +175,7 @@ internal fun CollectionScreen(
                             })
                     }
                     state.tracks.isEmpty() -> Text(
-                        "目前沒有可播放的歌曲", modifier = Modifier.align(Alignment.Center),
+                        stringResource(R.string.browse_tracks_empty), modifier = Modifier.align(Alignment.Center),
                         color = Color.White.copy(alpha = 0.6f), fontSize = 17.sp,
                     )
                     else -> LazyColumn(
@@ -212,7 +219,7 @@ internal fun CollectionScreen(
                             ) { focused ->
                                 Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        if (selected && isPlaying) "♫" else "${index + 1}",
+                                        if (selected && isPlaying) "♫" else stringResource(R.string.browse_track_index, index + 1),
                                         color = if (selected) Color(0xFFFF788B) else Color.White.copy(alpha = 0.4f),
                                         fontSize = 13.sp, modifier = Modifier.width(30.dp),
                                     )
@@ -277,9 +284,9 @@ internal fun StationUnavailableDialog(station: Track, onDismiss: () -> Unit) {
         AlertDialog(
             onDismissRequest = onDismiss,
             title = { Text(station.title) },
-            text = { Text("目前無法收聽這個電台。") },
+            text = { Text(stringResource(R.string.browse_station_unavailable)) },
             confirmButton = {
-                CollectionAction("返回", null, onDismiss,
+                CollectionAction(stringResource(R.string.browse_back), null, onDismiss,
                     modifier = Modifier.width(110.dp).height(42.dp).focusRequester(focus))
             },
             containerColor = Color(0xFF252529),
@@ -289,12 +296,15 @@ internal fun StationUnavailableDialog(station: Track, onDismiss: () -> Unit) {
     }
 }
 
+@Composable
 private fun songDuration(ms: Long): String {
     val seconds = ms.coerceAtLeast(0L) / 1000
-    return "%d:%02d".format(seconds / 60, seconds % 60)
+    return stringResource(R.string.browse_song_duration, seconds / 60, seconds % 60)
 }
 
+@Composable
 private fun collectionDuration(ms: Long): String {
     val minutes = ms / 60_000
-    return if (minutes >= 60) "${minutes / 60} 小時 ${minutes % 60} 分鐘" else "$minutes 分鐘"
+    return if (minutes >= 60) stringResource(R.string.browse_duration_hours, minutes / 60, minutes % 60)
+    else stringResource(R.string.browse_duration_minutes, minutes)
 }

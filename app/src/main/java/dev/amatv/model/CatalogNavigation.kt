@@ -8,12 +8,3 @@ val Track.openAction: CatalogOpenAction
         CatalogKind.Station -> CatalogOpenAction.Station
         CatalogKind.Song, CatalogKind.MusicVideo -> CatalogOpenAction.Play
     }
-
-val Track.kindLabel: String
-    get() = when (catalogKind) {
-        CatalogKind.Album -> "專輯"
-        CatalogKind.Playlist -> "歌單"
-        CatalogKind.Station -> "電台"
-        CatalogKind.Song -> "歌曲"
-        CatalogKind.MusicVideo -> "音樂影片"
-    }

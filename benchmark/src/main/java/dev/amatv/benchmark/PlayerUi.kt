@@ -1,13 +1,28 @@
 package dev.amatv.benchmark
 
 import android.os.SystemClock
+import android.content.res.Configuration
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import org.junit.Assert.assertTrue
+import java.util.Locale
 
 /** Reads actual player state through Android accessibility; no private playback command channel. */
 internal class PlayerUi(private val ui: TvUi) {
+    private val stateLabels by lazy {
+        val context = InstrumentationRegistry.getInstrumentation().context.createPackageContext(TARGET, 0)
+        buildMap {
+            for (locale in listOf(Locale.ENGLISH, Locale.TAIWAN, Locale.SIMPLIFIED_CHINESE)) {
+                val configuration = Configuration(context.resources.configuration).apply { setLocale(locale) }
+                val resources = context.createConfigurationContext(configuration).resources
+                for (state in listOf("playing", "preparing", "paused")) {
+                    val id = resources.getIdentifier("player_state_$state", "string", TARGET)
+                    if (id != 0) put(resources.getString(id), state)
+                }
+            }
+        }
+    }
     fun state(): String? {
         val root = InstrumentationRegistry.getInstrumentation().uiAutomation.rootInActiveWindow ?: return null
         @Suppress("DEPRECATION")
@@ -23,7 +38,8 @@ internal class PlayerUi(private val ui: TvUi) {
                 found
             }
         } finally { node.recycle() }
-        return read(root)
+        val label = read(root)
+        return stateLabels[label] ?: label
     }
     fun awaitState(expected: String, timeout: Long = UI_TIMEOUT) {
         val deadline = SystemClock.uptimeMillis() + timeout
@@ -63,7 +79,7 @@ internal class PlayerUi(private val ui: TvUi) {
     fun pause() {
         wakeControls()
         focusControl("player-play-pause")
-        if (ui.device.hasObject(By.desc("暫停"))) ui.center()
+        if (state() != "paused") ui.center()
         awaitState("paused")
     }
 }

@@ -1,5 +1,8 @@
 package dev.amatv.integration
 
+import dev.amatv.R
+import dev.amatv.i18n.AppText
+
 import dev.amatv.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -30,7 +33,7 @@ class GoogleTvAuthorization(private val store: SecureTokenStore) {
     val signedIn get() = store.readYtmSession() != null
 
     suspend fun startPairing(): GoogleTvPairing {
-        check(configured) { "請設定 YTM_OAUTH_CLIENT_ID 與 YTM_OAUTH_CLIENT_SECRET。" }
+        check(configured) { AppText.text(R.string.services_google_not_configured) }
         val response = post(
             "https://oauth2.googleapis.com/device/code",
             mapOf(
@@ -38,7 +41,7 @@ class GoogleTvAuthorization(private val store: SecureTokenStore) {
                 "scope" to "https://www.googleapis.com/auth/youtube.readonly",
             ),
         )
-        check(response.status in 200..299) { "Google 配對啟動失敗 (HTTP ${response.status})。" }
+        check(response.status in 200..299) { AppText.text(R.string.services_google_pairing_start_failed, response.status) }
         val json = response.body
         return GoogleTvPairing(
             userCode = json.getString("user_code"),
@@ -66,19 +69,19 @@ class GoogleTvAuthorization(private val store: SecureTokenStore) {
             val body = response.body
             if (response.status in 200..299) {
                 val refresh = body.optString("refresh_token")
-                check(refresh.isNotBlank()) { "Google did not return a refresh token." }
+                check(refresh.isNotBlank()) { AppText.text(R.string.services_google_refresh_token_missing) }
                 saveTokens(body, refresh)
                 return
             }
             when (body.optString("error")) {
                 "authorization_pending" -> Unit
                 "slow_down" -> interval += 5
-                "access_denied" -> error("Google 帳號授權已拒絕。")
-                "expired_token" -> error("Google 配對碼已過期。")
-                else -> error("Google 配對失敗 (HTTP ${response.status})。")
+                "access_denied" -> error(AppText.text(R.string.services_google_access_denied))
+                "expired_token" -> error(AppText.text(R.string.services_google_pairing_expired))
+                else -> error(AppText.text(R.string.services_google_pairing_failed, response.status))
             }
         }
-        error("Google 配對碼已過期。")
+        error(AppText.text(R.string.services_google_pairing_expired))
     }
 
     suspend fun accessToken(): String? = refreshMutex.withLock {

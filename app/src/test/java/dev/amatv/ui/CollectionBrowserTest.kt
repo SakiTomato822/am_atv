@@ -1,5 +1,6 @@
 package dev.amatv.ui
 
+import dev.amatv.R
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
 import kotlinx.coroutines.*
@@ -39,7 +40,7 @@ class CollectionBrowserTest {
         }
         val item = collection("playlist")
         browser.open(item)
-        assertEquals("Try again", browser.state.value.error)
+        assertEquals(R.string.browse_tracks_error_detail, browser.state.value.error)
         assertFalse(browser.state.value.loading)
         browser.open(item)
         assertNull(browser.state.value.error)

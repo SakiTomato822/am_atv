@@ -1,5 +1,8 @@
 package dev.amatv.integration
 
+import dev.amatv.R
+import dev.amatv.i18n.AppText
+
 import android.icu.lang.UScript
 import android.util.Log
 import dev.amatv.model.LyricAgentType
@@ -39,7 +42,7 @@ class AppleMusicLyricsClient(
 ) {
     suspend fun lyricsFor(catalogId: String): List<LyricLine> = withContext(Dispatchers.IO) {
         val mediaUserToken = userToken()?.takeIf(String::isNotBlank)
-            ?: throw LyricsRequestException(LyricsFailureReason.Authorization, "請先登入 Apple Music。")
+            ?: throw LyricsRequestException(LyricsFailureReason.Authorization, AppText.text(R.string.services_sign_in_apple_music))
         val cacheGeneration = contentCache?.generation ?: 0L
         // The key is hashed before becoming a filename; account tokens are never written.
         val cacheKey = "$storefront|$catalogId|${Locale.getDefault().toLanguageTag()}|$mediaUserToken"
@@ -97,23 +100,23 @@ class AppleMusicLyricsClient(
             body = retried.second
         }
         if (status == HttpURLConnection.HTTP_UNAUTHORIZED) {
-            throw LyricsRequestException(LyricsFailureReason.Authorization, "Apple 歌詞授權已失效，請重新登入。")
+            throw LyricsRequestException(LyricsFailureReason.Authorization, AppText.text(R.string.services_lyrics_auth_expired))
         }
         Log.i(TAG, "Apple syllable-lyrics HTTP $status for catalog item $catalogId")
         if (status !in 200..299) {
             throw LyricsRequestException(lyricsHttpFailure(status), when (status) {
                 HttpURLConnection.HTTP_UNAUTHORIZED ->
-                    "Apple 歌詞授權已失效，請重新登入。"
+                    AppText.text(R.string.services_lyrics_auth_expired)
                 HttpURLConnection.HTTP_FORBIDDEN ->
-                    "此帳號、訂閱或地區目前不能讀取 Apple 同步歌詞。"
+                    AppText.text(R.string.services_lyrics_restricted)
                 HttpURLConnection.HTTP_NOT_FOUND ->
-                    "Apple Music 沒有提供這首歌的同步歌詞。"
-                else -> "Apple 同步歌詞服務回傳 HTTP $status。"
+                    AppText.text(R.string.services_lyrics_unavailable)
+                else -> AppText.text(R.string.services_lyrics_http_error, status)
             })
         }
 
         debugDumpDir?.let { dir ->
-            check(dir.isDirectory || dir.mkdirs()) { "Cannot create lyrics dump dir $dir" }
+            check(dir.isDirectory || dir.mkdirs()) { AppText.text(R.string.services_lyrics_cache_folder_failed, dir) }
             java.io.File(dir, "$catalogId.json").writeText(body)
         }
         val ttml = extractTtml(JSONObject(body))
@@ -141,7 +144,7 @@ class AppleMusicLyricsClient(
         val localized = ttmlLocalizations?.takeIf { it.isNotEmpty() }
         val resolved = localized ?: ttml?.takeIf { it.isNotEmpty() }
         if (resolved == null) {
-            throw LyricsRequestException(LyricsFailureReason.Unavailable, "這首歌暫時沒有歌詞。")
+            throw LyricsRequestException(LyricsFailureReason.Unavailable, AppText.text(R.string.services_lyrics_unavailable))
         }
         return resolved
     }
@@ -237,12 +240,12 @@ class AppleWebPlaybackTokenClient {
             .map { it.groupValues[1].replace("&amp;", "&") }
             .distinct()
             .toList()
-        check(assetPaths.isNotEmpty()) { "music.apple.com 沒有提供可讀取的網頁播放元件。" }
+        check(assetPaths.isNotEmpty()) { AppText.text(R.string.services_web_player_unavailable) }
 
         val token = assetPaths.asSequence().mapNotNull { asset ->
             val assetUrl = if (asset.startsWith("http")) asset else "$MUSIC_ORIGIN$asset"
             runCatching { JWT.find(get(assetUrl))?.value }.getOrNull()
-        }.firstOrNull() ?: error("music.apple.com 網頁播放權杖格式已變更。")
+        }.firstOrNull() ?: error(AppText.text(R.string.services_web_token_changed))
 
         cachedToken = token
         cachedExpiryEpochSeconds = jwtExpiry(token) ?: (now + DEFAULT_CACHE_SECONDS)
@@ -258,7 +261,7 @@ class AppleWebPlaybackTokenClient {
             connection.setRequestProperty("Accept", "text/html,application/javascript,*/*")
             connection.setRequestProperty("User-Agent", WEB_USER_AGENT)
             val status = connection.responseCode
-            check(status in 200..299) { "music.apple.com 回傳 HTTP $status。" }
+            check(status in 200..299) { AppText.text(R.string.services_music_website_http_error, status) }
             connection.inputStream.bufferedReader().use { it.readText() }
         } finally {
             connection.disconnect()

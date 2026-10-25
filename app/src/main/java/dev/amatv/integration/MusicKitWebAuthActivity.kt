@@ -2,11 +2,13 @@ package dev.amatv.integration
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.os.Message
+import android.text.TextUtils
 import android.util.Base64
 import android.view.Gravity
 import android.view.View
@@ -19,7 +21,9 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import dev.amatv.BuildConfig
+import dev.amatv.R
 import org.json.JSONObject
 
 /**
@@ -34,12 +38,16 @@ class MusicKitWebAuthActivity : Activity() {
     private lateinit var status: TextView
     private var popupWebView: WebView? = null
 
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(ContextCompat.getContextForLanguage(newBase))
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val developerToken = intent.getStringExtra(EXTRA_DEVELOPER_TOKEN)
         if (developerToken.isNullOrBlank()) {
-            finishWithError("Developer token is missing.")
+            finishWithError(getString(R.string.services_auth_token_missing))
             return
         }
 
@@ -47,7 +55,7 @@ class MusicKitWebAuthActivity : Activity() {
             setTextColor(Color.WHITE)
             textSize = 20f
             gravity = Gravity.CENTER
-            text = "正在載入 Apple Music 登入…"
+            text = getString(R.string.services_auth_loading)
             setPadding(48, 24, 48, 24)
             setBackgroundColor(Color.rgb(20, 20, 24))
         }
@@ -178,7 +186,8 @@ class MusicKitWebAuthActivity : Activity() {
                     if (request?.isForMainFrame == true) {
                         val failingUrl = request.url?.toString().orEmpty()
                         if (failingUrl.startsWith(AUTH_ORIGIN)) return
-                        showStatus("登入頁載入失敗：${error?.description ?: "未知錯誤"}")
+                        showStatus(getString(R.string.services_auth_page_failed,
+                            error?.description ?: getString(R.string.services_unknown_error)))
                     }
                 }
             }
@@ -207,9 +216,15 @@ class MusicKitWebAuthActivity : Activity() {
     private fun authorizationPage(developerToken: String): String {
         val tokenLiteral = JSONObject.quote(developerToken)
         val buildLiteral = JSONObject.quote(BuildConfig.VERSION_NAME)
+        val labels = JSONObject()
+            .put("continue", getString(R.string.services_auth_continue))
+            .put("componentFailed", getString(R.string.services_auth_component_failed))
+            .put("waiting", getString(R.string.services_auth_waiting))
+            .put("invalidAuthorization", getString(R.string.services_auth_invalid_user_token))
+            .put("retry", getString(R.string.services_auth_retry))
         return """
             <!doctype html>
-            <html lang="zh-Hant">
+            <html lang="${resources.configuration.locales[0].toLanguageTag()}">
               <head>
                 <meta charset="utf-8">
                 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -231,13 +246,14 @@ class MusicKitWebAuthActivity : Activity() {
               </head>
               <body>
                 <main>
-                  <h1>登入 Apple Music</h1>
-                  <button id="signin" disabled onclick="authorizeMusic()">正在準備…</button>
+                  <h1>${TextUtils.htmlEncode(getString(R.string.services_auth_title))}</h1>
+                  <button id="signin" disabled onclick="authorizeMusic()">${TextUtils.htmlEncode(getString(R.string.services_auth_preparing))}</button>
                   <p id="error"></p>
                 </main>
                 <script>
                   const button = document.getElementById('signin');
                   const error = document.getElementById('error');
+                  const labels = $labels;
                   document.addEventListener('musickitloaded', async () => {
                     try {
                       await MusicKit.configure({
@@ -245,7 +261,7 @@ class MusicKitWebAuthActivity : Activity() {
                         app: { name: 'AM for TV', build: $buildLiteral }
                       });
                       button.disabled = false;
-                      button.textContent = '繼續登入 Apple Music';
+                      button.textContent = labels.continue;
                       button.focus();
                     } catch (e) {
                       const message = e && e.message ? e.message : String(e);
@@ -254,13 +270,13 @@ class MusicKitWebAuthActivity : Activity() {
                     }
                   });
                   function scriptFailed() {
-                    const message = '無法載入 Apple Music 網頁元件。';
+                    const message = labels.componentFailed;
                     error.textContent = message;
                     $JS_BRIDGE.failed(message);
                   }
                   async function authorizeMusic() {
                     button.disabled = true;
-                    button.textContent = '正在等待 Apple 授權…';
+                    button.textContent = labels.waiting;
                     error.textContent = '';
                     try {
                       const instance = MusicKit.getInstance();
@@ -271,13 +287,13 @@ class MusicKitWebAuthActivity : Activity() {
                       if (resolved && resolved.length > 20) {
                         $JS_BRIDGE.authorized(resolved);
                       } else {
-                        throw new Error('Apple Music 沒有回傳有效的使用者授權。');
+                        throw new Error(labels.invalidAuthorization);
                       }
                     } catch (e) {
                       const message = e && e.message ? e.message : String(e);
                       error.textContent = message;
                       button.disabled = false;
-                      button.textContent = '重新嘗試登入 Apple Music';
+                      button.textContent = labels.retry;
                       button.focus();
                     }
                   }
@@ -330,7 +346,7 @@ class MusicKitWebAuthActivity : Activity() {
         @JavascriptInterface
         fun authorized(userToken: String) {
             if (userToken.length <= 20 || userToken.any(Char::isWhitespace)) {
-                failed("Apple Music 回傳的授權格式無效。")
+                failed(getString(R.string.services_auth_invalid_token_format))
                 return
             }
             runOnUiThread {
@@ -342,7 +358,7 @@ class MusicKitWebAuthActivity : Activity() {
 
         @JavascriptInterface
         fun failed(message: String) {
-            showStatus("Apple Music 登入尚未完成\n$message\n\n按返回鍵可回到 App 後重試。")
+            showStatus(getString(R.string.services_auth_incomplete, message))
         }
     }
 

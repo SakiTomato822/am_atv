@@ -1,5 +1,8 @@
 package dev.amatv.integration
 
+import dev.amatv.R
+import dev.amatv.i18n.AppText
+
 import android.util.Log
 import androidx.compose.ui.graphics.Color
 import dev.amatv.BuildConfig
@@ -40,13 +43,13 @@ class DeveloperTokenClient(
         }
 
         check(endpoint.isNotBlank()) {
-            if (bundledToken.isNotBlank()) "此版本的 Apple Music 連線憑證已到期，請更新 App。"
-            else "此版本尚未設定 Apple Music 連線，請安裝完整版本。"
+            if (bundledToken.isNotBlank()) AppText.text(R.string.services_credentials_expired_update)
+            else AppText.text(R.string.services_full_version_required)
         }
         val secureEndpoint = endpoint.startsWith("https://")
         val debugLanEndpoint = BuildConfig.DEBUG && endpoint.startsWith("http://")
         check(secureEndpoint || debugLanEndpoint) {
-            "Release builds require an HTTPS AM_TOKEN_ENDPOINT."
+            AppText.text(R.string.services_token_https_required)
         }
         val value = runCatching {
             val connection = URI(endpoint).toURL().openConnection() as HttpURLConnection
@@ -61,21 +64,21 @@ class DeveloperTokenClient(
                 } else {
                     connection.errorStream
                 })?.bufferedReader()?.use { it.readText() }.orEmpty().trim()
-                check(status in 200..299) { "Token endpoint returned HTTP $status" }
+                check(status in 200..299) { AppText.text(R.string.services_token_http_error, status) }
                 val parsed = if (body.startsWith("{")) {
                     val json = JSONObject(body)
                     json.optString("developerToken").ifBlank { json.optString("token") }
                 } else {
                     body
                 }
-                check(isJwtValid(parsed)) { "Token endpoint returned an invalid or expired developer token" }
+                check(isJwtValid(parsed)) { AppText.text(R.string.services_token_invalid) }
                 parsed
             } finally {
                 connection.disconnect()
             }
         }.getOrElse { error ->
             throw IllegalStateException(
-                "無法連線至 Developer Token 服務 ($endpoint)：${error.message ?: error.javaClass.simpleName}",
+                AppText.text(R.string.services_token_connection_failed, endpoint, error.message ?: error.javaClass.simpleName),
                 error,
             )
         }
@@ -112,7 +115,7 @@ class AppleMusicApi(
                 val attributes = recommendation.optJSONObject("attributes")
                 val title = attributes?.displayText("title")
                     ?: attributes?.displayText("name")
-                    ?: "推薦給你"
+                    ?: AppText.text(R.string.services_recommended_for_you)
                 val contents = recommendation.optJSONObject("relationships")
                     ?.optJSONObject("contents")
                     ?: continue
@@ -136,7 +139,7 @@ class AppleMusicApi(
         if (shelves.isNotEmpty()) return@withContext shelves
         val fallback = parseResources(root)
         if (fallback.isEmpty()) emptyList() else listOf(
-            ContentShelf("recommendations", "Top Picks for You", fallback, featured = true),
+            ContentShelf("recommendations", AppText.text(R.string.services_top_picks_for_you), fallback, featured = true),
         )
         }
     }
@@ -173,7 +176,7 @@ class AppleMusicApi(
             needsUserToken = true,
         )
         val item = root.optJSONArray("data")?.optJSONObject(0)
-            ?: error("找不到媒體庫歌曲 ($id) 的目錄資訊。")
+            ?: error(AppText.text(R.string.services_library_song_catalog_missing, id))
         val playParams = item.optJSONObject("attributes")?.optJSONObject("playParams")
         val fromPlayParams = playParams?.optString("catalogId")?.takeIf(String::isNotBlank)
             ?: playParams?.optString("reportingId")?.takeIf(String::isNotBlank)
@@ -185,7 +188,7 @@ class AppleMusicApi(
             ?.optString("id")
             ?.takeIf(String::isNotBlank)
         if (fromRelationship != null) return fromRelationship
-        throw IllegalStateException("此媒體庫歌曲為個人上傳音檔，無對應 Apple Music 同步歌詞。")
+        throw IllegalStateException(AppText.text(R.string.services_uploaded_song_lyrics_unavailable))
     }
 
     suspend fun charts(types: String = "albums,songs,playlists"): List<Track> = request(
@@ -274,9 +277,9 @@ class AppleMusicApi(
         var path: String? = request.firstPage
         while (path != null) {
             currentCoroutineContext().ensureActive()
-            check(visited.add(path)) { "歌單分頁重複，請稍後重試。" }
+            check(visited.add(path)) { AppText.text(R.string.services_playlist_page_repeated) }
             val root = fetchPage(path, request.needsUserToken)
-            val data = root.optJSONArray("data") ?: error("無法讀取歌單曲目，請重試。")
+            val data = root.optJSONArray("data") ?: error(AppText.text(R.string.services_playlist_tracks_unavailable))
             // Read only this relationship, in order. Nested catalog resources are metadata,
             // and repeated songs are separate playlist entries, not duplicates to remove.
             for (index in 0 until data.length()) {
@@ -308,7 +311,7 @@ class AppleMusicApi(
         val musicUserToken = userToken()
         if (needsUserToken) {
             check(!musicUserToken.isNullOrBlank()) {
-                "請先登入 Apple Music 帳號。"
+                AppText.text(R.string.services_sign_in_apple_music)
             }
         }
 
@@ -352,8 +355,8 @@ class AppleMusicApi(
             when (status) {
                 HttpURLConnection.HTTP_UNAUTHORIZED,
                 HttpURLConnection.HTTP_FORBIDDEN,
-                -> "Apple Music 授權已失效或未完成登入 (HTTP $status)，請重新登入。"
-                else -> "Apple Music API 回傳錯誤 (HTTP $status)。"
+                -> AppText.text(R.string.services_apple_auth_http_error, status)
+                else -> AppText.text(R.string.services_apple_api_http_error, status)
             }
         }
         JSONObject(body)
@@ -468,17 +471,17 @@ class AppleMusicApi(
         val editorialNotes = optJSONObject("editorialNotes")
             ?: catalogAttrs?.optJSONObject("editorialNotes")
         val name = rawName.ifBlank {
-            editorialNotes?.optString("name").orEmpty().ifBlank { "Untitled" }
+            editorialNotes?.optString("name").orEmpty().ifBlank { AppText.text(R.string.services_unknown_title) }
         }
         val artist = rawArtist.ifBlank { "Apple Music" }
         val album = optString("albumName").ifBlank {
             catalogAttrs?.optString("albumName").orEmpty().ifBlank {
                 when (kind) {
-                    CatalogKind.Album -> "Album"
-                    CatalogKind.Playlist -> "Playlist"
-                    CatalogKind.Station -> "Station"
-                    CatalogKind.MusicVideo -> "Music Video"
-                    CatalogKind.Song -> "Song"
+                    CatalogKind.Album -> AppText.text(R.string.services_kind_album)
+                    CatalogKind.Playlist -> AppText.text(R.string.services_kind_playlist)
+                    CatalogKind.Station -> AppText.text(R.string.services_kind_station)
+                    CatalogKind.MusicVideo -> AppText.text(R.string.services_kind_music_video)
+                    CatalogKind.Song -> AppText.text(R.string.services_kind_song)
                 }
             }
         }

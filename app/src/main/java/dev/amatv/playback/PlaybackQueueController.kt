@@ -1,5 +1,8 @@
 package dev.amatv.playback
 
+import dev.amatv.R
+import dev.amatv.i18n.AppText
+
 import dev.amatv.integration.AutoplaySource
 import dev.amatv.integration.PlaybackRepeatMode
 import dev.amatv.integration.PlaybackSession
@@ -68,7 +71,7 @@ data class QueueState(
     val shuffle: Boolean = false,
     val repeat: PlaybackRepeatMode = PlaybackRepeatMode.Off,
     val infinite: Boolean = true,
-    val source: AutoplaySource = AutoplaySource.YouTubeMusic,
+    val source: AutoplaySource = AutoplaySource.AppleMusic,
     val autoplayStatus: AutoplayStatus = AutoplayStatus.Idle,
     val amStationId: String? = null,
     val ytmContinuation: String? = null,
@@ -440,6 +443,11 @@ class PlaybackQueueController(
 
     fun restoreFromSession(session: PlaybackSession) {
         val restored = session.sanitizedAutoplayEntries() ?: return
+        // Preferences represent the user's provider choice. A saved queue records
+        // provenance, and must not silently opt an upgraded installation into YTM.
+        val source = playbackPrefs.autoplaySource
+        val sameSource = source == restored.autoplaySource
+        val restoreYtmCursor = sameSource && source == AutoplaySource.YouTubeMusic
         cancelRefill()
         playbackSessionActive = false
         failedSongs.clear()
@@ -460,7 +468,9 @@ class PlaybackQueueController(
         }
         val clampedIndex = restored.currentIndex.coerceIn(entries.indices)
         val currentEntry = entries[clampedIndex]
-        val future = entries.drop(clampedIndex + 1)
+        val future = entries.drop(clampedIndex + 1).filter {
+            sameSource || it.origin == EntryOrigin.Context || it.wasPlayed
+        }
         val autoplayStart = future.indexOfLast { it.origin == EntryOrigin.Context } + 1
         val contextEntries = if (restored.contextQueue.isNotEmpty()) {
             // Context IDs may also be on the visible timeline; reuse that identity.
@@ -474,9 +484,10 @@ class PlaybackQueueController(
             history = entries.take(clampedIndex).map(::historyMetadata),
             current = currentEntry, upNext = future.take(autoplayStart),
             unshuffledUpNext = null, autoplay = future.drop(autoplayStart),
-            source = restored.autoplaySource, infinite = restored.radioActive, amStationId = null,
-            ytmContinuation = restored.radioContinuation,
-            ytmSeedVideoId = restored.radioSeedVideoId ?: restored.radioSeed?.ytmVideoId,
+            source = source, infinite = restored.radioActive, amStationId = null,
+            ytmContinuation = restored.radioContinuation.takeIf { restoreYtmCursor },
+            ytmSeedVideoId = (restored.radioSeedVideoId ?: restored.radioSeed?.ytmVideoId)
+                .takeIf { restoreYtmCursor },
             autoplayStatus = AutoplayStatus.Idle, awaitingNext = false,
             contextEntries = contextEntries,
             recommendationSeed = restored.radioSeed?.takeIf { it.catalogKind == CatalogKind.Song }
@@ -549,14 +560,14 @@ class PlaybackQueueController(
                 consecutiveFailures = failures,
                 failureLimitReached = limit,
                 awaitingNext = false,
-                autoplayStatus = if (limit) AutoplayStatus.Error("連續多首歌曲無法播放，請稍後再試。")
+                autoplayStatus = if (limit) AutoplayStatus.Error(AppText.text(R.string.services_queue_failure_limit))
                     else if (anchorFailed) AutoplayStatus.Idle else curr.autoplayStatus,
             )
         }
         if (limit) return null
         val next = advanceNextInternal(manual = true)
         if (next == null && !_state.value.awaitingNext) {
-            _state.update { it.copy(autoplayStatus = AutoplayStatus.Error("這首歌曲無法播放，目前沒有其他可播放曲目。")) }
+            _state.update { it.copy(autoplayStatus = AutoplayStatus.Error(AppText.text(R.string.services_queue_no_playable_tracks))) }
         }
         return next
     }
@@ -640,7 +651,7 @@ class PlaybackQueueController(
                     if (refillGeneration != gen) curr else curr.copy(
                         autoplay = curr.autoplay + newTracks,
                         autoplayStatus = if (newTracks.isEmpty() && curr.autoplay.isEmpty() && !continueLoading) {
-                            AutoplayStatus.Error("暫時沒有可播放的推薦歌曲，請再試一次。")
+                            AutoplayStatus.Error(AppText.text(R.string.services_queue_no_recommendations))
                         } else AutoplayStatus.Idle,
                         recommendationSeed = replacementSeed ?: curr.recommendationSeed,
                         amStationId = if (replacementSeed != null) null else nextAmStationId,
@@ -656,13 +667,13 @@ class PlaybackQueueController(
                 }
             } catch (timeout: TimeoutCancellationException) {
                 if (refillGeneration == gen) _state.update {
-                    it.copy(autoplayStatus = AutoplayStatus.Error("推薦載入逾時，請稍後再試。"), awaitingNext = false)
+                    it.copy(autoplayStatus = AutoplayStatus.Error(AppText.text(R.string.services_queue_timeout)), awaitingNext = false)
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
                 if (refillGeneration == gen) _state.update {
-                    it.copy(autoplayStatus = AutoplayStatus.Error(error.message ?: "無法載入推薦歌曲。"), awaitingNext = false)
+                    it.copy(autoplayStatus = AutoplayStatus.Error(error.message ?: AppText.text(R.string.services_queue_load_failed)), awaitingNext = false)
                 }
             }
         }

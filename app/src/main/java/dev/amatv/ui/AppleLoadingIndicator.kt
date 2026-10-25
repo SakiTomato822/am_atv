@@ -13,9 +13,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import dev.amatv.R
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -23,13 +25,14 @@ import kotlin.math.sin
 /** Small, quiet activity indicator; animation invalidates drawing, not the surrounding layout. */
 @Composable
 internal fun AppleLoadingIndicator(modifier: Modifier = Modifier) {
+    val loadingDescription = stringResource(R.string.player_loading)
     val phase = if (LocalFocusTargetsEnabled.current) rememberInfiniteTransition(label = "activity-indicator").animateFloat(
         initialValue = 0f,
         targetValue = 12f,
         animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart),
         label = "activity-spokes",
     ) else null
-    Canvas(modifier.size(28.dp).semantics { contentDescription = "載入中" }) {
+    Canvas(modifier.size(28.dp).semantics { contentDescription = loadingDescription }) {
         val radius = size.minDimension / 2f
         val head = (phase?.value?.toInt() ?: 0) % 12
         repeat(12) { index ->

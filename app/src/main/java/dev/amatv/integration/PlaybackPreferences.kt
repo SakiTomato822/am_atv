@@ -11,6 +11,10 @@ enum class AutoplaySource {
     YouTubeMusic,
 }
 
+/** Only a recognized stored selection opts in to a different recommendation provider. */
+internal fun autoplaySourceFromStoredValue(raw: String?): AutoplaySource =
+    AutoplaySource.entries.firstOrNull { it.name == raw } ?: AutoplaySource.AppleMusic
+
 data class PlaybackSession(
     val queue: List<Track>,
     val currentIndex: Int,
@@ -21,7 +25,7 @@ data class PlaybackSession(
     val radioActive: Boolean,
     val radioSeed: Track?,
     val radioContinuation: String?,
-    val autoplaySource: AutoplaySource = AutoplaySource.YouTubeMusic,
+    val autoplaySource: AutoplaySource = AutoplaySource.AppleMusic,
     val radioSeedVideoId: String? = null,
     val autoplayEntryIndices: Set<Int> = emptySet(),
     val queueEntryIds: List<Long> = emptyList(),
@@ -102,8 +106,8 @@ class PlaybackPreferences(context: Context) : QueuePreferences {
 
     override var autoplaySource: AutoplaySource
         get() {
-            val raw = preferences.getString(KEY_AUTOPLAY_SOURCE, AutoplaySource.YouTubeMusic.name)
-            return enumValueOrDefault(raw.orEmpty(), AutoplaySource.YouTubeMusic)
+            val raw = runCatching { preferences.getString(KEY_AUTOPLAY_SOURCE, null) }.getOrNull()
+            return autoplaySourceFromStoredValue(raw)
         }
         set(value) {
             preferences.edit().putString(KEY_AUTOPLAY_SOURCE, value.name).apply()

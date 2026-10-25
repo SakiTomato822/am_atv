@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_previous_track">Previous Track</string>
+    <string name="player_pause">Pause</string>
+    <string name="player_play">Play</string>
+    <string name="player_next_track">Next Track</string>
+    <string name="player_lyrics">Lyrics</string>
+    <string name="player_queue">Play Queue</string>
+    <string name="player_radio">Radio</string>
+    <string name="player_state_playing">Playing</string>
+    <string name="player_state_preparing">Preparing</string>
+    <string name="player_state_paused">Paused</string>
+    <string name="player_lyrics_unavailable">No lyrics are available for this song</string>
+    <string name="player_lyrics_load_failed">Lyrics are temporarily unavailable</string>
+    <string name="player_songwriters_format">Written by: %1$s</string>
+    <string name="player_shuffle">Shuffle</string>
+    <string name="player_repeat_off">Repeat Off</string>
+    <string name="player_repeat_one">Repeat One</string>
+    <string name="player_repeat_all">Repeat All</string>
+    <string name="player_autoplay">Autoplay</string>
+    <string name="player_source_format">Source: %1$s</string>
+    <string name="player_clear_queue">Clear</string>
+    <string name="player_provider_ytm" translatable="false">YTM</string>
+    <string name="player_provider_apple_music" translatable="false">AM</string>
+    <string name="player_artwork_transitioning">Transitioning</string>
+    <string name="player_artwork_loaded">Loaded</string>
+    <string name="player_loading">Loading</string>
+    <string name="player_artwork_description">%1$s artwork</string>
+</resources>

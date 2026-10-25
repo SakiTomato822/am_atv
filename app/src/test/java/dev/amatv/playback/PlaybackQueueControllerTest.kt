@@ -4,6 +4,7 @@ import dev.amatv.integration.AutoplaySource
 import dev.amatv.integration.MusicServices
 import dev.amatv.integration.PlaybackRepeatMode
 import dev.amatv.integration.PlaybackSession
+import dev.amatv.integration.autoplaySourceFromStoredValue
 import dev.amatv.model.Destination
 import dev.amatv.integration.QueuePreferences
 import dev.amatv.integration.RecommendationProvider
@@ -30,6 +31,7 @@ class PlaybackQueueControllerTest {
         override var repeatMode: PlaybackRepeatMode = PlaybackRepeatMode.Off
         override var shuffleEnabled: Boolean = false
         override var autoplayEnabled: Boolean = false
+        // Existing radio scenarios exercise an explicitly chosen YTM provider.
         override var autoplaySource: AutoplaySource = AutoplaySource.YouTubeMusic
     }
 
@@ -419,6 +421,7 @@ class PlaybackQueueControllerTest {
             wasPlaying = false, destination = Destination.NowPlaying,
             previousDestination = Destination.Home, radioActive = true,
             radioSeed = first, radioContinuation = null, autoplayEntryIndices = setOf(1, 2),
+            autoplaySource = AutoplaySource.YouTubeMusic,
         ))
 
         assertTrue(controller.state.value.upNext.isEmpty())
@@ -441,6 +444,7 @@ class PlaybackQueueControllerTest {
             previousDestination = Destination.Home, radioActive = true,
             radioSeed = current, radioContinuation = "station-page",
             radioSeedVideoId = "original-id",
+            autoplaySource = AutoplaySource.YouTubeMusic,
         ))
         assertTrue(fakeRecommendations.requests.isEmpty())
         controller.activatePlaybackSession()
@@ -720,5 +724,106 @@ class PlaybackQueueControllerTest {
         controller.activatePlaybackSession()
         assertTrue(fakeRecommendations.requests.isEmpty())
         assertTrue(fakeRecommendations.appleSeeds.isEmpty())
+    }
+
+    @Test fun defaultSourceMakesNoYtmRequestUntilTheUserSelectsYtm() {
+        prefs.autoplaySource = autoplaySourceFromStoredValue(null)
+        prefs.autoplayEnabled = true
+        fakeRecommendations.amStationTracks = listOf(testTrack("2", "Apple suggestion", "Second"))
+        fakeRecommendations.ytmRadioTracks = listOf(testTrack("3", "YTM suggestion", "Third"))
+        val controller = createController()
+        assertEquals(AutoplaySource.AppleMusic, controller.state.value.source)
+        assertTrue(fakeRecommendations.requests.isEmpty())
+        controller.playContext(listOf(testTrack("1", "Selected", "First")), 0)
+        assertEquals(listOf("1"), fakeRecommendations.appleSeeds)
+        assertTrue(fakeRecommendations.requests.isEmpty())
+        controller.advanceNext(manual = false)
+        assertTrue(fakeRecommendations.requests.isEmpty())
+
+        controller.setAutoplaySource(AutoplaySource.YouTubeMusic)
+        assertEquals(AutoplaySource.YouTubeMusic, prefs.autoplaySource)
+        assertEquals(AutoplaySource.YouTubeMusic, controller.state.value.source)
+        assertTrue(fakeRecommendations.requests.isNotEmpty())
+        assertEquals(null to null, fakeRecommendations.requests.first())
+    }
+
+    @Test fun staleYtmCheckpointAndFullSessionCannotOverrideApplePreference() {
+        prefs.autoplaySource = AutoplaySource.AppleMusic
+        prefs.autoplayEnabled = true
+        val controller = createController()
+        val earlier = testTrack("1", "Earlier", "First")
+        val current = testTrack("2", "Current", "Second")
+        val explicitNext = testTrack("3", "Playlist next", "Third")
+        val pendingRecommendation = testTrack("4", "Old YTM suggestion", "Fourth")
+        val saved = PlaybackSession(
+            queue = listOf(earlier, current, explicitNext, pendingRecommendation),
+            currentIndex = 1, positionMs = 42_000, wasPlaying = false,
+            destination = Destination.NowPlaying, previousDestination = Destination.Home,
+            radioActive = true, radioSeed = earlier, radioContinuation = "old-ytm-cursor",
+            autoplaySource = AutoplaySource.YouTubeMusic, radioSeedVideoId = "old-video",
+            autoplayEntryIndices = setOf(1, 3), queueEntryIds = listOf(11L, 12L, 13L, 14L),
+            playedEntryIds = setOf(11L, 12L), contextQueue = listOf(earlier, explicitNext),
+            contextEntryIds = listOf(11L, 13L), persistenceId = "saved-session",
+        )
+        controller.restoreFromSession(saved)
+        controller.restoreFromSession(saved.copy(radioContinuation = "full-session-ytm-cursor"))
+        val state = controller.state.value
+        assertEquals(AutoplaySource.AppleMusic, state.source)
+        assertEquals(AutoplaySource.AppleMusic, prefs.autoplaySource)
+        assertEquals(listOf(11L), state.history.map { it.entryId })
+        assertEquals(12L, state.current?.entryId)
+        assertEquals(listOf(13L), state.upNext.map { it.entryId })
+        assertEquals(listOf(11L, 13L), state.contextEntries.map { it.entryId })
+        assertEquals("saved-session", state.persistenceId)
+        assertTrue(state.autoplay.isEmpty())
+        assertNull(state.ytmContinuation)
+        assertNull(state.ytmSeedVideoId)
+        assertTrue(fakeRecommendations.requests.isEmpty())
+        assertTrue(fakeRecommendations.appleSeeds.isEmpty())
+        assertTrue(playedTracks.isEmpty())
+        controller.activatePlaybackSession()
+        assertEquals(listOf("1"), fakeRecommendations.appleSeeds)
+        assertTrue(fakeRecommendations.requests.isEmpty())
+    }
+
+    @Test fun explicitYtmPreferenceSurvivesAppleSessionAndStartsWithAFreshCursor() {
+        prefs.autoplaySource = AutoplaySource.YouTubeMusic
+        prefs.autoplayEnabled = true
+        val controller = createController()
+        val current = testTrack("1", "Current", "First")
+        controller.restoreFromSession(PlaybackSession(
+            queue = listOf(current, testTrack("2", "Old Apple suggestion", "Second")),
+            currentIndex = 0, positionMs = 0, wasPlaying = false,
+            destination = Destination.NowPlaying, previousDestination = Destination.Home,
+            radioActive = true, radioSeed = current, radioContinuation = "foreign-cursor",
+            autoplaySource = AutoplaySource.AppleMusic, radioSeedVideoId = "foreign-video",
+            autoplayEntryIndices = setOf(1), queueEntryIds = listOf(21L, 22L),
+        ))
+        assertEquals(AutoplaySource.YouTubeMusic, controller.state.value.source)
+        assertTrue(controller.state.value.autoplay.isEmpty())
+        assertNull(controller.state.value.ytmContinuation)
+        assertNull(controller.state.value.ytmSeedVideoId)
+        assertTrue(fakeRecommendations.requests.isEmpty())
+        controller.activatePlaybackSession()
+        assertEquals(null to null, fakeRecommendations.requests.first())
+        assertTrue(fakeRecommendations.appleSeeds.isEmpty())
+    }
+
+    @Test fun providerChangeKeepsPreviouslyPlayedForwardEntriesAndDropsOnlyNewRecommendations() {
+        prefs.autoplaySource = AutoplaySource.AppleMusic
+        val controller = createController()
+        val current = testTrack("1", "Current", "First")
+        controller.restoreFromSession(PlaybackSession(
+            queue = listOf(current, testTrack("2", "Already played", "Second"), testTrack("3", "Unplayed", "Third")),
+            currentIndex = 0, positionMs = 0, wasPlaying = false,
+            destination = Destination.NowPlaying, previousDestination = Destination.Home,
+            radioActive = true, radioSeed = current, radioContinuation = "old-cursor",
+            autoplaySource = AutoplaySource.YouTubeMusic, autoplayEntryIndices = setOf(1, 2),
+            queueEntryIds = listOf(31L, 32L, 33L), playedEntryIds = setOf(32L),
+        ))
+        assertEquals(31L, controller.state.value.current?.entryId)
+        assertEquals(listOf(32L), controller.state.value.autoplay.map { it.entryId })
+        assertTrue(controller.state.value.autoplay.single().wasPlayed)
+        assertTrue(fakeRecommendations.requests.isEmpty())
     }
 }

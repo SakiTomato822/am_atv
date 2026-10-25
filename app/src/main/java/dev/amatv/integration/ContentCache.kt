@@ -1,5 +1,8 @@
 package dev.amatv.integration
 
+import dev.amatv.R
+import dev.amatv.i18n.AppText
+
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -108,7 +111,7 @@ class ContentCache private constructor(context: Context) {
                 clearArtwork()
                 mutations.withLock {
                     lyricsDirectory.listFiles()?.forEach { file ->
-                        if (file.isFile && !file.delete()) error("部分快取無法清除，請重試。")
+                        if (file.isFile && !file.delete()) error(AppText.text(R.string.services_cache_clear_failed))
                     }
                 }
             } finally {

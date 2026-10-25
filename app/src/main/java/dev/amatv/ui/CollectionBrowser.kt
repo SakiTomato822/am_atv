@@ -1,5 +1,6 @@
 package dev.amatv.ui
 
+import dev.amatv.R
 import dev.amatv.model.CatalogOpenAction
 import dev.amatv.model.Track
 import dev.amatv.model.openAction
@@ -14,7 +15,7 @@ internal data class CollectionBrowserState(
     val collection: Track? = null,
     val tracks: List<Track> = emptyList(),
     val loading: Boolean = false,
-    val error: String? = null,
+    val error: Int? = null,
 )
 
 /** Browsing never touches the playback queue. A dismissed request cannot reopen the page. */
@@ -40,10 +41,10 @@ internal class CollectionBrowser(
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (error: Exception) {
+            } catch (_: Exception) {
                 if (request == generation) {
                     mutableState.value = CollectionBrowserState(
-                        collection, error = error.message ?: "無法讀取曲目，請重試。",
+                        collection, error = R.string.browse_tracks_error_detail,
                     )
                 }
             }

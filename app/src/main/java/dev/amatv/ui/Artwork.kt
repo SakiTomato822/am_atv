@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.viewinterop.AndroidView
@@ -112,14 +113,15 @@ private fun RetainedMotionArtwork(
     val density = LocalDensity.current
     val requestedKey = requestedTrack.artworkVisualKey()
     var coverState by remember { mutableStateOf("loading") }
+    val coverStateDescription = stringResource(when (coverState) {
+        "blending" -> R.string.player_artwork_transitioning
+        "ready" -> R.string.player_artwork_loaded
+        else -> R.string.player_loading
+    })
     BoxWithConstraints(modifier = modifier
         .automationId("player-artwork")
         .semantics {
-            stateDescription = when {
-                coverState == "blending" -> "切換中"
-                coverState == "ready" -> "已載入"
-                else -> "載入中"
-            }
+            stateDescription = coverStateDescription
         }
         .clip(RoundedCornerShape(cornerRadius))) {
         val imageSize = with(density) { maxWidth.toPx().roundToInt().coerceAtLeast(1) }
@@ -164,7 +166,7 @@ private fun RetainedMotionArtwork(
         }
         Image(
             painter = displayed?.painter ?: initialPlaceholder,
-            contentDescription = "${requestedTrack.title} artwork",
+            contentDescription = stringResource(R.string.player_artwork_description, requestedTrack.title),
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
         )
@@ -214,7 +216,7 @@ private fun ArtworkSurface(
         AsyncImage(
             model = request,
             imageLoader = imageLoader,
-            contentDescription = "${track.title} artwork",
+            contentDescription = stringResource(R.string.player_artwork_description, track.title),
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
             placeholder = placeholder,

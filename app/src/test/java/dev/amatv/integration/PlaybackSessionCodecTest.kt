@@ -89,4 +89,30 @@ class PlaybackSessionCodecTest {
         assertEquals(45_000L, restored.positionMs)
         assertEquals(setOf(1L), restored.playedEntryIds)
     }
+
+    @Test fun currentSessionMissingOrInvalidSourceUsesAppleWithoutErasingExplicitYtmProvenance() {
+        for (raw in listOf(null, "", "invalid-provider", "YouTubeMusic", "AppleMusic")) {
+            val root = JSONObject(PlaybackSessionCodec.encode(session(2)))
+            if (raw == null) root.remove("autoplaySource") else root.put("autoplaySource", raw)
+            val decoded = PlaybackSessionCodec.decode(root.toString())!!
+            val expected = if (raw == "YouTubeMusic") AutoplaySource.YouTubeMusic else AutoplaySource.AppleMusic
+            assertEquals(expected, decoded.autoplaySource)
+            assertEquals(2, decoded.queue.size)
+            assertEquals(listOf(1L, 2L), decoded.queueEntryIds)
+        }
+    }
+
+    @Test fun legacySessionMissingOrInvalidSourceAlsoUsesAppleMusic() {
+        for (raw in listOf(null, "", "invalid-provider", "YouTubeMusic", "AppleMusic")) {
+            val root = JSONObject().put("version", 1)
+                .put("queue", org.json.JSONArray(listOf(track("1").toSessionJson())))
+                .put("currentIndex", 0).put("positionMs", 25_000)
+            if (raw != null) root.put("autoplaySource", raw)
+            val decoded = PlaybackSessionCodec.decode(root.toString())!!
+            val expected = if (raw == "YouTubeMusic") AutoplaySource.YouTubeMusic else AutoplaySource.AppleMusic
+            assertEquals(expected, decoded.autoplaySource)
+            assertEquals("1", decoded.queue.single().id)
+            assertEquals(25_000L, decoded.positionMs)
+        }
+    }
 }

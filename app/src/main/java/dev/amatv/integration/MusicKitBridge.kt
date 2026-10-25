@@ -1,5 +1,8 @@
 package dev.amatv.integration
 
+import dev.amatv.R
+import dev.amatv.i18n.AppText
+
 import android.content.Context
 import android.content.Intent
 import android.os.Handler
@@ -102,7 +105,7 @@ class MusicKitBridge(private val context: Context) {
         get() = classExists(AUTH_FACTORY) && classExists(PLAYER_FACTORY)
 
     fun authenticationIntent(developerToken: String): Intent {
-        check(isInstalled) { "Apple MusicKit Android AARs are not installed." }
+        check(isInstalled) { AppText.text(R.string.services_sdk_unavailable) }
         val factory = Class.forName(AUTH_FACTORY)
         val manager = factory.getMethod(
             "createAuthenticationManager",
@@ -128,7 +131,7 @@ class MusicKitBridge(private val context: Context) {
         val isError = tokenResult.javaClass.getMethod("isError").invoke(tokenResult) as Boolean
         check(!isError) {
             val error = tokenResult.javaClass.getMethod("getError").invoke(tokenResult)
-            "Apple Music authentication failed: $error"
+            AppText.text(R.string.services_auth_failed, error.toString())
         }
         return tokenResult.javaClass.getMethod("getMusicUserToken")
             .invoke(tokenResult) as String
@@ -162,7 +165,7 @@ class MusicKitBridge(private val context: Context) {
         playbackUserToken = userToken
         val currentController = controller ?: createController(developerToken, userToken)
             .also { controller = it }
-        val storeId = checkNotNull(track.catalogId) { "Track has no Apple catalog ID" }
+        val storeId = checkNotNull(track.catalogId) { AppText.text(R.string.services_catalog_id_missing) }
         if (playbackListener != null) {
             mainHandler.removeCallbacks(snapshotPoll)
             mainHandler.post(snapshotPoll)
@@ -182,7 +185,7 @@ class MusicKitBridge(private val context: Context) {
                 ).invoke(builder, 1, arrayOf(storeId))
 
                 CatalogKind.MusicVideo -> error(
-                    "The installed MusicKit Android SDK does not support music-video playback.",
+                    AppText.text(R.string.services_video_unsupported),
                 )
 
                 CatalogKind.Album,
@@ -194,7 +197,7 @@ class MusicKitBridge(private val context: Context) {
                         CatalogKind.Song,
                         CatalogKind.MusicVideo,
                         CatalogKind.Station,
-                        -> error("Item kinds do not use a container queue")
+                        -> error(AppText.text(R.string.services_container_unsupported))
                     }
                     builderClass.getMethod(
                         "containers",
@@ -204,7 +207,7 @@ class MusicKitBridge(private val context: Context) {
                 }
 
                 CatalogKind.Station -> error(
-                    "The installed MusicKit Android SDK does not support station playback.",
+                    AppText.text(R.string.services_station_unsupported),
                 )
             }
             val provider = builderClass.getMethod("build").invoke(builder)
@@ -240,7 +243,7 @@ class MusicKitBridge(private val context: Context) {
         }
     }
     fun seekTo(positionMs: Long) {
-        val value = checkNotNull(controller) { "Playback has not been prepared." }
+        val value = checkNotNull(controller) { AppText.text(R.string.services_playback_not_prepared) }
         postPlaybackAction("seekToPosition") {
             playbackIntent.requestSeek()
             endedCatalogId = null
@@ -324,7 +327,7 @@ class MusicKitBridge(private val context: Context) {
     }
 
     private fun createController(developerToken: String, userToken: String): Any {
-        check(isInstalled) { "Apple MusicKit Android AARs are not installed." }
+        check(isInstalled) { AppText.text(R.string.services_sdk_unavailable) }
         val providerClass = Class.forName(TOKEN_PROVIDER)
         val tokenProvider = MusicKitTokenProvider(developerToken, userToken)
         val factory = Class.forName(PLAYER_FACTORY)
@@ -372,7 +375,7 @@ class MusicKitBridge(private val context: Context) {
             throw error
         }
         return checkNotNull(createdController) {
-            "MusicKit did not create a playback controller."
+            AppText.text(R.string.services_controller_unavailable)
         }
     }
 
@@ -517,8 +520,8 @@ class MusicKitBridge(private val context: Context) {
             if (decision.failure != null) {
                 pendingFailureKind = decision.failure
                 pendingPlaybackError = when (decision.failure) {
-                    PlaybackFailureKind.PositionRestore -> "無法恢復這首歌的播放進度，請重試。"
-                    else -> "歌曲連線暫時無法完成，請重試。"
+                    PlaybackFailureKind.PositionRestore -> AppText.text(R.string.services_playback_restore_failed)
+                    else -> AppText.text(R.string.services_song_connection_failed)
                 }
             }
         }
@@ -576,7 +579,7 @@ class MusicKitBridge(private val context: Context) {
         val title = (item.callOrNull("getTitle") as? String).orEmpty().ifBlank { "Apple Music" }
         val artist = (item.callOrNull("getArtistName") as? String).orEmpty()
             .ifBlank { "Apple Music" }
-        val album = (item.callOrNull("getAlbumTitle") as? String).orEmpty().ifBlank { "Song" }
+        val album = (item.callOrNull("getAlbumTitle") as? String).orEmpty().ifBlank { AppText.text(R.string.services_kind_song) }
         val artwork = item.javaClass.methods.firstOrNull {
             it.name == "getArtworkUrl" && it.parameterTypes.size == 2
         }?.invoke(item, 600, 600) as? String
@@ -656,11 +659,11 @@ class MusicKitBridge(private val context: Context) {
     }
 
     private fun invokeController(name: String, vararg args: Any) {
-        val value = checkNotNull(controller) { "Playback has not been prepared." }
+        val value = checkNotNull(controller) { AppText.text(R.string.services_playback_not_prepared) }
         postPlaybackAction(name) {
             val method = value.javaClass.methods.firstOrNull {
                 it.name == name && it.parameterTypes.size == args.size
-            } ?: error("MusicKit controller does not expose $name.")
+            } ?: error(AppText.text(R.string.services_controller_command_unavailable, name))
             Log.i(TAG, "Controller command: $name")
             method.invoke(value, *args)
         }
@@ -668,7 +671,7 @@ class MusicKitBridge(private val context: Context) {
 
     private fun postPlaybackAction(name: String, action: () -> Unit) {
         val handler = checkNotNull(playbackHandler) {
-            "MusicKit playback thread is not running."
+            AppText.text(R.string.services_playback_thread_unavailable)
         }
         val generation = prepareGeneration.get()
         handler.post {
@@ -718,11 +721,11 @@ class MusicKitBridge(private val context: Context) {
     }
 
     private fun describePlaybackError(error: Any?): String = when (classifyNativeFailure(error)) {
-        PlaybackFailureKind.TrackUnavailable -> "這首歌曲目前無法播放。"
-        PlaybackFailureKind.Authorization -> "Apple Music 授權需要更新，請重新登入。"
-        PlaybackFailureKind.Network -> "暫時無法連線至 Apple Music，請重試。"
-        PlaybackFailureKind.PositionRestore -> "無法恢復播放進度，請重試。"
-        PlaybackFailureKind.Unexpected -> "無法完成播放，請重試。"
+        PlaybackFailureKind.TrackUnavailable -> AppText.text(R.string.services_track_unavailable)
+        PlaybackFailureKind.Authorization -> AppText.text(R.string.services_playback_auth_required)
+        PlaybackFailureKind.Network -> AppText.text(R.string.services_apple_connection_failed)
+        PlaybackFailureKind.PositionRestore -> AppText.text(R.string.services_playback_restore_failed)
+        PlaybackFailureKind.Unexpected -> AppText.text(R.string.services_playback_failed)
     }
 
     private fun classExists(name: String): Boolean = runCatching {

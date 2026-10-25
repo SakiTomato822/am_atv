@@ -1,5 +1,8 @@
 package dev.amatv.integration
 
+import dev.amatv.R
+import dev.amatv.i18n.AppText
+
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -44,7 +47,7 @@ class SecureTokenStore(context: Context) {
 
     fun writeDeveloperToken(token: String) {
         val trimmed = token.trim()
-        require(trimmed.count { it == '.' } == 2) { "Developer token is not a valid JWT." }
+        require(trimmed.count { it == '.' } == 2) { AppText.text(R.string.services_developer_token_invalid) }
         writeEncrypted(KEY_DEV_TOKEN_CIPHERTEXT, trimmed)
         sdkAuthPreferences.edit().putString("developer-token", trimmed).apply()
     }

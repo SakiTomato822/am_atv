@@ -1,5 +1,8 @@
 package dev.amatv.integration
 
+import dev.amatv.R
+import dev.amatv.i18n.AppText
+
 import android.content.Context
 import android.content.Intent
 import android.util.Log
@@ -147,10 +150,10 @@ class MusicServices(context: Context) : RecommendationProvider {
 
     val setupMessage: String?
         get() = when {
-            !isCatalogConfigured -> "此版本尚未設定 Apple Music 連線。"
+            !isCatalogConfigured -> AppText.text(R.string.services_catalog_not_configured)
             BuildConfig.MUSICKIT_DEVELOPER_TOKEN.isNotBlank() &&
                 !DeveloperTokenPolicy.isUsable(BuildConfig.MUSICKIT_DEVELOPER_TOKEN) &&
-                BuildConfig.MUSICKIT_TOKEN_ENDPOINT.isBlank() -> "連線憑證已到期，請更新 App。"
+                BuildConfig.MUSICKIT_TOKEN_ENDPOINT.isBlank() -> AppText.text(R.string.services_credentials_expired_update)
             else -> null
         }
 
@@ -170,7 +173,7 @@ class MusicServices(context: Context) : RecommendationProvider {
     fun completeWebAuthentication(data: Intent): String {
         val userToken = checkNotNull(
             data.getStringExtra(MusicKitWebAuthActivity.EXTRA_USER_TOKEN),
-        ) { "Apple Music did not return a Music User Token." }
+        ) { AppText.text(R.string.services_auth_invalid_user_token) }
         tokenStore.writeUserToken(userToken)
         mediaSession.clear()
         bridge.release()
@@ -202,7 +205,7 @@ class MusicServices(context: Context) : RecommendationProvider {
     suspend fun collectionTracks(collection: Track): List<Track> = api.collectionTracks(collection)
 
     suspend fun lyricsFor(track: Track): List<LyricLine> {
-        val rawCatalogId = checkNotNull(track.catalogId) { "Apple catalog ID is required for lyrics." }
+        val rawCatalogId = checkNotNull(track.catalogId) { AppText.text(R.string.services_catalog_id_missing) }
         val resolvedCatalogId = if (rawCatalogId.startsWith("i.")) {
             api.resolveCatalogSongId(rawCatalogId)
         } else {
@@ -218,7 +221,7 @@ class MusicServices(context: Context) : RecommendationProvider {
         positionMs: Long = 0L,
         playWhenReady: Boolean = true,
     ): Long {
-        val userToken = checkNotNull(tokenStore.readUserToken()) { "請先登入 Apple Music 帳號。" }
+        val userToken = checkNotNull(tokenStore.readUserToken()) { AppText.text(R.string.services_sign_in_apple_music) }
         val developerToken = developerTokens.token()
         return playbackPreparation.withLock {
             withContext(Dispatchers.Default) {

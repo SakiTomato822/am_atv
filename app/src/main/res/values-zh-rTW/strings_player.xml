@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_previous_track">上一首</string>
+    <string name="player_pause">暫停</string>
+    <string name="player_play">播放</string>
+    <string name="player_next_track">下一首</string>
+    <string name="player_lyrics">歌詞</string>
+    <string name="player_queue">播放佇列</string>
+    <string name="player_radio">電台</string>
+    <string name="player_state_playing">播放中</string>
+    <string name="player_state_preparing">準備中</string>
+    <string name="player_state_paused">已暫停</string>
+    <string name="player_lyrics_unavailable">這首歌目前沒有歌詞</string>
+    <string name="player_lyrics_load_failed">歌詞暫時無法載入</string>
+    <string name="player_songwriters_format">詞曲作者：%1$s</string>
+    <string name="player_shuffle">隨機播放</string>
+    <string name="player_repeat_off">不重複</string>
+    <string name="player_repeat_one">單曲重複</string>
+    <string name="player_repeat_all">全部重複</string>
+    <string name="player_autoplay">無限播放</string>
+    <string name="player_source_format">來源：%1$s</string>
+    <string name="player_clear_queue">清除</string>
+    <string name="player_artwork_transitioning">切換中</string>
+    <string name="player_artwork_loaded">已載入</string>
+    <string name="player_loading">載入中</string>
+    <string name="player_artwork_description">%1$s 封面</string>
+</resources>

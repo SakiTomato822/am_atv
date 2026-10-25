@@ -95,6 +95,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -105,6 +106,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import dev.amatv.R
 import dev.amatv.integration.PlaybackRepeatMode
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.LyricLine
@@ -182,7 +184,7 @@ fun PlayerScreen(
     onCycleRepeat: () -> Unit,
     onToggleShuffle: () -> Unit,
     onToggleAutoplay: () -> Unit,
-    autoplaySource: dev.amatv.integration.AutoplaySource = dev.amatv.integration.AutoplaySource.YouTubeMusic,
+    autoplaySource: dev.amatv.integration.AutoplaySource = dev.amatv.integration.AutoplaySource.AppleMusic,
     onToggleAutoplaySource: () -> Unit = {},
     onClearQueue: () -> Unit = {},
     audioSpectrum: () -> AudioSpectrum = { AudioSpectrum() },
@@ -197,6 +199,11 @@ fun PlayerScreen(
     lyricsTransientFailure: Boolean = false,
     onRetryLyrics: () -> Unit = {},
 ) {
+    val playbackStateDescription = stringResource(when {
+        isPlaying -> R.string.player_state_playing
+        playWhenReady -> R.string.player_state_preparing
+        else -> R.string.player_state_paused
+    })
     val supportsLyrics = track.catalogKind == CatalogKind.Song ||
         track.lyrics.isNotEmpty() || track.hasLyricsAvailable
     var userToggledLyrics by remember(queueSessionId) { mutableStateOf(false) }
@@ -312,7 +319,7 @@ fun PlayerScreen(
     Box(
         modifier
             .automationId(if (isActiveScreen) "player-screen" else "player-retained")
-            .semantics { stateDescription = if (isPlaying) "playing" else if (playWhenReady) "preparing" else "paused" }
+            .semantics { stateDescription = playbackStateDescription }
             .fillMaxSize()
             .onPreviewKeyEvent { event ->
                 if (!isActiveScreen || event.nativeKeyEvent.action != KeyEvent.ACTION_DOWN) {
@@ -661,23 +668,26 @@ fun PlayerScreen(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                         PlayerButton(
+                            controlId = "player-previous",
                             icon = Icons.Rounded.SkipPrevious,
-                            contentDescription = "上一首",
+                            contentDescription = stringResource(R.string.player_previous_track),
                             enabled = canSkipPrevious,
                             focused = navigationZone == PlayerNavigationZone.Controls &&
                                 focusedControl == PlayerControl.Previous,
                             width = 46.dp,
                         )
                         PlayerButton(
+                            controlId = "player-play-pause",
                             icon = if (playWhenReady) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                            contentDescription = if (playWhenReady) "暫停" else "播放",
+                            contentDescription = stringResource(if (playWhenReady) R.string.player_pause else R.string.player_play),
                             focused = navigationZone == PlayerNavigationZone.Controls &&
                                 focusedControl == PlayerControl.PlayPause,
                             width = 56.dp,
                         )
                         PlayerButton(
+                            controlId = "player-next",
                             icon = Icons.Rounded.SkipNext,
-                            contentDescription = "下一首",
+                            contentDescription = stringResource(R.string.player_next_track),
                             enabled = canSkipNext,
                             focused = navigationZone == PlayerNavigationZone.Controls &&
                                 focusedControl == PlayerControl.Next,
@@ -695,8 +705,9 @@ fun PlayerScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                         if (supportsLyrics) {
                             PlayerButton(
+                                controlId = "player-lyrics",
                                 icon = Icons.Rounded.Lyrics,
-                                contentDescription = "歌詞",
+                                contentDescription = stringResource(R.string.player_lyrics),
                                 selected = showLyrics,
                                 focused = navigationZone == PlayerNavigationZone.Controls &&
                                     focusedControl == PlayerControl.Lyrics,
@@ -705,8 +716,9 @@ fun PlayerScreen(
 
                         }
                         PlayerButton(
+                            controlId = "player-queue",
                             icon = Icons.AutoMirrored.Rounded.QueueMusic,
-                            contentDescription = "播放佇列",
+                            contentDescription = stringResource(R.string.player_queue),
                             selected = showQueue,
                             focused = navigationZone == PlayerNavigationZone.Controls &&
                                 focusedControl == PlayerControl.Queue,
@@ -714,7 +726,7 @@ fun PlayerScreen(
                         )
                         QueueModeButton(
                             icon = Icons.Rounded.AllInclusive,
-                            label = "Radio",
+                            label = stringResource(R.string.player_radio),
                             selected = autoplayEnabled,
                             focused = navigationZone == PlayerNavigationZone.Controls &&
                                 focusedControl == PlayerControl.Radio,
@@ -861,6 +873,7 @@ private fun Progress(
 
 @Composable
 private fun PlayerButton(
+    controlId: String,
     icon: ImageVector,
     contentDescription: String,
     selected: Boolean = false,
@@ -876,17 +889,10 @@ private fun PlayerButton(
     )
     Box(
         modifier = Modifier
-            .automationId(when (contentDescription) {
-                "播放", "暫停" -> "player-play-pause"
-                "上一首" -> "player-previous"
-                "下一首" -> "player-next"
-                "歌詞" -> "player-lyrics"
-                "播放佇列" -> "player-queue"
-                else -> "player-button-$contentDescription"
-            })
+            .automationId(controlId)
             .semantics { this.selected = focused; stateDescription = contentDescription }
             .size(width = width, height = height)
-            .focusFrameTarget(focused, "player-control:$contentDescription", 20.dp)
+            .focusFrameTarget(focused, "player-control:$controlId", 20.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -1169,7 +1175,9 @@ private fun LyricsUnavailablePanel(
             AppleLoadingIndicator()
         } else if (confirmedUnavailable || hasFailed) {
             Text(
-                text = if (confirmedUnavailable) "這首歌目前沒有歌詞" else "歌詞暫時無法載入",
+                text = stringResource(if (confirmedUnavailable) {
+                    R.string.player_lyrics_unavailable
+                } else R.string.player_lyrics_load_failed),
                 color = Color.White.copy(alpha = 0.72f),
                 fontSize = 24.sp,
                 lineHeight = 32.sp,
@@ -1404,10 +1412,11 @@ private fun LyricsPanel(
             (positionState.value + lyricOffsetMs).coerceAtLeast(0L)
         }
     }
-    val songwritersFooter = remember(lines) {
+    val songwriterNames = remember(lines) {
         val writers = lines.firstOrNull()?.songwriters.orEmpty()
-        if (writers.isNotEmpty()) "Written by: ${writers.joinToString(", ")}" else null
+        if (writers.isNotEmpty()) writers.joinToString(", ") else null
     }
+    val songwritersFooter = songwriterNames?.let { stringResource(R.string.player_songwriters_format, it) }
     val lyricSchedule = remember(lines) { LyricTimeline.Schedule(lines) }
     val terminalRelease = remember(lines, lyricSchedule) {
         terminalLyricRelease(
@@ -3303,46 +3312,55 @@ private fun QueueModeControls(
             Row(Modifier.automationId("queue-mode-controls"), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 QueueModeButton(
                     icon = Icons.Rounded.Shuffle,
-                    label = "Shuffle",
+                    label = stringResource(R.string.player_shuffle),
                     selected = shuffleEnabled,
                     focused = focusedMode == QueueModeControl.Shuffle,
                     enabled = canSetShuffle && !autoplayEnabled,
+                    frameKey = "player-mode:shuffle",
                 )
                 QueueModeButton(
                     icon = if (repeatMode == PlaybackRepeatMode.One) {
                         Icons.Rounded.RepeatOne
                     } else Icons.Rounded.Repeat,
-                    label = when (repeatMode) {
-                        PlaybackRepeatMode.Off -> "Repeat Off"
-                        PlaybackRepeatMode.One -> "Repeat One"
-                        PlaybackRepeatMode.All -> "Repeat All"
-                    },
+                    label = stringResource(when (repeatMode) {
+                        PlaybackRepeatMode.Off -> R.string.player_repeat_off
+                        PlaybackRepeatMode.One -> R.string.player_repeat_one
+                        PlaybackRepeatMode.All -> R.string.player_repeat_all
+                    }),
                     selected = repeatMode != PlaybackRepeatMode.Off,
                     focused = focusedMode == QueueModeControl.Repeat,
                     enabled = canSetRepeat && !autoplayEnabled,
+                    frameKey = "player-mode:repeat",
                 )
                 QueueModeButton(
                     icon = Icons.Rounded.AllInclusive,
-                    label = "無限播放",
+                    label = stringResource(R.string.player_autoplay),
                     selected = autoplayEnabled,
                     focused = focusedMode == QueueModeControl.Autoplay,
                     enabled = canSetAutoplay,
+                    frameKey = "player-mode:autoplay",
                     ytmBadge = false,
                 )
                 QueueModeButton(
                     icon = Icons.Rounded.AutoAwesome,
-                    label = if (autoplaySource == dev.amatv.integration.AutoplaySource.YouTubeMusic) "來源: YTM" else "來源: AM",
+                    label = stringResource(R.string.player_source_format, stringResource(
+                        if (autoplaySource == dev.amatv.integration.AutoplaySource.YouTubeMusic) {
+                            R.string.player_provider_ytm
+                        } else R.string.player_provider_apple_music,
+                    )),
                     selected = true,
                     focused = focusedMode == QueueModeControl.Source,
                     enabled = true,
+                    frameKey = "player-mode:source",
                     ytmBadge = false,
                 )
                 QueueModeButton(
                     icon = Icons.Rounded.ClearAll,
-                    label = "清除",
+                    label = stringResource(R.string.player_clear_queue),
                     selected = false,
                     focused = focusedMode == QueueModeControl.Clear,
                     enabled = canClearQueue,
+                    frameKey = "player-mode:clear",
                     ytmBadge = false,
                 )
             }
@@ -3355,8 +3373,8 @@ private fun QueueModeButton(
     selected: Boolean,
     focused: Boolean,
     enabled: Boolean,
+    frameKey: String,
     ytmBadge: Boolean = false,
-    frameKey: String = "player-mode:$label",
 ) {
     val scale by animateFloatAsState(
         targetValue = if (focused) 1.06f else 1f,
@@ -3405,7 +3423,7 @@ private fun QueueModeButton(
         )
         if (ytmBadge) {
             Text(
-                text = "YTM",
+                text = stringResource(R.string.player_provider_ytm),
                 color = Color.White,
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Bold,

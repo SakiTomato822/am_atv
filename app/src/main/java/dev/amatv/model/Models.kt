@@ -12,16 +12,16 @@ import kotlin.math.roundToLong
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-enum class Destination(val label: String) {
-    Home("Home"),
-    Browse("New"),
-    Sing("Sing"),
-    Videos("Videos"),
-    Radio("Radio"),
-    Library("Library"),
-    Account("Sign In"),
-    NowPlaying("Now Playing"),
-    Search("Search"),
+enum class Destination {
+    Home,
+    Browse,
+    Sing,
+    Videos,
+    Radio,
+    Library,
+    Account,
+    NowPlaying,
+    Search,
 }
 
 data class Track(

@@ -1,5 +1,8 @@
 package dev.amatv.integration
 
+import dev.amatv.R
+import dev.amatv.i18n.AppText
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -69,7 +72,7 @@ class YtmInnertubeClient(
     }
 
     suspend fun radio(videoId: String, continuation: String? = null): YtmRadioPage {
-        require(VIDEO_ID.matches(videoId)) { "Invalid YouTube video ID." }
+        require(VIDEO_ID.matches(videoId)) { AppText.text(R.string.services_ytm_video_invalid) }
         val body = JSONObject().put("videoId", videoId)
             .put("playlistId", "RDAMVM$videoId")
         if (continuation != null) body.put("continuation", continuation)
@@ -144,7 +147,9 @@ class YtmInnertubeClient(
 
     /** A playlist result from Home can be expanded with its watch endpoint. */
     suspend fun playlist(playlistId: String): List<YtmSong> {
-        require(playlistId.length in 8..120 && playlistId.all { it.isLetterOrDigit() || it in "_-" })
+        require(playlistId.length in 8..120 && playlistId.all { it.isLetterOrDigit() || it in "_-" }) {
+            AppText.text(R.string.services_ytm_playlist_invalid)
+        }
         return withContext(parse) {
             collectSongs(post("next", JSONObject().put("playlistId", playlistId)))
         }
@@ -181,7 +186,7 @@ class YtmInnertubeClient(
                 }
                 conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
                 val status = conn.responseCode
-                check(status in 200..299) { "YouTube Music request failed (HTTP $status)." }
+                check(status in 200..299) { AppText.text(R.string.services_ytm_http_error, status) }
                 conn.inputStream.bufferedReader().use { it.readText() }
             } finally {
                 conn.disconnect()

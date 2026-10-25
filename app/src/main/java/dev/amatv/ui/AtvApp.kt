@@ -55,7 +55,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -63,7 +65,10 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.amatv.R
 import dev.amatv.data.MockCatalog
+import dev.amatv.i18n.AppText
+import dev.amatv.i18n.destinationLabel
 import dev.amatv.integration.AutoplaySource
 import dev.amatv.integration.MusicConnectionState
 import dev.amatv.integration.MusicServices
@@ -103,9 +108,23 @@ private suspend fun <T> cancellableResult(block: suspend () -> T): Result<T> = t
     Result.failure(error)
 }
 
+private fun demoShelves(): Map<Destination, List<ContentShelf>> = mapOf(
+    Destination.Home to listOf(
+        ContentShelf("demo-picks", AppText.text(R.string.app_demo_top_picks), MockCatalog.tracks, featured = true),
+        ContentShelf("demo-recent", AppText.text(R.string.app_recently_played), MockCatalog.tracks.asReversed()),
+    ),
+    Destination.Browse to listOf(
+        ContentShelf("demo-new", AppText.text(R.string.app_demo_new_this_week), MockCatalog.tracks, featured = true),
+    ),
+    Destination.Library to listOf(
+        ContentShelf("demo-library", AppText.text(R.string.app_recently_added), MockCatalog.tracks, featured = true),
+    ),
+)
+
 @Composable
 fun AmAtvApp() {
     val context = LocalContext.current
+    val contentLanguageTag = LocalConfiguration.current.locales.toLanguageTags()
     val scope = rememberCoroutineScope()
     val services = remember(context) { MusicServices(context) }
     val cacheSettings by services.contentCache.settings.collectAsState()
@@ -150,23 +169,13 @@ fun AmAtvApp() {
     var connectionState by remember { mutableStateOf(services.connectionState) }
     var serviceMessage by remember { mutableStateOf<String?>(null) }
     var reloadNonce by remember { mutableIntStateOf(0) }
+    var shelvesLanguageTag by remember { mutableStateOf(contentLanguageTag) }
     var shelvesByDestination by remember {
         mutableStateOf<Map<Destination, List<ContentShelf>>>(
             if (services.isCatalogConfigured) {
                 emptyMap()
             } else {
-                mapOf(
-                    Destination.Home to listOf(
-                        ContentShelf("demo-picks", "Top Picks for You", MockCatalog.tracks, featured = true),
-                        ContentShelf("demo-recent", "Recently Played", MockCatalog.tracks.asReversed()),
-                    ),
-                    Destination.Browse to listOf(
-                        ContentShelf("demo-new", "New This Week", MockCatalog.tracks, featured = true),
-                    ),
-                    Destination.Library to listOf(
-                        ContentShelf("demo-library", "Recently Added", MockCatalog.tracks, featured = true),
-                    ),
-                )
+                demoShelves()
             },
         )
     }
@@ -246,7 +255,7 @@ fun AmAtvApp() {
         if (result.resultCode != android.app.Activity.RESULT_OK || data == null) {
             serviceMessage = data?.getStringExtra(
                 dev.amatv.integration.MusicKitWebAuthActivity.EXTRA_ERROR,
-            ) ?: "Apple Music 登入已取消。"
+            ) ?: AppText.text(R.string.app_apple_sign_in_cancelled)
         } else {
             runCatching { services.completeWebAuthentication(data) }
                 .onSuccess {
@@ -267,7 +276,7 @@ fun AmAtvApp() {
                     serviceMessage = null
                     reloadNonce++
                 }
-                .onFailure { serviceMessage = it.message ?: "登入失敗。" }
+                .onFailure { serviceMessage = it.message ?: AppText.text(R.string.app_sign_in_failed) }
         }
     }
 
@@ -302,7 +311,7 @@ fun AmAtvApp() {
             } catch (error: Throwable) {
                 if (selection == selectionGeneration) {
                     commandFailure = Triple(selection, classifyPlaybackFailure(null, null, null, error),
-                        error.message ?: "無法載入這首歌曲，請重試。")
+                        error.message ?: AppText.text(R.string.app_song_load_failed))
                 }
             }
         }
@@ -354,7 +363,7 @@ fun AmAtvApp() {
         if (track.catalogId == null || expectedPlaybackGeneration == 0L) return
         if (playbackPrepared) {
             runCatching { services.seekTo(positionAnchorMs) }
-                .onFailure { playbackMessage = "無法調整播放進度，請重試。" }
+                .onFailure { playbackMessage = AppText.text(R.string.app_seek_failed) }
         } else if (hasUserPlaybackRequest) {
             selectionGeneration++
             launchNativePlayback(track, positionAnchorMs)
@@ -371,14 +380,14 @@ fun AmAtvApp() {
             runCatching { services.webAuthenticationIntent() }
                 .onSuccess(webAuthenticationLauncher::launch)
                 .onFailure {
-                    serviceMessage = it.message ?: "無法啟動 Apple Music 登入頁面。"
+                    serviceMessage = it.message ?: AppText.text(R.string.app_apple_sign_in_unavailable)
                 }
         }
     }
 
     fun startYtmPairing() {
         if (!services.ytmPairingConfigured) {
-            serviceMessage = "此版本尚未開放 Google 登入。"
+            serviceMessage = AppText.text(R.string.app_google_sign_in_unavailable)
             return
         }
         scope.launch {
@@ -395,7 +404,7 @@ fun AmAtvApp() {
                 throw cancelled
             } catch (error: Throwable) {
                 ytmPairing = null
-                serviceMessage = error.message ?: "Google 配對失敗。"
+                serviceMessage = error.message ?: AppText.text(R.string.app_google_pairing_failed)
             }
         }
     }
@@ -406,7 +415,7 @@ fun AmAtvApp() {
         playbackRequestJob?.cancel()
         pendingRestore = null
         if (playWhenReady && nextTrack.catalogId != null && connectionState != MusicConnectionState.SignedIn) {
-            serviceMessage = "請先登入 Apple Music 帳號以播放曲目。"
+            serviceMessage = AppText.text(R.string.app_apple_sign_in_required)
             startSignIn()
             return
         }
@@ -571,7 +580,7 @@ fun AmAtvApp() {
     fun playTrack(nextTrack: Track, contextQueue: List<Track> = emptyList()) {
         if (nextTrack.openAction != CatalogOpenAction.Play) return
         if (nextTrack.catalogId != null && connectionState != MusicConnectionState.SignedIn) {
-            serviceMessage = "請先登入 Apple Music 帳號以播放曲目。"
+            serviceMessage = AppText.text(R.string.app_apple_sign_in_required)
             startSignIn()
             return
         }
@@ -605,7 +614,7 @@ fun AmAtvApp() {
     fun playCollection(collection: Track, tracks: List<Track>, index: Int, shuffle: Boolean) {
         if (tracks.isEmpty() || index !in tracks.indices) return
         if (connectionState != MusicConnectionState.SignedIn) {
-            serviceMessage = "請先登入 Apple Music 帳號以播放曲目。"
+            serviceMessage = AppText.text(R.string.app_apple_sign_in_required)
             startSignIn()
             return
         }
@@ -660,7 +669,7 @@ fun AmAtvApp() {
             if (firstCandidate != null) {
                 playTrack(firstCandidate)
             } else {
-                serviceMessage = "請先從 Home、New 或 Library 選擇內容播放。"
+                serviceMessage = AppText.text(R.string.app_choose_content_before_playback)
             }
             return
         }
@@ -687,7 +696,7 @@ fun AmAtvApp() {
             } else if (next == null) {
                 playWhenReady = false
                 playbackMessage = if (queueController.state.value.failureLimitReached) {
-                    "多首歌曲暫時無法播放，請稍後重試。"
+                    AppText.text(R.string.app_multiple_songs_unavailable)
                 } else message
             }
         } else {
@@ -991,7 +1000,14 @@ fun AmAtvApp() {
         }
     }
 
-    LaunchedEffect(destination, connectionState, reloadNonce) {
+    LaunchedEffect(destination, connectionState, reloadNonce, contentLanguageTag, queueState.source) {
+        if (shelvesLanguageTag != contentLanguageTag) {
+            // Section titles are presentation metadata. Invalidate only this
+            // cache, retaining the selected song, queue, focus and account.
+            shelvesByDestination = if (services.isCatalogConfigured) emptyMap() else demoShelves()
+            loadingDestinations = emptySet()
+            shelvesLanguageTag = contentLanguageTag
+        }
         if (!services.isCatalogConfigured) return@LaunchedEffect
         val target = destination
         if (
@@ -1031,7 +1047,7 @@ fun AmAtvApp() {
                     val albums = async { cancellableResult { services.charts("albums") } }
                     val playlists = async { cancellableResult { services.charts("playlists") } }
                     val ytmShelves = async {
-                        if (queueState.source == AutoplaySource.YouTubeMusic || services.ytmSignedIn) {
+                        if (queueState.source == AutoplaySource.YouTubeMusic) {
                             cancellableResult { services.ytmHomeShelves() }
                         } else Result.success(emptyList())
                     }
@@ -1052,7 +1068,7 @@ fun AmAtvApp() {
                                     add(
                                         ContentShelf(
                                             id = "recent-tracks",
-                                            title = "最近播放單曲",
+                                            title = AppText.text(R.string.app_recent_tracks),
                                             items = items,
                                             featured = isEmpty(),
                                         ),
@@ -1064,7 +1080,7 @@ fun AmAtvApp() {
                         recentContainers.await().fold(
                             onSuccess = { items ->
                                 if (items.isNotEmpty()) {
-                                    add(ContentShelf("recent", "最近播放專輯與歌單", items))
+                                    add(ContentShelf("recent", AppText.text(R.string.app_recent_albums_and_playlists), items))
                                 }
                             },
                             onFailure = errors::add,
@@ -1075,7 +1091,7 @@ fun AmAtvApp() {
                                     add(
                                         ContentShelf(
                                             id = "top-songs",
-                                            title = "熱門歌曲",
+                                            title = AppText.text(R.string.app_top_songs),
                                             items = items,
                                             featured = isEmpty(),
                                         ),
@@ -1087,7 +1103,7 @@ fun AmAtvApp() {
                         albums.await().fold(
                             onSuccess = { items ->
                                 if (items.isNotEmpty()) {
-                                    add(ContentShelf("top-albums", "熱門專輯", items))
+                                    add(ContentShelf("top-albums", AppText.text(R.string.app_top_albums), items))
                                 }
                             },
                             onFailure = errors::add,
@@ -1095,7 +1111,7 @@ fun AmAtvApp() {
                         playlists.await().fold(
                             onSuccess = { items ->
                                 if (items.isNotEmpty()) {
-                                    add(ContentShelf("top-playlists", "熱門播放列表", items))
+                                    add(ContentShelf("top-playlists", AppText.text(R.string.app_top_playlists), items))
                                 }
                             },
                             onFailure = errors::add,
@@ -1117,7 +1133,7 @@ fun AmAtvApp() {
                                     add(
                                         ContentShelf(
                                             id = "browse-songs",
-                                            title = "最新熱門單曲",
+                                            title = AppText.text(R.string.app_new_top_tracks),
                                             items = items,
                                             featured = true,
                                         ),
@@ -1129,7 +1145,7 @@ fun AmAtvApp() {
                         albums.await().fold(
                             onSuccess = { items ->
                                 if (items.isNotEmpty()) {
-                                    add(ContentShelf("browse-albums", "熱門專輯", items))
+                                    add(ContentShelf("browse-albums", AppText.text(R.string.app_top_albums), items))
                                 }
                             },
                             onFailure = errors::add,
@@ -1137,7 +1153,7 @@ fun AmAtvApp() {
                         playlists.await().fold(
                             onSuccess = { items ->
                                 if (items.isNotEmpty()) {
-                                    add(ContentShelf("browse-playlists", "精選歌單", items))
+                                    add(ContentShelf("browse-playlists", AppText.text(R.string.app_featured_playlists), items))
                                 }
                             },
                             onFailure = errors::add,
@@ -1145,7 +1161,7 @@ fun AmAtvApp() {
                         videos.await().fold(
                             onSuccess = { items ->
                                 if (items.isNotEmpty()) {
-                                    add(ContentShelf("browse-videos", "熱門音樂錄影帶", items))
+                                    add(ContentShelf("browse-videos", AppText.text(R.string.app_top_music_videos), items))
                                 }
                             },
                             onFailure = errors::add,
@@ -1153,7 +1169,7 @@ fun AmAtvApp() {
                         radio.await().fold(
                             onSuccess = { items ->
                                 if (items.isNotEmpty()) {
-                                    add(ContentShelf("browse-radio", "Apple Music 廣播", items))
+                                    add(ContentShelf("browse-radio", AppText.text(R.string.app_apple_music_radio), items))
                                 }
                             },
                             onFailure = errors::add,
@@ -1174,7 +1190,7 @@ fun AmAtvApp() {
                                     add(
                                         ContentShelf(
                                             id = "lib-recently-added",
-                                            title = "最近加入",
+                                            title = AppText.text(R.string.app_recently_added),
                                             items = items,
                                             featured = true,
                                         ),
@@ -1189,7 +1205,7 @@ fun AmAtvApp() {
                                     add(
                                         ContentShelf(
                                             id = "lib-playlists",
-                                            title = "媒體庫播放列表",
+                                            title = AppText.text(R.string.app_library_playlists),
                                             items = items,
                                             featured = isEmpty(),
                                         ),
@@ -1201,7 +1217,7 @@ fun AmAtvApp() {
                         songs.await().fold(
                             onSuccess = { items ->
                                 if (items.isNotEmpty()) {
-                                    add(ContentShelf("lib-songs", "媒體庫歌曲", items))
+                                    add(ContentShelf("lib-songs", AppText.text(R.string.app_library_songs), items))
                                 }
                             },
                             onFailure = errors::add,
@@ -1210,7 +1226,7 @@ fun AmAtvApp() {
                             onSuccess = { items ->
                                 if (items.isNotEmpty()) {
                                     recentTracks = items
-                                    add(ContentShelf("lib-recent", "最近播放", items))
+                                    add(ContentShelf("lib-recent", AppText.text(R.string.app_recently_played), items))
                                 }
                             },
                             onFailure = errors::add,
@@ -1405,7 +1421,7 @@ fun AmAtvApp() {
                             connectionState = services.connectionState
                             shelvesByDestination = emptyMap()
                             recentTracks = emptyList()
-                            serviceMessage = "已從這台電視登出 Apple Music。"
+                            serviceMessage = AppText.text(R.string.app_apple_signed_out)
                             reloadNonce++
                         },
                         onRetry = (::refreshAllContent),
@@ -1418,10 +1434,10 @@ fun AmAtvApp() {
                                         .onSuccess { items ->
                                             searchResults = items
                                             serviceMessage = if (items.isEmpty()) {
-                                                "找不到符合「$query」的結果。"
+                                                AppText.text(R.string.app_search_no_results_format, query)
                                             } else null
                                         }
-                                        .onFailure { serviceMessage = it.message ?: "搜尋失敗。" }
+                                        .onFailure { serviceMessage = it.message ?: AppText.text(R.string.app_search_failed) }
                                 } finally {
                                     searchLoading = false
                                 }
@@ -1437,7 +1453,10 @@ fun AmAtvApp() {
                         },
                         autoplaySource = queueState.source,
                         onAutoplaySourceChange = { dispatchQueueAction(StartupQueueAction.SetSource(it)) },
-                        cacheSettingsContent = { ContentCacheSettings(services.contentCache) },
+                        cacheSettingsContent = {
+                            LanguageSettings()
+                            ContentCacheSettings(services.contentCache)
+                        },
                     )
                 }
                 }
@@ -1538,7 +1557,7 @@ private fun BrowseShell(
     onPlayCollection: (Track, List<Track>, Int, Boolean) -> Unit,
     lyricOffsetMs: Long = 0L,
     onLyricOffsetChange: (Long) -> Unit = {},
-    autoplaySource: AutoplaySource = AutoplaySource.YouTubeMusic,
+    autoplaySource: AutoplaySource = AutoplaySource.AppleMusic,
     onAutoplaySourceChange: (AutoplaySource) -> Unit = {},
     cacheSettingsContent: @Composable () -> Unit = {},
 ) {
@@ -1816,14 +1835,14 @@ private fun TopNavigation(
                             Destination.Search -> {
                                 Icon(
                                     imageVector = Icons.Rounded.Search,
-                                    contentDescription = destination.label,
+                                    contentDescription = destinationLabel(destination),
                                     tint = tint,
                                     modifier = Modifier.size(20.dp),
                                 )
                             }
                             Destination.Home -> {
                                 Text(
-                                    text = "現在收聽",
+                                    text = destinationLabel(destination),
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = tint,
@@ -1831,7 +1850,7 @@ private fun TopNavigation(
                             }
                             Destination.Browse -> {
                                 Text(
-                                    text = "最新發行",
+                                    text = destinationLabel(destination),
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = tint,
@@ -1839,7 +1858,7 @@ private fun TopNavigation(
                             }
                             Destination.Library -> {
                                 Text(
-                                    text = "資料庫",
+                                    text = destinationLabel(destination),
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = tint,
@@ -1847,7 +1866,7 @@ private fun TopNavigation(
                             }
                             else -> {
                                 Text(
-                                    text = destination.label,
+                                    text = destinationLabel(destination),
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = tint,
@@ -1923,7 +1942,7 @@ private fun TopNavigation(
                             Destination.NowPlaying -> {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        text = "播放中",
+                                        text = destinationLabel(destination),
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = tint,
@@ -1934,7 +1953,7 @@ private fun TopNavigation(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     val signedIn = connectionState == MusicConnectionState.SignedIn
                                     Text(
-                                        text = if (signedIn) "帳號" else "登入",
+                                        text = stringResource(if (signedIn) R.string.app_account else R.string.app_sign_in),
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = tint,
@@ -1943,7 +1962,7 @@ private fun TopNavigation(
                             }
                             else -> {
                                 Text(
-                                    text = destination.label,
+                                    text = destinationLabel(destination),
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = tint,

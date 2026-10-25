@@ -49,6 +49,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import dev.amatv.R
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
@@ -107,7 +109,7 @@ fun HomeScreen(
     onOpenTrack: (Track, List<Track>) -> Unit = { _, _ -> },
     lyricOffsetMs: Long = 0L,
     onLyricOffsetChange: (Long) -> Unit = {},
-    autoplaySource: dev.amatv.integration.AutoplaySource = dev.amatv.integration.AutoplaySource.YouTubeMusic,
+    autoplaySource: dev.amatv.integration.AutoplaySource = dev.amatv.integration.AutoplaySource.AppleMusic,
     onAutoplaySourceChange: (dev.amatv.integration.AutoplaySource) -> Unit = {},
     firstContentFocusRequester: FocusRequester? = null,
     navigationFocusRequester: FocusRequester? = null,
@@ -148,7 +150,7 @@ fun HomeScreen(
                         onRetry = onRetry,
                         firstContentFocusRequester = firstContentFocusRequester,
                         navigationFocusRequester = navigationFocusRequester,
-                        headingOverride = "登入以存取你的 Apple Music 媒體庫",
+                        headingOverride = stringResource(R.string.browse_library_sign_in),
                     )
                 } else {
                     HomeShelves(
@@ -209,7 +211,7 @@ private fun AccountScreen(
     onRetry: () -> Unit,
     lyricOffsetMs: Long = 0L,
     onLyricOffsetChange: (Long) -> Unit = {},
-    autoplaySource: dev.amatv.integration.AutoplaySource = dev.amatv.integration.AutoplaySource.YouTubeMusic,
+    autoplaySource: dev.amatv.integration.AutoplaySource = dev.amatv.integration.AutoplaySource.AppleMusic,
     onAutoplaySourceChange: (dev.amatv.integration.AutoplaySource) -> Unit = {},
     firstContentFocusRequester: FocusRequester?,
     navigationFocusRequester: FocusRequester?,
@@ -229,7 +231,7 @@ private fun AccountScreen(
     ) {
         Text(
             text = headingOverride
-                ?: if (connected) "Apple Music 帳號已連結" else "登入 Apple Music",
+                ?: if (connected) stringResource(R.string.browse_apple_connected) else stringResource(R.string.browse_apple_sign_in),
             color = Color.White,
             fontSize = 32.sp,
             fontWeight = FontWeight.Bold,
@@ -243,7 +245,7 @@ private fun AccountScreen(
                     .padding(horizontal = 18.dp, vertical = 14.dp),
             ) {
                 Text(
-                    text = setupMessage,
+                    text = stringResource(R.string.browse_connection_error),
                     color = Color(0xFFFFC6CF),
                     fontSize = 15.sp,
                     lineHeight = 22.sp,
@@ -274,7 +276,7 @@ private fun AccountScreen(
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
-                            text = if (connected) "重新整理 Apple Music 內容" else "在這台電視登入",
+                            text = if (connected) stringResource(R.string.browse_refresh_apple) else stringResource(R.string.browse_sign_in_tv),
                             color = Color(0xFF111713),
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -299,7 +301,7 @@ private fun AccountScreen(
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
-                            text = if (connected) "從這台電視登出" else "重新嘗試連線",
+                            text = if (connected) stringResource(R.string.browse_sign_out_tv) else stringResource(R.string.browse_retry_connection),
                             color = Color.White,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -311,7 +313,7 @@ private fun AccountScreen(
         if (headingOverride == null) {
             if (ytmPairingConfigured) {
             Text(
-                text = if (ytmSignedIn) "YouTube Music 帳號已連結" else "YouTube Music 推薦",
+                text = if (ytmSignedIn) stringResource(R.string.browse_ytm_connected) else stringResource(R.string.browse_ytm_recommendations),
                 color = Color.White,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -319,9 +321,9 @@ private fun AccountScreen(
             Text(
                 text = when {
                     ytmPairing != null ->
-                        "用手機開啟 ${ytmPairing.verificationUrl}，輸入代碼 ${ytmPairing.userCode}"
-                    ytmSignedIn -> "已啟用個人化推薦。"
-                    else -> "在手機瀏覽器輸入電視顯示的配對碼。"
+                        stringResource(R.string.browse_pairing_instructions, ytmPairing.verificationUrl, ytmPairing.userCode)
+                    ytmSignedIn -> stringResource(R.string.browse_personalized_enabled)
+                    else -> stringResource(R.string.browse_pairing_hint)
                 },
                 color = Color.White.copy(alpha = 0.72f),
                 fontSize = 16.sp,
@@ -336,7 +338,7 @@ private fun AccountScreen(
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
-                            if (ytmSignedIn) "登出 YouTube Music" else "配對 YouTube Music",
+                            if (ytmSignedIn) stringResource(R.string.browse_ytm_sign_out) else stringResource(R.string.browse_ytm_pair),
                             color = Color.White,
                             fontSize = 16.sp,
                         )
@@ -347,13 +349,13 @@ private fun AccountScreen(
 
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "歌詞同步",
+                text = stringResource(R.string.browse_lyrics_sync),
                 color = Color.White,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "歌詞比音樂早就延後，較慢則提前。",
+                text = stringResource(R.string.browse_lyrics_sync_hint),
                 color = Color.White.copy(alpha = 0.72f),
                 fontSize = 16.sp,
             )
@@ -369,7 +371,7 @@ private fun AccountScreen(
                     focusedBackground = Color.White.copy(alpha = 0.28f),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("-100ms", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.browse_offset_value, -100), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                     }
                 }
                 FocusSurface(
@@ -380,7 +382,7 @@ private fun AccountScreen(
                     focusedBackground = Color.White.copy(alpha = 0.28f),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("-50ms", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.browse_offset_value, -50), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                     }
                 }
                 Box(
@@ -393,9 +395,9 @@ private fun AccountScreen(
                 ) {
                     Text(
                         text = when {
-                            lyricOffsetMs > 0L -> "+${lyricOffsetMs} ms"
-                            lyricOffsetMs < 0L -> "${lyricOffsetMs} ms"
-                            else -> "0 ms (預設)"
+                            lyricOffsetMs > 0L -> stringResource(R.string.browse_offset_value, lyricOffsetMs)
+                            lyricOffsetMs < 0L -> stringResource(R.string.browse_offset_value, lyricOffsetMs)
+                            else -> stringResource(R.string.browse_offset_default)
                         },
                         color = Color.White,
                         fontSize = 16.sp,
@@ -410,7 +412,7 @@ private fun AccountScreen(
                     focusedBackground = Color.White.copy(alpha = 0.28f),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("+50ms", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.browse_offset_value, 50), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                     }
                 }
                 FocusSurface(
@@ -421,7 +423,7 @@ private fun AccountScreen(
                     focusedBackground = Color.White.copy(alpha = 0.28f),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("+100ms", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.browse_offset_value, 100), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                     }
                 }
                 if (lyricOffsetMs != 0L) {
@@ -434,14 +436,14 @@ private fun AccountScreen(
                         padding = PaddingValues(horizontal = 16.dp),
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("重設", color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
+                            Text(stringResource(R.string.browse_reset), color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
                         }
                     }
                 }
             }
             Spacer(Modifier.height(18.dp))
             Text(
-                text = "接續播放來源",
+                text = stringResource(R.string.browse_autoplay_source),
                 color = Color.White,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -460,7 +462,7 @@ private fun AccountScreen(
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
-                            text = if (isYtm) "✓ YouTube Music" else "YouTube Music",
+                            text = if (isYtm) stringResource(R.string.browse_selected_source, stringResource(R.string.browse_ytm_name)) else stringResource(R.string.browse_ytm_name),
                             color = Color.White,
                             fontSize = 15.sp,
                             fontWeight = if (isYtm) FontWeight.Bold else FontWeight.Medium,
@@ -477,7 +479,7 @@ private fun AccountScreen(
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
-                            text = if (isAm) "✓ Apple Music" else "Apple Music",
+                            text = if (isAm) stringResource(R.string.browse_selected_source, stringResource(R.string.browse_apple_name)) else stringResource(R.string.browse_apple_name),
                             color = Color.White,
                             fontSize = 15.sp,
                             fontWeight = if (isAm) FontWeight.Bold else FontWeight.Medium,
@@ -501,8 +503,9 @@ private fun SearchScreen(
     firstContentFocusRequester: FocusRequester?,
     navigationFocusRequester: FocusRequester?,
 ) {
-    val quickTerms = remember {
-        listOf("熱門華語", "Doja Cat", "Ado", "YOASOBI", "周杰倫", "BLACKPINK", "Laufey", "Taylor Swift")
+    val mandopopTerm = stringResource(R.string.browse_quick_mandopop)
+    val quickTerms = remember(mandopopTerm) {
+        listOf(mandopopTerm, "Doja Cat", "Ado", "YOASOBI", "周杰倫", "BLACKPINK", "Laufey", "Taylor Swift")
     }
     var query by remember { mutableStateOf("") }
     var lastExecutedQuery by remember { mutableStateOf("") }
@@ -655,8 +658,8 @@ private fun SearchScreen(
                 },
             placeholder = {
                 Text(
-                    if (isInputActive) "輸入以搜尋藝人、專輯、歌曲或播放列表"
-                    else "搜尋藝人、專輯、歌曲或播放列表（按確認鍵開啟鍵盤）"
+                    if (isInputActive) stringResource(R.string.browse_search_hint)
+                    else stringResource(R.string.browse_search_hint_remote)
                 )
             },
             singleLine = true,
@@ -685,7 +688,7 @@ private fun SearchScreen(
         )
         Spacer(Modifier.height(18.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            SectionHeading(if (tracks.isNotEmpty()) "搜尋結果" else "最近播放")
+            SectionHeading(if (tracks.isNotEmpty()) stringResource(R.string.browse_search_results) else stringResource(R.string.browse_recently_played))
             if (loading && shownTracks.isNotEmpty()) {
                 Spacer(Modifier.width(14.dp))
                 AppleLoadingIndicator(Modifier.size(18.dp))
@@ -699,7 +702,7 @@ private fun SearchScreen(
                 }
             } else {
                 Text(
-                    setupMessage ?: "搜尋你喜歡的音樂",
+                    stringResource(if (setupMessage.isNullOrBlank()) R.string.browse_search_empty else R.string.browse_search_error),
                     color = Color.White.copy(alpha = 0.64f), fontSize = 16.sp,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 16.dp),
                 )
@@ -779,17 +782,16 @@ private fun HomeShelves(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 Text(
-                    text = "目前無法載入 Apple Music 內容",
+                    text = stringResource(R.string.browse_content_unavailable),
                     color = Color.White,
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
                 )
                 val detailText = when {
-                    !setupMessage.isNullOrBlank() -> setupMessage
                     connectionState != MusicConnectionState.SignedIn ->
-                        "請先登入 Apple Music 帳號以載入你的個人化推薦與媒體庫。"
-                    else -> "請檢查網路連線後重試。"
+                        stringResource(R.string.browse_sign_in_personalized)
+                    else -> stringResource(R.string.browse_check_connection)
                 }
                 Text(
                     text = detailText,
@@ -821,7 +823,7 @@ private fun HomeShelves(
                         ) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
-                                    text = "重新載入",
+                                    text = stringResource(R.string.browse_reload),
                                     color = Color(0xFF111713),
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.SemiBold,
@@ -847,9 +849,9 @@ private fun HomeShelves(
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     Text(
                                         text = if (connectionState == MusicConnectionState.SignedIn) {
-                                            "重新授權登入"
+                                            stringResource(R.string.browse_sign_in_again)
                                         } else {
-                                            "登入 Apple Music"
+                                            stringResource(R.string.browse_apple_sign_in)
                                         },
                                         color = Color.White,
                                         fontSize = 16.sp,
@@ -1189,11 +1191,15 @@ private fun rememberHomeCardMount(
     return ready
 }
 
-private fun Modifier.homeCardSemantics(track: Track, ready: State<Boolean>, staged: Boolean): Modifier =
-    if (!staged) this else semantics {
+@Composable
+private fun Modifier.homeCardSemantics(track: Track, ready: State<Boolean>, staged: Boolean): Modifier {
+    val loadedLabel = stringResource(R.string.browse_loaded)
+    val loadingLabel = stringResource(R.string.browse_loading)
+    return if (!staged) this else semantics {
         contentDescription = listOf(track.title, track.artist).filter { it.isNotBlank() }.joinToString(", ")
-        stateDescription = if (ready.value) "已載入" else "載入中"
+        stateDescription = if (ready.value) loadedLabel else loadingLabel
     }
+}
 
 /** Only this small restart scope reads the permit, never the focus shell or row. */
 @Composable
@@ -1265,11 +1271,16 @@ private fun TopPick(
 ) {
     val contentReady = rememberHomeCardMount(warmup, track.id, mountPriority)
     val cardShape = RoundedCornerShape(14.dp)
+    val genericEyebrows = listOf(
+        stringResource(R.string.browse_kind_song), stringResource(R.string.browse_kind_album),
+        stringResource(R.string.browse_kind_playlist),
+    )
     val distinctEyebrow = label.takeIf {
         it.isNotBlank() && !it.equals(track.artist, ignoreCase = true) &&
             !it.equals("Playlist", ignoreCase = true) &&
             !it.equals("Album", ignoreCase = true) &&
-            !it.equals("Song", ignoreCase = true)
+            !it.equals("Song", ignoreCase = true) &&
+            genericEyebrows.none { placeholder -> it.equals(placeholder, ignoreCase = true) }
     }
     Column(Modifier.width(210.dp).height(280.dp)) {
         Box(Modifier.fillMaxWidth().height(24.dp), contentAlignment = Alignment.TopStart) {
@@ -1420,10 +1431,11 @@ private fun firstRowFocusModifier(
     return result
 }
 
+@Composable
 private fun Track.eyebrow(): String = when (catalogKind) {
-    CatalogKind.Song -> album.takeIf { it.isNotBlank() && it != "Song" } ?: "Song"
-    CatalogKind.Album -> "Album"
-    CatalogKind.Playlist -> artist.takeIf { it.isNotBlank() } ?: "Playlist"
-    CatalogKind.Station -> "Station"
-    CatalogKind.MusicVideo -> "Music Video"
+    CatalogKind.Song -> album.takeIf { it.isNotBlank() && it != "Song" } ?: stringResource(R.string.browse_kind_song)
+    CatalogKind.Album -> stringResource(R.string.browse_kind_album)
+    CatalogKind.Playlist -> artist.takeIf { it.isNotBlank() } ?: stringResource(R.string.browse_kind_playlist)
+    CatalogKind.Station -> stringResource(R.string.browse_kind_station)
+    CatalogKind.MusicVideo -> stringResource(R.string.browse_kind_music_video)
 }

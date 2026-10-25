@@ -1,5 +1,6 @@
 package dev.amatv.integration
 
+import dev.amatv.R
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -19,7 +20,7 @@ class DeveloperTokenClientTest {
         val client = DeveloperTokenClient(endpoint = "", bundledToken = "expired")
         val error = runCatching { client.token() }.exceptionOrNull()
         assertNotNull(error)
-        assertTrue(error!!.message.orEmpty().contains("更新 App"))
+        assertEquals("res:${R.string.services_credentials_expired_update}", error!!.message)
         assertFalse(error.message.orEmpty().contains("local.properties"))
     }
 }

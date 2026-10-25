@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_demo_top_picks">專屬推薦</string>
+    <string name="app_recently_played">最近播放</string>
+    <string name="app_demo_new_this_week">本週新歌</string>
+    <string name="app_recently_added">最近加入</string>
+    <string name="app_apple_sign_in_cancelled">Apple Music 登入已取消。</string>
+    <string name="app_sign_in_failed">登入失敗。</string>
+    <string name="app_song_load_failed">無法載入這首歌曲，請重試。</string>
+    <string name="app_seek_failed">無法調整播放進度，請重試。</string>
+    <string name="app_apple_sign_in_unavailable">無法啟動 Apple Music 登入頁面。</string>
+    <string name="app_google_sign_in_unavailable">此版本尚未開放 Google 登入。</string>
+    <string name="app_google_pairing_failed">Google 配對失敗。</string>
+    <string name="app_apple_sign_in_required">請先登入 Apple Music 帳號以播放曲目。</string>
+    <string name="app_choose_content_before_playback">請先選擇要播放的內容。</string>
+    <string name="app_multiple_songs_unavailable">多首歌曲暫時無法播放，請稍後重試。</string>
+    <string name="app_recent_tracks">最近播放單曲</string>
+    <string name="app_recent_albums_and_playlists">最近播放專輯與歌單</string>
+    <string name="app_top_songs">熱門歌曲</string>
+    <string name="app_top_albums">熱門專輯</string>
+    <string name="app_top_playlists">熱門播放列表</string>
+    <string name="app_new_top_tracks">最新熱門單曲</string>
+    <string name="app_featured_playlists">精選歌單</string>
+    <string name="app_top_music_videos">熱門音樂錄影帶</string>
+    <string name="app_apple_music_radio">Apple Music 廣播</string>
+    <string name="app_library_playlists">媒體庫播放列表</string>
+    <string name="app_library_songs">媒體庫歌曲</string>
+    <string name="app_apple_signed_out">已從這台電視登出 Apple Music。</string>
+    <string name="app_search_no_results_format">找不到符合「%1$s」的結果。</string>
+    <string name="app_search_failed">搜尋失敗。</string>
+    <string name="app_account">帳號</string>
+    <string name="app_sign_in">登入</string>
+</resources>
