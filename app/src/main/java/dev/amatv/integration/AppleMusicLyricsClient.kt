@@ -40,6 +40,7 @@ class AppleMusicLyricsClient(
     /** Debug builds only: raw syllable-lyrics responses are written here for inspection. */
     private val debugDumpDir: java.io.File? = null,
     private val contentCache: ContentCache? = null,
+    private val includeTranslations: Boolean = false,
 ) {
     suspend fun lyricsFor(catalogId: String): List<LyricLine> = withContext(Dispatchers.IO) {
         val mediaUserToken = userToken()?.takeIf(String::isNotBlank)
@@ -52,9 +53,9 @@ class AppleMusicLyricsClient(
             )
         val cacheGeneration = contentCache?.generation ?: 0L
         // The key is hashed before becoming a filename; account tokens are never written.
-        val cacheKey = "$requestStorefront|$catalogId|${Locale.getDefault().toLanguageTag()}|$mediaUserToken"
+        val cacheKey = "$requestStorefront|$catalogId|${Locale.getDefault().toLanguageTag()}|$mediaUserToken|trans=$includeTranslations"
         contentCache?.readLyrics(cacheKey)?.let { cached ->
-            val lines = runCatching { AppleTtmlParser.parse(cached) }.getOrNull().orEmpty()
+            val lines = runCatching { AppleTtmlParser.parse(cached, includeTranslations = includeTranslations) }.getOrNull().orEmpty()
             if (lines.isNotEmpty()) return@withContext lines
             contentCache.removeLyrics(cacheKey)
         }
@@ -64,10 +65,10 @@ class AppleMusicLyricsClient(
         suspend fun request(forceBearerRefresh: Boolean): Pair<Int, String> {
             val bearer = webToken.token(forceBearerRefresh)
             val queryMap = linkedMapOf<String, String>()
-            if (lyricsLanguages.isNotEmpty()) {
+            if (includeTranslations && lyricsLanguages.isNotEmpty()) {
                 queryMap["l[lyrics]"] = lyricsLanguages.joinToString(",")
             }
-            if (scripts.isNotEmpty()) {
+            if (includeTranslations && scripts.isNotEmpty()) {
                 queryMap["extend"] = "ttmlLocalizations"
                 queryMap["l[script]"] = scripts.joinToString(",")
             }
@@ -126,30 +127,37 @@ class AppleMusicLyricsClient(
             check(dir.isDirectory || dir.mkdirs()) { AppText.text(R.string.services_lyrics_cache_folder_failed, dir) }
             java.io.File(dir, "$catalogId.json").writeText(body)
         }
-        val ttml = extractTtml(JSONObject(body))
-        val lines = AppleTtmlParser.parse(ttml)
+        val ttml = extractTtml(JSONObject(body), preferLocalizations = includeTranslations)
+        val lines = AppleTtmlParser.parse(ttml, includeTranslations = includeTranslations)
         if (lines.isNotEmpty()) contentCache?.writeLyrics(cacheKey, ttml, cacheGeneration)
         Log.i(TAG, "Apple TTML lyrics: lines=${lines.size}, units=${lines.sumOf { it.words.size }}")
         lines
     }
 
     /**
-     * Reads localized TTML first, then the base TTML. A successful response with
-     * neither is a definitive unavailable result, separate from transport/auth failures.
+     * Reads base TTML when localizations are not preferred, or localized TTML first
+     * when preferred. A successful response with neither is a definitive unavailable result.
      */
-    internal fun extractTtml(root: JSONObject): String {
+    internal fun extractTtml(root: JSONObject, preferLocalizations: Boolean = false): String {
         val data = root.optJSONArray("data")
         val mediaEntity = data?.optJSONObject(0)
         val attributes = mediaEntity?.optJSONObject("attributes")
         return selectTtml(
             ttmlLocalizations = attributes?.optString("ttmlLocalizations"),
             ttml = attributes?.optString("ttml"),
+            preferLocalizations = preferLocalizations,
         )
     }
 
-    internal fun selectTtml(ttmlLocalizations: String?, ttml: String?): String {
-        val localized = ttmlLocalizations?.takeIf { it.isNotEmpty() }
-        val resolved = localized ?: ttml?.takeIf { it.isNotEmpty() }
+    internal fun selectTtml(
+        ttmlLocalizations: String?,
+        ttml: String?,
+        preferLocalizations: Boolean = false,
+    ): String {
+        val localized = if (preferLocalizations) ttmlLocalizations?.takeIf { it.isNotEmpty() } else null
+        val base = ttml?.takeIf { it.isNotEmpty() }
+        val fallbackLocalized = ttmlLocalizations?.takeIf { it.isNotEmpty() }
+        val resolved = localized ?: base ?: fallbackLocalized
         if (resolved == null) {
             throw LyricsRequestException(LyricsFailureReason.Unavailable, AppText.text(R.string.services_lyrics_unavailable))
         }
@@ -319,7 +327,7 @@ internal object AppleTtmlParser {
         val explicitGroupId: Int? = null,
     )
 
-    fun parse(ttml: String): List<LyricLine> {
+    fun parse(ttml: String, includeTranslations: Boolean = false): List<LyricLine> {
         val factory = DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = true
             isExpandEntityReferences = false
@@ -345,7 +353,7 @@ internal object AppleTtmlParser {
         val isMultiAgentSong = agents.keys.any { it != primaryPersonAgentId }
 
         val songwriters = parseSongwriters(root)
-        val translations = parseTranslations(root)
+        val translations = if (includeTranslations) parseTranslations(root) else emptyMap()
         val pronunciations = parsePronunciations(root)
 
         val paragraphs = document.getElementsByTagNameNS("*", "p")
@@ -361,6 +369,7 @@ internal object AppleTtmlParser {
                     songwriters = songwriters,
                     translations = translations,
                     pronunciations = pronunciations,
+                    includeTranslations = includeTranslations,
                 )?.let(::add)
             }
         }
@@ -376,6 +385,7 @@ internal object AppleTtmlParser {
         songwriters: List<String>,
         translations: Map<String, ParsedTranslation>,
         pronunciations: Map<String, ParsedPronunciation>,
+        includeTranslations: Boolean = false,
     ): LyricLine? {
         val lineStart = paragraph.time("begin")
         val lineEnd = paragraph.time("end")
@@ -385,8 +395,8 @@ internal object AppleTtmlParser {
             primaryPersonAgentId != null &&
             agentId != primaryPersonAgentId
 
-        val translation = lineKey?.let(translations::get)
-        val inlineTranslation = paragraph.extractInlineRoleText("x-translation")
+        val translation = if (includeTranslations) lineKey?.let(translations::get) else null
+        val inlineTranslation = if (includeTranslations) paragraph.extractInlineRoleText("x-translation") else null
         val inlinePronunciation = paragraph.extractInlineRoleText("x-roman")
         val pronunciation = lineKey?.let(pronunciations::get)
 

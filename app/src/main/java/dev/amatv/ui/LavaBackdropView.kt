@@ -82,6 +82,7 @@ private class LavaRenderWorker {
     private var enabled = false
     private var scheduled = false
     private var previousFrame = 0L
+    private var lastRenderNanos = 0L
     private var settlingFrames = 0
     private val motion = BackdropMotion()
     private val palette = LavaPaletteTransition(LavaPalette.from(intArrayOf(0xFF33333B.toInt())))
@@ -98,6 +99,11 @@ private class LavaRenderWorker {
         val session = egl
         if (!closed && session != null) {
             try {
+                if (enabled && lastRenderNanos != 0L && (timestamp - lastRenderNanos) < 32_000_000L) {
+                    requestFrame()
+                    return@FrameCallback
+                }
+                lastRenderNanos = timestamp
                 val measured = if (enabled) spectrum() else SILENCE
                 if (enabled && previousFrame != 0L) {
                     motion.advance(timestamp - previousFrame, measured)
@@ -156,6 +162,7 @@ private class LavaRenderWorker {
     fun running(value: Boolean) { handler.post {
         enabled = value
         previousFrame = 0L
+        lastRenderNanos = 0L
         requestFrame()
     } }
 
@@ -206,6 +213,7 @@ private class LavaRenderWorker {
         if (scheduled) choreographer.removeFrameCallback(frame)
         scheduled = false
         previousFrame = 0L
+        lastRenderNanos = 0L
         settlingFrames = 0
         egl?.release()
         egl = null
@@ -475,7 +483,7 @@ private class LavaGlRenderer(private var width: Int, private var height: Int) {
             }
         """.trimIndent()
         val BLUR = """
-            precision highp float; varying vec2 uv; uniform sampler2D image; uniform vec2 stepSize;
+            precision mediump float; varying vec2 uv; uniform sampler2D image; uniform vec2 stepSize;
             void main(){vec3 color=texture2D(image,uv).rgb*.227027027;
               color+=(texture2D(image,uv+stepSize).rgb+texture2D(image,uv-stepSize).rgb)*.194594595;
               color+=(texture2D(image,uv+stepSize*2.).rgb+texture2D(image,uv-stepSize*2.).rgb)*.121621622;
@@ -484,7 +492,7 @@ private class LavaGlRenderer(private var width: Int, private var height: Int) {
               gl_FragColor=vec4(color,1.);}
         """.trimIndent()
         val OUTPUT = """
-            precision highp float; varying vec2 uv; uniform sampler2D image;
+            precision mediump float; varying vec2 uv; uniform sampler2D image;
             void main(){vec3 color=texture2D(image,uv).rgb;
               float n=fract(52.9829189*fract(dot(gl_FragCoord.xy,vec2(.06711056,.00583715))))-.5;
               gl_FragColor=vec4(clamp(color+n/255.,0.,1.),1.);}

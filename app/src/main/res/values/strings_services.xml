@@ -36,6 +36,7 @@
     <string name="services_music_website_http_error">The Apple Music website returned HTTP %1$d.</string>
     <string name="services_playback_restore_failed">Unable to restore playback progress. Please try again.</string>
     <string name="services_song_connection_failed">Unable to connect to this song. Please try again.</string>
+    <string name="services_song_connection_retry">Unable to connect to this song. Retrying in %1$d seconds…</string>
     <string name="services_track_unavailable">This song is currently unavailable.</string>
     <string name="services_playback_auth_required">Apple Music authorization needs to be renewed. Please sign in again.</string>
     <string name="services_apple_connection_failed">Unable to connect to Apple Music. Please try again.</string>

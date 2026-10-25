@@ -56,6 +56,7 @@ internal fun AudioBandIndicator(
         var previousFrame = 0L
         while (isPlaying || !envelope.isFlat) {
             withFrameNanos { now ->
+                if (previousFrame != 0L && (now - previousFrame) < 30_000_000L) return@withFrameNanos
                 val elapsedMs = if (previousFrame == 0L) 16.667f else (now - previousFrame) / 1_000_000f
                 previousFrame = now
                 val sample = if (isPlaying) latestSpectrum() else SilentAudioBands

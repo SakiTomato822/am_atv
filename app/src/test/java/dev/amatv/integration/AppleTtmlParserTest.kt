@@ -60,7 +60,7 @@ class AppleTtmlParserTest {
             </tt>
         """.trimIndent()
 
-        val lines = AppleTtmlParser.parse(ttml)
+        val lines = AppleTtmlParser.parse(ttml, includeTranslations = true)
 
         assertEquals(2, lines.size)
         assertEquals(listOf("More", "than", "perfect"), lines[0].words.map { it.text })
@@ -70,6 +70,9 @@ class AppleTtmlParserTest {
         assertTrue(lines[0].joinWithSpaces)
         assertEquals(lines[0].words[1].emphasisGroupId, lines[0].words[2].emphasisGroupId)
         assertFalse(lines[1].joinWithSpaces)
+
+        val linesWithoutTranslation = AppleTtmlParser.parse(ttml, includeTranslations = false)
+        assertEquals(null, linesWithoutTranslation[0].translation)
     }
 
     @Test
@@ -150,11 +153,19 @@ class AppleTtmlParserTest {
         )
         assertEquals(
             "<tt>localized</tt>",
-            client.selectTtml(ttmlLocalizations = "<tt>localized</tt>", ttml = "<tt>base</tt>"),
+            client.selectTtml(ttmlLocalizations = "<tt>localized</tt>", ttml = "<tt>base</tt>", preferLocalizations = true),
         )
         assertEquals(
             "<tt>base</tt>",
-            client.selectTtml(ttmlLocalizations = "", ttml = "<tt>base</tt>"),
+            client.selectTtml(ttmlLocalizations = "<tt>localized</tt>", ttml = "<tt>base</tt>", preferLocalizations = false),
+        )
+        assertEquals(
+            "<tt>base</tt>",
+            client.selectTtml(ttmlLocalizations = "", ttml = "<tt>base</tt>", preferLocalizations = false),
+        )
+        assertEquals(
+            "<tt>localized</tt>",
+            client.selectTtml(ttmlLocalizations = "<tt>localized</tt>", ttml = "", preferLocalizations = false),
         )
     }
 

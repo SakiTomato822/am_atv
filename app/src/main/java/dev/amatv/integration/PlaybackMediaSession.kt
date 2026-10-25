@@ -27,6 +27,11 @@ class PlaybackMediaSession(context: Context) {
     private var acceptPlayingActivation = true
     private var durationMs = 0L
     private var metadataKey: MetadataKey? = null
+    private var lastPublishedState = PlaybackState.STATE_NONE
+    private var lastPublishedActions = 0L
+    private var lastPublishedPosition = -1L
+    private var lastPublishedUpdateTime = 0L
+    private var lastPublishedErrorMessage: String? = null
     private val session = MediaSession(context.applicationContext, "AM ATV").apply {
         @Suppress("DEPRECATION")
         setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
@@ -129,12 +134,32 @@ class PlaybackMediaSession(context: Context) {
         val position = snapshot.positionMs.coerceAtLeast(0L).let {
             if (durationMs > 0L) it.coerceAtMost(durationMs) else it
         }
-        session.setPlaybackState(PlaybackState.Builder()
-            .setActions(actions)
-            .setState(state, position, if (state == PlaybackState.STATE_PLAYING) 1f else 0f,
-                snapshot.capturedAtElapsedRealtimeMs)
-            .apply { snapshot.errorMessage?.let { setErrorMessage(it) } }
-            .build())
+        val updateTime = snapshot.capturedAtElapsedRealtimeMs
+        val isSignificantStateChange = state != lastPublishedState ||
+            actions != lastPublishedActions ||
+            snapshot.errorMessage != lastPublishedErrorMessage
+        val shouldUpdatePosition = if (isSignificantStateChange) {
+            true
+        } else if (state == PlaybackState.STATE_PLAYING) {
+            val expectedPosition = lastPublishedPosition + (updateTime - lastPublishedUpdateTime)
+            val drift = kotlin.math.abs(position - expectedPosition)
+            drift > 2_000L || (updateTime - lastPublishedUpdateTime) >= 10_000L
+        } else {
+            kotlin.math.abs(position - lastPublishedPosition) > 500L
+        }
+        if (shouldUpdatePosition) {
+            lastPublishedState = state
+            lastPublishedActions = actions
+            lastPublishedPosition = position
+            lastPublishedUpdateTime = updateTime
+            lastPublishedErrorMessage = snapshot.errorMessage
+            session.setPlaybackState(PlaybackState.Builder()
+                .setActions(actions)
+                .setState(state, position, if (state == PlaybackState.STATE_PLAYING) 1f else 0f,
+                    updateTime)
+                .apply { snapshot.errorMessage?.let { setErrorMessage(it) } }
+                .build())
+        }
         if (snapshot.isPlaying && acceptPlayingActivation) activatedByPlayback = true
         session.isActive = callbacks != null && activatedByPlayback
     }
@@ -155,6 +180,11 @@ class PlaybackMediaSession(context: Context) {
         acceptPlayingActivation = true
         metadataKey = null
         durationMs = 0L
+        lastPublishedState = PlaybackState.STATE_NONE
+        lastPublishedActions = 0L
+        lastPublishedPosition = -1L
+        lastPublishedUpdateTime = 0L
+        lastPublishedErrorMessage = null
         session.isActive = false
         session.setMetadata(null)
         session.setPlaybackState(PlaybackState.Builder()

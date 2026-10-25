@@ -131,7 +131,7 @@ class MusicKitBridge(private val context: Context) {
         val isError = tokenResult.javaClass.getMethod("isError").invoke(tokenResult) as Boolean
         check(!isError) {
             val error = tokenResult.javaClass.getMethod("getError").invoke(tokenResult)
-            AppText.text(R.string.services_auth_failed, error.toString())
+            AppText.text(R.string.services_auth_failed, error?.toString() ?: "")
         }
         return tokenResult.javaClass.getMethod("getMusicUserToken")
             .invoke(tokenResult) as String

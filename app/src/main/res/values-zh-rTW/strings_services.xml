@@ -36,6 +36,7 @@
     <string name="services_music_website_http_error">Apple Music 網站回傳 HTTP %1$d。</string>
     <string name="services_playback_restore_failed">無法恢復播放進度，請重試。</string>
     <string name="services_song_connection_failed">歌曲連線暫時無法完成，請重試。</string>
+    <string name="services_song_connection_retry">歌曲連線暫時無法完成，將在 %1$d 秒後自動重試…</string>
     <string name="services_track_unavailable">這首歌曲目前無法播放。</string>
     <string name="services_playback_auth_required">Apple Music 授權需要更新，請重新登入。</string>
     <string name="services_apple_connection_failed">暫時無法連線至 Apple Music，請重試。</string>

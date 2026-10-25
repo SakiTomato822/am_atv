@@ -166,6 +166,8 @@ fun AmAtvApp() {
     var commandFailure by remember { mutableStateOf<Triple<Long, PlaybackFailureKind, String>?>(null) }
     var failureHandledSelection by remember { mutableLongStateOf(-1L) }
     var successfulSelection by remember { mutableLongStateOf(-1L) }
+    var networkRetryJob by remember { mutableStateOf<Job?>(null) }
+    var networkRetryCount by remember(track.id) { mutableIntStateOf(0) }
     var connectionState by remember { mutableStateOf(services.connectionState) }
     var serviceMessage by remember { mutableStateOf<String?>(null) }
     var reloadNonce by remember { mutableIntStateOf(0) }
@@ -292,6 +294,8 @@ fun AmAtvApp() {
         hasUserPlaybackRequest = true
         playbackPrepared = false
         playbackMessage = null
+        networkRetryJob?.cancel()
+        networkRetryJob = null
         val selection = selectionGeneration
         playbackRequestJob?.cancel()
         expectedPlaybackGeneration = 0L
@@ -320,6 +324,8 @@ fun AmAtvApp() {
     fun pausePlayback() {
         positionAnchorMs = currentPositionMs()
         playWhenReady = false
+        networkRetryJob?.cancel()
+        networkRetryJob = null
         pendingRestore = pendingRestore?.copy(wasPlaying = false)
         if (track.catalogId != null) services.pause()
         isPlaying = false
@@ -686,6 +692,8 @@ fun AmAtvApp() {
         isPlaying = false
         playbackPrepared = false
         services.pause()
+        networkRetryJob?.cancel()
+        networkRetryJob = null
         if (kind == PlaybackFailureKind.TrackUnavailable && playWhenReady) {
             val entry = queueController.state.value.current
             val next = entry?.let { queueController.skipFailedCurrent(it.entryId) }
@@ -698,6 +706,22 @@ fun AmAtvApp() {
                 playbackMessage = if (queueController.state.value.failureLimitReached) {
                     AppText.text(R.string.app_multiple_songs_unavailable)
                 } else message
+            }
+        } else if (kind == PlaybackFailureKind.Network && playWhenReady && networkRetryCount < 2) {
+            networkRetryCount++
+            val retrySelection = selection
+            val retryTrack = track
+            val retryPosition = positionAnchorMs
+            networkRetryJob = scope.launch {
+                for (countdown in 3 downTo 1) {
+                    if (retrySelection != selectionGeneration || !playWhenReady) return@launch
+                    playbackMessage = AppText.text(R.string.services_song_connection_retry, countdown)
+                    delay(1_000L)
+                }
+                if (retrySelection != selectionGeneration || !playWhenReady) return@launch
+                playbackMessage = null
+                selectionGeneration++
+                launchNativePlayback(retryTrack, retryPosition)
             }
         } else {
             playWhenReady = false
@@ -760,6 +784,9 @@ fun AmAtvApp() {
         pendingRestore = null
         if (snapshot.isPlaying && snapshot.positionMs > 250L && successfulSelection != selectionGeneration) {
             successfulSelection = selectionGeneration
+            networkRetryCount = 0
+            networkRetryJob?.cancel()
+            networkRetryJob = null
             queueController.state.value.current?.let { queueController.markCurrentPlaybackStarted(it.entryId) }
         }
         val endedEntryKey = queueController.state.value.current?.entryId?.toString() ?: track.id

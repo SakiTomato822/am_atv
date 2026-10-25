@@ -14,6 +14,27 @@ class NativePlaybackIntentTest {
     ) = NativePlaybackProbe(id, true, position, 200_000L, playing, buffering, canSeek,
         paused = !playing, ended = false, nowMs = now)
 
+    @Test fun initialStoppedTrackWithNoCanSeekTransitionsToReadyAndPlays() {
+        val intent = NativePlaybackIntent()
+        intent.begin("song", 0L, true, 0L)
+        val initial = intent.observe(
+            NativePlaybackProbe(
+                catalogId = "song",
+                hasCurrentItem = true,
+                positionMs = 0L,
+                durationMs = 200_000L,
+                playing = false,
+                buffering = false,
+                canSeek = false,
+                paused = false,
+                ended = false,
+                nowMs = 1_000L,
+            ),
+        )
+        assertTrue(initial.prepared)
+        assertEquals(listOf(NativePlaybackCommand.Play), initial.commands)
+    }
+
     @Test fun restoreSeeksSilentlyAndWaitsForPositionAcknowledgementBeforePlaying() {
         val intent = NativePlaybackIntent()
         intent.begin("song", 80_000L, true, 0L)
@@ -114,7 +135,8 @@ class NativePlaybackIntentTest {
             assertEquals(listOf(NativePlaybackCommand.Play), intent.observe(probe(now = now)).commands)
         }
         assertTrue(intent.observe(probe(now = 18_000L)).commands.isEmpty())
-        assertEquals(PlaybackFailureKind.Network, intent.observe(probe(now = 30_000L)).failure)
+        assertNull(intent.observe(probe(now = 30_000L)).failure)
+        assertEquals(PlaybackFailureKind.Network, intent.observe(probe(now = 55_000L)).failure)
     }
 
     @Test fun nativePauseAfterConfirmedPlaybackDoesNotStealFocusOrTimeOut() {
@@ -177,7 +199,8 @@ class NativePlaybackIntentTest {
             assertTrue(intent.observe(probe(now = now + 250L, playing = true)).commands.isEmpty())
         }
         assertTrue(intent.observe(probe(now = 10_000L)).commands.isEmpty())
-        assertEquals(PlaybackFailureKind.Network, intent.observe(probe(now = 22_000L)).failure)
+        assertNull(intent.observe(probe(now = 22_000L)).failure)
+        assertEquals(PlaybackFailureKind.Network, intent.observe(probe(now = 47_000L)).failure)
     }
 
     @Test fun actualInitialProgressDisablesRetriesForASubsequentNativePause() {
@@ -245,7 +268,8 @@ class NativePlaybackIntentTest {
         intent.observe(probe(now = 4_000L))
         intent.observe(probe(now = 7_000L))
         assertTrue(intent.observe(probe(now = 10_000L)).commands.isEmpty())
-        assertEquals(PlaybackFailureKind.Network, intent.observe(probe(now = 22_000L)).failure)
+        assertNull(intent.observe(probe(now = 22_000L)).failure)
+        assertEquals(PlaybackFailureKind.Network, intent.observe(probe(now = 47_000L)).failure)
     }
 
     @Test fun onlyTheSdkIoTypeIdentifiesANativeNetworkFailure() {
@@ -304,6 +328,7 @@ class NativePlaybackIntentTest {
 
     @Test fun completedEventRemainsValidWithoutReadingTheStoppedControllersResetPosition() {
         assertTrue(isCompletedPlaybackItem(7L, 7L, true, "song", "song", 42L, 42L, 200_000L, 200_000L))
+        assertTrue(isCompletedPlaybackItem(7L, 7L, true, "song", "song", 42L, 42L, 196_500L, 200_000L))
         // Stop/skip before the media end is not a completed song.
         assertFalse(isCompletedPlaybackItem(7L, 7L, true, "song", "song", 42L, 42L, 35_000L, 200_000L))
     }

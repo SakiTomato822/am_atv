@@ -168,7 +168,7 @@ internal class NativePlaybackIntent {
             recoveryPlayingPosition = null
         }
         bufferingSince = null
-        if (phase == Phase.Loading && (probe.canSeek || (probe.paused && startPosition <= POSITION_TOLERANCE_MS))) {
+        if (phase == Phase.Loading && (probe.canSeek || (startPosition <= POSITION_TOLERANCE_MS && !probe.playing && !probe.buffering))) {
             if (probe.durationMs > 0L) startPosition = startPosition.coerceAtMost((probe.durationMs - 500L).coerceAtLeast(0L))
             if (abs(probe.positionMs - startPosition) > POSITION_TOLERANCE_MS) {
                 if (!probe.canSeek) return result()
@@ -222,14 +222,14 @@ internal class NativePlaybackIntent {
             playAttempts++
             return result(listOf(NativePlaybackCommand.Play))
         }
-        if (probe.nowMs - idleStart >= 20_000L) return fail(PlaybackFailureKind.Network)
+        if (probe.nowMs - idleStart >= 45_000L) return fail(PlaybackFailureKind.Network)
         return result()
     }
 
     private companion object {
         const val POSITION_TOLERANCE_MS = 750L
         const val STARTED_PROGRESS_MS = 250L
-        const val COMPLETION_TOLERANCE_MS = 1_500L
+        const val COMPLETION_TOLERANCE_MS = 5_000L
         const val COMPLETION_CONFIRMATION_MS = 1_000L
         const val COMPLETION_GRACE_MS = 500L
     }
@@ -263,4 +263,5 @@ internal fun isCompletedPlaybackItem(
 ): Boolean = eventGeneration == requestGeneration && prepared && requestedCatalogId != null &&
     requestedCatalogId == endedCatalogId &&
     (expectedNativeQueueId == null || endedNativeQueueId == null || expectedNativeQueueId == endedNativeQueueId) &&
-    durationMs > 0L && endPositionMs > 0L && endPositionMs >= durationMs - 1_500L
+    durationMs > 0L && endPositionMs > 0L &&
+    endPositionMs >= (durationMs - 5_000L).coerceAtMost(kotlin.math.round(durationMs * 0.92f).toLong()).coerceAtLeast(0L)
