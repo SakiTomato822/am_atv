@@ -1,0 +1,35 @@
+.gradle/
+.kotlin/
+.idea/
+local.properties
+/build/
+/app/build/
+/benchmark/build/
+/buildSrc/build/
+*.iml
+.DS_Store
+
+# Apple-provided SDK binaries must be downloaded by each developer.
+app/libs/*.aar
+*.p8
+.env
+secrets.properties
+*.jwt
+*.jks
+*.keystore
+*.hprof
+*.perfetto-trace
+*.trace
+/dist/
+/work/
+
+# Keep reverse-engineering output out of the clean-room source tree.
+analysis/
+decoded/
+*.apk
+*.apks
+
+# Local runtime data and proprietary reference/distribution packages.
+/log/
+*.xapk
+*.apk.zip

@@ -1,0 +1,23 @@
+AM for TV
+Copyright (c) 2026 AM for TV contributors
+Project source: MIT License (MIT.txt).
+
+Open-source components used by the application:
+- AndroidX, Jetpack Compose, Material and Media3: Android Open Source Project contributors.
+- Kotlin and kotlinx.coroutines: JetBrains and Kotlin contributors.
+- Coil: Coil contributors.
+- OkHttp and Okio: Square and contributors.
+These components are distributed under the Apache License, Version 2.0.
+The full license is included in Apache-2.0.txt. Individual upstream copyright
+and notice files retain their original owners.
+
+OkHttp's bundled Public Suffix List data uses the Mozilla Public License 2.0
+(MPL-2.0.txt). Its upstream NOTICE remains included in the APK. The source data
+is available at https://publicsuffix.org/list/public_suffix_list.dat .
+
+The MusicKit Android SDK is separately licensed by Apple Inc. Developers must
+obtain it from Apple; it is not included in the source distribution. The MIT
+license does not relicense the SDK, Apple trademarks, catalog artwork or lyrics.
+MusicKit terms: https://developer.apple.com/musickit/android/
+
+AM for TV is an independent project and is not affiliated with Apple Inc.

@@ -1,0 +1,178 @@
+package dev.amatv.integration
+
+import kotlin.math.abs
+
+enum class PlaybackFailureKind { TrackUnavailable, Authorization, Network, PositionRestore, Unexpected }
+
+internal data class NativePlaybackProbe(
+    val catalogId: String?,
+    val hasCurrentItem: Boolean,
+    val positionMs: Long,
+    val durationMs: Long,
+    val playing: Boolean,
+    val buffering: Boolean,
+    val canSeek: Boolean,
+    val paused: Boolean,
+    val ended: Boolean,
+    val nowMs: Long,
+)
+
+internal sealed interface NativePlaybackCommand {
+    data object Play : NativePlaybackCommand
+    data object Pause : NativePlaybackCommand
+    data class Seek(val positionMs: Long) : NativePlaybackCommand
+}
+
+internal data class NativePlaybackDecision(
+    val prepared: Boolean,
+    val playing: Boolean,
+    val positionMs: Long,
+    val commands: List<NativePlaybackCommand> = emptyList(),
+    val failure: PlaybackFailureKind? = null,
+)
+
+/** One requested item and its intent; buffering never changes the user's play/pause choice. */
+internal class NativePlaybackIntent {
+    private enum class Phase { Loading, Seeking, Ready, Failed }
+    private var phase = Phase.Loading
+    private var catalogId: String? = null
+    private var startPosition = 0L
+    private var wantsPlay = false
+    private var startedAt = 0L
+    private var seekAt = 0L
+    private var seekAttempts = 0
+    private var lastPlayAt = Long.MIN_VALUE
+    private var playAttempts = 0
+    private var idleSince: Long? = null
+    private var bufferingSince: Long? = null
+    private var failure: PlaybackFailureKind? = null
+
+    fun begin(catalogId: String?, positionMs: Long, playWhenReady: Boolean, nowMs: Long) {
+        this.catalogId = catalogId
+        startPosition = positionMs.coerceAtLeast(0L)
+        wantsPlay = playWhenReady
+        startedAt = nowMs
+        phase = Phase.Loading
+        seekAt = 0L
+        seekAttempts = 0
+        lastPlayAt = Long.MIN_VALUE
+        playAttempts = 0
+        idleSince = null
+        bufferingSince = null
+        failure = null
+    }
+
+    fun requestPlaying(value: Boolean) {
+        wantsPlay = value
+        if (!value) bufferingSince = null
+        if (value) {
+            playAttempts = 0
+            lastPlayAt = Long.MIN_VALUE
+            idleSince = null
+        }
+    }
+
+    fun observe(probe: NativePlaybackProbe): NativePlaybackDecision {
+        fun result(commands: List<NativePlaybackCommand> = emptyList()) = NativePlaybackDecision(
+            prepared = phase == Phase.Ready,
+            playing = phase == Phase.Ready && wantsPlay && probe.playing && !probe.buffering,
+            positionMs = if (phase == Phase.Ready) probe.positionMs else startPosition,
+            commands = commands,
+            failure = failure,
+        )
+        fun fail(kind: PlaybackFailureKind): NativePlaybackDecision {
+            phase = Phase.Failed
+            failure = kind
+            return result(listOf(NativePlaybackCommand.Pause))
+        }
+        if (phase == Phase.Failed) return result()
+        // A terminal SDK callback can precede clearing getCurrentItem()/position.
+        // Preserve completion rather than treating that cleanup as a new load failure.
+        if (phase == Phase.Ready && probe.ended) return result().copy(playing = false)
+        if (!probe.hasCurrentItem || probe.catalogId != catalogId) {
+            return if (probe.nowMs - startedAt > 60_000L) fail(PlaybackFailureKind.Network) else result()
+        }
+        if (phase != Phase.Ready && probe.nowMs - startedAt > 60_000L) {
+            return fail(if (phase == Phase.Seeking) PlaybackFailureKind.PositionRestore else PlaybackFailureKind.Network)
+        }
+        if (probe.buffering) {
+            idleSince = null
+            if (wantsPlay) {
+                val since = bufferingSince ?: probe.nowMs.also { bufferingSince = it }
+                if (probe.nowMs - since >= 60_000L) return fail(PlaybackFailureKind.Network)
+            } else bufferingSince = null
+            return result(if (!wantsPlay && probe.playing) listOf(NativePlaybackCommand.Pause) else emptyList())
+        }
+        bufferingSince = null
+        if (phase == Phase.Loading && (probe.canSeek || (probe.paused && startPosition <= POSITION_TOLERANCE_MS))) {
+            if (probe.durationMs > 0L) startPosition = startPosition.coerceAtMost((probe.durationMs - 500L).coerceAtLeast(0L))
+            if (abs(probe.positionMs - startPosition) > POSITION_TOLERANCE_MS) {
+                if (!probe.canSeek) return result()
+                phase = Phase.Seeking
+                seekAt = probe.nowMs
+                seekAttempts = 1
+                return result(listOf(NativePlaybackCommand.Seek(startPosition)))
+            }
+            phase = Phase.Ready
+        }
+        if (phase == Phase.Seeking) {
+            if (abs(probe.positionMs - startPosition) <= POSITION_TOLERANCE_MS) {
+                phase = Phase.Ready
+            } else if (probe.nowMs - seekAt >= 3_000L && probe.canSeek && seekAttempts < 3) {
+                seekAt = probe.nowMs
+                seekAttempts++
+                return result(listOf(NativePlaybackCommand.Seek(startPosition)))
+            } else if (probe.nowMs - seekAt >= 10_000L) {
+                return fail(PlaybackFailureKind.PositionRestore)
+            } else return result()
+        }
+        if (phase != Phase.Ready) return result()
+        if (!wantsPlay) {
+            idleSince = null
+            return result(if (probe.playing) listOf(NativePlaybackCommand.Pause) else emptyList())
+        }
+        if (probe.playing) {
+            playAttempts = 0
+            idleSince = null
+            return result()
+        }
+        if (probe.ended) return result()
+        val idleStart = idleSince ?: probe.nowMs.also { idleSince = it }
+        if (playAttempts < 3 && (lastPlayAt == Long.MIN_VALUE || probe.nowMs - lastPlayAt >= 3_000L)) {
+            lastPlayAt = probe.nowMs
+            playAttempts++
+            return result(listOf(NativePlaybackCommand.Play))
+        }
+        if (probe.nowMs - idleStart >= 20_000L) return fail(PlaybackFailureKind.Network)
+        return result()
+    }
+
+    private companion object { const val POSITION_TOLERANCE_MS = 750L }
+}
+
+internal fun classifyPlaybackFailure(type: Int?, code: Int?, componentCode: Int?, error: Throwable? = null): PlaybackFailureKind {
+    val codes = setOfNotNull(code, componentCode)
+    if (401 in codes || 403 in codes || type in setOf(2, 4, 6)) return PlaybackFailureKind.Authorization
+    if (404 in codes || 410 in codes) return PlaybackFailureKind.TrackUnavailable
+    if (type == 1 || 408 in codes || 429 in codes || codes.any { it in 500..599 } ||
+        generateSequence(error) { it.cause }.take(8).any { it is java.io.IOException }
+    ) return PlaybackFailureKind.Network
+    if (type == 3) return PlaybackFailureKind.TrackUnavailable
+    return PlaybackFailureKind.Unexpected
+}
+
+/** The callback's end position is authoritative even if the stopped controller has reset to zero. */
+internal fun isCompletedPlaybackItem(
+    eventGeneration: Long,
+    requestGeneration: Long,
+    prepared: Boolean,
+    requestedCatalogId: String?,
+    endedCatalogId: String?,
+    expectedNativeQueueId: Long?,
+    endedNativeQueueId: Long?,
+    endPositionMs: Long,
+    durationMs: Long,
+): Boolean = eventGeneration == requestGeneration && prepared && requestedCatalogId != null &&
+    requestedCatalogId == endedCatalogId &&
+    (expectedNativeQueueId == null || endedNativeQueueId == null || expectedNativeQueueId == endedNativeQueueId) &&
+    durationMs > 0L && endPositionMs > 0L && endPositionMs >= durationMs - 1_500L

@@ -1,0 +1,1007 @@
+package dev.amatv.integration
+
+import android.icu.lang.UScript
+import android.util.Log
+import dev.amatv.model.LyricAgentType
+import dev.amatv.model.LyricLine
+import dev.amatv.model.LyricTimeline
+import dev.amatv.model.LyricTiming
+import dev.amatv.model.LyricWord
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import org.w3c.dom.Element
+import org.w3c.dom.Node
+import org.xml.sax.InputSource
+import java.io.StringReader
+import java.net.HttpURLConnection
+import java.net.URI
+import java.net.URLEncoder
+import java.time.Instant
+import java.util.Base64
+import java.util.Locale
+import javax.xml.parsers.DocumentBuilderFactory
+
+/**
+ * Fetches and parses Apple Music TTML lyrics using the exact request parameters
+ * and selection logic from Apple Music 6.5.3:
+ * - `com.apple.android.music.ttml.LocaleUtil`
+ * - `p384u8.c1` (`GET /v1/catalog/{storefront}/songs/{id}/syllable-lyrics`)
+ * - `com.apple.android.music.ttml.f` (`attributes.getTtmlLocalizations() ?: attributes.getTtml()`)
+ */
+class AppleMusicLyricsClient(
+    private val storefront: String,
+    private val userToken: () -> String?,
+    private val webToken: AppleWebPlaybackTokenClient = AppleWebPlaybackTokenClient(),
+    /** Debug builds only: raw syllable-lyrics responses are written here for inspection. */
+    private val debugDumpDir: java.io.File? = null,
+    private val contentCache: ContentCache? = null,
+) {
+    suspend fun lyricsFor(catalogId: String): List<LyricLine> = withContext(Dispatchers.IO) {
+        val mediaUserToken = userToken()?.takeIf(String::isNotBlank)
+            ?: throw LyricsRequestException(LyricsFailureReason.Authorization, "請先登入 Apple Music。")
+        val cacheGeneration = contentCache?.generation ?: 0L
+        // The key is hashed before becoming a filename; account tokens are never written.
+        val cacheKey = "$storefront|$catalogId|${Locale.getDefault().toLanguageTag()}|$mediaUserToken"
+        contentCache?.readLyrics(cacheKey)?.let { cached ->
+            val lines = runCatching { AppleTtmlParser.parse(cached) }.getOrNull().orEmpty()
+            if (lines.isNotEmpty()) return@withContext lines
+            contentCache.removeLyrics(cacheKey)
+        }
+        val lyricsLanguages = arrayOf(AppleLocaleUtil.getSystemLyricsLanguage())
+        val scripts = AppleLocaleUtil.getSystemLyricsScripts()
+
+        suspend fun request(forceBearerRefresh: Boolean): Pair<Int, String> {
+            val bearer = webToken.token(forceBearerRefresh)
+            val queryMap = linkedMapOf<String, String>()
+            if (lyricsLanguages.isNotEmpty()) {
+                queryMap["l[lyrics]"] = lyricsLanguages.joinToString(",")
+            }
+            if (scripts.isNotEmpty()) {
+                queryMap["extend"] = "ttmlLocalizations"
+                queryMap["l[script]"] = scripts.joinToString(",")
+            }
+            val query = queryMap.entries.joinToString("&") { (key, value) ->
+                "${key.urlEncoded()}=${value.urlEncoded()}"
+            }
+            val url = "https://amp-api.music.apple.com/v1/catalog/" +
+                "${storefront.urlEncoded()}/songs/${catalogId.urlEncoded()}/" +
+                "syllable-lyrics" + if (query.isNotEmpty()) "?$query" else ""
+            val connection = URI(url).toURL().openConnection() as HttpURLConnection
+            return try {
+                connection.requestMethod = "GET"
+                connection.connectTimeout = 10_000
+                connection.readTimeout = 18_000
+                connection.setRequestProperty("Accept", "application/json")
+                connection.setRequestProperty("Authorization", "Bearer $bearer")
+                connection.setRequestProperty("media-user-token", mediaUserToken)
+                connection.setRequestProperty("Origin", MUSIC_ORIGIN)
+                connection.setRequestProperty("Referer", "$MUSIC_ORIGIN/")
+                connection.setRequestProperty("User-Agent", WEB_USER_AGENT)
+                val status = connection.responseCode
+                val body = (if (status in 200..299) {
+                    connection.inputStream
+                } else {
+                    connection.errorStream
+                })?.bufferedReader()?.use { it.readText() }.orEmpty()
+                status to body
+            } finally {
+                connection.disconnect()
+            }
+        }
+
+        var (status, body) = request(forceBearerRefresh = false)
+        if (status == HttpURLConnection.HTTP_UNAUTHORIZED) {
+            val retried = request(forceBearerRefresh = true)
+            status = retried.first
+            body = retried.second
+        }
+        if (status == HttpURLConnection.HTTP_UNAUTHORIZED) {
+            throw LyricsRequestException(LyricsFailureReason.Authorization, "Apple 歌詞授權已失效，請重新登入。")
+        }
+        Log.i(TAG, "Apple syllable-lyrics HTTP $status for catalog item $catalogId")
+        if (status !in 200..299) {
+            throw LyricsRequestException(lyricsHttpFailure(status), when (status) {
+                HttpURLConnection.HTTP_UNAUTHORIZED ->
+                    "Apple 歌詞授權已失效，請重新登入。"
+                HttpURLConnection.HTTP_FORBIDDEN ->
+                    "此帳號、訂閱或地區目前不能讀取 Apple 同步歌詞。"
+                HttpURLConnection.HTTP_NOT_FOUND ->
+                    "Apple Music 沒有提供這首歌的同步歌詞。"
+                else -> "Apple 同步歌詞服務回傳 HTTP $status。"
+            })
+        }
+
+        debugDumpDir?.let { dir ->
+            check(dir.isDirectory || dir.mkdirs()) { "Cannot create lyrics dump dir $dir" }
+            java.io.File(dir, "$catalogId.json").writeText(body)
+        }
+        val ttml = extractTtml(JSONObject(body))
+        val lines = AppleTtmlParser.parse(ttml)
+        if (lines.isNotEmpty()) contentCache?.writeLyrics(cacheKey, ttml, cacheGeneration)
+        Log.i(TAG, "Apple TTML lyrics: lines=${lines.size}, units=${lines.sumOf { it.words.size }}")
+        lines
+    }
+
+    /**
+     * Reads localized TTML first, then the base TTML. A successful response with
+     * neither is a definitive unavailable result, separate from transport/auth failures.
+     */
+    internal fun extractTtml(root: JSONObject): String {
+        val data = root.optJSONArray("data")
+        val mediaEntity = data?.optJSONObject(0)
+        val attributes = mediaEntity?.optJSONObject("attributes")
+        return selectTtml(
+            ttmlLocalizations = attributes?.optString("ttmlLocalizations"),
+            ttml = attributes?.optString("ttml"),
+        )
+    }
+
+    internal fun selectTtml(ttmlLocalizations: String?, ttml: String?): String {
+        val localized = ttmlLocalizations?.takeIf { it.isNotEmpty() }
+        val resolved = localized ?: ttml?.takeIf { it.isNotEmpty() }
+        if (resolved == null) {
+            throw LyricsRequestException(LyricsFailureReason.Unavailable, "這首歌暫時沒有歌詞。")
+        }
+        return resolved
+    }
+
+    private fun String.urlEncoded(): String = URLEncoder.encode(this, Charsets.UTF_8.name())
+
+    private companion object {
+        const val TAG = "AppleMusicLyrics"
+        const val MUSIC_ORIGIN = "https://music.apple.com"
+        const val WEB_USER_AGENT = "Mozilla/5.0 (Linux; Android 12; TV) " +
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142 Safari/537.36"
+    }
+}
+
+/**
+ * Exact reproduction of `com.apple.android.music.ttml.LocaleUtil`.
+ */
+internal object AppleLocaleUtil {
+    fun getSystemLyricsLanguage(locale: Locale = Locale.getDefault()): String {
+        var script = locale.script.orEmpty()
+        if (script.isEmpty()) {
+            script = getChineseScript(locale)
+        }
+        if (script.isEmpty()) {
+            script = locale.country.orEmpty()
+        }
+        return listOf(locale.language.orEmpty(), script)
+            .filter { it.isNotEmpty() }
+            .joinToString("-")
+    }
+
+    fun getSystemLyricsScripts(locale: Locale = Locale.getDefault()): Array<String> {
+        val shortNames = runCatching {
+            val codes = UScript.getCode(locale)
+            val list = ArrayList<String>((codes?.size ?: 0) + 1)
+            if (locale == Locale.JAPAN) {
+                UScript.getShortName(54)?.let(list::add)
+            }
+            if (codes != null) {
+                for (code in codes) {
+                    UScript.getShortName(code)?.let(list::add)
+                }
+            }
+            list
+        }.getOrElse {
+            buildList {
+                if (locale == Locale.JAPAN) add("Hira")
+                val fallback = locale.script.ifEmpty { getChineseScript(locale) }
+                if (fallback.isNotEmpty()) add(fallback)
+            }
+        }
+        return shortNames
+            .filter { it.isNotEmpty() }
+            .map { "${locale.language}-$it" }
+            .toTypedArray()
+    }
+
+    fun getChineseScript(locale: Locale): String {
+        if (locale.language == Locale.CHINESE.language) {
+            val country = locale.country
+            if (country != null) {
+                when (country) {
+                    "CN", "SG" -> return "Hans"
+                    "HK", "MO", "TW" -> return "Hant"
+                }
+            }
+        }
+        return ""
+    }
+}
+
+/** Refreshes the public JWT shipped by music.apple.com without exposing it. */
+class AppleWebPlaybackTokenClient {
+    @Volatile
+    private var cachedToken: String? = null
+
+    @Volatile
+    private var cachedExpiryEpochSeconds: Long = 0L
+
+    suspend fun token(forceRefresh: Boolean = false): String = withContext(Dispatchers.IO) {
+        tokenBlocking(forceRefresh)
+    }
+
+    @Synchronized
+    private fun tokenBlocking(forceRefresh: Boolean): String {
+        val now = Instant.now().epochSecond
+        if (!forceRefresh && cachedExpiryEpochSeconds > now + EXPIRY_MARGIN_SECONDS) {
+            cachedToken?.let { return it }
+        }
+
+        val html = get("$MUSIC_ORIGIN/us/browse")
+        val assetPaths = ASSET_SCRIPT.findAll(html)
+            .map { it.groupValues[1].replace("&amp;", "&") }
+            .distinct()
+            .toList()
+        check(assetPaths.isNotEmpty()) { "music.apple.com 沒有提供可讀取的網頁播放元件。" }
+
+        val token = assetPaths.asSequence().mapNotNull { asset ->
+            val assetUrl = if (asset.startsWith("http")) asset else "$MUSIC_ORIGIN$asset"
+            runCatching { JWT.find(get(assetUrl))?.value }.getOrNull()
+        }.firstOrNull() ?: error("music.apple.com 網頁播放權杖格式已變更。")
+
+        cachedToken = token
+        cachedExpiryEpochSeconds = jwtExpiry(token) ?: (now + DEFAULT_CACHE_SECONDS)
+        return token
+    }
+
+    private fun get(url: String): String {
+        val connection = URI(url).toURL().openConnection() as HttpURLConnection
+        return try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 18_000
+            connection.setRequestProperty("Accept", "text/html,application/javascript,*/*")
+            connection.setRequestProperty("User-Agent", WEB_USER_AGENT)
+            val status = connection.responseCode
+            check(status in 200..299) { "music.apple.com 回傳 HTTP $status。" }
+            connection.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun jwtExpiry(token: String): Long? = runCatching {
+        val payload = token.split('.')[1]
+        val decoded = String(Base64.getUrlDecoder().decode(payload), Charsets.UTF_8)
+        JSONObject(decoded).optLong("exp").takeIf { it > 0L }
+    }.getOrNull()
+
+    private companion object {
+        const val MUSIC_ORIGIN = "https://music.apple.com"
+        const val WEB_USER_AGENT = "Mozilla/5.0 (Linux; Android 12; TV) " +
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142 Safari/537.36"
+        const val EXPIRY_MARGIN_SECONDS = 60L * 60L
+        const val DEFAULT_CACHE_SECONDS = 60L * 60L
+        val ASSET_SCRIPT = Regex("""src=["']([^"']*/assets/[^"']+\.js)["']""")
+        val JWT = Regex("""eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+""")
+    }
+}
+
+/**
+ * Namespace-aware TTML parser reproducing Apple Music 6.5.3's native `SongInfoParser` +
+ * `LyricsLineParser` (`libandroidappmusic.so`) and `com.apple.android.music.player.A.H`
+ * sub-word syllable grouping.
+ */
+internal object AppleTtmlParser {
+    private data class ParsedTranslation(
+        val mainText: String?,
+        val backgroundText: String?,
+    )
+
+    private data class ParsedPronunciation(
+        val mainText: String?,
+        val backgroundText: String?,
+        val mainWords: List<LyricWord>,
+        val backgroundWords: List<LyricWord>,
+    )
+
+    private data class RawToken(
+        val text: String,
+        val startMs: Long?,
+        val endMs: Long?,
+        val isWhitespace: Boolean,
+        val explicitGroupId: Int? = null,
+    )
+
+    fun parse(ttml: String): List<LyricLine> {
+        val factory = DocumentBuilderFactory.newInstance().apply {
+            isNamespaceAware = true
+            isExpandEntityReferences = false
+            runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
+            runCatching { setFeature("http://xml.org/sax/features/external-general-entities", false) }
+            runCatching { setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
+        }
+        val document = factory.newDocumentBuilder().parse(
+            InputSource(StringReader(ttml.trimStart('\uFEFF'))),
+        )
+        val root = document.documentElement
+        val declaredTiming = when (root.attributeByLocalName("timing")?.lowercase()) {
+            "word" -> LyricTiming.Word
+            "line" -> LyricTiming.Line
+            "none" -> LyricTiming.None
+            else -> null
+        }
+
+        val agents = parseAgents(root)
+        val primaryPersonAgentId = agents.entries
+            .firstOrNull { it.value == LyricAgentType.Person }?.key
+            ?: agents.keys.firstOrNull()
+        val isMultiAgentSong = agents.keys.any { it != primaryPersonAgentId }
+
+        val songwriters = parseSongwriters(root)
+        val translations = parseTranslations(root)
+        val pronunciations = parsePronunciations(root)
+
+        val paragraphs = document.getElementsByTagNameNS("*", "p")
+        val rawLines = buildList {
+            for (index in 0 until paragraphs.length) {
+                val paragraph = paragraphs.item(index) as? Element ?: continue
+                if (paragraph.isInsideMetadata()) continue
+                parseLine(
+                    paragraph = paragraph,
+                    declaredTiming = declaredTiming,
+                    primaryPersonAgentId = primaryPersonAgentId,
+                    isMultiAgentSong = isMultiAgentSong,
+                    songwriters = songwriters,
+                    translations = translations,
+                    pronunciations = pronunciations,
+                )?.let(::add)
+            }
+        }
+        val hasTimed = rawLines.any { !it.isStatic && it.endMs > 0L }
+        return if (hasTimed) rawLines.sortedBy(LyricLine::startMs) else rawLines
+    }
+
+    private fun parseLine(
+        paragraph: Element,
+        declaredTiming: LyricTiming?,
+        primaryPersonAgentId: String?,
+        isMultiAgentSong: Boolean,
+        songwriters: List<String>,
+        translations: Map<String, ParsedTranslation>,
+        pronunciations: Map<String, ParsedPronunciation>,
+    ): LyricLine? {
+        val lineStart = paragraph.time("begin")
+        val lineEnd = paragraph.time("end")
+        val lineKey = paragraph.lineKey()
+        val agentId = paragraph.resolveAgentId()
+        val isOppositeAgent = !agentId.isNullOrBlank() &&
+            primaryPersonAgentId != null &&
+            agentId != primaryPersonAgentId
+
+        val translation = lineKey?.let(translations::get)
+        val inlineTranslation = paragraph.extractInlineRoleText("x-translation")
+        val inlinePronunciation = paragraph.extractInlineRoleText("x-roman")
+        val pronunciation = lineKey?.let(pronunciations::get)
+
+        val mainPronunciationByBegin = pronunciation?.mainWords
+            ?.associateBy { it.startMs }
+            .orEmpty()
+        val bgPronunciationByBegin = pronunciation?.backgroundWords
+            ?.associateBy { it.startMs }
+            .orEmpty()
+
+        val mainRawTokens = mutableListOf<RawToken>()
+        val bgRawTokens = mutableListOf<RawToken>()
+        var keepBgParenthesis = false
+        var explicitGroupCounter = 10_000
+
+        fun collectTokens(parent: Node, target: MutableList<RawToken>, inheritedGroupId: Int?) {
+            var child = parent.firstChild
+            while (child != null) {
+                when (child.nodeType) {
+                    Node.TEXT_NODE, Node.CDATA_SECTION_NODE -> {
+                        val value = child.nodeValue.orEmpty()
+                        if (value.isNotEmpty()) {
+                            target += RawToken(
+                                text = value,
+                                startMs = null,
+                                endMs = null,
+                                isWhitespace = true,
+                            )
+                        }
+                    }
+                    Node.ELEMENT_NODE -> {
+                        val el = child as Element
+                        val role = el.attributeByLocalName("role")?.lowercase().orEmpty()
+                        when {
+                            role == "x-bg" -> {
+                                if (el.attributeByLocalName("parenthesis")?.lowercase() == "keep") {
+                                    keepBgParenthesis = true
+                                }
+                                val bgTimedLeaves = el.timedLeafSpans(includeBg = true)
+                                if (bgTimedLeaves.isNotEmpty()) {
+                                    collectTokens(el, bgRawTokens, null)
+                                } else {
+                                    val bgStart = el.time("begin") ?: lineStart
+                                    val bgEnd = el.timeEnd(bgStart) ?: lineEnd
+                                    val bgText = el.mainText(includeBg = true).trim()
+                                    if (bgText.isNotEmpty() && bgStart != null && bgEnd != null) {
+                                        bgRawTokens += RawToken(
+                                            text = bgText,
+                                            startMs = bgStart,
+                                            endMs = bgEnd.coerceAtLeast(bgStart + 1L),
+                                            isWhitespace = false,
+                                        )
+                                    }
+                                }
+                            }
+                            el.isAuxiliaryText() -> Unit
+                            el.localTag == "span" -> {
+                                val directTimedChildren = el.childElements()
+                                    .filter { it.localTag == "span" && !it.isAuxiliaryText() && !it.isBgSpan() }
+                                if (directTimedChildren.size > 1) {
+                                    val gid = explicitGroupCounter++
+                                    collectTokens(el, target, gid)
+                                } else if (directTimedChildren.size == 1) {
+                                    collectTokens(el, target, inheritedGroupId)
+                                } else {
+                                    val start = el.time("begin")
+                                    val end = el.timeEnd(start)
+                                    val text = el.directText().ifEmpty { el.textContent.orEmpty() }
+                                    if (start != null && end != null && text.isNotEmpty()) {
+                                        target += RawToken(
+                                            text = text,
+                                            startMs = start,
+                                            endMs = end.coerceAtLeast(start + 1L),
+                                            isWhitespace = false,
+                                            explicitGroupId = inheritedGroupId,
+                                        )
+                                    } else if (text.isNotEmpty()) {
+                                        target += RawToken(
+                                            text = text,
+                                            startMs = null,
+                                            endMs = null,
+                                            isWhitespace = true,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                child = child.nextSibling
+            }
+        }
+
+        collectTokens(paragraph, mainRawTokens, null)
+
+        val fullMainText = paragraph.mainText(includeBg = false)
+        val joinWithSpaces = fullMainText.any(Char::isWhitespace)
+
+        val mainWords = buildWordsFromRawTokens(
+            rawTokens = mainRawTokens,
+            lineStart = lineStart,
+            lineEnd = lineEnd,
+            isBackgroundVocal = false,
+            stripOuterParentheses = false,
+            pronunciationByBegin = mainPronunciationByBegin,
+        )
+        val backgroundWords = buildWordsFromRawTokens(
+            rawTokens = bgRawTokens,
+            lineStart = lineStart,
+            lineEnd = lineEnd,
+            isBackgroundVocal = true,
+            stripOuterParentheses = !keepBgParenthesis,
+            pronunciationByBegin = bgPronunciationByBegin,
+        )
+
+        val resolvedTranslation = translation?.mainText ?: inlineTranslation
+        val resolvedBgTranslation = translation?.backgroundText
+        val resolvedPronunciationText = pronunciation?.mainText ?: inlinePronunciation
+        val resolvedBgPronunciationText = pronunciation?.backgroundText
+
+        if (mainWords.isEmpty() && backgroundWords.isEmpty()) {
+            val text = fullMainText.trim()
+            if (text.isBlank()) return null
+            val isStaticLine = declaredTiming == LyricTiming.None || lineStart == null
+            val start = lineStart ?: 0L
+            val end = lineEnd?.coerceAtLeast(start + 1L) ?: (if (isStaticLine) 0L else start + 1L)
+            return LyricLine(
+                words = listOf(
+                    LyricWord(
+                        text = text,
+                        displayText = text,
+                        startMs = start,
+                        endMs = end,
+                        hasTrailingWhitespace = false,
+                    ),
+                ),
+                translation = resolvedTranslation,
+                backgroundTranslation = resolvedBgTranslation,
+                pronunciationText = resolvedPronunciationText,
+                backgroundPronunciationText = resolvedBgPronunciationText,
+                pronunciationWords = pronunciation?.mainWords.orEmpty(),
+                backgroundPronunciationWords = pronunciation?.backgroundWords.orEmpty(),
+                lineStartMs = lineStart,
+                lineEndMs = lineEnd,
+                agentId = agentId,
+                isOppositeAgent = isOppositeAgent,
+                isMultiAgentSong = isMultiAgentSong,
+                timing = if (isStaticLine) LyricTiming.None else LyricTiming.Line,
+                songwriters = songwriters,
+                joinWithSpaces = false,
+                isStatic = isStaticLine,
+            )
+        }
+
+        val effectiveTiming = when {
+            declaredTiming != null -> declaredTiming
+            mainWords.size > 1 || backgroundWords.isNotEmpty() -> LyricTiming.Word
+            else -> LyricTiming.Line
+        }
+
+        return LyricLine(
+            words = mainWords,
+            backgroundWords = backgroundWords,
+            translation = resolvedTranslation,
+            backgroundTranslation = resolvedBgTranslation,
+            pronunciationText = resolvedPronunciationText,
+            backgroundPronunciationText = resolvedBgPronunciationText,
+            pronunciationWords = pronunciation?.mainWords.orEmpty(),
+            backgroundPronunciationWords = pronunciation?.backgroundWords.orEmpty(),
+            lineStartMs = lineStart,
+            lineEndMs = lineEnd,
+            agentId = agentId,
+            isOppositeAgent = isOppositeAgent,
+            isMultiAgentSong = isMultiAgentSong,
+            timing = effectiveTiming,
+            songwriters = songwriters,
+            joinWithSpaces = joinWithSpaces,
+            isStatic = effectiveTiming == LyricTiming.None,
+        )
+    }
+
+    /**
+     * Reproduces `com.apple.android.music.player.A.H` (lines 3396-3780):
+     * 1. Merges leading/trailing non-timed punctuation (`LyricsWord.isWhitespace()`) into the
+     *    adjacent timed word and records whether the timed word is followed by whitespace (`z13`).
+     * 2. Appends trailing `" "` to `displayText` when `hasTrailingWhitespace` is true on
+     *    non-final words (`sb3.append(lyricsWordNative3.getHtmlLineText())`).
+     * 3. Groups consecutive timed syllables that are NOT separated by whitespace (`!z13 && !z28`)
+     *    in non-CJK scripts (`!LyricTimeline.containsSplitOnCharsScript`) into a shared
+     *    `emphasisGroupId` with combined `groupDurationMs` and `groupCharCount`.
+     */
+    private fun buildWordsFromRawTokens(
+        rawTokens: List<RawToken>,
+        lineStart: Long?,
+        lineEnd: Long?,
+        isBackgroundVocal: Boolean,
+        stripOuterParentheses: Boolean,
+        pronunciationByBegin: Map<Long, LyricWord>,
+    ): List<LyricWord> {
+        val timedIndices = rawTokens.indices.filter { !rawTokens[it].isWhitespace && rawTokens[it].startMs != null }
+        if (timedIndices.isEmpty()) return emptyList()
+
+        data class MergedSyllable(
+            val trimmedText: String,
+            val displayText: String,
+            val startMs: Long,
+            val endMs: Long,
+            val hasTrailingWhitespace: Boolean,
+            val explicitGroupId: Int?,
+        )
+
+        val merged = ArrayList<MergedSyllable>(timedIndices.size)
+        var i = 0
+        val size = rawTokens.size
+        while (i < size) {
+            val token = rawTokens[i]
+            val sb = StringBuilder()
+            var timedToken: RawToken? = null
+            var hasTrailingSpace = false
+
+            if (token.isWhitespace) {
+                if (token.text.trim().isEmpty()) {
+                    i++
+                    continue
+                }
+                sb.append(token.text)
+                var j = i + 1
+                var consumedTimed = false
+                while (j < size) {
+                    val next = rawTokens[j]
+                    if (next.isWhitespace) {
+                        if (next.text.trim().isEmpty()) {
+                            if (consumedTimed) {
+                                if (j < size - 1) sb.append(next.text)
+                                hasTrailingSpace = true
+                                i = j
+                                break
+                            }
+                        } else {
+                            sb.append(next.text)
+                            if (consumedTimed) hasTrailingSpace = true
+                        }
+                    } else if (!consumedTimed) {
+                        timedToken = next
+                        sb.append(next.text)
+                        consumedTimed = true
+                    } else {
+                        break
+                    }
+                    i = j
+                    j++
+                }
+            } else {
+                timedToken = token
+                sb.append(token.text)
+                var j = i + 1
+                while (j < size) {
+                    val next = rawTokens[j]
+                    if (next.isWhitespace) {
+                        if (next.text.trim().isEmpty()) {
+                            if (j < size - 1) sb.append(next.text)
+                            hasTrailingSpace = true
+                            i = j
+                            break
+                        } else {
+                            sb.append(next.text)
+                            hasTrailingSpace = true
+                            i = j
+                            j++
+                        }
+                    } else {
+                        break
+                    }
+                }
+            }
+            i++
+
+            val resolvedTimed = timedToken ?: continue
+            val rawDisplay = sb.toString()
+            val trimmed = rawDisplay.trim()
+            if (trimmed.isEmpty()) continue
+            val start = resolvedTimed.startMs ?: continue
+            val end = (resolvedTimed.endMs ?: (start + 1L)).coerceAtLeast(start + 1L)
+            merged += MergedSyllable(
+                trimmedText = trimmed,
+                displayText = rawDisplay,
+                startMs = start,
+                endMs = end,
+                hasTrailingWhitespace = hasTrailingSpace,
+                explicitGroupId = resolvedTimed.explicitGroupId,
+            )
+        }
+
+        if (merged.isEmpty()) return emptyList()
+
+        val cleaned = if (stripOuterParentheses && merged.isNotEmpty()) {
+            merged.mapIndexed { idx, item ->
+                var trimmed = item.trimmedText
+                var display = item.displayText
+                if (idx == 0 && trimmed.startsWith("(")) {
+                    trimmed = trimmed.removePrefix("(")
+                    display = display.replaceFirst("(", "")
+                }
+                if (idx == merged.lastIndex && trimmed.endsWith(")")) {
+                    trimmed = trimmed.removeSuffix(")")
+                    val lastParen = display.lastIndexOf(')')
+                    if (lastParen >= 0) {
+                        display = display.removeRange(lastParen, lastParen + 1)
+                    }
+                }
+                item.copy(trimmedText = trimmed, displayText = display)
+            }.filter { it.trimmedText.isNotEmpty() }
+        } else {
+            merged
+        }
+
+        if (cleaned.isEmpty()) return emptyList()
+
+        val fallbackStart = lineStart ?: cleaned.first().startMs
+        val fallbackEnd = maxOf(lineEnd ?: 0L, cleaned.last().endMs)
+
+        // Group adjacent non-whitespace syllables in non-CJK scripts (`A.H` lines 3549-3840)
+        val groupIds = arrayOfNulls<Int>(cleaned.size)
+        val groupDurations = LongArray(cleaned.size)
+        val groupCharCounts = IntArray(cleaned.size)
+        var nextGroupId = 1
+        var pendingIndices = mutableListOf<Int>()
+
+        for (idx in cleaned.indices) {
+            val item = cleaned[idx]
+            val isLast = idx == cleaned.lastIndex
+            val isSplitOnChars = LyricTimeline.containsSplitOnCharsScript(item.trimmedText)
+            val nextHasSameExplicitGroup = !isLast &&
+                item.explicitGroupId != null &&
+                item.explicitGroupId == cleaned[idx + 1].explicitGroupId
+
+            if ((!item.hasTrailingWhitespace || nextHasSameExplicitGroup) && !isLast && !isSplitOnChars) {
+                pendingIndices += idx
+            } else if (pendingIndices.isNotEmpty()) {
+                pendingIndices += idx
+                val gid = item.explicitGroupId ?: nextGroupId++
+                val totalDuration = pendingIndices.sumOf { (cleaned[it].endMs - cleaned[it].startMs).coerceAtLeast(0L) }
+                val totalChars = pendingIndices.sumOf { cleaned[it].trimmedText.length }
+                for (memberIdx in pendingIndices) {
+                    groupIds[memberIdx] = gid
+                    groupDurations[memberIdx] = totalDuration
+                    groupCharCounts[memberIdx] = totalChars
+                }
+                pendingIndices = mutableListOf()
+            } else {
+                groupIds[idx] = item.explicitGroupId
+                groupDurations[idx] = (item.endMs - item.startMs).coerceAtLeast(0L)
+                groupCharCounts[idx] = item.trimmedText.length
+            }
+        }
+
+        return cleaned.mapIndexed { idx, item ->
+            val clampedStart = item.startMs.coerceAtLeast(fallbackStart)
+            val clampedEnd = item.endMs.coerceAtMost(fallbackEnd).coerceAtLeast(clampedStart + 1L)
+            val matchedPronunciation = pronunciationByBegin[item.startMs]
+                ?: pronunciationByBegin[clampedStart]
+            LyricWord(
+                text = item.trimmedText,
+                displayText = item.displayText,
+                startMs = clampedStart,
+                endMs = clampedEnd,
+                emphasisGroupId = groupIds[idx],
+                hasTrailingWhitespace = item.hasTrailingWhitespace || idx == cleaned.lastIndex,
+                groupDurationMs = groupDurations[idx],
+                groupCharCount = groupCharCounts[idx],
+                isBackgroundVocal = isBackgroundVocal,
+                pronunciationText = matchedPronunciation?.text,
+                pronunciationEndMs = matchedPronunciation?.endMs,
+            )
+        }
+    }
+
+    private fun parseAgents(root: Element): Map<String, LyricAgentType> {
+        val output = linkedMapOf<String, LyricAgentType>()
+        val agentNodes = root.getElementsByTagNameNS("*", "agent")
+        for (index in 0 until agentNodes.length) {
+            val el = agentNodes.item(index) as? Element ?: continue
+            val id = el.attributeByLocalName("id") ?: continue
+            val type = when (el.attributeByLocalName("type")?.lowercase()) {
+                "person" -> LyricAgentType.Person
+                "character" -> LyricAgentType.Character
+                "group" -> LyricAgentType.Group
+                "organization" -> LyricAgentType.Organization
+                "other" -> LyricAgentType.Other
+                else -> LyricAgentType.None
+            }
+            output[id] = type
+        }
+        return output
+    }
+
+    private fun parseSongwriters(root: Element): List<String> {
+        val output = mutableListOf<String>()
+        val nodes = root.getElementsByTagNameNS("*", "songwriter")
+        for (index in 0 until nodes.length) {
+            val el = nodes.item(index) as? Element ?: continue
+            val name = el.textContent?.trim().orEmpty()
+            if (name.isNotEmpty()) output += name
+        }
+        return output
+    }
+
+    private fun parseTranslations(root: Element): Map<String, ParsedTranslation> {
+        val output = linkedMapOf<String, ParsedTranslation>()
+        val translationsNodes = root.getElementsByTagNameNS("*", "translations")
+        for (i in 0 until translationsNodes.length) {
+            val container = translationsNodes.item(i) as? Element ?: continue
+            val textNodes = container.getElementsByTagNameNS("*", "text")
+            for (j in 0 until textNodes.length) {
+                val textEl = textNodes.item(j) as? Element ?: continue
+                val key = textEl.attributeByLocalName("for") ?: continue
+                val mainText = textEl.mainText(includeBg = false).trim().takeIf { it.isNotEmpty() }
+                val bgText = textEl.extractBgText()?.trim()?.removeSurrounding("(", ")")?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                if (mainText != null || bgText != null) {
+                    output.putIfAbsent(key, ParsedTranslation(mainText, bgText))
+                }
+            }
+        }
+        if (output.isEmpty()) {
+            val textNodes = root.getElementsByTagNameNS("*", "text")
+            for (index in 0 until textNodes.length) {
+                val element = textNodes.item(index) as? Element ?: continue
+                if (element.isInsideTag("transliterations")) continue
+                val key = element.attributeByLocalName("for") ?: continue
+                val mainText = element.mainText(includeBg = false).trim().takeIf { it.isNotEmpty() }
+                val bgText = element.extractBgText()?.trim()?.removeSurrounding("(", ")")?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                if (mainText != null || bgText != null) {
+                    output.putIfAbsent(key, ParsedTranslation(mainText, bgText))
+                }
+            }
+        }
+        return output
+    }
+
+    private fun parsePronunciations(root: Element): Map<String, ParsedPronunciation> {
+        val output = linkedMapOf<String, ParsedPronunciation>()
+        val translitNodes = root.getElementsByTagNameNS("*", "transliterations")
+        for (i in 0 until translitNodes.length) {
+            val container = translitNodes.item(i) as? Element ?: continue
+            val textNodes = container.getElementsByTagNameNS("*", "text")
+            for (j in 0 until textNodes.length) {
+                val textEl = textNodes.item(j) as? Element ?: continue
+                val key = textEl.attributeByLocalName("for") ?: continue
+                val mainText = textEl.mainText(includeBg = false).trim().takeIf { it.isNotEmpty() }
+                val bgText = textEl.extractBgText()?.trim()?.removeSurrounding("(", ")")?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                val mainWords = textEl.timedLeafSpans(includeBg = false).mapNotNull { span ->
+                    val start = span.time("begin") ?: return@mapNotNull null
+                    val end = span.timeEnd(start) ?: return@mapNotNull null
+                    val txt = span.textContent?.trim().orEmpty()
+                    if (txt.isEmpty()) null else LyricWord(txt, start, end.coerceAtLeast(start + 1L))
+                }
+                val bgWords = textEl.childElements()
+                    .filter { it.isBgSpan() }
+                    .flatMap { it.timedLeafSpans(includeBg = true) }
+                    .mapNotNull { span ->
+                        val start = span.time("begin") ?: return@mapNotNull null
+                        val end = span.timeEnd(start) ?: return@mapNotNull null
+                        val txt = span.textContent?.trim()?.removeSurrounding("(", ")")?.trim().orEmpty()
+                        if (txt.isEmpty()) null else LyricWord(
+                            text = txt,
+                            startMs = start,
+                            endMs = end.coerceAtLeast(start + 1L),
+                            isBackgroundVocal = true,
+                        )
+                    }
+                if (mainText != null || bgText != null || mainWords.isNotEmpty() || bgWords.isNotEmpty()) {
+                    output.putIfAbsent(
+                        key,
+                        ParsedPronunciation(
+                            mainText = mainText,
+                            backgroundText = bgText,
+                            mainWords = mainWords,
+                            backgroundWords = bgWords,
+                        ),
+                    )
+                }
+            }
+        }
+        return output
+    }
+
+    private fun Element.timedLeafSpans(includeBg: Boolean): List<Element> {
+        val children = childElements().filter {
+            it.localTag == "span" && !it.isAuxiliaryText() && (includeBg || !it.isBgSpan())
+        }
+        val nested = children.flatMap { child -> child.timedLeafSpans(includeBg) }
+        if (nested.isNotEmpty()) return nested
+        return if (time("begin") != null && (time("end") != null || attributeByLocalName("dur") != null)) {
+            listOf(this)
+        } else emptyList()
+    }
+
+    private fun Element.mainText(includeBg: Boolean): String = buildString {
+        fun appendNode(node: Node) {
+            when (node.nodeType) {
+                Node.TEXT_NODE, Node.CDATA_SECTION_NODE -> append(node.nodeValue.orEmpty())
+                Node.ELEMENT_NODE -> {
+                    val element = node as Element
+                    if (!element.isAuxiliaryText() && (includeBg || !element.isBgSpan())) {
+                        var child = element.firstChild
+                        while (child != null) {
+                            appendNode(child)
+                            child = child.nextSibling
+                        }
+                    }
+                }
+            }
+        }
+        var child = firstChild
+        while (child != null) {
+            appendNode(child)
+            child = child.nextSibling
+        }
+    }
+
+    private fun Element.extractBgText(): String? {
+        val bgSpans = childElements().filter { it.isBgSpan() }
+        if (bgSpans.isEmpty()) return null
+        return bgSpans.joinToString(" ") { it.mainText(includeBg = true).trim() }
+            .takeIf { it.isNotEmpty() }
+    }
+
+    private fun Element.extractInlineRoleText(targetRole: String): String? {
+        val spans = childElements().filter {
+            it.attributeByLocalName("role")?.lowercase() == targetRole
+        }
+        if (spans.isEmpty()) return null
+        return spans.joinToString(" ") { it.textContent?.trim().orEmpty() }
+            .trim()
+            .takeIf { it.isNotEmpty() }
+    }
+
+    private fun Element.directText(): String = buildString {
+        var child = firstChild
+        while (child != null) {
+            if (child.nodeType == Node.TEXT_NODE || child.nodeType == Node.CDATA_SECTION_NODE) {
+                append(child.nodeValue.orEmpty())
+            }
+            child = child.nextSibling
+        }
+    }
+
+    private fun Element.childElements(): List<Element> = buildList {
+        var child = firstChild
+        while (child != null) {
+            if (child.nodeType == Node.ELEMENT_NODE) add(child as Element)
+            child = child.nextSibling
+        }
+    }
+
+    private fun Element.isBgSpan(): Boolean =
+        attributeByLocalName("role")?.lowercase() == "x-bg"
+
+    private fun Element.isAuxiliaryText(): Boolean {
+        val role = attributeByLocalName("role")?.lowercase().orEmpty()
+        val ruby = attributeByLocalName("ruby")?.lowercase().orEmpty()
+        return role == "x-translation" || role == "x-roman" ||
+            ruby == "text" || ruby == "textcontainer"
+    }
+
+    private fun Element.isInsideMetadata(): Boolean =
+        isInsideTag("metadata") || isInsideTag("iTunesMetadata") || isInsideTag("head")
+
+    private fun Element.isInsideTag(tag: String): Boolean {
+        var current: Node? = parentNode
+        while (current is Element) {
+            if (current.localTag.equals(tag, ignoreCase = true)) return true
+            current = current.parentNode
+        }
+        return false
+    }
+
+    private fun Element.resolveAgentId(): String? {
+        var current: Node? = this
+        while (current is Element) {
+            current.attributeByLocalName("agent")?.let { return it }
+            current = current.parentNode
+        }
+        return null
+    }
+
+    private fun Element.lineKey(): String? = attributeByLocalName("key")
+
+    private fun Element.time(name: String): Long? = attributeByLocalName(name)?.let(::parseTimeMs)
+
+    private fun Element.timeEnd(startMs: Long?): Long? {
+        time("end")?.let { return it }
+        val dur = attributeByLocalName("dur")?.let(::parseTimeMs) ?: return null
+        return (startMs ?: 0L) + dur
+    }
+
+    private fun Element.attributeByLocalName(name: String): String? {
+        val attributes = attributes
+        for (index in 0 until attributes.length) {
+            val attribute = attributes.item(index)
+            if ((attribute.localName ?: attribute.nodeName.substringAfter(':')) == name) {
+                return attribute.nodeValue?.takeIf(String::isNotBlank)
+            }
+        }
+        return null
+    }
+
+    private val Element.localTag: String
+        get() = localName ?: tagName.substringAfter(':')
+
+    internal fun parseTimeMs(raw: String): Long? {
+        val value = raw.trim().replace(',', '.')
+        if (value.isBlank()) return null
+        if (value.endsWith("ms")) {
+            return value.dropLast(2).toDoubleOrNull()?.toLong()
+        }
+        val seconds = if (value.contains(':')) {
+            value.removeSuffix("s").split(':').fold(0.0) { total, part ->
+                total * 60.0 + (part.toDoubleOrNull() ?: return null)
+            }
+        } else {
+            value.removeSuffix("s").toDoubleOrNull() ?: return null
+        }
+        return (seconds * 1_000.0).toLong()
+    }
+}
