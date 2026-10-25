@@ -285,6 +285,9 @@ class MusicKitBridge(private val context: Context) {
         }
     }
 
+    /** Includes SDK-restored queues; querying never prepares or constructs a renderer. */
+    fun audioSessionId(): Int = if (controller != null) MusicKitAudioSession.currentId() else 0
+
     fun playbackSnapshot(): PlaybackSnapshot? = latestSnapshot
 
     @Synchronized

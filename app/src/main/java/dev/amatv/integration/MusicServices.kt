@@ -45,8 +45,8 @@ class MusicServices(context: Context) : RecommendationProvider {
         tokenStore = tokenStore,
         bundledToken = BuildConfig.MUSICKIT_DEVELOPER_TOKEN,
     )
-    private val songSpectrum = SongAudioSpectrum(appContext)
     private val bridge = MusicKitBridge(appContext)
+    private val songSpectrum = SongAudioSpectrum(appContext, bridge::audioSessionId)
     private val mediaSession = PlaybackMediaSession(appContext)
     private val playbackPreparation = Mutex()
     private val appleLyrics = AppleMusicLyricsClient(
