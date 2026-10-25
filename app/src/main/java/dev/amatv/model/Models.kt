@@ -401,6 +401,7 @@ object LyricTimeline {
         private val timed = BooleanArray(lines.size) { !lines[it].isStatic }
         private val clusters = vocalClusters(lines)
         private val clusterStarts = IntArray(clusters.size) { clusters[it].startIndex }
+        val finalClusterStartIndex: Int = clusterStarts.lastOrNull() ?: -1
         private val cueTimes = LongArray(clusters.size) { index ->
             val startMs = starts[clusterStarts[index]]
             startMs - clusterLeadOffsetMs(startMs, clusters.getOrNull(index - 1)?.endMs)
@@ -517,8 +518,11 @@ object LyricTimeline {
         focalAnchorY: Float,
         fadeDistance: Float,
         completionMs: Long = line.mainEndMs,
+        terminalReleaseMs: Long? = null,
     ): Float {
         if (line.isStatic || positionMs < completionMs) return 0f
+        // The last vocal cluster has no following cue to move it upward.
+        if (terminalReleaseMs != null && positionMs >= terminalReleaseMs) return 0f
         return (1f - (focalAnchorY - rowTop) / fadeDistance.coerceAtLeast(1f)).coerceIn(0f, 1f)
     }
 

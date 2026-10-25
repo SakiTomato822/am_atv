@@ -239,7 +239,14 @@ class MusicKitBridge(private val context: Context) {
             dispatchSnapshot()
         }
     }
-    fun seekTo(positionMs: Long) = invokeController("seekToPosition", positionMs)
+    fun seekTo(positionMs: Long) {
+        val value = checkNotNull(controller) { "Playback has not been prepared." }
+        postPlaybackAction("seekToPosition") {
+            playbackIntent.requestSeek()
+            endedCatalogId = null
+            value.javaClass.getMethod("seekToPosition", Long::class.javaPrimitiveType).invoke(value, positionMs)
+        }
+    }
     fun skipToNext() = invokeController("skipToNextItem")
     fun skipToPrevious() = invokeController("skipToPreviousItem")
     fun skipToQueueItem(queueId: Long) = invokeController("skipToQueueItemWithId", queueId)
@@ -556,7 +563,7 @@ class MusicKitBridge(private val context: Context) {
             canSetShuffle = currentController.callOrNull("canSetShuffleMode") as? Boolean ?: false,
             canSetAutoplay = canSetAutoplay,
             errorMessage = pendingPlaybackError,
-            isEnded = decision.prepared && nativeEnded,
+            isEnded = decision.ended,
             requestGeneration = generation,
             isPrepared = decision.prepared,
             failureKind = pendingFailureKind,

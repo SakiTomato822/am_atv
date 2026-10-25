@@ -39,8 +39,8 @@ android {
         applicationId = "dev.amatv"
         minSdk = 28
         targetSdk = 36
-        versionCode = 8
-        versionName = "0.4.2"
+        versionCode = 11
+        versionName = "0.4.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(

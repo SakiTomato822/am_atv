@@ -89,6 +89,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.LastBaseline
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -567,6 +568,8 @@ fun PlayerScreen(
             // preparing. Keep the artwork's play scale stable for that expected
             // gap; an explicit pause clears playWhenReady immediately.
             isPlaying = (isPlaying || playWhenReady) && isVisibleOnScreen,
+            audioIsPlaying = isPlaying && isVisibleOnScreen,
+            audioSpectrum = audioSpectrum,
             controlsVisible = controlsVisible,
             positionState = playbackPosition,
             lyricOffsetMs = lyricOffsetMs,
@@ -929,6 +932,8 @@ private fun PlayerStage(
     supportsLyrics: Boolean,
     isVisibleOnScreen: Boolean,
     isPlaying: Boolean,
+    audioIsPlaying: Boolean,
+    audioSpectrum: () -> AudioSpectrum,
     controlsVisible: Boolean,
     positionState: State<Long>,
     lyricOffsetMs: Long = 0L,
@@ -1106,7 +1111,13 @@ private fun PlayerStage(
                         crossfadeTrackChanges = true,
                     )
                     Spacer(Modifier.height(20.dp))
-                    TrackIdentity(track, titleSize = 20)
+                    TrackIdentity(
+                        track = track,
+                        titleSize = 20,
+                        isPlaying = audioIsPlaying,
+                        audioSpectrum = audioSpectrum,
+                        bandsEnabled = isVisibleOnScreen && presentation != PlayerPresentation.Queue,
+                    )
                 }
             }
         }
@@ -1130,6 +1141,9 @@ private fun PlayerStage(
                     controlsVisible = controlsVisible,
                     selectedIndex = focusedQueueIndex,
                     selectionVisible = selectionVisible,
+                    isPlaying = audioIsPlaying,
+                    audioSpectrum = audioSpectrum,
+                    bandsEnabled = isVisibleOnScreen && presentation == PlayerPresentation.Queue,
                 )
                 }
             }
@@ -1166,7 +1180,13 @@ private fun LyricsUnavailablePanel(
 }
 
 @Composable
-private fun TrackIdentity(track: Track, titleSize: Int) {
+private fun TrackIdentity(
+    track: Track,
+    titleSize: Int,
+    isPlaying: Boolean,
+    audioSpectrum: () -> AudioSpectrum,
+    bandsEnabled: Boolean,
+) {
     // Keep the centred artwork column's height independent of fallback font
     // metrics (for example moving between Latin and CJK song names).
     Column(Modifier.fillMaxWidth().height((titleSize * 2 + 14).dp)) {
@@ -1182,16 +1202,56 @@ private fun TrackIdentity(track: Track, titleSize: Int) {
         modifier = Modifier.fillMaxWidth(),
     )
     Spacer(Modifier.height(4.dp))
-    Text(
-        text = track.artist,
+    ArtistWithAudioBands(
+        artist = track.artist,
         fontSize = (titleSize - 4).sp,
         lineHeight = (titleSize + 2).sp,
         color = Color.White.copy(alpha = 0.64f),
-        textAlign = TextAlign.Center,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.fillMaxWidth(),
+        showBands = true,
+        isPlaying = isPlaying,
+        audioSpectrum = audioSpectrum,
+        bandsEnabled = bandsEnabled,
     )
+    }
+}
+
+@Composable
+private fun ArtistWithAudioBands(
+    artist: String,
+    fontSize: TextUnit,
+    color: Color,
+    showBands: Boolean,
+    isPlaying: Boolean,
+    audioSpectrum: () -> AudioSpectrum,
+    bandsEnabled: Boolean,
+    lineHeight: TextUnit = TextUnit.Unspecified,
+    compact: Boolean = false,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = artist,
+            fontSize = fontSize,
+            lineHeight = lineHeight,
+            color = color,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false).alignBy(LastBaseline),
+        )
+        if (showBands) {
+            Spacer(Modifier.width(if (compact) 6.dp else 7.dp))
+            AudioBandIndicator(
+                isPlaying = isPlaying,
+                audioSpectrum = audioSpectrum,
+                enabled = bandsEnabled,
+                modifier = Modifier
+                    .size(if (compact) 12.dp else 13.dp, if (compact) 10.dp else 12.dp)
+                    .alignBy { it.measuredHeight },
+            )
+        }
     }
 }
 
@@ -1311,6 +1371,7 @@ private data class LyricsRetentionWindow(
     val enabled: Boolean,
     val firstLineIndex: Int,
     val endLineIndex: Int,
+    val terminalRelease: TerminalLyricRelease?,
 )
 
 /**
@@ -1348,6 +1409,14 @@ private fun LyricsPanel(
         if (writers.isNotEmpty()) "Written by: ${writers.joinToString(", ")}" else null
     }
     val lyricSchedule = remember(lines) { LyricTimeline.Schedule(lines) }
+    val terminalRelease = remember(lines, lyricSchedule) {
+        terminalLyricRelease(
+            lines, lyricSchedule.finalClusterStartIndex, MotionTokens.KaraokeRushGradientMillis.toLong(),
+        )
+    }
+    val lyricVisualPositionState = rememberTerminalLyricPosition(
+        lyricSchedule, effectiveLyricPositionState, terminalRelease, isVisible,
+    )
     val allInstrumentalGaps = lyricSchedule.instrumentalGaps
     // Publish only singer/anchor/interlude boundaries into composition. Linking
     // every row's derived predicates to the frame clock makes the recomposer
@@ -1499,7 +1568,9 @@ private fun LyricsPanel(
         val retentionEndIndex = lyricSchedule.nextClusterStartIndex(scrollAnchorLineIndex)
             .takeIf { it >= 0 } ?: lines.size
         val retentionWindowState = rememberUpdatedState(
-            LyricsRetentionWindow(retainCompletedHighlight, retentionStartIndex, retentionEndIndex),
+            LyricsRetentionWindow(
+                retainCompletedHighlight, retentionStartIndex, retentionEndIndex, terminalRelease,
+            ),
         )
 
         LaunchedEffect(anchorKey, anchorDisplayIndex, layoutInfo.totalHeight, isUserScrolling, isVisible) {
@@ -1640,7 +1711,7 @@ private fun LyricsPanel(
                 layoutInfo = layoutInfo,
                 transitionState = transitionState,
                 frameRealtimeState = frameRealtimeMs,
-                positionState = effectiveLyricPositionState,
+                positionState = lyricVisualPositionState,
                 allInstrumentalGaps = allInstrumentalGaps,
                 focalAnchorY = focalAnchorY,
                 selectedLyricIndex = selectedLyricIndex,
@@ -1660,6 +1731,50 @@ private fun LyricsPanel(
             }
         }
     }
+}
+
+/** Only the final visual tail may outlive the media clock; scrolling keeps its actual position. */
+@Composable
+private fun rememberTerminalLyricPosition(
+    schedule: LyricTimeline.Schedule,
+    positionState: State<Long>,
+    release: TerminalLyricRelease?,
+    isVisible: Boolean,
+): State<Long> {
+    // The player replaces its clock State when paused. Keep this tail clock alive
+    // across that replacement so reaching the song end cannot restart a long note.
+    val currentPositionState = rememberUpdatedState(positionState)
+    val tailPosition = remember(schedule) { mutableLongStateOf(0L) }
+    val visualPosition = remember(schedule) {
+        derivedStateOf {
+            val actual = currentPositionState.value.value
+            if (release == null || actual < release.vocalsEndMs) actual
+            else maxOf(actual, tailPosition.longValue)
+        }
+    }
+    LaunchedEffect(schedule, isVisible) {
+        if (!isVisible || release == null) return@LaunchedEffect
+        snapshotFlow { currentPositionState.value.value >= release.vocalsEndMs }
+            .collectLatest { completed ->
+                if (!completed) {
+                    tailPosition.longValue = 0L
+                    return@collectLatest
+                }
+                val startPosition = maxOf(currentPositionState.value.value, tailPosition.longValue)
+                val startedRealtimeMs = SystemClock.elapsedRealtime()
+                while (tailPosition.longValue < release.releaseMs) {
+                    withFrameNanos {
+                        tailPosition.longValue = terminalLyricTailPosition(
+                            currentPositionState.value.value,
+                            startPosition,
+                            SystemClock.elapsedRealtime() - startedRealtimeMs,
+                            release,
+                        )
+                    }
+                }
+            }
+    }
+    return visualPosition
 }
 
 /** Stable restart boundary: a new scroll/focus does not rebuild every word in the song. */
@@ -1747,7 +1862,16 @@ private fun LyricsLineRow(
             ) * interludeAdvance
         }
     }
-    val retainedPresence = remember(item, renderedRowTop, positionState, focalAnchorY, fadeDistance) {
+    val terminalReleaseMs = remember(item.lineIndex, retentionWindowState) {
+        derivedStateOf {
+            retentionWindowState.value.terminalRelease?.takeIf {
+                item.lineIndex >= it.firstLineIndex
+            }?.releaseMs
+        }
+    }
+    val retainedPresence = remember(
+        item, renderedRowTop, positionState, focalAnchorY, fadeDistance, terminalReleaseMs,
+    ) {
         derivedStateOf {
             if (renderedRowTop.value.isNaN()) 0f
             else LyricTimeline.completedLinePresence(
@@ -1756,12 +1880,13 @@ private fun LyricsLineRow(
                 rowTop = renderedRowTop.value,
                 focalAnchorY = focalAnchorY,
                 fadeDistance = fadeDistance,
+                terminalReleaseMs = terminalReleaseMs.value,
             )
         }
     }
     val backgroundEndMs = remember(item.line) { item.line.backgroundWords.maxOfOrNull { it.endMs } }
     val retainedBackgroundPresence = remember(
-        item, renderedRowTop, positionState, focalAnchorY, fadeDistance, backgroundEndMs,
+        item, renderedRowTop, positionState, focalAnchorY, fadeDistance, backgroundEndMs, terminalReleaseMs,
     ) {
         derivedStateOf {
             if (backgroundEndMs == null || renderedRowTop.value.isNaN()) 0f
@@ -1772,6 +1897,7 @@ private fun LyricsLineRow(
                 focalAnchorY = focalAnchorY,
                 fadeDistance = fadeDistance,
                 completionMs = backgroundEndMs,
+                terminalReleaseMs = terminalReleaseMs.value,
             )
         }
     }
@@ -3044,6 +3170,9 @@ private fun QueuePanel(
     controlsVisible: Boolean,
     selectedIndex: Int,
     selectionVisible: Boolean,
+    isPlaying: Boolean,
+    audioSpectrum: () -> AudioSpectrum,
+    bandsEnabled: Boolean,
 ) {
     val density = LocalDensity.current
     val targetStageOffsetPx = with(density) {
@@ -3139,16 +3268,17 @@ private fun QueuePanel(
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.fillMaxWidth(),
                             )
-                            Text(
-                                text = item.artist,
+                            ArtistWithAudioBands(
+                                artist = item.artist,
                                 fontSize = 12.sp,
                                 color = Color.White.copy(
                                     alpha = if (focused || isCurrent) 0.68f else 0.46f,
                                 ),
-                                textAlign = TextAlign.Center,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.fillMaxWidth(),
+                                showBands = isCurrent,
+                                isPlaying = isPlaying,
+                                audioSpectrum = audioSpectrum,
+                                bandsEnabled = bandsEnabled,
+                                compact = true,
                             )
                         }
                     }

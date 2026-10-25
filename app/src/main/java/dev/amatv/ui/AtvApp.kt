@@ -76,6 +76,7 @@ import dev.amatv.integration.requestLyricsWithRetry
 import dev.amatv.integration.PlaybackFailureKind
 import dev.amatv.integration.classifyPlaybackFailure
 import dev.amatv.integration.PlaybackSnapshot
+import dev.amatv.integration.PlaybackMediaSession
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.CatalogOpenAction
 import dev.amatv.model.openAction
@@ -213,6 +214,8 @@ fun AmAtvApp() {
         spectrumPermissionGranted = it
     }
     var pendingRequestedSongCatalogId by remember { mutableStateOf<String?>(null) }
+    // Read only by callbacks/effects: native position polls do not recompose the app.
+    val systemPlaybackSnapshot = remember { mutableStateOf<PlaybackSnapshot?>(null) }
 
     fun withCachedLyrics(candidate: Track): Track {
         if (candidate.lyrics.isNotEmpty()) return candidate
@@ -305,32 +308,36 @@ fun AmAtvApp() {
         }
     }
 
-    fun togglePlayback() {
-        if (playWhenReady) {
-            positionAnchorMs = currentPositionMs()
-            playWhenReady = false
-            pendingRestore = pendingRestore?.copy(wasPlaying = false)
-            if (track.catalogId != null) services.pause()
-            isPlaying = false
+    fun pausePlayback() {
+        positionAnchorMs = currentPositionMs()
+        playWhenReady = false
+        pendingRestore = pendingRestore?.copy(wasPlaying = false)
+        if (track.catalogId != null) services.pause()
+        isPlaying = false
+    }
+
+    fun requestPlayback() {
+        playWhenReady = true
+        if (lyricsTransientFailureTrackId == track.id) lyricsRetryNonce++
+        pendingRestore = pendingRestore?.copy(wasPlaying = true)
+        if (!startupSessionLoaded && selectionGeneration == 0L) return
+        // Play while Next is resolving belongs to the incoming entry, not
+        // the old song still used as the queue's continuation anchor.
+        if (waitingQueueEntryId != null) return
+        if (track.catalogId != null) {
+            if (lastPlaybackFailure != null || (expectedPlaybackGeneration == 0L && playbackRequestJob?.isActive != true)) {
+                selectionGeneration++
+                launchNativePlayback(track, positionAnchorMs)
+            } else if (expectedPlaybackGeneration != 0L) services.play()
         } else {
-            playWhenReady = true
-            if (lyricsTransientFailureTrackId == track.id) lyricsRetryNonce++
-            pendingRestore = pendingRestore?.copy(wasPlaying = true)
-            if (!startupSessionLoaded && selectionGeneration == 0L) return
-            // Play while Next is resolving belongs to the incoming entry, not
-            // the old song still used as the queue's continuation anchor.
-            if (waitingQueueEntryId != null) return
-            if (track.catalogId != null) {
-                if (lastPlaybackFailure != null || (expectedPlaybackGeneration == 0L && playbackRequestJob?.isActive != true)) {
-                    selectionGeneration++
-                    launchNativePlayback(track, positionAnchorMs)
-                } else if (expectedPlaybackGeneration != 0L) services.play()
-            } else {
-                playStartedRealtimeMs = android.os.SystemClock.elapsedRealtime()
-                isPlaying = true
-            }
-            playbackMessage = null
+            playStartedRealtimeMs = android.os.SystemClock.elapsedRealtime()
+            isPlaying = true
         }
+        playbackMessage = null
+    }
+
+    fun togglePlayback() {
+        if (playWhenReady) pausePlayback() else requestPlayback()
     }
 
     fun retryCurrentLyrics() {
@@ -716,9 +723,19 @@ fun AmAtvApp() {
         }
     }
 
+    fun publishSystemSnapshot(snapshot: PlaybackSnapshot) {
+        val published = if (!playWhenReady && (snapshot.isPlaying || snapshot.isBuffering)) {
+            snapshot.copy(isPlaying = false, isBuffering = false)
+        } else snapshot
+        systemPlaybackSnapshot.value = published
+        val live = queueController.state.value
+        services.publishSystemPlayback(published, live.canSkipNext, live.canSkipPrevious)
+    }
+
     fun applyPlaybackSnapshot(snapshot: PlaybackSnapshot) {
         if (snapshot.requestGeneration == 0L || snapshot.requestGeneration != expectedPlaybackGeneration) return
         if (snapshot.errorMessage != null) {
+            publishSystemSnapshot(snapshot)
             handlePlaybackFailure(selectionGeneration, snapshot.failureKind ?: PlaybackFailureKind.Unexpected,
                 snapshot.errorMessage)
             return
@@ -727,6 +744,7 @@ fun AmAtvApp() {
         if (pendingCatalogId != null &&
             (!snapshot.hasPlayerCurrentTrack || snapshot.currentTrack?.catalogId != pendingCatalogId)
         ) return
+        publishSystemSnapshot(snapshot)
         if (!snapshot.isPrepared) return
         playbackPrepared = true
         pendingRequestedSongCatalogId = null
@@ -791,11 +809,35 @@ fun AmAtvApp() {
     }
 
     val latestSnapshotHandler by rememberUpdatedState<(PlaybackSnapshot) -> Unit>(::applyPlaybackSnapshot)
+    val latestSystemPlaybackCallbacks by rememberUpdatedState(
+        PlaybackMediaSession.Callbacks(
+            play = ::requestPlayback,
+            pause = ::pausePlayback,
+            next = { skip(1) },
+            previous = { skip(-1) },
+            seekTo = { position -> seekPlaybackBy(position - currentPositionMs()) },
+        ),
+    )
     DisposableEffect(services) {
+        services.setSystemPlaybackCallbacks(PlaybackMediaSession.Callbacks(
+            play = { latestSystemPlaybackCallbacks.play() },
+            pause = { latestSystemPlaybackCallbacks.pause() },
+            next = { latestSystemPlaybackCallbacks.next() },
+            previous = { latestSystemPlaybackCallbacks.previous() },
+            seekTo = { latestSystemPlaybackCallbacks.seekTo(it) },
+        ))
         services.setPlaybackListener { latestSnapshotHandler(it) }
         onDispose {
+            services.setSystemPlaybackCallbacks(null)
             services.setPlaybackListener(null)
             services.release()
+        }
+    }
+    LaunchedEffect(queueState.canSkipNext, queueState.canSkipPrevious) {
+        systemPlaybackSnapshot.value?.takeIf {
+            it.requestGeneration == expectedPlaybackGeneration && it.currentTrack?.catalogId == track.catalogId
+        }?.let {
+            services.publishSystemPlayback(it, queueState.canSkipNext, queueState.canSkipPrevious)
         }
     }
 
@@ -1260,11 +1302,11 @@ fun AmAtvApp() {
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_PLAY -> {
-                            if (!playWhenReady) togglePlayback()
+                            requestPlayback()
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_PAUSE -> {
-                            if (playWhenReady) togglePlayback()
+                            pausePlayback()
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_NEXT -> {

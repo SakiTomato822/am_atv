@@ -88,6 +88,134 @@ class NativePlaybackIntentTest {
         assertFalse(ready.playing)
     }
 
+    @Test fun nextTrackGetsFreshPlayAttemptsWhenBufferingFinishesAfterEarlyAttemptsWereIgnored() {
+        val intent = NativePlaybackIntent()
+        // The app prepares the next item silently, then applies the current user intent.
+        intent.begin("next", 0L, false, 0L)
+        assertTrue(intent.observe(probe(id = "next")).commands.isEmpty())
+        intent.requestPlaying(true)
+        for (now in listOf(1_250L, 4_250L, 7_250L)) {
+            assertEquals(listOf(NativePlaybackCommand.Play), intent.observe(probe(now = now, id = "next")).commands)
+        }
+        assertTrue(intent.observe(probe(now = 8_000L, id = "next", buffering = true)).commands.isEmpty())
+        assertTrue(intent.observe(probe(now = 18_000L, id = "next", buffering = true)).commands.isEmpty())
+        val ready = intent.observe(probe(now = 19_000L, id = "next"))
+        assertNull(ready.failure)
+        assertEquals(listOf(NativePlaybackCommand.Play), ready.commands)
+        assertTrue(intent.observe(probe(now = 19_250L, id = "next", position = 250L, playing = true)).playing)
+    }
+
+    @Test fun bufferRecoveryStillHasABoundedBudgetRatherThanResettingAtEveryReadyPoll() {
+        val intent = NativePlaybackIntent()
+        intent.begin("song", 0L, true, 0L)
+        for (now in listOf(1_000L, 4_000L, 7_000L)) intent.observe(probe(now = now))
+        intent.observe(probe(now = 8_000L, buffering = true))
+        for (now in listOf(9_000L, 12_000L, 15_000L)) {
+            assertEquals(listOf(NativePlaybackCommand.Play), intent.observe(probe(now = now)).commands)
+        }
+        assertTrue(intent.observe(probe(now = 18_000L)).commands.isEmpty())
+        assertEquals(PlaybackFailureKind.Network, intent.observe(probe(now = 30_000L)).failure)
+    }
+
+    @Test fun nativePauseAfterConfirmedPlaybackDoesNotStealFocusOrTimeOut() {
+        for (position in listOf(20_000L, 199_000L)) {
+            val intent = NativePlaybackIntent()
+            intent.begin("song", 0L, true, 0L)
+            intent.observe(probe())
+            intent.observe(probe(now = 199_750L, position = position - 250L, playing = true))
+            intent.observe(probe(now = 200_000L, position = position, playing = true))
+            for (now in listOf(201_000L, 205_000L, 280_000L)) {
+                val paused = intent.observe(probe(now = now, position = position))
+                assertTrue(paused.prepared)
+                assertFalse(paused.playing)
+                assertFalse(paused.ended)
+                assertNull(paused.failure)
+                assertTrue(paused.commands.isEmpty())
+            }
+        }
+    }
+
+    @Test fun explicitPlayCanResumeANativePauseWithABoundedRetryBudget() {
+        val intent = NativePlaybackIntent()
+        intent.begin("song", 0L, true, 0L)
+        intent.observe(probe())
+        intent.observe(probe(now = 19_750L, position = 19_750L, playing = true))
+        intent.observe(probe(now = 20_000L, position = 20_000L, playing = true))
+        assertTrue(intent.observe(probe(now = 21_000L, position = 20_000L)).commands.isEmpty())
+        intent.requestPlaying(true)
+        for (now in listOf(22_000L, 25_000L, 28_000L)) {
+            assertEquals(listOf(NativePlaybackCommand.Play),
+                intent.observe(probe(now = now, position = 20_000L)).commands)
+        }
+        assertTrue(intent.observe(probe(now = 31_000L, position = 20_000L)).commands.isEmpty())
+    }
+
+    @Test fun musicKitCanResumeItsOwnFocusPauseWithoutAnotherAppPlayCommand() {
+        val intent = NativePlaybackIntent()
+        intent.begin("song", 0L, true, 0L)
+        intent.observe(probe())
+        intent.observe(probe(now = 19_750L, position = 19_750L, playing = true))
+        intent.observe(probe(now = 20_000L, position = 20_000L, playing = true))
+        assertTrue(intent.observe(probe(now = 21_000L, position = 20_000L)).commands.isEmpty())
+        val resumed = intent.observe(probe(now = 25_000L, position = 20_250L, playing = true))
+        assertTrue(resumed.playing)
+        assertTrue(resumed.commands.isEmpty())
+        assertTrue(intent.observe(probe(now = 26_000L, position = 20_250L)).commands.isEmpty())
+        intent.requestPlaying(false)
+        val unwantedResume = intent.observe(probe(now = 27_000L, position = 20_500L, playing = true))
+        assertFalse(unwantedResume.playing)
+        assertEquals(listOf(NativePlaybackCommand.Pause), unwantedResume.commands)
+    }
+
+    @Test fun transientPlayingAtZeroDoesNotDisableOrResetTheInitialBoundedRetries() {
+        val intent = NativePlaybackIntent()
+        intent.begin("song", 0L, false, 0L)
+        intent.observe(probe(now = 500L))
+        intent.requestPlaying(true)
+        for (now in listOf(1_000L, 4_000L, 7_000L)) {
+            assertEquals(listOf(NativePlaybackCommand.Play), intent.observe(probe(now = now)).commands)
+            assertTrue(intent.observe(probe(now = now + 250L, playing = true)).commands.isEmpty())
+        }
+        assertTrue(intent.observe(probe(now = 10_000L)).commands.isEmpty())
+        assertEquals(PlaybackFailureKind.Network, intent.observe(probe(now = 22_000L)).failure)
+    }
+
+    @Test fun actualInitialProgressDisablesRetriesForASubsequentNativePause() {
+        val intent = NativePlaybackIntent()
+        intent.begin("song", 0L, true, 0L)
+        intent.observe(probe())
+        intent.observe(probe(now = 1_250L, playing = true))
+        intent.observe(probe(now = 1_500L, position = 250L, playing = true))
+        for (now in listOf(2_000L, 25_000L)) {
+            val paused = intent.observe(probe(now = now, position = 250L))
+            assertTrue(paused.commands.isEmpty())
+            assertNull(paused.failure)
+        }
+    }
+
+    @Test fun explicitAndBufferRecoveryRequireProgressFromTheirOwnMiddleOfSongBaseline() {
+        for (buffered in listOf(false, true)) {
+            val intent = NativePlaybackIntent()
+            intent.begin("song", 0L, true, 0L)
+            intent.observe(probe())
+            intent.observe(probe(now = 1_250L, playing = true))
+            intent.observe(probe(now = 1_500L, position = 250L, playing = true))
+            intent.observe(probe(now = 20_000L, position = 20_000L, playing = true))
+            intent.observe(probe(now = 21_000L, position = 20_000L, buffering = buffered))
+            if (!buffered) intent.requestPlaying(true)
+            assertEquals(listOf(NativePlaybackCommand.Play),
+                intent.observe(probe(now = 22_000L, position = 20_000L)).commands)
+            intent.observe(probe(now = 22_250L, position = 20_000L, playing = true))
+            assertEquals(listOf(NativePlaybackCommand.Play),
+                intent.observe(probe(now = 25_000L, position = 20_000L)).commands)
+            intent.observe(probe(now = 25_250L, position = 20_000L, playing = true))
+            intent.observe(probe(now = 25_500L, position = 20_250L, playing = true))
+            val paused = intent.observe(probe(now = 26_000L, position = 20_250L))
+            assertTrue(paused.commands.isEmpty())
+            assertNull(paused.failure)
+        }
+    }
+
     @Test fun unrelatedOldItemNeverStartsOrMovesTheRequestedSong() {
         val intent = NativePlaybackIntent()
         intent.begin("song", 70_000L, true, 0L)
@@ -174,5 +302,96 @@ class NativePlaybackIntentTest {
         assertFalse(ended.playing)
         assertNull(ended.failure)
         assertTrue(ended.commands.isEmpty())
+        assertTrue(ended.ended)
+    }
+
+    @Test fun lostCompletionCallbackIsRecoveredWithoutReplayingTheFinishedSong() {
+        val intent = NativePlaybackIntent()
+        intent.begin("song", 0L, true, 0L)
+        intent.observe(probe())
+        intent.observe(probe(now = 199_000L, position = 199_000L, playing = true))
+        val cleanup = probe(now = 200_000L).copy(hasCurrentItem = false)
+        val confirming = intent.observe(cleanup)
+        assertFalse(confirming.ended)
+        assertEquals(199_000L, confirming.positionMs)
+        assertTrue(intent.observe(cleanup.copy(nowMs = 200_500L)).commands.isEmpty())
+        assertFalse(intent.observe(cleanup.copy(nowMs = 201_000L)).ended)
+        val completed = intent.observe(cleanup.copy(nowMs = 201_500L))
+        assertTrue(completed.ended)
+        assertTrue(completed.prepared)
+        assertNull(completed.failure)
+        assertTrue(completed.commands.isEmpty())
+        assertEquals(199_000L, completed.positionMs)
+        val retainedCompletion = intent.observe(cleanup.copy(nowMs = 230_000L))
+        assertTrue(retainedCompletion.ended)
+        assertEquals(199_000L, retainedCompletion.positionMs)
+
+        intent.begin("next", 0L, true, 231_000L)
+        val nextReady = intent.observe(probe(now = 232_000L, id = "next"))
+        assertFalse(nextReady.ended)
+        assertEquals(listOf(NativePlaybackCommand.Play), nextReady.commands)
+    }
+
+    @Test fun stoppedFinalSegmentWithRetainedItemCanAlsoCompleteWithoutCallback() {
+        val intent = NativePlaybackIntent()
+        intent.begin("song", 0L, true, 0L)
+        intent.observe(probe())
+        intent.observe(probe(now = 199_000L, position = 199_000L, playing = true))
+        assertTrue(intent.observe(probe(now = 200_000L, position = 200_000L)).commands.isEmpty())
+        assertFalse(intent.observe(probe(now = 201_000L, position = 200_000L)).ended)
+        assertTrue(intent.observe(probe(now = 201_500L, position = 200_000L)).ended)
+    }
+
+    @Test fun completionFallbackWaitsForTheUnobservedTailButAnAuthoritativeEndDoesNot() {
+        val intent = NativePlaybackIntent()
+        intent.begin("song", 0L, true, 0L)
+        intent.observe(probe())
+        intent.observe(probe(now = 198_500L, position = 198_500L, playing = true))
+        val stopped = probe(now = 198_750L, position = 198_500L).copy(paused = false)
+        assertFalse(intent.observe(stopped).ended)
+        assertFalse(intent.observe(stopped.copy(nowMs = 199_750L)).ended)
+        assertFalse(intent.observe(stopped.copy(nowMs = 200_500L)).ended)
+        assertTrue(intent.observe(stopped.copy(nowMs = 200_750L)).ended)
+
+        intent.begin("song", 0L, true, 201_000L)
+        intent.observe(probe(now = 202_000L))
+        assertTrue(intent.observe(probe(now = 202_250L).copy(ended = true)).ended)
+    }
+
+    @Test fun nearEndBufferingMustResumeInsteadOfBeingMistakenForCompletion() {
+        val intent = NativePlaybackIntent()
+        intent.begin("song", 0L, true, 0L)
+        intent.observe(probe())
+        intent.observe(probe(now = 199_000L, position = 199_000L, playing = true))
+        assertFalse(intent.observe(probe(now = 200_000L, position = 199_000L, buffering = true)).ended)
+        val recovered = intent.observe(probe(now = 220_000L, position = 199_000L))
+        assertFalse(recovered.ended)
+        assertEquals(listOf(NativePlaybackCommand.Play), recovered.commands)
+    }
+
+    @Test fun explicitPauseOrSeekAtTheEndInvalidatesAutomaticCompletionEvidence() {
+        for (seek in listOf(false, true)) {
+            val intent = NativePlaybackIntent()
+            intent.begin("song", 0L, true, 0L)
+            intent.observe(probe())
+            intent.observe(probe(now = 199_000L, position = 199_000L, playing = true))
+            if (seek) intent.requestSeek() else intent.requestPlaying(false)
+            val idle = intent.observe(probe(now = 200_000L))
+            assertFalse(idle.ended)
+            assertEquals(if (seek) listOf(NativePlaybackCommand.Play) else emptyList<NativePlaybackCommand>(), idle.commands)
+            assertFalse(intent.observe(probe(now = 202_000L)).ended)
+        }
+    }
+
+    @Test fun midSongIdleOrUnrelatedItemsNeverBecomeCompletedSongs() {
+        for (position in listOf(30_000L, 199_000L)) {
+            val intent = NativePlaybackIntent()
+            intent.begin("song", 0L, true, 0L)
+            intent.observe(probe())
+            intent.observe(probe(now = 199_000L, position = position, playing = true))
+            val idle = probe(now = 200_000L, id = if (position == 199_000L) "other" else "song")
+            assertFalse(intent.observe(idle).ended)
+            assertFalse(intent.observe(idle.copy(nowMs = 202_000L)).ended)
+        }
     }
 }

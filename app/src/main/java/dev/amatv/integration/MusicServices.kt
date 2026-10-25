@@ -44,6 +44,7 @@ class MusicServices(context: Context) : RecommendationProvider {
     )
     private val songSpectrum = SongAudioSpectrum(appContext)
     private val bridge = MusicKitBridge(appContext)
+    private val mediaSession = PlaybackMediaSession(appContext)
     private val playbackPreparation = Mutex()
     private val appleLyrics = AppleMusicLyricsClient(
         storefront = BuildConfig.APPLE_MUSIC_STOREFRONT,
@@ -171,12 +172,14 @@ class MusicServices(context: Context) : RecommendationProvider {
             data.getStringExtra(MusicKitWebAuthActivity.EXTRA_USER_TOKEN),
         ) { "Apple Music did not return a Music User Token." }
         tokenStore.writeUserToken(userToken)
+        mediaSession.clear()
         bridge.release()
         return userToken
     }
 
     fun signOut() {
         songSpectrum.setActive(false)
+        mediaSession.clear()
         bridge.release()
         tokenStore.clear()
     }
@@ -219,6 +222,7 @@ class MusicServices(context: Context) : RecommendationProvider {
         val developerToken = developerTokens.token()
         return playbackPreparation.withLock {
             withContext(Dispatchers.Default) {
+                if (playWhenReady) mediaSession.playbackRequested()
                 bridge.preparePlayback(track, developerToken, userToken, positionMs, playWhenReady)
             }
         }
@@ -227,7 +231,10 @@ class MusicServices(context: Context) : RecommendationProvider {
     fun audioSpectrum(): AudioSpectrum = songSpectrum.sample()
     fun setSpectrumActive(enabled: Boolean) = songSpectrum.setActive(enabled)
 
-    fun play() = bridge.play()
+    fun play() {
+        mediaSession.playbackRequested()
+        bridge.play()
+    }
     fun pause() = bridge.pause()
     fun seekTo(positionMs: Long) = bridge.seekTo(positionMs)
     fun skipToNext() = bridge.skipToNext()
@@ -238,8 +245,13 @@ class MusicServices(context: Context) : RecommendationProvider {
     fun playbackSnapshot(): PlaybackSnapshot? = bridge.playbackSnapshot()
     fun setPlaybackListener(listener: ((PlaybackSnapshot) -> Unit)?) =
         bridge.setPlaybackListener(listener)
+    fun setSystemPlaybackCallbacks(callbacks: PlaybackMediaSession.Callbacks?) =
+        mediaSession.setCallbacks(callbacks)
+    fun publishSystemPlayback(snapshot: PlaybackSnapshot, canSkipNext: Boolean, canSkipPrevious: Boolean) =
+        mediaSession.publish(snapshot, canSkipNext, canSkipPrevious)
     fun release() {
         songSpectrum.release()
+        mediaSession.release()
         bridge.release()
     }
 }
