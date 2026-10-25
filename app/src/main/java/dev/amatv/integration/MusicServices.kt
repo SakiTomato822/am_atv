@@ -49,16 +49,17 @@ class MusicServices(context: Context) : RecommendationProvider {
     private val songSpectrum = SongAudioSpectrum(appContext, bridge::audioSessionId)
     private val mediaSession = PlaybackMediaSession(appContext)
     private val playbackPreparation = Mutex()
-    private val appleLyrics = AppleMusicLyricsClient(
-        storefront = BuildConfig.APPLE_MUSIC_STOREFRONT,
-        userToken = tokenStore::readUserToken,
-        debugDumpDir = if (BuildConfig.DEBUG) java.io.File(appContext.cacheDir, "lyrics-ttml") else null,
-        contentCache = contentCache,
-    )
     private val api = AppleMusicApi(
         storefront = BuildConfig.APPLE_MUSIC_STOREFRONT,
         developerTokens = developerTokens,
         userToken = tokenStore::readUserToken,
+    )
+    private val appleLyrics = AppleMusicLyricsClient(
+        storefront = BuildConfig.APPLE_MUSIC_STOREFRONT,
+        storefrontProvider = api::userStorefront,
+        userToken = tokenStore::readUserToken,
+        debugDumpDir = if (BuildConfig.DEBUG) java.io.File(appContext.cacheDir, "lyrics-ttml") else null,
+        contentCache = contentCache,
     )
     private val google = GoogleTvAuthorization(tokenStore)
     private val ytm = YtmInnertubeClient(google::accessToken)

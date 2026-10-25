@@ -34,6 +34,7 @@ import javax.xml.parsers.DocumentBuilderFactory
  */
 class AppleMusicLyricsClient(
     private val storefront: String,
+    private val storefrontProvider: suspend () -> String = { storefront },
     private val userToken: () -> String?,
     private val webToken: AppleWebPlaybackTokenClient = AppleWebPlaybackTokenClient(),
     /** Debug builds only: raw syllable-lyrics responses are written here for inspection. */
@@ -43,9 +44,15 @@ class AppleMusicLyricsClient(
     suspend fun lyricsFor(catalogId: String): List<LyricLine> = withContext(Dispatchers.IO) {
         val mediaUserToken = userToken()?.takeIf(String::isNotBlank)
             ?: throw LyricsRequestException(LyricsFailureReason.Authorization, AppText.text(R.string.services_sign_in_apple_music))
+        val requestStorefront = storefrontProvider().trim().lowercase(Locale.ROOT)
+            .takeIf { it.matches(STOREFRONT) }
+            ?: throw LyricsRequestException(
+                LyricsFailureReason.Transient,
+                AppText.text(R.string.services_user_storefront_missing),
+            )
         val cacheGeneration = contentCache?.generation ?: 0L
         // The key is hashed before becoming a filename; account tokens are never written.
-        val cacheKey = "$storefront|$catalogId|${Locale.getDefault().toLanguageTag()}|$mediaUserToken"
+        val cacheKey = "$requestStorefront|$catalogId|${Locale.getDefault().toLanguageTag()}|$mediaUserToken"
         contentCache?.readLyrics(cacheKey)?.let { cached ->
             val lines = runCatching { AppleTtmlParser.parse(cached) }.getOrNull().orEmpty()
             if (lines.isNotEmpty()) return@withContext lines
@@ -68,7 +75,7 @@ class AppleMusicLyricsClient(
                 "${key.urlEncoded()}=${value.urlEncoded()}"
             }
             val url = "https://amp-api.music.apple.com/v1/catalog/" +
-                "${storefront.urlEncoded()}/songs/${catalogId.urlEncoded()}/" +
+                "${requestStorefront.urlEncoded()}/songs/${catalogId.urlEncoded()}/" +
                 "syllable-lyrics" + if (query.isNotEmpty()) "?$query" else ""
             val connection = URI(url).toURL().openConnection() as HttpURLConnection
             return try {
@@ -156,6 +163,7 @@ class AppleMusicLyricsClient(
         const val MUSIC_ORIGIN = "https://music.apple.com"
         const val WEB_USER_AGENT = "Mozilla/5.0 (Linux; Android 12; TV) " +
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142 Safari/537.36"
+        val STOREFRONT = Regex("[a-z]{2}")
     }
 }
 

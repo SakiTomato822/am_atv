@@ -14,6 +14,7 @@
     <string name="services_playlist_page_repeated">歌單分頁重複，請稍後重試。</string>
     <string name="services_playlist_tracks_unavailable">無法讀取歌單曲目，請重試。</string>
     <string name="services_sign_in_apple_music">請先登入 Apple Music。</string>
+    <string name="services_user_storefront_missing">Apple Music 未回傳此帳號的地區。</string>
     <string name="services_apple_auth_http_error">Apple Music 授權已失效或尚未完成登入（HTTP %1$d），請重新登入。</string>
     <string name="services_apple_api_http_error">Apple Music 回傳錯誤（HTTP %1$d）。</string>
     <string name="services_collection_next_page_failed">無法讀取歌單的下一頁，請重試。</string>

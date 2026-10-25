@@ -12,12 +12,15 @@ import dev.amatv.model.Track
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URLEncoder
+import java.util.Locale
 
 class DeveloperTokenClient(
     private val endpoint: String,
@@ -96,7 +99,29 @@ class AppleMusicApi(
     private val developerTokens: DeveloperTokenClient,
     private val userToken: () -> String?,
 ) {
+    private data class UserStorefrontCache(val userToken: String, val storefront: String)
+
     private val parseDispatcher = Dispatchers.Default.limitedParallelism(2)
+    private val userStorefrontMutex = Mutex()
+
+    @Volatile
+    private var userStorefrontCache: UserStorefrontCache? = null
+
+    suspend fun userStorefront(): String {
+        val currentUserToken = userToken()?.takeIf(String::isNotBlank)
+            ?: error(AppText.text(R.string.services_sign_in_apple_music))
+        userStorefrontCache?.takeIf { it.userToken == currentUserToken }?.let { return it.storefront }
+        return userStorefrontMutex.withLock {
+            userStorefrontCache?.takeIf { it.userToken == currentUserToken }?.let { return@withLock it.storefront }
+            val root = requestRoot(path = "/v1/me/storefront", needsUserToken = true)
+            val resolved = parseUserStorefrontId(root)
+                ?: error(AppText.text(R.string.services_user_storefront_missing))
+            userStorefrontCache = UserStorefrontCache(currentUserToken, resolved)
+            Log.i(TAG, "Apple user storefront=$resolved")
+            resolved
+        }
+    }
+
     suspend fun recommendations(): List<Track> = request(
         path = "/v1/me/recommendations?limit=10&extend=editorialArtwork,editorialVideo",
         needsUserToken = true,
@@ -589,3 +614,10 @@ class AppleMusicApi(
         const val TAG = "AmAtvAppleMusic"
     }
 }
+
+internal fun parseUserStorefrontId(root: JSONObject): String? = root.optJSONArray("data")
+    ?.optJSONObject(0)
+    ?.optString("id")
+    ?.trim()
+    ?.lowercase(Locale.ROOT)
+    ?.takeIf { it.matches(Regex("[a-z]{2}")) }

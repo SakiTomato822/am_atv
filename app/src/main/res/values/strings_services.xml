@@ -14,6 +14,7 @@
     <string name="services_playlist_page_repeated">Unable to continue loading this playlist. Please try again.</string>
     <string name="services_playlist_tracks_unavailable">Unable to load playlist tracks. Please try again.</string>
     <string name="services_sign_in_apple_music">Please sign in to Apple Music.</string>
+    <string name="services_user_storefront_missing">Apple Music did not return the account region.</string>
     <string name="services_apple_auth_http_error">Apple Music authorization is required (HTTP %1$d). Please sign in again.</string>
     <string name="services_apple_api_http_error">Apple Music returned an error (HTTP %1$d).</string>
     <string name="services_collection_next_page_failed">Unable to load the next playlist page. Please try again.</string>
