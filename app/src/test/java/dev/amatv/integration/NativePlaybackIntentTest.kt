@@ -248,14 +248,35 @@ class NativePlaybackIntentTest {
         assertEquals(PlaybackFailureKind.Network, intent.observe(probe(now = 22_000L)).failure)
     }
 
-    @Test fun failureClassificationDoesNotSkipTracksForNetworkOrAccountErrors() {
-        assertEquals(PlaybackFailureKind.Network, classifyPlaybackFailure(3, 503, null))
+    @Test fun onlyTheSdkIoTypeIdentifiesANativeNetworkFailure() {
         assertEquals(PlaybackFailureKind.Network, classifyPlaybackFailure(1, null, null))
-        assertEquals(PlaybackFailureKind.Authorization, classifyPlaybackFailure(3, 401, null))
-        assertEquals(PlaybackFailureKind.Authorization, classifyPlaybackFailure(2, null, null))
-        assertEquals(PlaybackFailureKind.TrackUnavailable, classifyPlaybackFailure(3, 404, null))
-        assertEquals(PlaybackFailureKind.TrackUnavailable, classifyPlaybackFailure(3, null, null))
+        assertEquals(PlaybackFailureKind.Network, classifyPlaybackFailure(1, 401, 403))
         assertEquals(PlaybackFailureKind.Unexpected, classifyPlaybackFailure(null, null, null))
+    }
+
+    @Test fun drmLeaseAndAgeVerificationDoNotMeanTheAccountNeedsToSignInAgain() {
+        for (type in listOf(2, 4, 6)) {
+            assertEquals(PlaybackFailureKind.Unexpected, classifyPlaybackFailure(type, null, null))
+            assertEquals(PlaybackFailureKind.Unexpected, classifyPlaybackFailure(type, 401, 403))
+            // MusicKit ErrorConditionException has this broad IOException superclass.
+            assertEquals(PlaybackFailureKind.Unexpected,
+                classifyPlaybackFailure(type, 401, 403, java.io.IOException("native component condition")))
+        }
+    }
+
+    @Test fun queueAndComponentCodesDoNotProveHttpErrorsOrAnUnavailableRecording() {
+        for (type in listOf(null, 0, 2, 3, 4, 5, 6, 99)) {
+            for (code in listOf(Int.MIN_VALUE, 401, 403, 404, 408, 410, 429, 500, 503)) {
+                assertEquals(PlaybackFailureKind.Unexpected, classifyPlaybackFailure(type, code, null))
+                assertEquals(PlaybackFailureKind.Unexpected, classifyPlaybackFailure(type, null, code))
+            }
+        }
+    }
+
+    @Test fun genuineJavaTransportFailuresRemainRetryableWithoutANativeErrorType() {
+        val transportFailure = java.lang.reflect.InvocationTargetException(java.io.IOException("offline"))
+        assertEquals(PlaybackFailureKind.Network, classifyPlaybackFailure(null, null, null, transportFailure))
+        assertEquals(PlaybackFailureKind.Unexpected, classifyPlaybackFailure(null, null, null, IllegalStateException("not ready")))
     }
 
     @Test fun continuousBufferTimeoutIsRetryableNetworkFailureNotTrackFailure() {

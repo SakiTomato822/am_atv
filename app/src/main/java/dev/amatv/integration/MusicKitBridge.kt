@@ -413,8 +413,19 @@ class MusicKitBridge(private val context: Context) {
                             val nativeCurrent = currentController.callOrNull("getCurrentItem")?.let(::trackFromQueueItem)
                             if (nativeCurrent == null || nativeCurrent.catalogId == requestedTrack?.catalogId) {
                                 val error = args?.lastOrNull()
+                                val firstFailure = pendingPlaybackError == null
                                 pendingPlaybackError = describePlaybackError(error)
                                 pendingFailureKind = classifyNativeFailure(error)
+                                if (firstFailure) {
+                                    fun errorNumber(name: String): Int? = runCatching {
+                                        (error?.javaClass?.getMethod(name)?.invoke(error) as? Number)?.toInt()
+                                    }.getOrNull()
+                                    val errorType = errorNumber("getType")
+                                    val errorCode = errorNumber("getErrorCode")
+                                    val componentCode = errorNumber("getComponentErrorCode")
+                                    Log.w(TAG, "Native playback failure generation=$generation " +
+                                        "type=$errorType code=$errorCode component=$componentCode kind=$pendingFailureKind")
+                                }
                                 dispatchSnapshot()
                             }
                         }

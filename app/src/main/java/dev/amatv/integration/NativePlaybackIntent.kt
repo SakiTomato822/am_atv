@@ -235,14 +235,17 @@ internal class NativePlaybackIntent {
     }
 }
 
+/** MusicKit component codes are not documented HTTP status codes or account-token verdicts. */
+@Suppress("UNUSED_PARAMETER")
 internal fun classifyPlaybackFailure(type: Int?, code: Int?, componentCode: Int?, error: Throwable? = null): PlaybackFailureKind {
-    val codes = setOfNotNull(code, componentCode)
-    if (401 in codes || 403 in codes || type in setOf(2, 4, 6)) return PlaybackFailureKind.Authorization
-    if (404 in codes || 410 in codes) return PlaybackFailureKind.TrackUnavailable
-    if (type == 1 || 408 in codes || 429 in codes || codes.any { it in 500..599 } ||
-        generateSequence(error) { it.cause }.take(8).any { it is java.io.IOException }
-    ) return PlaybackFailureKind.Network
-    if (type == 3) return PlaybackFailureKind.TrackUnavailable
+    // Public MusicKit 1.1.1 types: IO=1, DRM=2, queue=3, lease=4,
+    // Chromecast=5, explicit-content age verification=6. None means expired login.
+    if (type == 1) return PlaybackFailureKind.Network
+    // The SDK's ErrorConditionException also extends IOException. An explicit
+    // native type therefore takes precedence over that broad Java superclass.
+    if (type == null && generateSequence(error) { it.cause }.take(8).any { it is java.io.IOException }) {
+        return PlaybackFailureKind.Network
+    }
     return PlaybackFailureKind.Unexpected
 }
 
