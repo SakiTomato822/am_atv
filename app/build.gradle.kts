@@ -40,8 +40,8 @@ android {
         applicationId = "dev.amatv"
         minSdk = 28
         targetSdk = 36
-        versionCode = 14
-        versionName = "0.6.1"
+        versionCode = 15
+        versionName = "0.6.2"
 
         buildConfigField("String", "AUTH_BROWSER_ACTIVITY", "\"dev.amatv.integration.MusicKitWebAuthActivity\"")
         buildConfigField("boolean", "AUTH_BROWSER_IS_GECKO", "false")

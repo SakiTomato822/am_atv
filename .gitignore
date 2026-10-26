@@ -23,6 +23,9 @@ secrets.properties
 /dist/
 /work/
 
+# Local release planning notes.
+/README-update-preview.md
+
 # Keep reverse-engineering output out of the clean-room source tree.
 analysis/
 decoded/

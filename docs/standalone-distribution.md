@@ -31,6 +31,6 @@ AMATV_GECKO_ABI=armeabi-v7a tools/build-standalone-gecko.sh # -gecko-arm32.apk
 AMATV_GECKO_ABI=arm64-v8a tools/build-standalone-gecko.sh   # -gecko-arm64.apk
 ```
 
-Both login screens show a small console in the top-right corner. It does not
-take focus or intercept input; press the remote's MENU key to hide or show it.
+Both login screens keep the diagnostic console hidden by default. Press the
+remote's MENU key to show or hide it. The panel does not take focus or intercept input.
 Diagnostics are bounded in memory and redact credentials and URL parameters.

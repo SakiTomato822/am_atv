@@ -23,7 +23,7 @@ internal class AuthDiagnosticsOverlay private constructor(private val parent: Fr
     private val startedAt = SystemClock.elapsedRealtime()
     private var updateScheduled = false
     @Volatile private var disposed = false
-    @Volatile private var visible = true
+    @Volatile private var visible = false
 
     private val text = TextView(parent.context).apply {
         typeface = Typeface.MONOSPACE
@@ -37,6 +37,7 @@ internal class AuthDiagnosticsOverlay private constructor(private val parent: Fr
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
     private val panel = PassThroughScrollView(parent.context).apply {
+        visibility = View.GONE
         setBackgroundColor(Color.argb(185, 0, 0, 0))
         elevation = dp(12).toFloat()
         isFocusable = false
