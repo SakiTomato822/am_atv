@@ -26,4 +26,14 @@ class AppleMusicStorefrontTest {
         assertNull(parseUserStorefrontId(JSONObject("""{"data": []}""")))
         assertNull(parseUserStorefrontId(JSONObject("""{"data": [{"id": "china"}]}""")))
     }
+
+    @Test
+    fun effectiveStorefrontFallsBackToDefaultWhenUserTokenNull() = kotlinx.coroutines.runBlocking {
+        val api = AppleMusicApi(
+            storefront = "tw",
+            developerTokens = DeveloperTokenClient(""),
+            userToken = { null },
+        )
+        assertEquals("tw", api.effectiveStorefront())
+    }
 }

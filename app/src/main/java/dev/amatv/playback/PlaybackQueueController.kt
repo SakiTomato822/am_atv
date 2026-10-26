@@ -578,6 +578,26 @@ class PlaybackQueueController(
         refillJob = null
     }
 
+    fun reset() {
+        cancelRefill()
+        failedSongs.clear()
+        playbackSessionActive = false
+        _state.update {
+            QueueState(
+                current = null,
+                upNext = emptyList(),
+                autoplay = emptyList(),
+                history = emptyList(),
+                context = null,
+                repeat = playbackPrefs.repeatMode,
+                shuffle = playbackPrefs.shuffleEnabled,
+                infinite = playbackPrefs.autoplayEnabled,
+                source = playbackPrefs.autoplaySource,
+                autoplayStatus = AutoplayStatus.Idle,
+            )
+        }
+    }
+
     fun triggerRefillIfNeeded() {
         refillIfNeeded(MAX_REFILL_PAGES)
     }
@@ -595,6 +615,8 @@ class PlaybackQueueController(
         val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
                 val fetchedTracks: List<Track>
+                var recommendedByYtm = false
+                var usedAppleFallback = false
                 var nextAmStationId = s.amStationId
                 var nextYtmContinuation = s.ytmContinuation
                 var nextYtmSeedVideoId = s.ytmSeedVideoId
@@ -615,15 +637,43 @@ class PlaybackQueueController(
                     AutoplaySource.YouTubeMusic -> {
                         val excluded = (s.history.takeLast(RECOMMENDATION_LOOKBACK) + listOfNotNull(s.current) + s.upNext + s.autoplay)
                             .map { it.track } + failedSongs.values
-                        val page = withContext(recommendationDispatcher) {
-                            withTimeout(YTM_NETWORK_TIMEOUT_MS) {
-                                services.ytmRadio(seedTrack, s.ytmContinuation,
-                                    excluded.mapNotNull { it.catalogId }.toSet(), s.ytmSeedVideoId)
+                        val page = try {
+                            withContext(recommendationDispatcher) {
+                                withTimeout(YTM_NETWORK_TIMEOUT_MS) {
+                                    services.ytmRadio(
+                                        seedTrack,
+                                        s.ytmContinuation,
+                                        excluded.mapNotNull { it.catalogId }.toSet(),
+                                        s.ytmSeedVideoId,
+                                    )
+                                }
                             }
+                        } catch (_: TimeoutCancellationException) {
+                            null
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Throwable) {
+                            null
                         }
-                        nextYtmContinuation = page.continuation
-                        nextYtmSeedVideoId = page.seedVideoId
-                        fetchedTracks = page.tracks
+                        if (page != null) {
+                            recommendedByYtm = true
+                            nextYtmContinuation = page.continuation
+                            nextYtmSeedVideoId = page.seedVideoId
+                            fetchedTracks = page.tracks
+                        } else {
+                            usedAppleFallback = true
+                            val station = withContext(recommendationDispatcher) {
+                                withTimeout(AM_NETWORK_TIMEOUT_MS) {
+                                    if (nextAmStationId == null) {
+                                        services.createAmStation(seedTrack.catalogId ?: seedTrack.id)
+                                    } else {
+                                        nextAmStationId to services.amStationNextTracks(checkNotNull(nextAmStationId))
+                                    }
+                                }
+                            }
+                            nextAmStationId = station.first
+                            fetchedTracks = station.second
+                        }
                     }
                 }
                 if (refillGeneration != gen) return@launch
@@ -634,16 +684,17 @@ class PlaybackQueueController(
                     excluded = occupied.map { it.track } + failedSongs.values,
                     recent = occupied.takeLast(6).map { it.track },
                 ).map { QueueEntry(nextEntryId++,
-                    it.copy(recommendedByYtm = s.source == AutoplaySource.YouTubeMusic), EntryOrigin.Autoplay) }
+                    it.copy(recommendedByYtm = recommendedByYtm), EntryOrigin.Autoplay) }
                 // A failed single-song anchor may have had no fallback until this
                 // in-flight radio page arrived. Repair that seed before any refill.
                 val replacementSeed = if (live.recommendationSeed?.let(::isFailed) == true) {
                     (live.contextEntries + live.upNext + live.autoplay + newTracks)
                         .firstOrNull { it.track.catalogKind == CatalogKind.Song && !isFailed(it.track) }?.track
                 } else null
-                val providerCanContinue = replacementSeed != null || when (s.source) {
-                    AutoplaySource.AppleMusic -> nextAmStationId != null
-                    AutoplaySource.YouTubeMusic -> nextYtmContinuation != null && nextYtmContinuation != s.ytmContinuation
+                val providerCanContinue = replacementSeed != null || when {
+                    usedAppleFallback -> nextAmStationId != null
+                    s.source == AutoplaySource.AppleMusic -> nextAmStationId != null
+                    else -> nextYtmContinuation != null && nextYtmContinuation != s.ytmContinuation
                 }
                 val continueLoading = pagesRemaining > 1 && providerCanContinue &&
                     live.autoplay.size + newTracks.size < AUTOPLAY_RESERVE

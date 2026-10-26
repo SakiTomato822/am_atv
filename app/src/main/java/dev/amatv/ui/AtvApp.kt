@@ -157,8 +157,18 @@ fun AmAtvApp() {
     // Startup restores metadata and cursor only. An explicit user action owns playback.
     var isPlaying by remember { mutableStateOf(false) }
     var playWhenReady by remember { mutableStateOf(false) }
+
+    val currentView = androidx.compose.ui.platform.LocalView.current
+    val shouldKeepScreenOn = isPlaying || playWhenReady
+    DisposableEffect(shouldKeepScreenOn) {
+        currentView.keepScreenOn = shouldKeepScreenOn
+        onDispose {
+            currentView.keepScreenOn = false
+        }
+    }
     var playbackPrepared by remember { mutableStateOf(false) }
     var hasUserPlaybackRequest by remember { mutableStateOf(false) }
+    var lowPerformanceMode by remember { mutableStateOf(playbackPrefs.lowPerformanceMode) }
     var playbackMessage by remember { mutableStateOf<String?>(null) }
     var waitingQueueEntryId by remember { mutableStateOf<Long?>(null) }
     var expectedPlaybackGeneration by remember { mutableLongStateOf(0L) }
@@ -1361,16 +1371,11 @@ fun AmAtvApp() {
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_REWIND -> {
-                            positionAnchorMs = (currentPositionMs() - 10_000L).coerceAtLeast(0L)
-                            playStartedRealtimeMs = android.os.SystemClock.elapsedRealtime()
-                            if (track.catalogId != null) services.seekTo(positionAnchorMs)
+                            seekPlaybackBy(-10_000L)
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
-                            positionAnchorMs = (currentPositionMs() + 10_000L)
-                                .coerceAtMost(track.durationMs)
-                            playStartedRealtimeMs = android.os.SystemClock.elapsedRealtime()
-                            if (track.catalogId != null) services.seekTo(positionAnchorMs)
+                            seekPlaybackBy(10_000L)
                             true
                         }
                         else -> false
@@ -1435,6 +1440,8 @@ fun AmAtvApp() {
                             selectionGeneration++
                             playbackRequestJob?.cancel()
                             services.signOut()
+                            queueController.reset()
+                            playbackPrefs.clearSession()
                             scope.launch { cancellableResult { services.contentCache.clear { ArtworkImages.clear(context) } } }
                             isPlaying = false
                             playWhenReady = false
@@ -1464,7 +1471,10 @@ fun AmAtvApp() {
                                                 AppText.text(R.string.app_search_no_results_format, query)
                                             } else null
                                         }
-                                        .onFailure { serviceMessage = it.message ?: AppText.text(R.string.app_search_failed) }
+                                        .onFailure {
+                                            searchResults = emptyList()
+                                            serviceMessage = it.message ?: AppText.text(R.string.app_search_failed)
+                                        }
                                 } finally {
                                     searchLoading = false
                                 }
@@ -1480,6 +1490,11 @@ fun AmAtvApp() {
                         },
                         autoplaySource = queueState.source,
                         onAutoplaySourceChange = { dispatchQueueAction(StartupQueueAction.SetSource(it)) },
+                        lowPerformanceMode = lowPerformanceMode,
+                        onLowPerformanceModeChange = {
+                            lowPerformanceMode = it
+                            playbackPrefs.lowPerformanceMode = it
+                        },
                         cacheSettingsContent = {
                             LanguageSettings()
                             ContentCacheSettings(services.contentCache)
@@ -1533,6 +1548,7 @@ fun AmAtvApp() {
                         onSkipNext = { skip(1) },
                         onSeekBy = ::seekPlaybackBy,
                         onSelectTrack = (::selectQueueTrack),
+                        lowPerformanceMode = lowPerformanceMode,
                         onCycleRepeat = { dispatchQueueAction(StartupQueueAction.CycleRepeat) },
                         onToggleShuffle = { dispatchQueueAction(StartupQueueAction.ToggleShuffle) },
                         onToggleAutoplay = { dispatchQueueAction(StartupQueueAction.ToggleInfinite) },
@@ -1586,6 +1602,8 @@ private fun BrowseShell(
     onLyricOffsetChange: (Long) -> Unit = {},
     autoplaySource: AutoplaySource = AutoplaySource.AppleMusic,
     onAutoplaySourceChange: (AutoplaySource) -> Unit = {},
+    lowPerformanceMode: Boolean = false,
+    onLowPerformanceModeChange: (Boolean) -> Unit = {},
     cacheSettingsContent: @Composable () -> Unit = {},
 ) {
     val density = LocalDensity.current
@@ -1715,6 +1733,8 @@ private fun BrowseShell(
                             onLyricOffsetChange = onLyricOffsetChange,
                             autoplaySource = autoplaySource,
                             onAutoplaySourceChange = onAutoplaySourceChange,
+                            lowPerformanceMode = lowPerformanceMode,
+                            onLowPerformanceModeChange = onLowPerformanceModeChange,
                             cacheSettingsContent = cacheSettingsContent,
                             firstContentFocusRequester = firstContentFocus,
                             navigationFocusRequester = navigationFocus[destination],

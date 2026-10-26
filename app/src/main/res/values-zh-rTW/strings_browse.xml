@@ -21,6 +21,10 @@
     <string name="browse_offset_default">0 毫秒（預設）</string>
     <string name="browse_reset">重設</string>
     <string name="browse_autoplay_source">接續播放來源</string>
+    <string name="browse_performance_mode">效能模式</string>
+    <string name="browse_performance_mode_hint">停用動態封面影片以提升老舊電視盒硬體的流暢度與穩定性。</string>
+    <string name="browse_performance_standard">標準模式</string>
+    <string name="browse_performance_low">低效能模式</string>
     <string name="browse_ytm_name">YouTube Music</string>
     <string name="browse_apple_name">Apple Music</string>
     <string name="browse_selected_source">✓ %1$s</string>

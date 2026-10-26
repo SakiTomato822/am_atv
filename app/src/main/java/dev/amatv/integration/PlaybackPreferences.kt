@@ -71,6 +71,7 @@ interface QueuePreferences {
     var shuffleEnabled: Boolean
     var autoplayEnabled: Boolean
     var autoplaySource: AutoplaySource
+    var lowPerformanceMode: Boolean
 }
 
 /**
@@ -113,6 +114,12 @@ class PlaybackPreferences(context: Context) : QueuePreferences {
             preferences.edit().putString(KEY_AUTOPLAY_SOURCE, value.name).apply()
         }
 
+    override var lowPerformanceMode: Boolean
+        get() = preferences.getBoolean(KEY_LOW_PERFORMANCE_MODE, false)
+        set(value) {
+            preferences.edit().putBoolean(KEY_LOW_PERFORMANCE_MODE, value).apply()
+        }
+
     var lyricOffsetMs: Long
         get() = preferences.getLong(KEY_LYRIC_OFFSET_MS, 0L)
         set(value) {
@@ -132,6 +139,8 @@ class PlaybackPreferences(context: Context) : QueuePreferences {
     /** Timeline serialization/disk I/O is coalesced off the UI thread. */
     fun saveSession(session: PlaybackSession, synchronous: Boolean = false) = sessions.save(session, synchronous)
 
+    fun clearSession() = sessions.clear()
+
     /** Blocking file read/parse: call on Dispatchers.IO. */
     fun restoreSession(): PlaybackSession? = sessions.restore()
 
@@ -148,5 +157,6 @@ class PlaybackPreferences(context: Context) : QueuePreferences {
         const val KEY_AUTOPLAY_ENABLED = "pref_playback_autoplay_enabled"
         const val KEY_AUTOPLAY_SOURCE = "pref_playback_autoplay_source"
         const val KEY_LYRIC_OFFSET_MS = "pref_playback_lyric_offset_ms"
+        const val KEY_LOW_PERFORMANCE_MODE = "pref_playback_low_performance_mode"
     }
 }

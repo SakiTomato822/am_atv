@@ -111,6 +111,8 @@ fun HomeScreen(
     onLyricOffsetChange: (Long) -> Unit = {},
     autoplaySource: dev.amatv.integration.AutoplaySource = dev.amatv.integration.AutoplaySource.AppleMusic,
     onAutoplaySourceChange: (dev.amatv.integration.AutoplaySource) -> Unit = {},
+    lowPerformanceMode: Boolean = false,
+    onLowPerformanceModeChange: (Boolean) -> Unit = {},
     firstContentFocusRequester: FocusRequester? = null,
     navigationFocusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
@@ -134,6 +136,8 @@ fun HomeScreen(
                     onLyricOffsetChange = onLyricOffsetChange,
                     autoplaySource = autoplaySource,
                     onAutoplaySourceChange = onAutoplaySourceChange,
+                    lowPerformanceMode = lowPerformanceMode,
+                    onLowPerformanceModeChange = onLowPerformanceModeChange,
                     cacheSettingsContent = cacheSettingsContent,
                     firstContentFocusRequester = firstContentFocusRequester,
                     navigationFocusRequester = navigationFocusRequester,
@@ -213,6 +217,8 @@ private fun AccountScreen(
     onLyricOffsetChange: (Long) -> Unit = {},
     autoplaySource: dev.amatv.integration.AutoplaySource = dev.amatv.integration.AutoplaySource.AppleMusic,
     onAutoplaySourceChange: (dev.amatv.integration.AutoplaySource) -> Unit = {},
+    lowPerformanceMode: Boolean = false,
+    onLowPerformanceModeChange: (Boolean) -> Unit = {},
     firstContentFocusRequester: FocusRequester?,
     navigationFocusRequester: FocusRequester?,
     headingOverride: String? = null,
@@ -487,6 +493,55 @@ private fun AccountScreen(
                     }
                 }
             }
+            Spacer(Modifier.height(18.dp))
+            Text(
+                text = stringResource(R.string.browse_performance_mode),
+                color = Color.White,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = stringResource(R.string.browse_performance_mode_hint),
+                color = Color.White.copy(alpha = 0.72f),
+                fontSize = 16.sp,
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FocusSurface(
+                    onClick = { onLowPerformanceModeChange(false) },
+                    modifier = Modifier.width(220.dp).height(46.dp),
+                    cornerRadius = 23.dp,
+                    background = if (!lowPerformanceMode) Color.White.copy(alpha = 0.26f) else Color.White.copy(alpha = 0.12f),
+                    focusedBackground = Color.White.copy(alpha = 0.38f),
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = if (!lowPerformanceMode) stringResource(R.string.browse_selected_source, stringResource(R.string.browse_performance_standard)) else stringResource(R.string.browse_performance_standard),
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = if (!lowPerformanceMode) FontWeight.Bold else FontWeight.Medium,
+                        )
+                    }
+                }
+                FocusSurface(
+                    onClick = { onLowPerformanceModeChange(true) },
+                    modifier = Modifier.width(220.dp).height(46.dp),
+                    cornerRadius = 23.dp,
+                    background = if (lowPerformanceMode) Color.White.copy(alpha = 0.26f) else Color.White.copy(alpha = 0.12f),
+                    focusedBackground = Color.White.copy(alpha = 0.38f),
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = if (lowPerformanceMode) stringResource(R.string.browse_selected_source, stringResource(R.string.browse_performance_low)) else stringResource(R.string.browse_performance_low),
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = if (lowPerformanceMode) FontWeight.Bold else FontWeight.Medium,
+                        )
+                    }
+                }
+            }
         }
         cacheSettingsContent()
     }
@@ -518,7 +573,8 @@ private fun SearchScreen(
     var lastChip by remember { mutableIntStateOf(0) }
     val chipRowState = rememberLazyListState()
     val resultRowState = rememberLazyListState()
-    val shownTracks = if (tracks.isNotEmpty()) tracks else recentTracks
+    val isSearching = lastExecutedQuery.isNotBlank()
+    val shownTracks = if (isSearching) tracks else recentTracks
     val resultFocus = remember(shownTracks) { List(shownTracks.size) { FocusRequester() } }
     var lastResult by remember(shownTracks) { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
@@ -688,7 +744,7 @@ private fun SearchScreen(
         )
         Spacer(Modifier.height(18.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            SectionHeading(if (tracks.isNotEmpty()) stringResource(R.string.browse_search_results) else stringResource(R.string.browse_recently_played))
+            SectionHeading(if (isSearching) stringResource(R.string.browse_search_results) else stringResource(R.string.browse_recently_played))
             if (loading && shownTracks.isNotEmpty()) {
                 Spacer(Modifier.width(14.dp))
                 AppleLoadingIndicator(Modifier.size(18.dp))

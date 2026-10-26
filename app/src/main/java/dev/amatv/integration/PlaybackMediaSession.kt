@@ -9,9 +9,10 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
+import dev.amatv.playback.PlaybackService
 
 /** Publishes the app queue to Android. MusicKit remains the sole audio-focus owner. */
-class PlaybackMediaSession(context: Context) {
+class PlaybackMediaSession(private val context: Context) {
     data class Callbacks(
         val play: () -> Unit,
         val pause: () -> Unit,
@@ -32,6 +33,10 @@ class PlaybackMediaSession(context: Context) {
     private var lastPublishedPosition = -1L
     private var lastPublishedUpdateTime = 0L
     private var lastPublishedErrorMessage: String? = null
+    private var foregroundRequested = false
+    private var foregroundStartAttempted = false
+    private var foregroundServiceStarted = false
+    private var foregroundMetadata: Pair<String, String>? = null
     private val session = MediaSession(context.applicationContext, "AM ATV").apply {
         @Suppress("DEPRECATION")
         setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
@@ -84,6 +89,17 @@ class PlaybackMediaSession(context: Context) {
         acceptPlayingActivation = true
         activatedByPlayback = true
         session.isActive = callbacks != null
+        if (!foregroundRequested) foregroundStartAttempted = false
+        foregroundRequested = true
+        updateForegroundService(
+            metadataKey?.title ?: context.getString(dev.amatv.R.string.app_name),
+            metadataKey?.artist.orEmpty(),
+        )
+    }
+
+    fun playbackPaused() = onMain {
+        foregroundRequested = false
+        stopForegroundService()
     }
 
     fun publish(snapshot: PlaybackSnapshot, canSkipNext: Boolean, canSkipPrevious: Boolean) = onMain {
@@ -162,6 +178,15 @@ class PlaybackMediaSession(context: Context) {
         }
         if (snapshot.isPlaying && acceptPlayingActivation) activatedByPlayback = true
         session.isActive = callbacks != null && activatedByPlayback
+        when (state) {
+            PlaybackState.STATE_PLAYING, PlaybackState.STATE_BUFFERING -> {
+                if (foregroundRequested) updateForegroundService(track.title, track.artist)
+            }
+            PlaybackState.STATE_STOPPED, PlaybackState.STATE_ERROR -> {
+                foregroundRequested = false
+                stopForegroundService()
+            }
+        }
     }
 
     fun clear() = onMain { clearOnMain() }
@@ -173,6 +198,7 @@ class PlaybackMediaSession(context: Context) {
         session.setCallback(null)
         session.release()
         released = true
+        stopForegroundService()
     }
 
     private fun clearOnMain() {
@@ -191,6 +217,28 @@ class PlaybackMediaSession(context: Context) {
             .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PLAY_PAUSE)
             .setState(PlaybackState.STATE_NONE, 0L, 0f)
             .build())
+        foregroundRequested = false
+        stopForegroundService()
+    }
+
+    private fun updateForegroundService(title: String, artist: String) {
+        val nextMetadata = title to artist
+        if (!foregroundServiceStarted) {
+            if (foregroundStartAttempted) return
+            foregroundStartAttempted = true
+            foregroundServiceStarted = PlaybackService.start(context, title, artist)
+            if (foregroundServiceStarted) foregroundMetadata = nextMetadata
+        } else if (foregroundMetadata != nextMetadata) {
+            PlaybackService.update(context, title, artist)
+            foregroundMetadata = nextMetadata
+        }
+    }
+
+    private fun stopForegroundService() {
+        if (foregroundServiceStarted) PlaybackService.stop(context)
+        foregroundServiceStarted = false
+        foregroundStartAttempted = false
+        foregroundMetadata = null
     }
 
     private fun onMain(block: () -> Unit) {

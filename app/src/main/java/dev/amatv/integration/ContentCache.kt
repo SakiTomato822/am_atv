@@ -48,8 +48,9 @@ class ContentCache private constructor(context: Context) {
     val artworkDirectory = File(appContext.cacheDir, "artwork")
 
     // The write gate, rather than an arbitrary small LRU, leaves room for the OS.
-    // Android can also evict files in cacheDir; these assets are not offline audio.
-    val artworkCapacityBytes: Long get() = appContext.filesDir.totalSpace.coerceAtLeast(64L * 1024 * 1024)
+    // Bound disk cache to at most 256MB to avoid consuming storage on small TV flash memory.
+    val artworkCapacityBytes: Long
+        get() = minOf(256L * 1024 * 1024, (appContext.filesDir.totalSpace / 20).coerceAtLeast(64L * 1024 * 1024))
     private val reserveBytes: Long
         get() = maxOf(256L * 1024 * 1024, appContext.filesDir.totalSpace / 20)
 

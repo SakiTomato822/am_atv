@@ -21,6 +21,10 @@
     <string name="browse_offset_default">0 ms (Default)</string>
     <string name="browse_reset">Reset</string>
     <string name="browse_autoplay_source">Autoplay Source</string>
+    <string name="browse_performance_mode">Performance Mode</string>
+    <string name="browse_performance_mode_hint">Disable animated artwork video to ensure smooth playback on older TV hardware.</string>
+    <string name="browse_performance_standard">Standard</string>
+    <string name="browse_performance_low">Low Spec Mode</string>
     <string name="browse_ytm_name">YouTube Music</string>
     <string name="browse_apple_name">Apple Music</string>
     <string name="browse_selected_source">✓ %1$s</string>

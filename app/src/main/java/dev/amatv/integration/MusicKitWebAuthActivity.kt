@@ -59,9 +59,15 @@ class MusicKitWebAuthActivity : Activity() {
             setPadding(48, 24, 48, 24)
             setBackgroundColor(Color.rgb(20, 20, 24))
         }
-        webView = createConfiguredWebView(isPopup = false).apply {
-            addJavascriptInterface(AuthBridge(), JS_BRIDGE)
+        val createdView = runCatching {
+            createConfiguredWebView(isPopup = false).apply {
+                addJavascriptInterface(AuthBridge(), JS_BRIDGE)
+            }
+        }.getOrElse { error ->
+            finishWithError(getString(R.string.services_auth_page_failed, error.message ?: getString(R.string.services_unknown_error)))
+            return
         }
+        webView = createdView
 
         rootContainer = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -154,6 +160,11 @@ class MusicKitWebAuthActivity : Activity() {
                     if (window != null) {
                         closePopupWebView(window)
                     }
+                }
+
+                override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
+                    android.util.Log.d("MusicKitWebAuth", "JS [${consoleMessage?.messageLevel()}]: ${consoleMessage?.message()} (${consoleMessage?.sourceId()}:${consoleMessage?.lineNumber()})")
+                    return super.onConsoleMessage(consoleMessage)
                 }
             }
             webViewClient = object : WebViewClient() {
@@ -254,25 +265,45 @@ class MusicKitWebAuthActivity : Activity() {
                   const button = document.getElementById('signin');
                   const error = document.getElementById('error');
                   const labels = $labels;
+                  let configured = false;
+                  setTimeout(() => {
+                    if (!configured) {
+                      const msg = labels.componentFailed + ' (Timeout / WebView incompatible)';
+                      error.textContent = msg;
+                      button.disabled = false;
+                      button.textContent = labels.retry;
+                      button.onclick = () => window.location.reload();
+                      button.focus();
+                    }
+                  }, 12000);
                   document.addEventListener('musickitloaded', async () => {
                     try {
                       await MusicKit.configure({
                         developerToken: $tokenLiteral,
                         app: { name: 'AM for TV', build: $buildLiteral }
                       });
+                      configured = true;
                       button.disabled = false;
                       button.textContent = labels.continue;
+                      button.onclick = authorizeMusic;
                       button.focus();
                     } catch (e) {
+                      configured = true;
                       const message = e && e.message ? e.message : String(e);
                       error.textContent = message;
-                      $JS_BRIDGE.failed(message);
+                      button.disabled = false;
+                      button.textContent = labels.retry;
+                      button.onclick = () => window.location.reload();
+                      button.focus();
                     }
                   });
                   function scriptFailed() {
                     const message = labels.componentFailed;
                     error.textContent = message;
-                    $JS_BRIDGE.failed(message);
+                    button.disabled = false;
+                    button.textContent = labels.retry;
+                    button.onclick = () => window.location.reload();
+                    button.focus();
                   }
                   async function authorizeMusic() {
                     button.disabled = true;

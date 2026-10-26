@@ -198,6 +198,7 @@ fun PlayerScreen(
     canClearQueue: Boolean = queue.size > 1,
     lyricsTransientFailure: Boolean = false,
     onRetryLyrics: () -> Unit = {},
+    lowPerformanceMode: Boolean = false,
 ) {
     val playbackStateDescription = stringResource(when {
         isPlaying -> R.string.player_state_playing
@@ -562,7 +563,7 @@ fun PlayerScreen(
     ) {
         PlayerBackdrop(
             track = track,
-            animate = isVisibleOnScreen && isPlaying,
+            animate = isVisibleOnScreen && isPlaying && !lowPerformanceMode,
             audioSpectrum = audioSpectrum,
             modifier = Modifier.fillMaxSize(),
         )
@@ -593,6 +594,7 @@ fun PlayerScreen(
             queueFocusVisibility = chromeFocusVisibility,
             focusedQueueIndex = focusedQueueIndex,
             selectionVisible = navigationZone == PlayerNavigationZone.QueueItems,
+            lowPerformanceMode = lowPerformanceMode,
             modifier = Modifier.fillMaxSize(),
         )
         if (statusMessage != null) {
@@ -956,6 +958,7 @@ private fun PlayerStage(
     queueFocusVisibility: State<Float>,
     focusedQueueIndex: Int,
     selectionVisible: Boolean,
+    lowPerformanceMode: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -1044,15 +1047,20 @@ private fun PlayerStage(
         val viewportWidthPx = with(density) { maxWidth.toPx() }
         val columnWidthDp = 288.dp
         val columnWidthPx = with(density) { columnWidthDp.toPx() }
-        val leftColumnStartPx = with(density) { 88.dp.toPx() }
+        val sideMarginDp = (maxWidth * (88f / 960f)).coerceIn(80.dp, 160.dp)
+        val leftColumnStartPx = with(density) { sideMarginDp.toPx() }
         val centeredColumnStartPx = ((viewportWidthPx - columnWidthPx) / 2f).coerceAtLeast(0f)
+
+        // Center the lyrics column in the right half with expanded width
+        val lyricsStartDp = (maxWidth * 0.43f).coerceAtLeast(sideMarginDp + columnWidthDp + 36.dp)
+        val lyricsEndDp = (maxWidth * 0.065f).coerceIn(52.dp, 80.dp)
 
         // Retain measured viewport rows; never create the whole song's word trees on arrival.
         if (lyricsStageVisible) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(start = 412.dp)
+                    .padding(start = lyricsStartDp, end = lyricsEndDp)
                     .graphicsLayer {
                         alpha = lyricsAlpha.value
                         translationX = (1f - lyricsAlpha.value) * slideDistancePx
@@ -1112,7 +1120,7 @@ private fun PlayerStage(
                                 scaleX = combinedScale
                                 scaleY = combinedScale
                             },
-                        animate = isPlaying,
+                        animate = isPlaying && !lowPerformanceMode,
                         cornerRadius = 20.dp,
                         crossfadeTrackChanges = true,
                     )
@@ -1167,7 +1175,7 @@ private fun LyricsUnavailablePanel(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(start = 24.dp, end = 84.dp)
+            .padding(horizontal = 24.dp)
             .graphicsLayer { translationY = stageOffsetPx.value },
         contentAlignment = Alignment.Center,
     ) {
@@ -1446,7 +1454,7 @@ private fun LyricsPanel(
     val lyricSnapshot = lyricSnapshotState.value
     val activeInstrumentalGap = lyricSnapshot.instrumentalGap
     val instrumentalScrollAnchor = lyricSnapshot.instrumentalScrollAnchor
-    val scrollAnchorLineIndex = if (isStaticMode) -1
+    val baseScrollAnchorLineIndex = if (isStaticMode) -1
     else lyricSnapshot.scrollAnchorLineIndex.takeIf { it >= 0 } ?: 0
 
     val displayItems = remember(lines, songwritersFooter) {
@@ -1460,14 +1468,6 @@ private fun LyricsPanel(
         }
     }
     val displayItemKeys = remember(displayItems) { displayItems.map { it.key } }
-
-    val effectiveAnchorIndex = selectedLyricIndex ?: scrollAnchorLineIndex
-    val anchorDisplayIndex = effectiveAnchorIndex.coerceIn(0, (displayItems.size - 1).coerceAtLeast(0))
-    val anchorKey = if (selectedLyricIndex == null && instrumentalScrollAnchor != null) {
-        // The interlude and the following lyric share a fixed layout position,
-        // but entering the slot must scroll even before that lyric is active.
-        "instrumental-anchor-${instrumentalScrollAnchor.beforeLineIndex}-${instrumentalScrollAnchor.startMs}"
-    } else displayItems.getOrNull(anchorDisplayIndex)?.key
 
     val textDensity = LocalDensity.current
     val layoutInfo = remember(lines, textDensity.density, textDensity.fontScale) { LyricsLayoutInfo() }
@@ -1528,15 +1528,6 @@ private fun LyricsPanel(
     BoxWithConstraints(
         modifier = Modifier
             .automationId("lyrics-panel")
-            .semantics {
-                if (dev.amatv.BuildConfig.BUILD_TYPE == "benchmark") {
-                    stateDescription = when {
-                        isStaticMode -> "static"
-                        activeInstrumentalGap != null -> "interlude:$anchorDisplayIndex"
-                        else -> "line:$anchorDisplayIndex"
-                    }
-                }
-            }
             .fillMaxSize()
             .graphicsLayer {
                 compositingStrategy = CompositingStrategy.Offscreen
@@ -1562,9 +1553,43 @@ private fun LyricsPanel(
             .roundToInt()
             .toFloat() - with(density) { 2.dp.toPx() }
         val maxScroll = (layoutInfo.totalHeight - viewportHeightPx).coerceAtLeast(0f)
+        val nextClusterAfterBase = lyricSchedule.nextClusterStartIndex(baseScrollAnchorLineIndex)
+        val retainedBaseAnchorLineIndex = retainedLyricAnchorBase(
+            clusterStartIndex = baseScrollAnchorLineIndex,
+            previousAnchorIndex = previousAnchorLineIndex,
+            nextClusterStartIndex = nextClusterAfterBase,
+        )
+        val scrollAnchorLineIndex = if (isStaticMode) {
+            -1
+        } else {
+            resolveActiveLyricAnchor(
+                baseAnchorIndex = retainedBaseAnchorLineIndex,
+                activeLineIndices = lyricSnapshot.activeLineIndices,
+                tops = layoutInfo.itemTops,
+                heights = layoutInfo.itemHeights,
+                focalAnchorY = focalAnchorY,
+                viewportHeightPx = viewportHeightPx,
+                stageOffsetPx = stageOffsetPx.value,
+                maxScroll = maxScroll,
+            )
+        }
+        val effectiveAnchorIndex = selectedLyricIndex ?: scrollAnchorLineIndex
+        val anchorDisplayIndex = effectiveAnchorIndex.coerceIn(0, (displayItems.size - 1).coerceAtLeast(0))
+        val anchorKey = if (selectedLyricIndex == null && instrumentalScrollAnchor != null) {
+            // The interlude and the following lyric share a fixed layout position,
+            // but entering the slot must scroll even before that lyric is active.
+            "instrumental-anchor-${instrumentalScrollAnchor.beforeLineIndex}-${instrumentalScrollAnchor.startMs}"
+        } else displayItems.getOrNull(anchorDisplayIndex)?.key
+
+        val advancesWithinCurrentCluster = previousAnchorLineIndex >= baseScrollAnchorLineIndex &&
+            (nextClusterAfterBase < 0 || previousAnchorLineIndex < nextClusterAfterBase) &&
+            anchorDisplayIndex >= previousAnchorLineIndex &&
+            anchorDisplayIndex in lyricSnapshot.activeLineIndices
+        val isNaturalSingingAdvance = previousAnchorDisplayIndex >= 0 &&
+            (advancesWithinCurrentCluster ||
+                scrollAnchorLineIndex == lyricSchedule.nextClusterStartIndex(previousAnchorLineIndex))
         val snapToAnchor = previousAnchorDisplayIndex == -1 ||
-            (abs(anchorDisplayIndex - previousAnchorDisplayIndex) > 2 &&
-                scrollAnchorLineIndex != lyricSchedule.nextClusterStartIndex(previousAnchorLineIndex))
+            (!isNaturalSingingAdvance && abs(anchorDisplayIndex - previousAnchorDisplayIndex) > 2)
         // Skipped phrases must not briefly light up before a seek's scroll snap.
         // Manual browsing uses its own focus/secondary colors instead of retention.
         val retainCompletedHighlight = !snapToAnchor && !isUserScrolling && selectedLyricIndex == null
@@ -1710,7 +1735,17 @@ private fun LyricsPanel(
             isStaticMode = isStaticMode,
             initialAnchorItemIndex = anchorDisplayIndex,
             bootstrapVisible = isVisible,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .semantics {
+                    if (dev.amatv.BuildConfig.BUILD_TYPE == "benchmark") {
+                        stateDescription = when {
+                            isStaticMode -> "static"
+                            activeInstrumentalGap != null -> "interlude:$anchorDisplayIndex"
+                            else -> "line:$anchorDisplayIndex"
+                        }
+                    }
+                },
         ) {
             LyricsRows(
                 displayItems = displayItems,
@@ -2330,11 +2365,11 @@ private fun KaraokeLyricLine(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 76.dp, top = 2.dp, bottom = 8.dp)
+            .padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 8.dp)
             .then(if (isFocused) Modifier.background(
                 Color.White.copy(alpha = 0.18f), RoundedCornerShape(16.dp),
             ) else Modifier)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         contentAlignment = if (alignEnd) Alignment.TopEnd else Alignment.TopStart,
     ) {
         Column(

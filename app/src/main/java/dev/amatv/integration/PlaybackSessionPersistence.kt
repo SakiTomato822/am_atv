@@ -18,10 +18,16 @@ internal class PlaybackSessionPersistence private constructor(
     private val file = AtomicFile(File(context.filesDir, "playback-session-v2.json"))
     private val fileLock = Any()
     private val pendingLock = Any()
-    private var pending: PlaybackSession? = null
+    private var pending: PendingWrite? = null
     private var writing = false
     private var lastStructure: Structure? = null
     private val revision = AtomicLong(System.currentTimeMillis())
+    private val storageGeneration = AtomicLong(0L)
+
+    private data class PendingWrite(
+        val session: PlaybackSession,
+        val generation: Long,
+    )
 
     private data class Structure(
         val persistenceId: String,
@@ -36,11 +42,11 @@ internal class PlaybackSessionPersistence private constructor(
         // ON_STOP commits only a bounded current-cover/cursor/recovery window in
         // a separate preferences file, never the potentially long timeline JSON.
         val snapshot = session.copy(savedRevision = revision.updateAndGet { maxOf(it + 1, System.currentTimeMillis()) })
-        val checkpoint = PlaybackSessionCodec.encodeCheckpoint(snapshot)
-        val edit = cursorPreferences.edit().putString(CHECKPOINT, checkpoint)
-        if (synchronous) edit.commit() else edit.apply()
         synchronized(pendingLock) {
-            pending = snapshot
+            val checkpoint = PlaybackSessionCodec.encodeCheckpoint(snapshot)
+            val edit = cursorPreferences.edit().putString(CHECKPOINT, checkpoint)
+            if (synchronous) edit.commit() else edit.apply()
+            pending = PendingWrite(snapshot, storageGeneration.get())
             if (writing) return
             writing = true
         }
@@ -53,22 +59,24 @@ internal class PlaybackSessionPersistence private constructor(
                     }
                 } ?: break
                 try {
-                    val structure = Structure(next.persistenceId, next.queueEntryIds, next.autoplayEntryIndices,
-                        next.playedEntryIds, next.contextEntryIds)
-                    // Five-second playhead updates need no re-encoding of old metadata.
-                    if (structure == lastStructure && next.queueEntryIds.isNotEmpty()) continue
-                    val bytes = PlaybackSessionCodec.encode(next).toByteArray(Charsets.UTF_8)
+                    val session = next.session
+                    val structure = Structure(session.persistenceId, session.queueEntryIds, session.autoplayEntryIndices,
+                        session.playedEntryIds, session.contextEntryIds)
+                    val bytes = PlaybackSessionCodec.encode(session).toByteArray(Charsets.UTF_8)
                     synchronized(fileLock) {
+                        if (next.generation != storageGeneration.get()) return@synchronized
+                        // Five-second playhead updates need no re-encoding of old metadata.
+                        if (structure == lastStructure && session.queueEntryIds.isNotEmpty()) return@synchronized
                         val output = file.startWrite()
                         try {
                             output.write(bytes)
                             file.finishWrite(output)
+                            lastStructure = structure
                         } catch (error: Throwable) {
                             file.failWrite(output)
                             throw error
                         }
                     }
-                    lastStructure = structure
                     legacyPreferences.edit().remove(LEGACY_SESSION).apply()
                 } catch (error: Exception) {
                     // Keep the previous atomic snapshot and the fresh cursor checkpoint.
@@ -80,6 +88,19 @@ internal class PlaybackSessionPersistence private constructor(
 
     fun checkpoint(): PlaybackSession? = cursorPreferences.getString(CHECKPOINT, null)
         ?.let(PlaybackSessionCodec::decode)
+
+    fun clear() {
+        synchronized(pendingLock) {
+            storageGeneration.incrementAndGet()
+            pending = null
+            cursorPreferences.edit().clear().commit()
+            legacyPreferences.edit().remove(LEGACY_SESSION).commit()
+        }
+        synchronized(fileLock) {
+            runCatching { file.delete() }
+            lastStructure = null
+        }
+    }
 
     /** Caller must run this full-history read/parse on Dispatchers.IO. */
     fun restore(): PlaybackSession? {

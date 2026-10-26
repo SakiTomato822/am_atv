@@ -66,6 +66,83 @@ internal fun initialLyricScroll(
     return (tops[anchorIndex] - focalAnchorY).coerceIn(0f, maxScroll.coerceAtLeast(0f))
 }
 
+/** Keep an overflow-driven anchor monotonic only while playback remains in the same vocal cluster. */
+internal fun retainedLyricAnchorBase(
+    clusterStartIndex: Int,
+    previousAnchorIndex: Int,
+    nextClusterStartIndex: Int,
+): Int = if (
+    previousAnchorIndex >= clusterStartIndex &&
+    (nextClusterStartIndex < 0 || previousAnchorIndex < nextClusterStartIndex)
+) {
+    previousAnchorIndex
+} else {
+    clusterStartIndex
+}
+
+/**
+ * Resolves the visual scroll anchor among currently active singing lines.
+ *
+ * If multiple lines are simultaneously active (e.g. duet, rapid overlapping phrases, or
+ * successive entries within a vocal cluster) and a lower active line extends past the physical
+ * bottom of the viewport, the scroll anchor advances only as far as needed to fit every active
+ * line while retaining as many earlier lines as possible. Edge fades are visual decoration and
+ * must not make lyrics move while they still fit on screen.
+ */
+internal fun resolveActiveLyricAnchor(
+    baseAnchorIndex: Int,
+    activeLineIndices: List<Int>,
+    tops: FloatArray,
+    heights: FloatArray,
+    focalAnchorY: Float,
+    viewportHeightPx: Float,
+    stageOffsetPx: Float = 0f,
+    maxScroll: Float = if (tops.isNotEmpty()) (tops.last() - focalAnchorY).coerceAtLeast(0f) else 0f,
+): Int {
+    if (baseAnchorIndex < 0 || activeLineIndices.isEmpty() || tops.isEmpty() || heights.isEmpty()) {
+        return baseAnchorIndex
+    }
+    val count = minOf(tops.size, heights.size)
+    if (baseAnchorIndex >= count) return baseAnchorIndex
+
+    var maxActive = Int.MIN_VALUE
+    for (i in 0 until activeLineIndices.size) {
+        val idx = activeLineIndices[i]
+        if (idx in 0 until count) {
+            if (idx > maxActive) maxActive = idx
+        }
+    }
+    if (maxActive == Int.MIN_VALUE) return baseAnchorIndex
+
+    // Keep the cluster's earliest line for as long as the active lyrics fit. When they do not,
+    // advance one active line at a time and stop at the earliest anchor that fits them all.
+    var candidate = baseAnchorIndex
+    while (candidate < maxActive) {
+        val scroll = initialLyricScroll(tops, candidate, focalAnchorY, maxScroll)
+        var overflows = false
+        for (i in 0 until activeLineIndices.size) {
+            val idx = activeLineIndices[i]
+            if (idx in candidate until count) {
+                val renderedRowBottom = tops[idx] + heights[idx] - scroll + stageOffsetPx
+                if (renderedRowBottom > viewportHeightPx) {
+                    overflows = true
+                    break
+                }
+            }
+        }
+        if (!overflows) break
+
+        var nextActive = Int.MAX_VALUE
+        for (i in 0 until activeLineIndices.size) {
+            val idx = activeLineIndices[i]
+            if (idx in (candidate + 1) until count && idx < nextActive) nextActive = idx
+        }
+        if (nextActive == Int.MAX_VALUE) break
+        candidate = nextActive
+    }
+    return candidate
+}
+
 /** Estimates are never painted; mounted rows replace them with exact Compose measurements. */
 internal fun estimateLyricRowHeight(line: LyricLine, widthPx: Float, density: Float, fontScale: Float): Float {
     val sp = density * fontScale
@@ -79,9 +156,9 @@ internal fun estimateLyricRowHeight(line: LyricLine, widthPx: Float, density: Fl
         return ceil(width / available.coerceAtLeast(sizeSp * sp)).toInt().coerceAtLeast(1)
     }
     if (line.isStatic || line.timing == LyricTiming.None) {
-        return 24f * density + textRows(line.text, 24f, widthPx - 136f * density) * 32f * sp
+        return 24f * density + textRows(line.text, 24f, widthPx - 60f * density) * 32f * sp
     }
-    val contentWidth = ((widthPx - 120f * density) * if (line.isMultiAgentSong) 0.85f else 1f)
+    val contentWidth = ((widthPx - 44f * density) * if (line.isMultiAgentSong) 0.85f else 1f)
         .coerceAtLeast(1f)
     val mainRows = textRows(line.text, 34f, contentWidth - 12f * density)
     val pronunciation = if (!line.pronunciationText.isNullOrBlank() || line.words.any { !it.pronunciationText.isNullOrBlank() }) {

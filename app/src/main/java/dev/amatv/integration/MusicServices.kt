@@ -239,7 +239,10 @@ class MusicServices(context: Context) : RecommendationProvider {
         mediaSession.playbackRequested()
         bridge.play()
     }
-    fun pause() = bridge.pause()
+    fun pause() {
+        mediaSession.playbackPaused()
+        bridge.pause()
+    }
     fun seekTo(positionMs: Long) = bridge.seekTo(positionMs)
     fun skipToNext() = bridge.skipToNext()
     fun skipToPrevious() = bridge.skipToPrevious()

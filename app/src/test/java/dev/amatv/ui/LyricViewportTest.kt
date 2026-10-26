@@ -98,4 +98,158 @@ class LyricViewportTest {
         assertEquals(500L, line.startMs)
         assertEquals(3_000L, line.mainEndMs)
     }
+
+    @Test fun singleActiveLineFittingOnScreenKeepsBaseAnchor() {
+        val tops = floatArrayOf(100f, 250f, 400f, 550f)
+        val heights = floatArrayOf(120f, 120f, 120f, 120f)
+        val anchor = resolveActiveLyricAnchor(
+            baseAnchorIndex = 0,
+            activeLineIndices = listOf(0),
+            tops = tops,
+            heights = heights,
+            focalAnchorY = 150f,
+            viewportHeightPx = 600f,
+        )
+        assertEquals(0, anchor)
+    }
+
+    @Test fun multipleActiveLinesWithinVisibleBoundsKeepBaseAnchor() {
+        val tops = floatArrayOf(100f, 250f, 400f, 550f)
+        val heights = floatArrayOf(120f, 120f, 120f, 120f)
+        val anchor = resolveActiveLyricAnchor(
+            baseAnchorIndex = 0,
+            activeLineIndices = listOf(0, 1),
+            tops = tops,
+            heights = heights,
+            focalAnchorY = 150f,
+            viewportHeightPx = 600f,
+        )
+        assertEquals(0, anchor)
+    }
+
+    @Test fun overflowingBottomLineUsesEarliestActiveAnchorThatFitsAllLines() {
+        val tops = floatArrayOf(100f, 250f, 500f, 650f)
+        val heights = floatArrayOf(120f, 120f, 120f, 120f)
+        // With anchor 0, scroll = 0. Line 2 bottom is 500 + 120 = 620 > viewport bottom (600).
+        // Moving only to line 1 makes every active line fit, so line 2 must not be moved to the top.
+        val anchor = resolveActiveLyricAnchor(
+            baseAnchorIndex = 0,
+            activeLineIndices = listOf(0, 1, 2),
+            tops = tops,
+            heights = heights,
+            focalAnchorY = 150f,
+            viewportHeightPx = 600f,
+        )
+        assertEquals(1, anchor)
+    }
+
+    @Test fun subsequentOverflowAdvancesAnchorFurther() {
+        val tops = floatArrayOf(100f, 250f, 400f, 650f)
+        val heights = floatArrayOf(120f, 120f, 120f, 120f)
+        val maxScroll = 500f
+        // Active lines are 1, 2, 3.
+        // Under anchor 1, line 1 and 2 fit, but line 3 bottom is (650 - 100) + 120 = 670 > 600.
+        // Anchor 2 is the earliest active line that lets line 3 fit; line 3 must not jump to the top.
+        val anchor3 = resolveActiveLyricAnchor(
+            baseAnchorIndex = 0,
+            activeLineIndices = listOf(1, 2, 3),
+            tops = tops,
+            heights = heights,
+            focalAnchorY = 150f,
+            viewportHeightPx = 600f,
+            maxScroll = maxScroll,
+        )
+        assertEquals(2, anchor3)
+
+        // If lines 0, 1, 2 are active, and line 2 fits under anchor 0, keep anchor 0.
+        val anchor2 = resolveActiveLyricAnchor(
+            baseAnchorIndex = 0,
+            activeLineIndices = listOf(0, 1, 2),
+            tops = tops,
+            heights = heights,
+            focalAnchorY = 150f,
+            viewportHeightPx = 600f,
+            maxScroll = maxScroll,
+        )
+        assertEquals(0, anchor2)
+    }
+
+    @Test fun emptyOrInvalidInputsSafelyReturnBase() {
+        val tops = floatArrayOf(100f, 250f)
+        val heights = floatArrayOf(120f, 120f)
+        assertEquals(1, resolveActiveLyricAnchor(1, emptyList(), tops, heights, 150f, 600f))
+        assertEquals(-1, resolveActiveLyricAnchor(-1, listOf(0, 1), tops, heights, 150f, 600f))
+        assertEquals(0, resolveActiveLyricAnchor(0, listOf(0, 1), floatArrayOf(), floatArrayOf(), 150f, 600f))
+    }
+
+    @Test fun edgeFadeDoesNotMoveLinesThatStillFitOnScreen() {
+        val tops = floatArrayOf(100f, 250f, 400f)
+        val heights = floatArrayOf(115f, 115f, 115f)
+        val active = listOf(0, 1, 2)
+        assertEquals(0, resolveActiveLyricAnchor(
+            baseAnchorIndex = 0,
+            activeLineIndices = active,
+            tops = tops,
+            heights = heights,
+            focalAnchorY = 150f,
+            viewportHeightPx = 600f,
+        ))
+    }
+
+    @Test fun stageOffsetUsesTheActualRenderedBottom() {
+        val tops = floatArrayOf(100f, 250f, 500f)
+        val heights = floatArrayOf(115f, 115f, 115f)
+        val active = listOf(0, 1, 2)
+        assertEquals(1, resolveActiveLyricAnchor(
+            baseAnchorIndex = 0,
+            activeLineIndices = active,
+            tops = tops,
+            heights = heights,
+            focalAnchorY = 150f,
+            viewportHeightPx = 600f,
+        ))
+        assertEquals(0, resolveActiveLyricAnchor(
+            baseAnchorIndex = 0,
+            activeLineIndices = active,
+            tops = tops,
+            heights = heights,
+            focalAnchorY = 150f,
+            viewportHeightPx = 600f,
+            stageOffsetPx = -20f,
+        ))
+    }
+
+    @Test fun overflowAnchorDoesNotMoveBackwardWithinCluster() {
+        val tops = floatArrayOf(100f, 250f, 500f)
+        val heights = floatArrayOf(115f, 115f, 115f)
+        val active = listOf(0, 1, 2)
+        val advanced = resolveActiveLyricAnchor(
+            baseAnchorIndex = 0,
+            activeLineIndices = active,
+            tops = tops,
+            heights = heights,
+            focalAnchorY = 150f,
+            viewportHeightPx = 600f,
+        )
+        assertEquals(1, advanced)
+
+        val retained = retainedLyricAnchorBase(
+            clusterStartIndex = 0,
+            previousAnchorIndex = advanced,
+            nextClusterStartIndex = -1,
+        )
+        assertEquals(1, resolveActiveLyricAnchor(
+            baseAnchorIndex = retained,
+            activeLineIndices = active,
+            tops = tops,
+            heights = heights,
+            focalAnchorY = 150f,
+            viewportHeightPx = 600f,
+        ))
+    }
+
+    @Test fun retainedOverflowAnchorResetsAcrossForwardAndBackwardSeeks() {
+        assertEquals(4, retainedLyricAnchorBase(4, 2, 8))
+        assertEquals(0, retainedLyricAnchorBase(0, 6, 4))
+    }
 }

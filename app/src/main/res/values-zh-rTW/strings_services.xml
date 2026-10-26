@@ -80,4 +80,6 @@
     <string name="services_auth_retry">重新嘗試登入 Apple Music</string>
     <string name="services_auth_invalid_token_format">Apple Music 回傳的授權格式無效。</string>
     <string name="services_auth_incomplete">Apple Music 登入尚未完成\n%1$s\n\n按返回鍵可回到 App 後重試。</string>
+    <string name="services_playback_channel_name">媒體播放</string>
+    <string name="services_playback_channel_desc">背景媒體播放通知</string>
 </resources>

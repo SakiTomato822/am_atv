@@ -122,6 +122,12 @@ class AppleMusicApi(
         }
     }
 
+    suspend fun effectiveStorefront(): String {
+        val currentUserToken = userToken()?.takeIf(String::isNotBlank)
+        if (currentUserToken == null) return storefront
+        return runCatching { userStorefront() }.getOrNull() ?: storefront
+    }
+
     suspend fun recommendations(): List<Track> = request(
         path = "/v1/me/recommendations?limit=10&extend=editorialArtwork,editorialVideo",
         needsUserToken = true,
@@ -184,15 +190,34 @@ class AppleMusicApi(
         needsUserToken = true,
     )
 
-    suspend fun libraryPlaylists(): List<Track> = request(
-        path = "/v1/me/library/playlists?limit=24&include=catalog",
-        needsUserToken = true,
+    suspend fun libraryPlaylists(maxItems: Int = 200): List<Track> = paginatedLibraryRequest(
+        initialPath = "/v1/me/library/playlists?limit=100&include=catalog",
+        maxItems = maxItems,
     )
 
-    suspend fun librarySongs(): List<Track> = request(
-        path = "/v1/me/library/songs?limit=24&include=catalog",
-        needsUserToken = true,
+    suspend fun librarySongs(maxItems: Int = 300): List<Track> = paginatedLibraryRequest(
+        initialPath = "/v1/me/library/songs?limit=100&include=catalog",
+        maxItems = maxItems,
     )
+
+    private suspend fun paginatedLibraryRequest(
+        initialPath: String,
+        maxItems: Int,
+    ): List<Track> = withContext(parseDispatcher) {
+        val visited = mutableSetOf<String>()
+        val results = mutableListOf<Track>()
+        var path: String? = initialPath
+        while (path != null && results.size < maxItems) {
+            currentCoroutineContext().ensureActive()
+            if (!visited.add(path)) break
+            val root = requestRoot(path, needsUserToken = true)
+            val tracks = parseAllTracks(root)
+            results += tracks
+            val next = root.optString("next").takeIf { it.isNotBlank() && it != "null" }
+            path = if (results.size < maxItems) next else null
+        }
+        results.take(maxItems)
+    }
 
     suspend fun resolveCatalogSongId(id: String): String {
         if (!id.startsWith("i.")) return id
@@ -216,22 +241,29 @@ class AppleMusicApi(
         throw IllegalStateException(AppText.text(R.string.services_uploaded_song_lyrics_unavailable))
     }
 
-    suspend fun charts(types: String = "albums,songs,playlists"): List<Track> = request(
-        path = "/v1/catalog/$storefront/charts?types=$types&limit=14&" +
-            "extend=editorialArtwork,editorialVideo",
-        needsUserToken = false,
-    )
+    suspend fun charts(types: String = "albums,songs,playlists"): List<Track> {
+        val sf = effectiveStorefront()
+        return request(
+            path = "/v1/catalog/$sf/charts?types=$types&limit=14&" +
+                "extend=editorialArtwork,editorialVideo",
+            needsUserToken = false,
+        )
+    }
 
-    suspend fun liveRadio(): List<Track> = request(
-        path = "/v1/catalog/$storefront/stations?filter%5Bfeatured%5D=apple-music-live-radio",
-        needsUserToken = false,
-    )
+    suspend fun liveRadio(): List<Track> {
+        val sf = effectiveStorefront()
+        return request(
+            path = "/v1/catalog/$sf/stations?filter%5Bfeatured%5D=apple-music-live-radio",
+            needsUserToken = false,
+        )
+    }
 
     suspend fun search(term: String): List<Track> {
         if (term.isBlank()) return emptyList()
+        val sf = effectiveStorefront()
         val encoded = URLEncoder.encode(term.trim(), Charsets.UTF_8.name())
         return request(
-            path = "/v1/catalog/$storefront/search?term=$encoded&types=songs,albums,playlists,music-videos,stations&limit=15",
+            path = "/v1/catalog/$sf/search?term=$encoded&types=songs,albums,playlists,music-videos,stations&limit=15",
             needsUserToken = false,
         )
     }
@@ -239,9 +271,10 @@ class AppleMusicApi(
     /** Search only playable songs for cross-catalog resolution. */
     suspend fun searchSongs(term: String): List<Track> {
         if (term.isBlank()) return emptyList()
+        val sf = effectiveStorefront()
         val encoded = URLEncoder.encode(term.trim(), Charsets.UTF_8.name())
         return request(
-            path = "/v1/catalog/$storefront/search?term=$encoded&types=songs&limit=25",
+            path = "/v1/catalog/$sf/search?term=$encoded&types=songs&limit=25",
             needsUserToken = false,
         ).filter { it.catalogKind == CatalogKind.Song && it.catalogId != null }
     }
@@ -296,7 +329,7 @@ class AppleMusicApi(
         collection: Track,
         fetchPage: suspend (String, Boolean) -> JSONObject,
     ): List<Track> = withContext(parseDispatcher) {
-        val request = collection.collectionRequest(storefront)
+        val request = collection.collectionRequest(effectiveStorefront())
         val visited = mutableSetOf<String>()
         val tracks = mutableListOf<Track>()
         var path: String? = request.firstPage

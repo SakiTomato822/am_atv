@@ -33,6 +33,7 @@ class PlaybackQueueControllerTest {
         override var autoplayEnabled: Boolean = false
         // Existing radio scenarios exercise an explicitly chosen YTM provider.
         override var autoplaySource: AutoplaySource = AutoplaySource.YouTubeMusic
+        override var lowPerformanceMode: Boolean = false
     }
 
     private class FakeRecommendationProvider : RecommendationProvider {
@@ -825,5 +826,19 @@ class PlaybackQueueControllerTest {
         assertEquals(listOf(32L), controller.state.value.autoplay.map { it.entryId })
         assertTrue(controller.state.value.autoplay.single().wasPlayed)
         assertTrue(fakeRecommendations.requests.isEmpty())
+    }
+
+    @Test fun resetClearsAllQueuesAndRestoresDefaultState() {
+        val controller = createController()
+        val current = testTrack("1", "Current", "First")
+        controller.playContext(listOf(current, testTrack("2", "Upcoming", "Second")), startIndex = 0)
+        assertNotNull(controller.state.value.current)
+        assertEquals(1, controller.state.value.upNext.size)
+
+        controller.reset()
+        assertNull(controller.state.value.current)
+        assertTrue(controller.state.value.upNext.isEmpty())
+        assertTrue(controller.state.value.autoplay.isEmpty())
+        assertTrue(controller.state.value.history.isEmpty())
     }
 }
