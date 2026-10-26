@@ -40,6 +40,7 @@ class MusicServices(context: Context) : RecommendationProvider {
     private val appContext = context.applicationContext
     val contentCache = ContentCache.get(appContext)
     private val tokenStore = SecureTokenStore(appContext)
+    private val webAuthenticationSession = WebAuthenticationSession(appContext)
     private val developerTokens = DeveloperTokenClient(
         endpoint = BuildConfig.MUSICKIT_TOKEN_ENDPOINT,
         tokenStore = tokenStore,
@@ -164,6 +165,7 @@ class MusicServices(context: Context) : RecommendationProvider {
         )
 
     suspend fun webAuthenticationIntent(): Intent {
+        webAuthenticationSession.prepareForSignIn()
         val developerToken = developerTokens.token()
         return Intent(appContext, MusicKitWebAuthActivity::class.java).putExtra(
             MusicKitWebAuthActivity.EXTRA_DEVELOPER_TOKEN,
@@ -182,6 +184,7 @@ class MusicServices(context: Context) : RecommendationProvider {
     }
 
     fun signOut() {
+        webAuthenticationSession.markLocalWebSessionForReset()
         songSpectrum.setActive(false)
         mediaSession.clear()
         bridge.release()
@@ -195,6 +198,8 @@ class MusicServices(context: Context) : RecommendationProvider {
     suspend fun recentlyAdded(): List<Track> = api.recentlyAdded()
     suspend fun libraryPlaylists(): List<Track> = api.libraryPlaylists()
     suspend fun librarySongs(): List<Track> = api.librarySongs()
+    suspend fun libraryPlaylistsPage(nextPage: String? = null): LibraryPage = api.libraryPlaylistsPage(nextPage)
+    suspend fun librarySongsPage(nextPage: String? = null): LibraryPage = api.librarySongsPage(nextPage)
     suspend fun charts(types: String = "albums,songs,playlists"): List<Track> =
         api.charts(types)
     suspend fun liveRadio(): List<Track> = api.liveRadio()

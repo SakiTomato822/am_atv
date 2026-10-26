@@ -413,6 +413,12 @@ class MusicKitWebAuthActivity : Activity() {
                   <p id="error"></p>
                 </main>
                 <script>
+                  // This synthetic origin only holds our MusicKit bootstrap
+                  // state. Never let its old token bypass a fresh local sign-in.
+                  try {
+                    window.localStorage.clear();
+                    window.sessionStorage.clear();
+                  } catch (storageUnavailable) { }
                   var button = document.getElementById('signin');
                   var error = document.getElementById('error');
                   var labels = $labels;

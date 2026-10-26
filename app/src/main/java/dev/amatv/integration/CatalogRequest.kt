@@ -1,0 +1,64 @@
+package dev.amatv.integration
+
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import org.json.JSONObject
+
+/** HTTP catalog failures carry service meaning, unlike MusicKit's native component codes. */
+internal enum class CatalogFailureReason { Unavailable, Authorization, Transient }
+
+internal class CatalogRequestException(
+    val reason: CatalogFailureReason,
+    message: String,
+    val httpStatus: Int? = null,
+) : IllegalStateException(message)
+
+internal fun catalogHttpFailure(status: Int): CatalogFailureReason = when (status) {
+    404, 410 -> CatalogFailureReason.Unavailable
+    401, 403 -> CatalogFailureReason.Authorization
+    else -> CatalogFailureReason.Transient
+}
+
+/** A reflected/suspended request may wrap its original service error or cancellation. */
+internal fun Throwable.catalogFailureReason(): CatalogFailureReason? {
+    val causes = generateSequence(this) { it.cause }.take(8).toList()
+    causes.filterIsInstance<CancellationException>().firstOrNull()?.let { throw it }
+    return causes.filterIsInstance<CatalogRequestException>().firstOrNull()?.reason
+}
+
+/** Resolve metadata with bounded transport retries; auth and unavailable are final verdicts. */
+internal suspend fun <T> retryCatalogRequest(
+    fetch: suspend () -> T,
+    wait: suspend (Long) -> Unit = { delay(it) },
+): T {
+    val delays = longArrayOf(2_000L, 5_000L)
+    for (attempt in 0..delays.size) {
+        try {
+            return fetch()
+        } catch (error: Exception) {
+            if (classifyPlaybackFailure(null, null, null, error) != PlaybackFailureKind.Network ||
+                attempt == delays.size
+            ) throw error
+            wait(delays[attempt])
+        }
+    }
+    error("Catalog retry loop did not complete")
+}
+
+internal fun requireEquivalentCatalogSongId(
+    root: JSONObject,
+    originalId: String,
+    unavailableMessage: String,
+    transientMessage: String,
+): String {
+    equivalentCatalogSongId(root, originalId)?.let { return it }
+    val mapping = root.optJSONObject("meta")?.optJSONObject("filters")
+        ?.optJSONObject("equivalents")?.optJSONArray(originalId)
+    // An explicit empty mapping is Apple's unavailable verdict. Missing or
+    // inconsistent metadata is not proof that the recording should be skipped.
+    val unavailable = mapping != null && mapping.length() == 0
+    throw CatalogRequestException(
+        if (unavailable) CatalogFailureReason.Unavailable else CatalogFailureReason.Transient,
+        if (unavailable) unavailableMessage else transientMessage,
+    )
+}

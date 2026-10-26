@@ -33,7 +33,12 @@ internal suspend fun requestLyricsWithRetry(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            val reason = (error as? LyricsRequestException)?.reason ?: LyricsFailureReason.Transient
+            val catalogReason = error.catalogFailureReason()
+            val reason = (error as? LyricsRequestException)?.reason ?: when (catalogReason) {
+                CatalogFailureReason.Unavailable -> LyricsFailureReason.Unavailable
+                CatalogFailureReason.Authorization -> LyricsFailureReason.Authorization
+                CatalogFailureReason.Transient, null -> LyricsFailureReason.Transient
+            }
             if (reason == LyricsFailureReason.Unavailable) return LyricsRequestResult.Unavailable
             if (reason == LyricsFailureReason.Authorization || attempt == delays.size) {
                 return LyricsRequestResult.RetryableFailure(reason)

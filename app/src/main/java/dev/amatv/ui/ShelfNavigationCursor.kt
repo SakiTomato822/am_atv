@@ -56,13 +56,25 @@ internal class ShelfFocusRequest(position: ShelfFocusPosition, val anchorX: Floa
 }
 
 /** Rapid vertical input carries the original screen x while destination rows are being revealed. */
-internal class ShelfNavigationCursor(private val shelfSizes: List<Int>) {
+internal class ShelfNavigationCursor(private var shelfSizes: List<Int>) {
     var focused = ShelfFocusPosition(0, 0)
         private set
     private var pending: ShelfFocusRequest? = null
 
     val requestedPosition: ShelfFocusPosition
         get() = pending?.position ?: focused
+
+    /** Appending a library page must not reset the user's existing row/focus cursor. */
+    fun updateShelfSizes(sizes: List<Int>) {
+        shelfSizes = sizes
+        fun ShelfFocusPosition.clamped(): ShelfFocusPosition {
+            if (sizes.isEmpty()) return ShelfFocusPosition(0, 0)
+            val row = shelf.coerceIn(sizes.indices)
+            return ShelfFocusPosition(row, item.coerceIn(0, (sizes[row] - 1).coerceAtLeast(0)))
+        }
+        focused = focused.clamped()
+        pending?.let { it.position = it.position.clamped() }
+    }
 
     fun onFocused(shelf: Int, item: Int) {
         focused = ShelfFocusPosition(shelf, item)

@@ -238,6 +238,12 @@ internal class NativePlaybackIntent {
 /** MusicKit component codes are not documented HTTP status codes or account-token verdicts. */
 @Suppress("UNUSED_PARAMETER")
 internal fun classifyPlaybackFailure(type: Int?, code: Int?, componentCode: Int?, error: Throwable? = null): PlaybackFailureKind {
+    when (error?.catalogFailureReason()) {
+        CatalogFailureReason.Unavailable -> return PlaybackFailureKind.TrackUnavailable
+        CatalogFailureReason.Authorization -> return PlaybackFailureKind.Authorization
+        CatalogFailureReason.Transient -> return PlaybackFailureKind.Network
+        null -> Unit
+    }
     // Public MusicKit 1.1.1 types: IO=1, DRM=2, queue=3, lease=4,
     // Chromecast=5, explicit-content age verification=6. None means expired login.
     if (type == 1) return PlaybackFailureKind.Network

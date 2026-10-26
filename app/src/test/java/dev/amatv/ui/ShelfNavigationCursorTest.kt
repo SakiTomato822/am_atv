@@ -7,6 +7,21 @@ class ShelfNavigationCursorTest {
     private fun row(vararg cards: ShelfCardBounds) = ShelfRowBounds(1_000f, cards.toList())
     private fun card(index: Int, center: Float, width: Float = 180f) = ShelfCardBounds(index, center - width / 2f, width)
 
+    @Test fun appendingAPageKeepsFocusAndAllowsNavigationIntoTheNewItems() {
+        val cursor = ShelfNavigationCursor(listOf(101, 101))
+        cursor.onFocused(0, 100)
+        cursor.updateShelfSizes(listOf(201, 201))
+        assertEquals(ShelfFocusPosition(0, 100), cursor.focused)
+        assertEquals(ShelfFocusPosition(1, 150), cursor.request(1) { _, _ -> 150 }!!.position)
+    }
+
+    @Test fun removingAnExhaustedLoadMoreCardClampsTheCursorToExistingContent() {
+        val cursor = ShelfNavigationCursor(listOf(101, 101))
+        cursor.onFocused(0, 100)
+        cursor.updateShelfSizes(listOf(100, 101))
+        assertEquals(ShelfFocusPosition(0, 99), cursor.focused)
+    }
+
     @Test fun aScrolledSourceDoesNotForceTheSameIndexIntoAnUnscrolledRow() {
         val cursor = ShelfNavigationCursor(listOf(14, 14))
         cursor.onFocused(0, 10)

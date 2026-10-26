@@ -112,7 +112,8 @@ class AppleMusicApi(
 
     suspend fun userStorefront(): String {
         val currentUserToken = userToken()?.takeIf(String::isNotBlank)
-            ?: error(AppText.text(R.string.services_sign_in_apple_music))
+            ?: throw CatalogRequestException(CatalogFailureReason.Authorization,
+                AppText.text(R.string.services_sign_in_apple_music))
         userStorefrontCache?.takeIf { it.userToken == currentUserToken }?.let { return it.storefront }
         return userStorefrontMutex.withLock {
             userStorefrontCache?.takeIf { it.userToken == currentUserToken }?.let { return@withLock it.storefront }
@@ -193,40 +194,53 @@ class AppleMusicApi(
         needsUserToken = true,
     )
 
-    suspend fun libraryPlaylists(maxItems: Int = 200): List<Track> = paginatedLibraryRequest(
-        initialPath = "/v1/me/library/playlists?limit=100&include=catalog",
-        maxItems = maxItems,
-    )
+    suspend fun libraryPlaylists(): List<Track> = libraryPlaylistsPage().items
 
-    suspend fun librarySongs(maxItems: Int = 300): List<Track> = paginatedLibraryRequest(
-        initialPath = "/v1/me/library/songs?limit=100&include=catalog",
-        maxItems = maxItems,
-    )
+    suspend fun librarySongs(): List<Track> = librarySongsPage().items
 
-    private suspend fun paginatedLibraryRequest(
-        initialPath: String,
-        maxItems: Int,
-    ): List<Track> = withContext(parseDispatcher) {
-        val visited = mutableSetOf<String>()
-        val results = mutableListOf<Track>()
-        var path: String? = initialPath
-        while (path != null && results.size < maxItems) {
-            currentCoroutineContext().ensureActive()
-            if (!visited.add(path)) break
-            val root = requestRoot(path, needsUserToken = true)
-            val tracks = parseAllTracks(root)
-            results += tracks
-            val next = root.optString("next").takeIf { it.isNotBlank() && it != "null" }
-            path = if (results.size < maxItems) next else null
+    suspend fun libraryPlaylistsPage(nextPage: String? = null): LibraryPage =
+        libraryPage(LibraryCollection.Playlists, nextPage) { requestRoot(it, needsUserToken = true) }
+
+    suspend fun librarySongsPage(nextPage: String? = null): LibraryPage =
+        libraryPage(LibraryCollection.Songs, nextPage) { requestRoot(it, needsUserToken = true) }
+
+    internal suspend fun libraryPage(
+        collection: LibraryCollection,
+        nextPage: String? = null,
+        fetchPage: suspend (String) -> JSONObject,
+    ): LibraryPage = withContext(parseDispatcher) {
+        val request = collection.request
+        val path = nextPage?.let(request::nextPage) ?: request.firstPage
+        currentCoroutineContext().ensureActive()
+        val root = fetchPage(path)
+        val data = checkNotNull(root.optJSONArray("data")) {
+            AppText.text(R.string.services_playlist_tracks_unavailable)
         }
-        results.take(maxItems)
+        // Only root resources belong to this page. Catalog relationships enrich
+        // those resources; they must not become additional library shelf cards.
+        val tracks = buildList {
+            for (index in 0 until data.length()) {
+                val item = data.optJSONObject(index) ?: continue
+                val type = item.optString("type")
+                if (type != collection.resourceType) continue
+                val attributes = item.optJSONObject("attributes") ?: continue
+                val linked = item.optJSONObject("relationships")?.optJSONObject("catalog")
+                    ?.optJSONArray("data")?.optJSONObject(0)
+                attributes.toTrack(item.getString("id"), checkNotNull(catalogKind(type)), linked, type)?.let(::add)
+            }
+        }
+        val next = root.optString("next").takeIf { it.isNotBlank() && it != "null" }
+            ?.let(request::nextPage)
+        check(next != path) { AppText.text(R.string.services_playlist_page_repeated) }
+        LibraryPage(items = mergeLibraryPage(emptyList(), tracks), nextPage = next, requestedPage = path)
     }
 
     suspend fun resolveCatalogSongId(id: String): String {
         if (!id.startsWith("i.")) return id
         return libraryCatalogMutex.withLock {
             val account = userToken()?.takeIf(String::isNotBlank)
-                ?: error(AppText.text(R.string.services_sign_in_apple_music))
+                ?: throw CatalogRequestException(CatalogFailureReason.Authorization,
+                    AppText.text(R.string.services_sign_in_apple_music))
             if (libraryCatalogToken != account) {
                 libraryCatalogIds.clear()
                 libraryCatalogToken = account
@@ -237,13 +251,15 @@ class AppleMusicApi(
                 needsUserToken = true,
             )
             val item = root.optJSONArray("data")?.optJSONObject(0)
-                ?: error(AppText.text(R.string.services_library_song_catalog_missing, id))
+                ?: throw CatalogRequestException(CatalogFailureReason.Unavailable,
+                    AppText.text(R.string.services_library_song_catalog_missing, id))
             val linked = item.optJSONObject("relationships")?.optJSONObject("catalog")
                 ?.optJSONArray("data")?.optJSONObject(0)
             val resolved = catalogPlaybackId(id, "library-songs",
                 item.optJSONObject("attributes")?.optJSONObject("playParams"), linked)
-            check(resolved != id && !resolved.startsWith("i.")) {
-                AppText.text(R.string.services_uploaded_song_lyrics_unavailable)
+            if (resolved == id || resolved.startsWith("i.")) {
+                throw CatalogRequestException(CatalogFailureReason.Unavailable,
+                    AppText.text(R.string.services_uploaded_song_lyrics_unavailable))
             }
             // Library links can outlive a catalog release. Apple owns equivalence
             // across retired releases and account storefronts; never guess by title.
@@ -252,9 +268,11 @@ class AppleMusicApi(
                 path = "/v1/catalog/$sf/songs?filter%5Bequivalents%5D=${URLEncoder.encode(resolved, Charsets.UTF_8.name())}",
                 needsUserToken = false,
             )
-            val playable = checkNotNull(equivalentCatalogSongId(equivalents, resolved)) {
-                AppText.text(R.string.services_track_unavailable)
-            }
+            val playable = requireEquivalentCatalogSongId(
+                equivalents, resolved,
+                unavailableMessage = AppText.text(R.string.services_track_unavailable),
+                transientMessage = AppText.text(R.string.services_song_connection_failed),
+            )
             Log.i(TAG, "Library catalog mapping: $id -> $playable (sourceCatalog=$resolved, storefront=$sf)")
             libraryCatalogIds[id] = playable
             if (libraryCatalogIds.size > 64) libraryCatalogIds.remove(libraryCatalogIds.keys.first())
@@ -389,8 +407,9 @@ class AppleMusicApi(
     ): JSONObject = withContext(Dispatchers.IO) {
         val musicUserToken = userToken()
         if (needsUserToken) {
-            check(!musicUserToken.isNullOrBlank()) {
-                AppText.text(R.string.services_sign_in_apple_music)
+            if (musicUserToken.isNullOrBlank()) {
+                throw CatalogRequestException(CatalogFailureReason.Authorization,
+                    AppText.text(R.string.services_sign_in_apple_music))
             }
         }
 
@@ -430,13 +449,14 @@ class AppleMusicApi(
             status = retried.first
             body = retried.second
         }
-        check(status in 200..299) {
-            when (status) {
+        if (status !in 200..299) {
+            val message = when (status) {
                 HttpURLConnection.HTTP_UNAUTHORIZED,
                 HttpURLConnection.HTTP_FORBIDDEN,
                 -> AppText.text(R.string.services_apple_auth_http_error, status)
                 else -> AppText.text(R.string.services_apple_api_http_error, status)
             }
+            throw CatalogRequestException(catalogHttpFailure(status), message, status)
         }
         JSONObject(body)
     }

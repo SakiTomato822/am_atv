@@ -28,6 +28,7 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -86,6 +87,15 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
+/** The shelf retains its existing cards while one continuation page is requested. */
+data class LibraryShelfPagination(
+    val hasMore: Boolean,
+    val loading: Boolean = false,
+    val failed: Boolean = false,
+) {
+    val showAction: Boolean get() = hasMore || loading || failed
+}
+
 @Composable
 fun HomeScreen(
     destination: Destination,
@@ -95,6 +105,8 @@ fun HomeScreen(
     recentTracks: List<Track> = emptyList(),
     homeShelves: List<ContentShelf> = emptyList(),
     homeLoading: Boolean = false,
+    homeShelfPagination: Map<String, LibraryShelfPagination> = emptyMap(),
+    onLoadMoreShelf: (String) -> Unit = {},
     connectionState: MusicConnectionState = MusicConnectionState.Demo,
     setupMessage: String? = null,
     onSignIn: () -> Unit = {},
@@ -165,6 +177,8 @@ fun HomeScreen(
                         onSignIn = onSignIn,
                         onRetry = onRetry,
                         onOpenTrack = onOpenTrack,
+                        pagination = homeShelfPagination,
+                        onLoadMoreShelf = onLoadMoreShelf,
                         firstContentFocusRequester = firstContentFocusRequester,
                         navigationFocusRequester = navigationFocusRequester,
                     )
@@ -815,6 +829,8 @@ private fun HomeShelves(
     onSignIn: () -> Unit,
     onRetry: () -> Unit,
     onOpenTrack: (Track, List<Track>) -> Unit,
+    pagination: Map<String, LibraryShelfPagination> = emptyMap(),
+    onLoadMoreShelf: (String) -> Unit = {},
     firstContentFocusRequester: FocusRequester?,
     navigationFocusRequester: FocusRequester?,
 ) {
@@ -923,30 +939,70 @@ private fun HomeShelves(
         return
     }
 
-    val shelfKey = remember(shelves) {
-        shelves.map { it.id to it.items.size }
+    val shelfKey = remember(shelves) { shelves.map(ContentShelf::id) }
+    val resourceCounts = remember(shelves) { shelves.map { it.items.size } }
+    val shelfSizes = remember(shelves, pagination) {
+        shelves.map { it.items.size + if (pagination[it.id]?.showAction == true) 1 else 0 }
     }
     val columnState = rememberLazyListState()
     val rowStates = remember(shelfKey) {
         shelves.map { androidx.compose.foundation.lazy.LazyListState() }
     }
-    val itemFocusRequesters = remember(shelfKey, firstContentFocusRequester) {
-        shelves.mapIndexed { shelfIndex, shelf ->
-            shelf.items.mapIndexed { itemIndex, _ ->
-                if (shelfIndex == 0 && itemIndex == 0 && firstContentFocusRequester != null) {
-                    firstContentFocusRequester
-                } else FocusRequester()
-            }
+    val requesterRows = remember(shelfKey, firstContentFocusRequester) {
+        shelves.map { ArrayList<FocusRequester>() }
+    }
+    val itemFocusRequesters = requesterRows.mapIndexed { shelfIndex, row ->
+        while (row.size < shelfSizes[shelfIndex]) {
+            row += if (shelfIndex == 0 && row.isEmpty() && firstContentFocusRequester != null) {
+                firstContentFocusRequester
+            } else FocusRequester()
         }
+        row
     }
     // The key handler reads this holder without invalidating the whole LazyColumn
     // whenever focus moves one card horizontally.
-    val navigationCursor = remember(shelfKey) { ShelfNavigationCursor(shelves.map { it.items.size }) }
+    val navigationCursor = remember(shelfKey) { ShelfNavigationCursor(shelfSizes) }
+    SideEffect { navigationCursor.updateShelfSizes(shelfSizes) }
+    var pendingPageFocus by remember(shelfKey) { mutableStateOf<ShelfFocusPosition?>(null) }
     val scope = rememberCoroutineScope()
     val focusJob = remember { arrayOfNulls<kotlinx.coroutines.Job>(1) }
     val verticalPlan = remember { mutableStateOf<ShelfFocusScroll?>(null) }
     val density = LocalDensity.current
     val focusTargetsEnabled = LocalFocusTargetsEnabled.current
+    // A final one-item page replaces its continuation card without changing the
+    // total slot count. Resource counts must still trigger focus restoration.
+    LaunchedEffect(resourceCounts, shelfSizes, focusTargetsEnabled) {
+        val request = pendingPageFocus ?: return@LaunchedEffect
+        if (!focusTargetsEnabled) {
+            pendingPageFocus = null
+            return@LaunchedEffect
+        }
+        val shelf = shelves.getOrNull(request.shelf) ?: return@LaunchedEffect
+        val page = pagination[shelf.id]
+        if (shelf.items.size <= request.item && page?.showAction == true) return@LaunchedEffect
+        val target = request.item.coerceAtMost(shelf.items.lastIndex)
+        if (target < 0) {
+            pendingPageFocus = null
+            navigationFocusRequester?.let { runCatching { it.requestFocus() } }
+            return@LaunchedEffect
+        }
+        // The old continuation card is replaced at the same index by the first
+        // new resource. Existing row state, cards and focus requesters stay alive.
+        repeat(3) {
+            withFrameNanos { }
+            if (pendingPageFocus != request) return@LaunchedEffect
+            if (runCatching { itemFocusRequesters[request.shelf][target].requestFocus() }.getOrDefault(false)) {
+                pendingPageFocus = null
+                return@LaunchedEffect
+            }
+        }
+        if (pendingPageFocus == request) {
+            rowStates[request.shelf].scrollToItem(target)
+            withFrameNanos { }
+            runCatching { itemFocusRequesters[request.shelf][target].requestFocus() }
+            pendingPageFocus = null
+        }
+    }
     val cardWarmup = remember(shelfKey) { HomeCardWarmup() }
     DisposableEffect(cardWarmup) {
         onDispose { cardWarmup.close() }
@@ -988,6 +1044,12 @@ private fun HomeShelves(
         cardWarmup.notifyPrioritiesChanged()
     }
 
+    fun recordFocused(shelf: Int, item: Int) {
+        if (pendingPageFocus != ShelfFocusPosition(shelf, item)) pendingPageFocus = null
+        navigationCursor.onFocused(shelf, item)
+        cardWarmup.notifyPrioritiesChanged()
+    }
+
     fun shelfBounds(shelfIndex: Int): ShelfRowBounds {
         val row = rowStates[shelfIndex]
         val layout = row.layoutInfo
@@ -1000,7 +1062,7 @@ private fun HomeShelves(
         val shelf = shelves[shelfIndex]
         val viewportWidth = columnState.layoutInfo.viewportSize.width.toFloat()
         return estimateShelfRowBounds(
-            shelf.items.size, row.firstVisibleItemIndex, row.firstVisibleItemScrollOffset,
+            shelfSizes[shelfIndex], row.firstVisibleItemIndex, row.firstVisibleItemScrollOffset,
             with(density) { (if (shelf.featured) 210.dp else 168.dp).toPx() },
             with(density) { (if (shelf.featured) 18.dp else 20.dp).toPx() },
             with(density) { 14.dp.toPx() }, viewportWidth,
@@ -1102,6 +1164,7 @@ private fun HomeShelves(
                     }
                     when (event.nativeKeyEvent.keyCode) {
                         KeyEvent.KEYCODE_DPAD_UP -> {
+                            pendingPageFocus = null
                             if (!moveVerticalFocus(-1)) {
                                 cancelVerticalFocus()
                                 navigationFocusRequester?.let { requester ->
@@ -1111,6 +1174,7 @@ private fun HomeShelves(
                             true
                         }
                         KeyEvent.KEYCODE_DPAD_DOWN -> {
+                            pendingPageFocus = null
                             moveVerticalFocus(1)
                             true
                         }
@@ -1119,6 +1183,9 @@ private fun HomeShelves(
                         KeyEvent.KEYCODE_DPAD_CENTER,
                         KeyEvent.KEYCODE_ENTER,
                         KeyEvent.KEYCODE_BACK -> {
+                            if (event.nativeKeyEvent.keyCode != KeyEvent.KEYCODE_DPAD_CENTER &&
+                                event.nativeKeyEvent.keyCode != KeyEvent.KEYCODE_ENTER
+                            ) pendingPageFocus = null
                             cancelVerticalFocus()
                             false
                         }
@@ -1153,19 +1220,20 @@ private fun HomeShelves(
                     ) {
                         itemsIndexed(
                             shelf.items,
-                            key = { _, track -> "${shelf.id}:${track.id}" },
+                            key = { _, track -> "${shelf.id}:${track.resourceType}:${track.resourceId ?: track.id}" },
                         ) { itemIndex, track ->
                             val focusModifier = Modifier
                                 .automationId("shelf-$shelfIndex-item-$itemIndex-${track.catalogKind.name.lowercase()}")
                                 .focusRequester(itemFocusRequesters[shelfIndex][itemIndex])
                                 .focusProperties {
                                     if (itemIndex == 0) left = FocusRequester.Cancel
-                                    if (itemIndex == shelf.items.lastIndex) right = FocusRequester.Cancel
+                                    if (itemIndex == shelf.items.lastIndex &&
+                                        pagination[shelf.id]?.showAction != true
+                                    ) right = FocusRequester.Cancel
                                 }
                                 .onFocusChanged { state ->
                                     if (state.isFocused) {
-                                        navigationCursor.onFocused(shelfIndex, itemIndex)
-                                        cardWarmup.notifyPrioritiesChanged()
+                                        recordFocused(shelfIndex, itemIndex)
                                     }
                                 }
                             val mountPriority = {
@@ -1206,8 +1274,83 @@ private fun HomeShelves(
                                 )
                             }
                         }
+                        val page = pagination[shelf.id]
+                        if (page?.showAction == true) {
+                            // Its key changes after append so the previously focused
+                            // action does not drag the viewport to the new row end.
+                            item(key = "${shelf.id}:continuation:${shelf.items.size}") {
+                                LibraryLoadMoreCard(
+                                    pagination = page,
+                                    featured = shelf.featured,
+                                    onClick = {
+                                        if (!page.loading) {
+                                            pendingPageFocus = ShelfFocusPosition(shelfIndex, shelf.items.size)
+                                            onLoadMoreShelf(shelf.id)
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .automationId("shelf-$shelfIndex-load-more")
+                                        .focusRequester(itemFocusRequesters[shelfIndex][shelf.items.size])
+                                        .focusProperties {
+                                            if (shelf.items.isEmpty()) left = FocusRequester.Cancel
+                                            right = FocusRequester.Cancel
+                                        }
+                                        .onFocusChanged { state ->
+                                            if (state.isFocused) recordFocused(shelfIndex, shelf.items.size)
+                                        },
+                                )
+                            }
+                        }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryLoadMoreCard(
+    pagination: LibraryShelfPagination,
+    featured: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val label = stringResource(when {
+        pagination.loading -> R.string.browse_loading
+        pagination.failed -> R.string.browse_load_more_retry
+        else -> R.string.browse_load_more
+    })
+    FocusSurface(
+        onClick = onClick,
+        modifier = modifier
+            .width(if (featured) 210.dp else 168.dp)
+            .height(if (featured) 280.dp else 220.dp)
+            .semantics { stateDescription = label },
+        cornerRadius = 14.dp,
+        focusedScale = 1.035f,
+        focusedLift = 2.dp,
+        background = Color.White.copy(alpha = 0.06f),
+        focusedBackground = Color.White.copy(alpha = 0.14f),
+        padding = PaddingValues(16.dp),
+    ) {
+        Column(
+            Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            if (pagination.loading) AppleLoadingIndicator()
+            else Text("+", color = Color.White.copy(alpha = 0.75f), fontSize = 38.sp)
+            Spacer(Modifier.height(16.dp))
+            Text(label, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center)
+            if (pagination.failed) {
+                Text(
+                    stringResource(R.string.browse_load_more_error),
+                    color = Color.White.copy(alpha = 0.62f),
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
             }
         }
     }
