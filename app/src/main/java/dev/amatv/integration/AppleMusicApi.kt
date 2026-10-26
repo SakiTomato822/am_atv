@@ -103,6 +103,9 @@ class AppleMusicApi(
 
     private val parseDispatcher = Dispatchers.Default.limitedParallelism(2)
     private val userStorefrontMutex = Mutex()
+    private val libraryCatalogMutex = Mutex()
+    private var libraryCatalogToken: String? = null
+    private val libraryCatalogIds = LinkedHashMap<String, String>()
 
     @Volatile
     private var userStorefrontCache: UserStorefrontCache? = null
@@ -221,24 +224,42 @@ class AppleMusicApi(
 
     suspend fun resolveCatalogSongId(id: String): String {
         if (!id.startsWith("i.")) return id
-        val root = requestRoot(
-            path = "/v1/me/library/songs/${URLEncoder.encode(id, Charsets.UTF_8.name())}?include=catalog",
-            needsUserToken = true,
-        )
-        val item = root.optJSONArray("data")?.optJSONObject(0)
-            ?: error(AppText.text(R.string.services_library_song_catalog_missing, id))
-        val playParams = item.optJSONObject("attributes")?.optJSONObject("playParams")
-        val fromPlayParams = playParams?.optString("catalogId")?.takeIf(String::isNotBlank)
-            ?: playParams?.optString("reportingId")?.takeIf(String::isNotBlank)
-        if (fromPlayParams != null) return fromPlayParams
-        val fromRelationship = item.optJSONObject("relationships")
-            ?.optJSONObject("catalog")
-            ?.optJSONArray("data")
-            ?.optJSONObject(0)
-            ?.optString("id")
-            ?.takeIf(String::isNotBlank)
-        if (fromRelationship != null) return fromRelationship
-        throw IllegalStateException(AppText.text(R.string.services_uploaded_song_lyrics_unavailable))
+        return libraryCatalogMutex.withLock {
+            val account = userToken()?.takeIf(String::isNotBlank)
+                ?: error(AppText.text(R.string.services_sign_in_apple_music))
+            if (libraryCatalogToken != account) {
+                libraryCatalogIds.clear()
+                libraryCatalogToken = account
+            }
+            libraryCatalogIds[id]?.let { return@withLock it }
+            val root = requestRoot(
+                path = "/v1/me/library/songs/${URLEncoder.encode(id, Charsets.UTF_8.name())}?include=catalog",
+                needsUserToken = true,
+            )
+            val item = root.optJSONArray("data")?.optJSONObject(0)
+                ?: error(AppText.text(R.string.services_library_song_catalog_missing, id))
+            val linked = item.optJSONObject("relationships")?.optJSONObject("catalog")
+                ?.optJSONArray("data")?.optJSONObject(0)
+            val resolved = catalogPlaybackId(id, "library-songs",
+                item.optJSONObject("attributes")?.optJSONObject("playParams"), linked)
+            check(resolved != id && !resolved.startsWith("i.")) {
+                AppText.text(R.string.services_uploaded_song_lyrics_unavailable)
+            }
+            // Library links can outlive a catalog release. Apple owns equivalence
+            // across retired releases and account storefronts; never guess by title.
+            val sf = userStorefront()
+            val equivalents = requestRoot(
+                path = "/v1/catalog/$sf/songs?filter%5Bequivalents%5D=${URLEncoder.encode(resolved, Charsets.UTF_8.name())}",
+                needsUserToken = false,
+            )
+            val playable = checkNotNull(equivalentCatalogSongId(equivalents, resolved)) {
+                AppText.text(R.string.services_track_unavailable)
+            }
+            Log.i(TAG, "Library catalog mapping: $id -> $playable (sourceCatalog=$resolved, storefront=$sf)")
+            libraryCatalogIds[id] = playable
+            if (libraryCatalogIds.size > 64) libraryCatalogIds.remove(libraryCatalogIds.keys.first())
+            playable
+        }
     }
 
     suspend fun charts(types: String = "albums,songs,playlists"): List<Track> {
@@ -496,13 +517,7 @@ class AppleMusicApi(
     ): Track? {
         val catalogAttrs = linkedCatalog?.optJSONObject("attributes")
         val playParams = optJSONObject("playParams")
-        val catalogPlayParams = catalogAttrs?.optJSONObject("playParams")
-        val resolvedCatalogId = playParams?.optString("catalogId")?.takeIf(String::isNotBlank)
-            ?: playParams?.optString("reportingId")?.takeIf(String::isNotBlank)
-            ?: playParams?.optString("globalId")?.takeIf(String::isNotBlank)
-            ?: linkedCatalog?.optString("id")?.takeIf(String::isNotBlank)
-            ?: catalogPlayParams?.optString("id")?.takeIf(String::isNotBlank)
-            ?: id
+        val resolvedCatalogId = catalogPlaybackId(id, resourceType, playParams, linkedCatalog)
 
         val rawName = optString("name").ifBlank {
             catalogAttrs?.optString("name").orEmpty()
@@ -654,3 +669,43 @@ internal fun parseUserStorefrontId(root: JSONObject): String? = root.optJSONArra
     ?.trim()
     ?.lowercase(Locale.ROOT)
     ?.takeIf { it.matches(Regex("[a-z]{2}")) }
+
+/** Reporting/global IDs are not the catalog resource's current playback identity. */
+internal fun catalogPlaybackId(
+    resourceId: String,
+    resourceType: String?,
+    playParams: JSONObject?,
+    linkedCatalog: JSONObject?,
+): String {
+    fun JSONObject?.identifier(key: String): String? = this?.optString(key)
+        ?.takeIf { it.isNotBlank() && it != "null" }
+    val isLibrary = resourceType?.startsWith("library-") == true ||
+        resourceId.startsWith("i.") || resourceId.startsWith("l.")
+    return if (isLibrary) {
+        linkedCatalog.identifier("id")
+            ?: linkedCatalog?.optJSONObject("attributes")?.optJSONObject("playParams").identifier("id")
+            ?: playParams.identifier("catalogId")
+            ?: resourceId
+    } else {
+        playParams.identifier("id") ?: resourceId
+    }
+}
+
+/** Only Apple's explicit per-source mapping may relink a library recording. */
+internal fun equivalentCatalogSongId(root: JSONObject, originalId: String): String? {
+    val mappings = root.optJSONObject("meta")?.optJSONObject("filters")
+        ?.optJSONObject("equivalents")?.optJSONArray(originalId) ?: return null
+    val targets = (0 until mappings.length()).mapNotNull { index ->
+        mappings.optJSONObject(index)?.takeIf { it.optString("type") == "songs" }
+            ?.optString("id")?.takeIf { it.isNotBlank() && it != "null" }
+    }.distinct()
+    val target = targets.singleOrNull() ?: return null
+    val data = root.optJSONArray("data") ?: return null
+    val resource = (0 until data.length()).firstNotNullOfOrNull { index ->
+        data.optJSONObject(index)?.takeIf {
+            it.optString("id") == target && it.optString("type") == "songs"
+        }
+    } ?: return null
+    val playParams = resource.optJSONObject("attributes")?.optJSONObject("playParams") ?: return null
+    return target.takeIf { playParams.optString("id") == target && playParams.optString("kind") == "song" }
+}

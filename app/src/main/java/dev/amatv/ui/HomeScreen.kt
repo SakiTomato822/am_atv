@@ -247,12 +247,12 @@ private fun AccountScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFF3A1822))
+                    .background(Color.White.copy(alpha = 0.07f))
                     .padding(horizontal = 18.dp, vertical = 14.dp),
             ) {
                 Text(
-                    text = stringResource(R.string.browse_connection_error),
-                    color = Color(0xFFFFC6CF),
+                    text = setupMessage,
+                    color = Color.White.copy(alpha = 0.82f),
                     fontSize = 15.sp,
                     lineHeight = 22.sp,
                 )

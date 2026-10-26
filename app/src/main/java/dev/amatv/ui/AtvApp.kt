@@ -77,6 +77,7 @@ import dev.amatv.integration.PlaybackPreferences
 import dev.amatv.integration.PlaybackSession
 import dev.amatv.integration.PlaybackRepeatMode
 import dev.amatv.integration.LyricsRequestResult
+import dev.amatv.integration.LyricsLocalizationRequest
 import dev.amatv.integration.requestLyricsWithRetry
 import dev.amatv.integration.PlaybackFailureKind
 import dev.amatv.integration.classifyPlaybackFailure
@@ -87,6 +88,7 @@ import dev.amatv.model.CatalogOpenAction
 import dev.amatv.model.openAction
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.Destination
+import dev.amatv.model.LyricLine
 import dev.amatv.model.Track
 import dev.amatv.model.matchesPlaybackQueueEntry
 import dev.amatv.playback.ContextKind
@@ -108,6 +110,20 @@ private suspend fun <T> cancellableResult(block: suspend () -> T): Result<T> = t
     Result.failure(error)
 }
 
+private enum class LyricsLoadPhase { Idle, Loading, Ready, Unavailable, Failed }
+
+private data class ActiveLyricsState(
+    val trackIdentity: String,
+    val lines: List<LyricLine>,
+    val resolvedVariant: String? = null,
+    val phase: LyricsLoadPhase = LyricsLoadPhase.Idle,
+)
+
+/** Catalog identity survives MusicKit's different browse and now-playing wrapper ids. */
+internal fun Track.lyricsIdentity(): String = catalogId?.takeIf(String::isNotBlank) ?: id
+
+internal fun lyricsCacheKey(trackIdentity: String, variant: String): String = "$trackIdentity|$variant"
+
 private fun demoShelves(): Map<Destination, List<ContentShelf>> = mapOf(
     Destination.Home to listOf(
         ContentShelf("demo-picks", AppText.text(R.string.app_demo_top_picks), MockCatalog.tracks, featured = true),
@@ -125,6 +141,7 @@ private fun demoShelves(): Map<Destination, List<ContentShelf>> = mapOf(
 fun AmAtvApp() {
     val context = LocalContext.current
     val contentLanguageTag = LocalConfiguration.current.locales.toLanguageTags()
+    val lyricsLanguageTag = LocalConfiguration.current.locales[0].toLanguageTag()
     val scope = rememberCoroutineScope()
     val services = remember(context) { MusicServices(context) }
     val cacheSettings by services.contentCache.settings.collectAsState()
@@ -213,17 +230,54 @@ fun AmAtvApp() {
     var shuffleEnabled by remember { mutableStateOf(playbackPrefs.shuffleEnabled) }
     var autoplayEnabled by remember { mutableStateOf(playbackPrefs.autoplayEnabled) }
     var lyricOffsetMs by remember { mutableLongStateOf(playbackPrefs.lyricOffsetMs) }
+    var lyricTranslationEnabled by remember {
+        mutableStateOf(playbackPrefs.lyricTranslationEnabled)
+    }
+    var lyricPronunciationEnabled by remember {
+        mutableStateOf(playbackPrefs.lyricPronunciationEnabled)
+    }
+    var lyricTranslationLanguageTag by remember {
+        mutableStateOf(playbackPrefs.lyricTranslationLanguageTag)
+    }
+    var lyricPronunciationLanguageTag by remember {
+        mutableStateOf(playbackPrefs.lyricPronunciationLanguageTag)
+    }
+    val effectiveLyricsLanguageTag = lyricTranslationLanguageTag.ifBlank { lyricsLanguageTag }
+    val lyricsLocalization = remember(
+        effectiveLyricsLanguageTag, lyricPronunciationLanguageTag,
+        lyricTranslationEnabled, lyricPronunciationEnabled,
+    ) {
+        LyricsLocalizationRequest(
+            languageTag = effectiveLyricsLanguageTag,
+            pronunciationLanguageTag = lyricPronunciationLanguageTag,
+            includeTranslations = lyricTranslationEnabled,
+            includePronunciations = lyricPronunciationEnabled,
+        )
+    }
+    val lyricsVariant = remember(lyricsLocalization) {
+        "${lyricsLocalization.languageTag}|trans=${lyricsLocalization.includeTranslations}" +
+            "|pron=${lyricsLocalization.includePronunciations}" +
+            "|pronLang=${lyricsLocalization.pronunciationLanguageTag}"
+    }
     var canSetRepeat by remember { mutableStateOf(false) }
     var canSetShuffle by remember { mutableStateOf(false) }
     var pendingRestore by remember {
         mutableStateOf(startupCheckpoint?.takeIf { track.catalogId != null })
     }
     var lyricsByTrackId by remember {
-        mutableStateOf<Map<String, List<dev.amatv.model.LyricLine>>>(emptyMap())
+        mutableStateOf<Map<String, List<LyricLine>>>(emptyMap())
     }
     var lyricsLookupFailures by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var lyricsLoadingTrackId by remember { mutableStateOf<String?>(null) }
-    var lyricsTransientFailureTrackId by remember { mutableStateOf<String?>(null) }
+    var activeLyrics by remember {
+        mutableStateOf(
+            ActiveLyricsState(
+                trackIdentity = track.lyricsIdentity(),
+                lines = track.lyrics,
+                resolvedVariant = lyricsVariant.takeUnless { lyricsLocalization.enabled },
+                phase = if (track.lyrics.isEmpty()) LyricsLoadPhase.Idle else LyricsLoadPhase.Ready,
+            ),
+        )
+    }
     var lyricsRetryNonce by remember { mutableIntStateOf(0) }
     var playbackRequestJob by remember { mutableStateOf<Job?>(null) }
     var selectionGeneration by remember { mutableLongStateOf(0L) }
@@ -237,17 +291,45 @@ fun AmAtvApp() {
     var pendingRequestedSongCatalogId by remember { mutableStateOf<String?>(null) }
     // Read only by callbacks/effects: native position polls do not recompose the app.
     val systemPlaybackSnapshot = remember { mutableStateOf<PlaybackSnapshot?>(null) }
+    lateinit var queueController: PlaybackQueueController
 
     fun withCachedLyrics(candidate: Track): Track {
-        if (candidate.lyrics.isNotEmpty()) return candidate
-        val cached = lyricsByTrackId[candidate.id].orEmpty()
-        return if (cached.isEmpty()) candidate else candidate.copy(lyrics = cached)
+        val identity = candidate.lyricsIdentity()
+        val cached = lyricsByTrackId[lyricsCacheKey(identity, lyricsVariant)].orEmpty()
+        val active = activeLyrics.lines.takeIf {
+            activeLyrics.trackIdentity == identity && it.isNotEmpty()
+        }.orEmpty()
+        val lines = cached.ifEmpty { active }.ifEmpty { candidate.lyrics }
+        return if (lines == candidate.lyrics) candidate else candidate.copy(lyrics = lines)
     }
 
-    fun cacheLyrics(id: String, lines: List<dev.amatv.model.LyricLine>) {
+    fun cacheLyrics(identity: String, variant: String, lines: List<LyricLine>) {
         // The persistent TTML store owns history; don't grow TV heap usage all night.
-        val recent = (lyricsByTrackId - id) + (id to lines)
+        val key = lyricsCacheKey(identity, variant)
+        val recent = (lyricsByTrackId - key) + (key to lines)
         lyricsByTrackId = recent.entries.toList().takeLast(24).associate { it.toPair() }
+    }
+
+    fun acceptResolvedLibraryTrack(original: Track, resolved: Track): Track {
+        if (original.catalogId == resolved.catalogId) return resolved
+        val oldIdentity = original.lyricsIdentity()
+        val newIdentity = resolved.lyricsIdentity()
+        val currentLines = activeLyrics.lines.takeIf { activeLyrics.trackIdentity == oldIdentity }
+            ?: original.lyrics
+        val updated = resolved.copy(lyrics = currentLines)
+        queueController.updateLibraryCatalogIdentity(original, updated)
+        if (track.lyricsIdentity() == oldIdentity && track.resourceId == original.resourceId) {
+            lyricsByTrackId = lyricsByTrackId.entries.associate { (key, lines) ->
+                val migrated = if (key.startsWith("$oldIdentity|")) newIdentity + key.removePrefix(oldIdentity) else key
+                migrated to lines
+            }
+            lyricsLookupFailures = lyricsLookupFailures - oldIdentity
+            if (activeLyrics.trackIdentity == oldIdentity) {
+                activeLyrics = activeLyrics.copy(trackIdentity = newIdentity)
+            }
+            track = updated
+        }
+        return updated
     }
 
     fun refreshAllContent() {
@@ -256,7 +338,9 @@ fun AmAtvApp() {
         loadingDestinations = setOf(destination)
         serviceMessage = null
         lyricsLookupFailures = emptySet()
-        lyricsTransientFailureTrackId = null
+        if (activeLyrics.phase == LyricsLoadPhase.Failed) {
+            activeLyrics = activeLyrics.copy(phase = LyricsLoadPhase.Idle)
+        }
         reloadNonce++
     }
 
@@ -279,8 +363,9 @@ fun AmAtvApp() {
                     hasUserPlaybackRequest = false
                     expectedPlaybackGeneration = 0L
                     playbackMessage = null
+                    lyricsByTrackId = emptyMap()
                     lyricsLookupFailures = emptySet()
-                    lyricsTransientFailureTrackId = null
+                    activeLyrics = activeLyrics.copy(phase = LyricsLoadPhase.Idle)
                     connectionState = MusicConnectionState.SignedIn
                     shelvesByDestination = emptyMap()
                     loadingDestinations = setOf(Destination.Home)
@@ -314,9 +399,15 @@ fun AmAtvApp() {
         pendingRequestedSongCatalogId = nextTrack.catalogId.takeIf { nextTrack.catalogKind == CatalogKind.Song }
         playbackRequestJob = scope.launch {
             try {
+                val resolved = services.resolvePlayableTrack(nextTrack)
+                if (selection != selectionGeneration) return@launch
+                val playableTrack = acceptResolvedLibraryTrack(nextTrack, resolved)
+                pendingRequestedSongCatalogId = playableTrack.catalogId.takeIf {
+                    playableTrack.catalogKind == CatalogKind.Song
+                }
                 // Authorize/prepare silently. Re-read the latest user intent after
                 // token I/O, so a pause during preparation cannot be overwritten.
-                val nativeGeneration = services.preparePlayback(nextTrack, resumePositionMs, playWhenReady = false)
+                val nativeGeneration = services.preparePlayback(playableTrack, resumePositionMs, playWhenReady = false)
                 if (selection != selectionGeneration) return@launch
                 expectedPlaybackGeneration = nativeGeneration
                 if (playWhenReady) services.play() else services.pause()
@@ -343,7 +434,9 @@ fun AmAtvApp() {
 
     fun requestPlayback() {
         playWhenReady = true
-        if (lyricsTransientFailureTrackId == track.id) lyricsRetryNonce++
+        if (activeLyrics.trackIdentity == track.lyricsIdentity() &&
+            activeLyrics.phase == LyricsLoadPhase.Failed
+        ) lyricsRetryNonce++
         pendingRestore = pendingRestore?.copy(wasPlaying = true)
         if (!startupSessionLoaded && selectionGeneration == 0L) return
         // Play while Next is resolving belongs to the incoming entry, not
@@ -366,8 +459,11 @@ fun AmAtvApp() {
     }
 
     fun retryCurrentLyrics() {
-        lyricsLookupFailures = lyricsLookupFailures - track.id
-        lyricsTransientFailureTrackId = null
+        val identity = track.lyricsIdentity()
+        lyricsLookupFailures = lyricsLookupFailures - identity
+        if (activeLyrics.trackIdentity == identity) {
+            activeLyrics = activeLyrics.copy(phase = LyricsLoadPhase.Idle)
+        }
         lyricsRetryNonce++
     }
 
@@ -437,6 +533,18 @@ fun AmAtvApp() {
         }
         positionAnchorMs = 0L
         val initialTrack = withCachedLyrics(nextTrack)
+        val nextIdentity = nextTrack.lyricsIdentity()
+        val hasResolvedVariant = lyricsCacheKey(nextIdentity, lyricsVariant) in lyricsByTrackId
+        if (activeLyrics.trackIdentity != nextIdentity || activeLyrics.lines != initialTrack.lyrics) {
+            activeLyrics = ActiveLyricsState(
+                trackIdentity = nextIdentity,
+                lines = initialTrack.lyrics,
+                resolvedVariant = lyricsVariant.takeIf {
+                    hasResolvedVariant || (!lyricsLocalization.enabled && initialTrack.lyrics.isNotEmpty())
+                },
+                phase = if (initialTrack.lyrics.isEmpty()) LyricsLoadPhase.Idle else LyricsLoadPhase.Ready,
+            )
+        }
         track = initialTrack
         advancingEndedTrackId = null
         hasCurrentTrack = true
@@ -462,13 +570,14 @@ fun AmAtvApp() {
         }
     }
 
-    val queueController = remember {
+    val latestTrackPlayback by rememberUpdatedState<(Track) -> Unit>(::executeTrackPlayback)
+    queueController = remember {
         PlaybackQueueController(
             scope = scope,
             services = services,
             playbackPrefs = playbackPrefs,
             onPlayTrack = { nextTrack ->
-                executeTrackPlayback(nextTrack)
+                latestTrackPlayback(nextTrack)
             },
         )
     }
@@ -971,13 +1080,25 @@ fun AmAtvApp() {
         }
     }
 
-    val lyricsRequestReady = hasUserPlaybackRequest && playbackPrepared &&
-        connectionState == MusicConnectionState.SignedIn && expectedPlaybackGeneration != 0L
+    // Lyrics use the account API, not the native audio engine. Wait for the full
+    // session (including deferred queue selection) before resolving the current
+    // song; lyricsFor then awaits the account storefront and bearer internally.
+    val lyricsRequestReady = startupSessionLoaded && hasCurrentTrack &&
+        connectionState == MusicConnectionState.SignedIn
+    val currentLyricsIdentity = track.lyricsIdentity()
+    val currentLyricsLines = if (activeLyrics.trackIdentity == currentLyricsIdentity) {
+        activeLyrics.lines
+    } else {
+        track.lyrics
+    }
 
     val prefetchTargets = remember(queueState.current?.entryId, queueState.upNext, queueState.autoplay) {
         (queueState.upNext + queueState.autoplay).take(2).map { it.track }
     }
-    LaunchedEffect(prefetchTargets, isPlaying, cacheSettings, lyricsRequestReady, track.lyrics.isEmpty(), lyricsLookupFailures) {
+    LaunchedEffect(
+        prefetchTargets, isPlaying, cacheSettings, lyricsRequestReady, currentLyricsLines.isEmpty(),
+        lyricsLookupFailures, lyricsVariant,
+    ) {
         if (!lyricsRequestReady || !isPlaying || !cacheSettings.enabled || !cacheSettings.prefetchNextTwo || cacheSettings.clearing) {
             return@LaunchedEffect
         }
@@ -988,52 +1109,166 @@ fun AmAtvApp() {
         for (candidate in prefetchTargets) {
             if (candidate.catalogKind != CatalogKind.Song) continue
             candidate.artworkUrl?.let { ArtworkImages.prefetch(context, it) }
-            if ((track.lyrics.isNotEmpty() || track.id in lyricsLookupFailures) &&
-                candidate.catalogId != null && candidate.lyrics.isEmpty() &&
-                candidate.id !in lyricsByTrackId && candidate.id !in lyricsLookupFailures
+            val candidateIdentity = candidate.lyricsIdentity()
+            val candidateLyricsKey = lyricsCacheKey(candidateIdentity, lyricsVariant)
+            if ((currentLyricsLines.isNotEmpty() || currentLyricsIdentity in lyricsLookupFailures) &&
+                candidate.catalogId != null &&
+                (candidate.lyrics.isEmpty() || lyricsLocalization.enabled) &&
+                candidateLyricsKey !in lyricsByTrackId && candidateIdentity !in lyricsLookupFailures
             ) {
-                cancellableResult {
-                    val lines = services.lyricsFor(candidate)
-                    if (lines.isNotEmpty() && cacheGeneration == services.contentCache.generation) {
-                        cacheLyrics(candidate.id, lines)
+                when (val result = requestLyricsWithRetry({
+                    services.lyricsFor(candidate, lyricsLocalization)
+                })) {
+                    is LyricsRequestResult.Available -> {
+                        if (cacheGeneration == services.contentCache.generation) {
+                            cacheLyrics(candidateIdentity, lyricsVariant, result.lines)
+                        }
                     }
+                    LyricsRequestResult.Unavailable -> {
+                        // A 200 response without TTML is a definitive miss. Remember it so
+                        // unstable queue projections cannot restart this prefetch every poll.
+                        lyricsLookupFailures = lyricsLookupFailures + candidateIdentity
+                    }
+                    is LyricsRequestResult.RetryableFailure -> Unit
                 }
             }
         }
     }
     LaunchedEffect(cacheSettings.revision) {
         // Preserve the displayed line; clearing assets must not interrupt the current song.
-        lyricsByTrackId = if (track.lyrics.isEmpty()) emptyMap() else mapOf(track.id to track.lyrics)
+        lyricsByTrackId = if (activeLyrics.lines.isEmpty()) {
+            emptyMap()
+        } else {
+            mapOf(
+                lyricsCacheKey(
+                    activeLyrics.trackIdentity,
+                    activeLyrics.resolvedVariant ?: lyricsVariant,
+                ) to activeLyrics.lines,
+            )
+        }
         lyricsLookupFailures = emptySet()
-        lyricsTransientFailureTrackId = null
+        if (activeLyrics.phase == LyricsLoadPhase.Failed) {
+            activeLyrics = activeLyrics.copy(phase = LyricsLoadPhase.Idle)
+        }
     }
 
-    LaunchedEffect(track.id, track.lyrics.isEmpty(), lyricsRequestReady, reloadNonce, lyricsRetryNonce, cacheSettings.revision) {
-        if (!lyricsRequestReady || track.catalogId == null || track.catalogKind != CatalogKind.Song ||
-            track.lyrics.isNotEmpty() || track.id in lyricsLookupFailures
+    LaunchedEffect(
+        currentLyricsIdentity, track.catalogKind, lyricsRequestReady, reloadNonce, lyricsRetryNonce,
+        cacheSettings.revision, lyricsVariant,
+    ) {
+        if (!lyricsRequestReady || track.catalogId == null || track.catalogKind != CatalogKind.Song) {
+            return@LaunchedEffect
+        }
+        val lookupIdentity = currentLyricsIdentity
+        val originalTrack = track
+        val resolvedTrack = cancellableResult { services.resolvePlayableTrack(originalTrack) }.getOrElse {
+            activeLyrics = activeLyrics.copy(phase = LyricsLoadPhase.Failed)
+            Log.w("AMATV-Lyrics", "Library catalog resolution failed (${it.javaClass.simpleName})")
+            return@LaunchedEffect
+        }
+        if (resolvedTrack.catalogId != originalTrack.catalogId) {
+            // Re-key the same library song before any request/cache lookup. The
+            // changed identity reruns this effect without flashing empty lyrics.
+            acceptResolvedLibraryTrack(originalTrack, resolvedTrack)
+            return@LaunchedEffect
+        }
+        val currentLyricsKey = lyricsCacheKey(lookupIdentity, lyricsVariant)
+        lyricsByTrackId[currentLyricsKey]?.let { cached ->
+            activeLyrics = ActiveLyricsState(
+                trackIdentity = lookupIdentity,
+                lines = cached,
+                resolvedVariant = lyricsVariant,
+                phase = LyricsLoadPhase.Ready,
+            )
+            return@LaunchedEffect
+        }
+        if (activeLyrics.trackIdentity == lookupIdentity &&
+            activeLyrics.resolvedVariant == lyricsVariant &&
+            activeLyrics.phase == LyricsLoadPhase.Ready
         ) return@LaunchedEffect
+
+        // The canonical lines are the stable UI baseline. Changing language never
+        // clears them and never exposes a half-parsed localization document.
+        val baseline = (if (activeLyrics.trackIdentity == lookupIdentity) {
+            activeLyrics.lines
+        } else {
+            track.lyrics
+        }).map { it.forDisplay(showTranslation = false, showPronunciation = false) }
+
+        if (!lyricsLocalization.enabled && baseline.isNotEmpty()) {
+            cacheLyrics(lookupIdentity, lyricsVariant, baseline)
+            activeLyrics = ActiveLyricsState(
+                trackIdentity = lookupIdentity,
+                lines = baseline,
+                resolvedVariant = lyricsVariant,
+                phase = LyricsLoadPhase.Ready,
+            )
+            return@LaunchedEffect
+        }
+        if (lookupIdentity in lyricsLookupFailures && baseline.isEmpty()) {
+            activeLyrics = ActiveLyricsState(
+                trackIdentity = lookupIdentity,
+                lines = emptyList(),
+                resolvedVariant = lyricsVariant,
+                phase = LyricsLoadPhase.Unavailable,
+            )
+            return@LaunchedEffect
+        }
         val lookupTrack = track
-        lyricsLoadingTrackId = lookupTrack.id
-        lyricsTransientFailureTrackId = null
-        try {
-            when (val result = requestLyricsWithRetry({ services.lyricsFor(lookupTrack) })) {
-                is LyricsRequestResult.Available -> {
-                    cacheLyrics(lookupTrack.id, result.lines)
-                    lyricsLookupFailures = lyricsLookupFailures - lookupTrack.id
-                    if (track.id == lookupTrack.id) track = track.copy(lyrics = result.lines)
-                }
-                LyricsRequestResult.Unavailable -> {
-                    lyricsLookupFailures = lyricsLookupFailures + lookupTrack.id
-                }
-                is LyricsRequestResult.RetryableFailure -> {
-                    // This is not a "no lyrics" cache entry. Readiness changes,
-                    // reauthentication and manual refresh can retry the same song.
-                    lyricsTransientFailureTrackId = lookupTrack.id
-                    Log.w("AMATV-Lyrics", "Lyrics temporarily unavailable (${result.reason})")
+        activeLyrics = ActiveLyricsState(
+            trackIdentity = lookupIdentity,
+            lines = baseline,
+            resolvedVariant = null,
+            phase = LyricsLoadPhase.Loading,
+        )
+        Log.i("AMATV-Lyrics", "Loading current lyrics: $lookupIdentity " +
+            "source=${lookupTrack.resourceType}:${lookupTrack.resourceId} (audioPrepared=$playbackPrepared)")
+        when (val result = requestLyricsWithRetry({
+            services.lyricsFor(lookupTrack, lyricsLocalization)
+        })) {
+            is LyricsRequestResult.Available -> {
+                if (track.lyricsIdentity() != lookupIdentity) return@LaunchedEffect
+                cacheLyrics(lookupIdentity, lyricsVariant, result.lines)
+                lyricsLookupFailures = lyricsLookupFailures - lookupIdentity
+                activeLyrics = ActiveLyricsState(
+                    trackIdentity = lookupIdentity,
+                    lines = result.lines,
+                    resolvedVariant = lyricsVariant,
+                    phase = LyricsLoadPhase.Ready,
+                )
+            }
+            LyricsRequestResult.Unavailable -> {
+                if (track.lyricsIdentity() != lookupIdentity) return@LaunchedEffect
+                if (baseline.isEmpty()) {
+                    lyricsLookupFailures = lyricsLookupFailures + lookupIdentity
+                    activeLyrics = ActiveLyricsState(
+                        trackIdentity = lookupIdentity,
+                        lines = emptyList(),
+                        resolvedVariant = lyricsVariant,
+                        phase = LyricsLoadPhase.Unavailable,
+                    )
+                } else {
+                    // Lyrics exist but this translation/pronunciation variant does not.
+                    cacheLyrics(lookupIdentity, lyricsVariant, baseline)
+                    activeLyrics = ActiveLyricsState(
+                        trackIdentity = lookupIdentity,
+                        lines = baseline,
+                        resolvedVariant = lyricsVariant,
+                        phase = LyricsLoadPhase.Ready,
+                    )
                 }
             }
-        } finally {
-            if (lyricsLoadingTrackId == lookupTrack.id) lyricsLoadingTrackId = null
+            is LyricsRequestResult.RetryableFailure -> {
+                if (track.lyricsIdentity() != lookupIdentity) return@LaunchedEffect
+                // Keep the canonical lines visible and expose a retryable state only.
+                activeLyrics = ActiveLyricsState(
+                    trackIdentity = lookupIdentity,
+                    lines = baseline,
+                    resolvedVariant = null,
+                    phase = LyricsLoadPhase.Failed,
+                )
+                Log.w("AMATV-Lyrics", "Lyrics temporarily unavailable (${result.reason})")
+            }
         }
     }
 
@@ -1448,8 +1683,13 @@ fun AmAtvApp() {
                             waitingQueueEntryId = null
                             playbackPrepared = false
                             hasUserPlaybackRequest = false
+                            hasCurrentTrack = false
+                            lyricsByTrackId = emptyMap()
                             lyricsLookupFailures = emptySet()
-                            lyricsTransientFailureTrackId = null
+                            activeLyrics = ActiveLyricsState(
+                                trackIdentity = track.lyricsIdentity(),
+                                lines = emptyList(),
+                            )
                             expectedPlaybackGeneration = 0L
                             pendingRestore = null
                             connectionState = services.connectionState
@@ -1510,7 +1750,7 @@ fun AmAtvApp() {
                         LocalFocusFrameVisibility provides nowPlayingAlpha,
                     ) {
                     PlayerScreen(
-                        track = track,
+                        track = track.copy(lyrics = currentLyricsLines),
                         positionAnchorMs = positionAnchorMs,
                         playStartedRealtimeMs = playStartedRealtimeMs,
                         isPlaying = isPlaying,
@@ -1535,9 +1775,12 @@ fun AmAtvApp() {
                         autoplaySource = queueState.source,
                         onToggleAutoplaySource = { dispatchQueueAction(StartupQueueAction.ToggleSource) },
                         onClearQueue = { dispatchQueueAction(StartupQueueAction.ClearUpcoming) },
-                        lyricsLoading = lyricsLoadingTrackId == track.id,
-                        lyricsLookupFailed = track.id in lyricsLookupFailures,
-                        lyricsTransientFailure = lyricsTransientFailureTrackId == track.id,
+                        lyricsLoading = activeLyrics.trackIdentity == currentLyricsIdentity &&
+                            activeLyrics.phase == LyricsLoadPhase.Loading,
+                        lyricsLookupFailed = activeLyrics.trackIdentity == currentLyricsIdentity &&
+                            activeLyrics.phase == LyricsLoadPhase.Unavailable,
+                        lyricsTransientFailure = activeLyrics.trackIdentity == currentLyricsIdentity &&
+                            activeLyrics.phase == LyricsLoadPhase.Failed,
                         onRetryLyrics = ::retryCurrentLyrics,
                         lyricOffsetMs = lyricOffsetMs,
                         statusMessage = playbackMessage ?: if (queueState.awaitingNext) {
@@ -1549,6 +1792,31 @@ fun AmAtvApp() {
                         onSeekBy = ::seekPlaybackBy,
                         onSelectTrack = (::selectQueueTrack),
                         lowPerformanceMode = lowPerformanceMode,
+                        lyricTranslationEnabled = lyricTranslationEnabled,
+                        lyricPronunciationEnabled = lyricPronunciationEnabled,
+                        lyricTranslationLanguageTag = lyricTranslationLanguageTag,
+                        lyricPronunciationLanguageTag = lyricPronunciationLanguageTag,
+                        appLanguageTag = lyricsLanguageTag,
+                        lyricsEnhancementsReady = !lyricsLocalization.enabled ||
+                            (activeLyrics.trackIdentity == currentLyricsIdentity &&
+                                activeLyrics.resolvedVariant == lyricsVariant &&
+                                activeLyrics.phase == LyricsLoadPhase.Ready),
+                        onLyricTranslationEnabledChange = { enabled ->
+                            lyricTranslationEnabled = enabled
+                            playbackPrefs.lyricTranslationEnabled = enabled
+                        },
+                        onLyricPronunciationEnabledChange = { enabled ->
+                            lyricPronunciationEnabled = enabled
+                            playbackPrefs.lyricPronunciationEnabled = enabled
+                        },
+                        onLyricTranslationLanguageChange = { languageTag ->
+                            lyricTranslationLanguageTag = languageTag
+                            playbackPrefs.lyricTranslationLanguageTag = languageTag
+                        },
+                        onLyricPronunciationLanguageChange = { languageTag ->
+                            lyricPronunciationLanguageTag = languageTag
+                            playbackPrefs.lyricPronunciationLanguageTag = languageTag
+                        },
                         onCycleRepeat = { dispatchQueueAction(StartupQueueAction.CycleRepeat) },
                         onToggleShuffle = { dispatchQueueAction(StartupQueueAction.ToggleShuffle) },
                         onToggleAutoplay = { dispatchQueueAction(StartupQueueAction.ToggleInfinite) },

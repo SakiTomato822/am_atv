@@ -126,6 +126,34 @@ class PlaybackPreferences(context: Context) : QueuePreferences {
             preferences.edit().putLong(KEY_LYRIC_OFFSET_MS, value).apply()
         }
 
+    var lyricTranslationEnabled: Boolean
+        get() = preferences.getBoolean(KEY_LYRIC_TRANSLATION_ENABLED, false)
+        set(value) {
+            preferences.edit().putBoolean(KEY_LYRIC_TRANSLATION_ENABLED, value).apply()
+        }
+
+    var lyricPronunciationEnabled: Boolean
+        get() = preferences.getBoolean(KEY_LYRIC_PRONUNCIATION_ENABLED, false)
+        set(value) {
+            preferences.edit().putBoolean(KEY_LYRIC_PRONUNCIATION_ENABLED, value).apply()
+        }
+
+    /** Empty means follow the current app language. */
+    var lyricTranslationLanguageTag: String
+        get() = preferences.getString(KEY_LYRIC_TRANSLATION_LANGUAGE, "").orEmpty()
+        set(value) {
+            preferences.edit().putString(KEY_LYRIC_TRANSLATION_LANGUAGE, value).apply()
+        }
+
+    /** English/Latin is the useful default for romanized pronunciation. */
+    var lyricPronunciationLanguageTag: String
+        get() = preferences.getString(KEY_LYRIC_PRONUNCIATION_LANGUAGE, "en-US")
+            .orEmpty()
+            .ifBlank { "en-US" }
+        set(value) {
+            preferences.edit().putString(KEY_LYRIC_PRONUNCIATION_LANGUAGE, value).apply()
+        }
+
     val activeTab: Destination
         get() = enumValueOrDefault(
             preferences.getString(KEY_ACTIVE_TAB, null).orEmpty(), Destination.Home,
@@ -157,6 +185,10 @@ class PlaybackPreferences(context: Context) : QueuePreferences {
         const val KEY_AUTOPLAY_ENABLED = "pref_playback_autoplay_enabled"
         const val KEY_AUTOPLAY_SOURCE = "pref_playback_autoplay_source"
         const val KEY_LYRIC_OFFSET_MS = "pref_playback_lyric_offset_ms"
+        const val KEY_LYRIC_TRANSLATION_ENABLED = "pref_lyric_translation_enabled"
+        const val KEY_LYRIC_PRONUNCIATION_ENABLED = "pref_lyric_pronunciation_enabled"
+        const val KEY_LYRIC_TRANSLATION_LANGUAGE = "pref_lyric_translation_language"
+        const val KEY_LYRIC_PRONUNCIATION_LANGUAGE = "pref_lyric_pronunciation_language"
         const val KEY_LOW_PERFORMANCE_MODE = "pref_playback_low_performance_mode"
     }
 }

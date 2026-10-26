@@ -1,12 +1,37 @@
 package dev.amatv.ui
 
+import androidx.compose.ui.graphics.Color
 import dev.amatv.model.LyricLine
 import dev.amatv.model.LyricTiming
 import dev.amatv.model.LyricWord
+import dev.amatv.model.Track
 import org.junit.Assert.*
 import org.junit.Test
 
 class LyricViewportTest {
+    private fun track(id: String, catalogId: String) = Track(
+        id = id,
+        title = "Song",
+        artist = "Artist",
+        album = "Album",
+        durationMs = 1_000L,
+        palette = listOf(Color.Black),
+        lyrics = emptyList(),
+        catalogId = catalogId,
+    )
+
+    @Test
+    fun catalogIdentityKeepsLyricsAcrossBrowseAndNowPlayingWrappers() {
+        val browse = track(id = "1496639586", catalogId = "1496639586")
+        val nowPlaying = track(id = "apple:1496639586", catalogId = "1496639586")
+
+        assertEquals(browse.lyricsIdentity(), nowPlaying.lyricsIdentity())
+        assertEquals(
+            lyricsCacheKey(browse.lyricsIdentity(), "zh-Hant"),
+            lyricsCacheKey(nowPlaying.lyricsIdentity(), "zh-Hant"),
+        )
+    }
+
     @Test fun longSongFirstArrivalBuildsOnlyBoundedContextWithCurrentSingerFirst() {
         val tops = FloatArray(1_000) { 80f * it }
         val order = lyricViewportMountOrder(tops, FloatArray(1_000) { 60f },
@@ -97,6 +122,48 @@ class LyricViewportTest {
         assertTrue(narrow >= wide)
         assertEquals(500L, line.startMs)
         assertEquals(3_000L, line.mainEndMs)
+    }
+
+    @Test fun oversizedNonBreakingGroupFallsBackToBoundedWordWrapping() {
+        val rows = lyricFlexRows(
+            groupIds = listOf(7, 7, 7, 7),
+            wordWidths = intArrayOf(58, 42, 55, 45),
+            maxWidth = 100,
+        )
+
+        assertEquals(2, rows.size)
+        assertArrayEquals(intArrayOf(0, 1), rows[0])
+        assertArrayEquals(intArrayOf(2, 3), rows[1])
+        assertTrue(rows.all { row -> row.sumOf { intArrayOf(58, 42, 55, 45)[it] } <= 100 })
+    }
+
+    @Test fun ordinaryNonBreakingGroupRemainsAtomicAtTheWrapBoundary() {
+        val rows = lyricFlexRows(
+            groupIds = listOf(null, 9, 9, null),
+            wordWidths = intArrayOf(35, 30, 30, 35),
+            maxWidth = 100,
+        )
+
+        assertEquals(2, rows.size)
+        assertArrayEquals(intArrayOf(0, 1, 2), rows[0])
+        assertArrayEquals(intArrayOf(3), rows[1])
+    }
+
+    @Test fun translationDisplayNeverReplacesBackgroundVocals() {
+        val line = LyricLine(
+            words = listOf(LyricWord("Lead", 1_000, 2_000)),
+            translation = "主唱翻譯",
+            backgroundWords = listOf(
+                LyricWord("Harmony", 1_200, 2_200, isBackgroundVocal = true),
+            ),
+            backgroundTranslation = "和聲翻譯",
+        )
+
+        val localized = line.forDisplay(showTranslation = true, showPronunciation = false)
+
+        assertEquals("主唱翻譯", localized.translation)
+        assertEquals("Harmony", localized.backgroundText)
+        assertEquals("和聲翻譯", localized.backgroundTranslation)
     }
 
     @Test fun singleActiveLineFittingOnScreenKeepsBaseAnchor() {
@@ -251,5 +318,40 @@ class LyricViewportTest {
     @Test fun retainedOverflowAnchorResetsAcrossForwardAndBackwardSeeks() {
         assertEquals(4, retainedLyricAnchorBase(4, 2, 8))
         assertEquals(0, retainedLyricAnchorBase(0, 6, 4))
+    }
+
+    @Test fun hidingLocalizationNeverChangesTimingSingerOrBackgroundVocals() {
+        val line = LyricLine(
+            words = listOf(
+                LyricWord("主唱", 1_000, 2_000, pronunciationText = "zhu chang"),
+            ),
+            translation = "Lead",
+            backgroundWords = listOf(
+                LyricWord("和聲", 1_500, 2_500, isBackgroundVocal = true, pronunciationText = "he sheng"),
+            ),
+            backgroundTranslation = "Harmony",
+            pronunciationText = "zhu chang",
+            backgroundPronunciationText = "he sheng",
+            lineStartMs = 1_000,
+            lineEndMs = 2_500,
+            agentId = "duet",
+            isOppositeAgent = true,
+            isMultiAgentSong = true,
+            sourceKey = "L1",
+        )
+
+        val originalOnly = line.forDisplay(showTranslation = false, showPronunciation = false)
+
+        assertEquals(line.startMs, originalOnly.startMs)
+        assertEquals(line.endMs, originalOnly.endMs)
+        assertEquals(line.agentId, originalOnly.agentId)
+        assertEquals(line.isOppositeAgent, originalOnly.isOppositeAgent)
+        assertEquals(line.isMultiAgentSong, originalOnly.isMultiAgentSong)
+        assertEquals(line.backgroundText, originalOnly.backgroundText)
+        assertEquals(null, originalOnly.translation)
+        assertEquals(null, originalOnly.backgroundTranslation)
+        assertEquals(null, originalOnly.words.single().pronunciationText)
+        assertEquals(null, originalOnly.backgroundWords.single().pronunciationText)
+        assertEquals("L1", originalOnly.sourceKey)
     }
 }

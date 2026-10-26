@@ -507,6 +507,41 @@ class PlaybackQueueController(
         triggerRefillIfNeeded()
     }
 
+    /** A library resource can be relinked by Apple; keep entry IDs and context order intact. */
+    fun updateLibraryCatalogIdentity(original: Track, resolved: Track) {
+        val libraryId = original.resourceId?.takeIf { it.startsWith("i.") }
+            ?: original.catalogId?.takeIf { it.startsWith("i.") } ?: return
+        if (original.catalogId == resolved.catalogId) return
+        fun Track.isSameLibraryResource(): Boolean = resourceId == libraryId ||
+            (resourceId == null && catalogId == libraryId)
+        val seedChanged = _state.value.recommendationSeed?.let {
+            it.isSameLibraryResource() && it.catalogId != resolved.catalogId
+        } == true
+        if (seedChanged) cancelRefill()
+        fun Track.updated(): Track = if (isSameLibraryResource()) {
+            copy(id = resolved.id, catalogId = resolved.catalogId,
+                resourceId = libraryId, resourceType = resourceType ?: "library-songs")
+        } else this
+        fun QueueEntry.updated(): QueueEntry {
+            val updatedTrack = track.updated()
+            return if (updatedTrack == track) this else copy(track = updatedTrack)
+        }
+        _state.update { current -> current.copy(
+            history = current.history.map { it.updated() },
+            current = current.current?.updated(),
+            upNext = current.upNext.map { it.updated() },
+            unshuffledUpNext = current.unshuffledUpNext?.map { it.updated() },
+            autoplay = current.autoplay.map { it.updated() },
+            contextEntries = current.contextEntries.map { it.updated() },
+            recommendationSeed = current.recommendationSeed?.updated(),
+            amStationId = if (seedChanged) null else current.amStationId,
+            ytmContinuation = if (seedChanged) null else current.ytmContinuation,
+            ytmSeedVideoId = if (seedChanged) null else current.ytmSeedVideoId,
+            autoplayStatus = if (seedChanged) AutoplayStatus.Idle else current.autoplayStatus,
+        ) }
+        if (seedChanged) triggerRefillIfNeeded()
+    }
+
     private fun isFailed(track: Track): Boolean = failedSongs.values.any { SongIdentity.isSameSong(it, track) }
 
     private fun resetFailureStreak() {

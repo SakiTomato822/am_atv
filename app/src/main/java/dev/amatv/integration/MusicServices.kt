@@ -205,14 +205,26 @@ class MusicServices(context: Context) : RecommendationProvider {
         api.stationNextTracks(stationId)
     suspend fun collectionTracks(collection: Track): List<Track> = api.collectionTracks(collection)
 
-    suspend fun lyricsFor(track: Track): List<LyricLine> {
-        val rawCatalogId = checkNotNull(track.catalogId) { AppText.text(R.string.services_catalog_id_missing) }
-        val resolvedCatalogId = if (rawCatalogId.startsWith("i.")) {
-            api.resolveCatalogSongId(rawCatalogId)
-        } else {
-            rawCatalogId
-        }
-        return appleLyrics.lyricsFor(resolvedCatalogId)
+    suspend fun lyricsFor(
+        track: Track,
+        localization: LyricsLocalizationRequest = LyricsLocalizationRequest.Disabled,
+    ): List<LyricLine> {
+        val playable = resolvePlayableTrack(track)
+        return appleLyrics.lyricsFor(checkNotNull(playable.catalogId), localization)
+    }
+
+    /** Restore library entries through their durable i.* resource, not retired reporting IDs. */
+    suspend fun resolvePlayableTrack(track: Track): Track {
+        val original = checkNotNull(track.catalogId) { AppText.text(R.string.services_catalog_id_missing) }
+        val libraryId = track.resourceId?.takeIf { it.startsWith("i.") }
+            ?: original.takeIf { it.startsWith("i.") }
+            ?: return track
+        if (track.catalogKind != dev.amatv.model.CatalogKind.Song) return track
+        val resolved = api.resolveCatalogSongId(libraryId)
+        return if (resolved == original) track else track.copy(
+            id = "apple:$resolved", catalogId = resolved,
+            resourceId = libraryId, resourceType = track.resourceType ?: "library-songs",
+        )
     }
 
     suspend fun prepareAndPlay(track: Track): Long = preparePlayback(track)

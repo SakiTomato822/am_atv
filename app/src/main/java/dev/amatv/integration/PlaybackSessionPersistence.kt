@@ -35,6 +35,8 @@ internal class PlaybackSessionPersistence private constructor(
         val autoplay: Set<Int>,
         val played: Set<Long>,
         val contextIds: List<Long>,
+        val catalogIds: List<String?>,
+        val contextCatalogIds: List<String?>,
     )
 
     fun save(session: PlaybackSession, synchronous: Boolean) {
@@ -61,7 +63,14 @@ internal class PlaybackSessionPersistence private constructor(
                 try {
                     val session = next.session
                     val structure = Structure(session.persistenceId, session.queueEntryIds, session.autoplayEntryIndices,
-                        session.playedEntryIds, session.contextEntryIds)
+                        session.playedEntryIds, session.contextEntryIds,
+                        session.queue.map { it.catalogId }, session.contextQueue.map { it.catalogId })
+                    // A repaired library catalog mapping is metadata worth saving,
+                    // while an unchanged five-second cursor update needs no full JSON.
+                    if (synchronized(fileLock) {
+                        next.generation != storageGeneration.get() ||
+                            (structure == lastStructure && session.queueEntryIds.isNotEmpty())
+                    }) continue
                     val bytes = PlaybackSessionCodec.encode(session).toByteArray(Charsets.UTF_8)
                     synchronized(fileLock) {
                         if (next.generation != storageGeneration.get()) return@synchronized

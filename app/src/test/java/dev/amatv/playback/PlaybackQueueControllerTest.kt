@@ -91,6 +91,27 @@ class PlaybackQueueControllerTest {
     private val fakeRecommendations = FakeRecommendationProvider()
     private var playedTracks = mutableListOf<Track>()
 
+    @Test fun libraryRelinkingPreservesEntryOrderHistoryAndRecommendationSeed() {
+        val controller = createController()
+        val old = testTrack("1465074689", "君はQueen", "Punipunidenki").copy(
+            resourceId = "i.queen", resourceType = "library-songs",
+        )
+        val unrelated = testTrack("other", "Other", "Other")
+        controller.playContext(listOf(old, unrelated, old), 0)
+        val before = controller.state.value
+        val callbacks = playedTracks.size
+        val resolved = old.copy(id = "apple:6790045614", catalogId = "6790045614")
+        controller.updateLibraryCatalogIdentity(old, resolved)
+        val after = controller.state.value
+        assertEquals(before.sessionEntries.map { it.entryId }, after.sessionEntries.map { it.entryId })
+        assertEquals(before.sessionId, after.sessionId)
+        assertEquals(before.current?.origin, after.current?.origin)
+        assertEquals(listOf("6790045614", "other", "6790045614"), after.sessionEntries.map { it.track.catalogId })
+        assertEquals("6790045614", after.recommendationSeed?.catalogId)
+        assertEquals(listOf("6790045614", "other", "6790045614"), after.contextEntries.map { it.track.catalogId })
+        assertEquals(callbacks, playedTracks.size)
+    }
+
     private fun createController(): PlaybackQueueController {
         playedTracks.clear()
         return PlaybackQueueController(

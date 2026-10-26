@@ -55,6 +55,27 @@ class CollectionTracksTest {
             request.nextPage("/v1/me/library/albums/l.own/tracks?offset=100"))
     }
 
+    @Test fun relinkedLibrarySongUsesCurrentCatalogInsteadOfRetiredReportingId() = runBlocking {
+        val tracks = api.collectionTracks(collection().copy(
+            resourceId = "p.own", resourceType = "library-playlists",
+        )) { _, _ ->
+            JSONObject("""{"data":[{"id":"i.queen","type":"library-songs",
+              "attributes":{"name":"君はQueen","artistName":"Punipunidenki",
+                "playParams":{"id":"i.queen","catalogId":"1465074689","reportingId":"1465074689"}},
+              "relationships":{"catalog":{"data":[${song("6790045614")}]}}}]}""")
+        }
+        assertEquals("6790045614", tracks.single().catalogId)
+        assertEquals("i.queen", tracks.single().resourceId)
+        assertEquals("library-songs", tracks.single().resourceType)
+    }
+
+    @Test fun catalogSongNeverUsesItsAnalyticsReportingIdAsPlaybackId() {
+        assertEquals("6790045614", catalogPlaybackId("6790045614", "songs",
+            JSONObject("""{"id":"6790045614","reportingId":"1465074689","globalId":"retired"}"""), null))
+        assertEquals("i.uploaded", catalogPlaybackId("i.uploaded", "library-songs",
+            JSONObject("""{"id":"i.uploaded","reportingId":"1465074689"}"""), null))
+    }
+
     @Test fun onlyDirectPlayableSongsEnterCollectionQueue() = runBlocking {
         val tracks = api.collectionTracks(collection()) { _, _ ->
             JSONObject("""{"data":[${song("1")},

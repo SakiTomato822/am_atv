@@ -49,6 +49,8 @@ import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.Translate
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -120,6 +122,7 @@ import dev.amatv.ui.rendering.TextureAlphaMask
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -148,6 +151,7 @@ private enum class PlayerControl {
     PlayPause,
     Next,
     Lyrics,
+    LyricsDisplay,
     Queue,
     Radio,
 }
@@ -199,6 +203,16 @@ fun PlayerScreen(
     lyricsTransientFailure: Boolean = false,
     onRetryLyrics: () -> Unit = {},
     lowPerformanceMode: Boolean = false,
+    lyricTranslationEnabled: Boolean = false,
+    lyricPronunciationEnabled: Boolean = false,
+    lyricTranslationLanguageTag: String = "",
+    lyricPronunciationLanguageTag: String = "en-US",
+    appLanguageTag: String = Locale.getDefault().toLanguageTag(),
+    lyricsEnhancementsReady: Boolean = true,
+    onLyricTranslationEnabledChange: (Boolean) -> Unit = {},
+    onLyricPronunciationEnabledChange: (Boolean) -> Unit = {},
+    onLyricTranslationLanguageChange: (String) -> Unit = {},
+    onLyricPronunciationLanguageChange: (String) -> Unit = {},
 ) {
     val playbackStateDescription = stringResource(when {
         isPlaying -> R.string.player_state_playing
@@ -210,6 +224,7 @@ fun PlayerScreen(
     var userToggledLyrics by remember(queueSessionId) { mutableStateOf(false) }
     var showLyrics by remember(queueSessionId) { mutableStateOf(supportsLyrics && track.lyrics.isNotEmpty()) }
     var showQueue by remember(queueSessionId) { mutableStateOf(false) }
+    var showLyricsSettings by remember(queueSessionId) { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
     var controlsActivity by remember { mutableIntStateOf(0) }
     var navigationZone by remember(queueSessionId) {
@@ -229,7 +244,10 @@ fun PlayerScreen(
             if (canSkipPrevious) add(PlayerControl.Previous)
             add(PlayerControl.PlayPause)
             if (canSkipNext) add(PlayerControl.Next)
-            if (supportsLyrics) add(PlayerControl.Lyrics)
+            if (supportsLyrics) {
+                add(PlayerControl.LyricsDisplay)
+                add(PlayerControl.Lyrics)
+            }
             add(PlayerControl.Queue)
             if (canSetAutoplay) add(PlayerControl.Radio)
         }
@@ -291,9 +309,28 @@ fun PlayerScreen(
         showLyrics && supportsLyrics -> PlayerPresentation.Lyrics
         else -> PlayerPresentation.Artwork
     }
+    val displayedLyrics = remember(
+        track.lyrics, lyricTranslationEnabled, lyricPronunciationEnabled, lyricsEnhancementsReady,
+    ) {
+        track.lyrics.map { line ->
+            line.forDisplay(
+                showTranslation = lyricTranslationEnabled && lyricsEnhancementsReady,
+                showPronunciation = lyricPronunciationEnabled && lyricsEnhancementsReady,
+            )
+        }
+    }
+    val displayedTrack = remember(track, displayedLyrics) { track.copy(lyrics = displayedLyrics) }
+    val lyricTranslationAvailable = lyricsEnhancementsReady && track.lyrics.any {
+        !it.translation.isNullOrBlank() || !it.backgroundTranslation.isNullOrBlank()
+    }
+    val lyricPronunciationAvailable = lyricsEnhancementsReady && track.lyrics.any { line ->
+        !line.pronunciationText.isNullOrBlank() || !line.backgroundPronunciationText.isNullOrBlank() ||
+            line.words.any { !it.pronunciationText.isNullOrBlank() } ||
+            line.backgroundWords.any { !it.pronunciationText.isNullOrBlank() }
+    }
 
-    LaunchedEffect(controlsVisible, controlsActivity, isActiveScreen, isScrubbing) {
-        if (controlsVisible && isActiveScreen && !isScrubbing) {
+    LaunchedEffect(controlsVisible, controlsActivity, isActiveScreen, isScrubbing, showLyricsSettings) {
+        if (controlsVisible && isActiveScreen && !isScrubbing && !showLyricsSettings) {
             delay(5_000L)
             controlsVisible = false
             isScrubbing = false
@@ -325,6 +362,14 @@ fun PlayerScreen(
             .onPreviewKeyEvent { event ->
                 if (!isActiveScreen || event.nativeKeyEvent.action != KeyEvent.ACTION_DOWN) {
                     return@onPreviewKeyEvent false
+                }
+                if (showLyricsSettings) {
+                    return@onPreviewKeyEvent if (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_BACK) {
+                        showLyricsSettings = false
+                        true
+                    } else {
+                        false
+                    }
                 }
                 val wasHidden = !controlsVisible
                 controlsVisible = true
@@ -365,7 +410,7 @@ fun PlayerScreen(
                     KeyEvent.KEYCODE_ENTER -> {
                         when (navigationZone) {
                             PlayerNavigationZone.Lyrics -> {
-                                val targetLine = track.lyrics.getOrNull(selectedLyricIndex)
+                                val targetLine = displayedLyrics.getOrNull(selectedLyricIndex)
                                 if (targetLine != null) {
                                     val delta = targetLine.startMs - playbackPosition.value
                                     onSeekBy(delta)
@@ -420,6 +465,9 @@ fun PlayerScreen(
                                         if (!showLyrics && navigationZone == PlayerNavigationZone.Lyrics) {
                                             navigationZone = PlayerNavigationZone.Controls
                                         }
+                                    }
+                                    PlayerControl.LyricsDisplay -> {
+                                        showLyricsSettings = true
                                     }
                                     PlayerControl.Queue -> {
                                         showQueue = !showQueue
@@ -506,10 +554,10 @@ fun PlayerScreen(
                                 if (showQueue) {
                                     focusQueueIndex(currentQueueIndex)
                                     navigationZone = PlayerNavigationZone.QueueItems
-                                } else if (presentation == PlayerPresentation.Lyrics && track.lyrics.isNotEmpty()) {
+                                } else if (presentation == PlayerPresentation.Lyrics && displayedLyrics.isNotEmpty()) {
                                     navigationZone = PlayerNavigationZone.Lyrics
                                     val currentIdx = LyricTimeline.activeLineAt(
-                                        lines = track.lyrics,
+                                        lines = displayedLyrics,
                                         positionMs = playbackPosition.value,
                                         applyTimeProcessorOffsets = true,
                                     )
@@ -540,7 +588,7 @@ fun PlayerScreen(
                                 navigationZone = PlayerNavigationZone.ProgressBar
                             }
                             PlayerNavigationZone.Lyrics -> {
-                                if (selectedLyricIndex < track.lyrics.lastIndex) {
+                                if (selectedLyricIndex < displayedLyrics.lastIndex) {
                                     selectedLyricIndex++
                                 } else {
                                     navigationZone = PlayerNavigationZone.ProgressBar
@@ -568,7 +616,7 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxSize(),
         )
         PlayerStage(
-            track = track,
+            track = displayedTrack,
             presentation = presentation,
             supportsLyrics = supportsLyrics,
             isVisibleOnScreen = isVisibleOnScreen,
@@ -707,6 +755,15 @@ fun PlayerScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                         if (supportsLyrics) {
                             PlayerButton(
+                                controlId = "player-lyrics-display",
+                                icon = Icons.Rounded.Translate,
+                                contentDescription = stringResource(R.string.player_lyrics_display_settings),
+                                selected = lyricTranslationEnabled || lyricPronunciationEnabled,
+                                focused = navigationZone == PlayerNavigationZone.Controls &&
+                                    focusedControl == PlayerControl.LyricsDisplay,
+                                width = 46.dp,
+                            )
+                            PlayerButton(
                                 controlId = "player-lyrics",
                                 icon = Icons.Rounded.Lyrics,
                                 contentDescription = stringResource(R.string.player_lyrics),
@@ -715,7 +772,6 @@ fun PlayerScreen(
                                     focusedControl == PlayerControl.Lyrics,
                                 width = 46.dp,
                             )
-
                         }
                         PlayerButton(
                             controlId = "player-queue",
@@ -741,6 +797,25 @@ fun PlayerScreen(
                 }
             }
             }
+        }
+
+        if (showLyricsSettings) {
+            LyricsDisplaySettingsDialog(
+                translationEnabled = lyricTranslationEnabled,
+                pronunciationEnabled = lyricPronunciationEnabled,
+                translationAvailable = lyricTranslationAvailable,
+                pronunciationAvailable = lyricPronunciationAvailable,
+                translationLanguageTag = lyricTranslationLanguageTag,
+                pronunciationLanguageTag = lyricPronunciationLanguageTag,
+                appLanguageTag = appLanguageTag,
+                enhancementsReady = lyricsEnhancementsReady,
+                enhancementsFailed = lyricsTransientFailure && track.lyrics.isNotEmpty(),
+                onTranslationChange = onLyricTranslationEnabledChange,
+                onPronunciationChange = onLyricPronunciationEnabledChange,
+                onTranslationLanguageChange = onLyricTranslationLanguageChange,
+                onPronunciationLanguageChange = onLyricPronunciationLanguageChange,
+                onDismiss = { showLyricsSettings = false },
+            )
         }
 
     }
@@ -920,6 +995,321 @@ private fun PlayerButton(
             },
             modifier = Modifier.size(24.dp),
         )
+    }
+}
+
+private enum class LyricsLanguagePicker { Translation, Pronunciation }
+
+private val TranslationLanguageTags = listOf(
+    "", "zh-TW", "zh-CN", "en-US", "ja-JP", "ko-KR", "es-ES", "fr-FR", "de-DE",
+)
+
+@Composable
+private fun LyricsDisplaySettingsDialog(
+    translationEnabled: Boolean,
+    pronunciationEnabled: Boolean,
+    translationAvailable: Boolean,
+    pronunciationAvailable: Boolean,
+    translationLanguageTag: String,
+    pronunciationLanguageTag: String,
+    appLanguageTag: String,
+    enhancementsReady: Boolean,
+    enhancementsFailed: Boolean,
+    onTranslationChange: (Boolean) -> Unit,
+    onPronunciationChange: (Boolean) -> Unit,
+    onTranslationLanguageChange: (String) -> Unit,
+    onPronunciationLanguageChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var languagePicker by remember { mutableStateOf<LyricsLanguagePicker?>(null) }
+    val firstFocus = remember { FocusRequester() }
+    LaunchedEffect(languagePicker) {
+        withFrameNanos { }
+        runCatching { firstFocus.requestFocus() }
+    }
+    val effectiveTranslationTag = translationLanguageTag.ifBlank { appLanguageTag }
+    val appLocale = remember(appLanguageTag) {
+        Locale.forLanguageTag(appLanguageTag).takeUnless { it.language.isBlank() } ?: Locale.getDefault()
+    }
+    fun languageName(tag: String): String = Locale.forLanguageTag(tag)
+        .getDisplayName(appLocale)
+        .replaceFirstChar { if (it.isLowerCase()) it.titlecase(appLocale) else it.toString() }
+
+    CompositionLocalProvider(LocalFocusFrameEnabled provides false) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = {
+                Text(
+                    text = stringResource(
+                        when (languagePicker) {
+                            LyricsLanguagePicker.Translation -> R.string.player_lyrics_choose_translation_language
+                            LyricsLanguagePicker.Pronunciation -> R.string.player_lyrics_choose_pronunciation_script
+                            null -> R.string.player_lyrics_display_title
+                        },
+                    ),
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.width(520.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    when (languagePicker) {
+                        LyricsLanguagePicker.Translation -> {
+                            TranslationLanguageTags.forEachIndexed { index, tag ->
+                                val effectiveTag = tag.ifBlank { appLanguageTag }
+                                val label = if (tag.isBlank()) {
+                                    stringResource(
+                                        R.string.player_lyrics_language_follow_app_format,
+                                        languageName(effectiveTag),
+                                    )
+                                } else {
+                                    languageName(tag)
+                                }
+                                LyricsLanguageChoiceRow(
+                                    label = label,
+                                    selected = tag == translationLanguageTag,
+                                    onClick = {
+                                        onTranslationLanguageChange(tag)
+                                        languagePicker = null
+                                    },
+                                    modifier = if (index == 0) Modifier.focusRequester(firstFocus) else Modifier,
+                                )
+                            }
+                        }
+                        LyricsLanguagePicker.Pronunciation -> {
+                            val options = listOf("en-US", appLanguageTag).distinct()
+                            options.forEachIndexed { index, tag ->
+                                LyricsLanguageChoiceRow(
+                                    label = if (tag == "en-US") {
+                                        stringResource(R.string.player_lyrics_pronunciation_latin)
+                                    } else {
+                                        stringResource(
+                                            R.string.player_lyrics_pronunciation_app_script_format,
+                                            languageName(tag),
+                                        )
+                                    },
+                                    selected = tag == pronunciationLanguageTag,
+                                    onClick = {
+                                        onPronunciationLanguageChange(tag)
+                                        languagePicker = null
+                                    },
+                                    modifier = if (index == 0) Modifier.focusRequester(firstFocus) else Modifier,
+                                )
+                            }
+                        }
+                        null -> {
+                            LyricsLanguageSummaryRow(
+                                title = stringResource(R.string.player_lyrics_source_language),
+                                value = stringResource(R.string.player_lyrics_source_auto),
+                            )
+                            LyricsDisplaySettingRow(
+                                title = stringResource(R.string.player_lyrics_translation),
+                                description = stringResource(when {
+                                    translationEnabled && enhancementsFailed -> R.string.player_lyrics_enhancement_load_failed
+                                    translationEnabled && !enhancementsReady -> R.string.player_lyrics_enhancement_loading
+                                    translationEnabled && !translationAvailable -> R.string.player_lyrics_translation_unavailable
+                                    else -> R.string.player_lyrics_translation_hint
+                                }),
+                                enabled = translationEnabled,
+                                onClick = { onTranslationChange(!translationEnabled) },
+                                modifier = Modifier.focusRequester(firstFocus),
+                            )
+                            LyricsDisplayValueRow(
+                                title = stringResource(R.string.player_lyrics_translate_to),
+                                value = if (translationLanguageTag.isBlank()) {
+                                    stringResource(
+                                        R.string.player_lyrics_language_follow_app_format,
+                                        languageName(effectiveTranslationTag),
+                                    )
+                                } else languageName(effectiveTranslationTag),
+                                onClick = { languagePicker = LyricsLanguagePicker.Translation },
+                            )
+                            LyricsDisplaySettingRow(
+                                title = stringResource(R.string.player_lyrics_pronunciation),
+                                description = stringResource(when {
+                                    pronunciationEnabled && enhancementsFailed -> R.string.player_lyrics_enhancement_load_failed
+                                    pronunciationEnabled && !enhancementsReady -> R.string.player_lyrics_enhancement_loading
+                                    pronunciationEnabled && !pronunciationAvailable -> R.string.player_lyrics_pronunciation_unavailable
+                                    else -> R.string.player_lyrics_pronunciation_hint
+                                }),
+                                enabled = pronunciationEnabled,
+                                onClick = { onPronunciationChange(!pronunciationEnabled) },
+                            )
+                            LyricsDisplayValueRow(
+                                title = stringResource(R.string.player_lyrics_pronunciation_script),
+                                value = if (pronunciationLanguageTag == "en-US") {
+                                    stringResource(R.string.player_lyrics_pronunciation_latin)
+                                } else {
+                                    stringResource(
+                                        R.string.player_lyrics_pronunciation_app_script_format,
+                                        languageName(pronunciationLanguageTag),
+                                    )
+                                },
+                                onClick = { languagePicker = LyricsLanguagePicker.Pronunciation },
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                FocusSurface(
+                    onClick = {
+                        if (languagePicker != null) languagePicker = null else onDismiss()
+                    },
+                    modifier = Modifier.width(112.dp).height(42.dp),
+                    cornerRadius = 21.dp,
+                    background = Color.White.copy(alpha = 0.12f),
+                    focusedBackground = Color.White,
+                ) { focused ->
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = stringResource(
+                                if (languagePicker == null) R.string.player_lyrics_display_done
+                                else R.string.player_lyrics_language_back,
+                            ),
+                            color = if (focused) Color(0xFF18181A) else Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+            },
+            containerColor = Color(0xFF252529),
+            titleContentColor = Color.White,
+            textContentColor = Color.White,
+        )
+    }
+}
+
+@Composable
+private fun LyricsDisplaySettingRow(
+    title: String,
+    description: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FocusSurface(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth().height(68.dp).semantics { selected = enabled },
+        cornerRadius = 14.dp,
+        showBorder = true,
+        padding = PaddingValues(horizontal = 16.dp),
+        background = Color.White.copy(alpha = 0.08f),
+        focusedBackground = Color.White.copy(alpha = 0.18f),
+    ) { _ ->
+        Row(
+            Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    description,
+                    color = Color.White.copy(alpha = 0.55f),
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .padding(start = 16.dp)
+                    .clip(RoundedCornerShape(13.dp))
+                    .background(if (enabled) Color.White else Color.White.copy(alpha = 0.12f))
+                    .padding(horizontal = 13.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = stringResource(
+                        if (enabled) R.string.player_lyrics_display_on else R.string.player_lyrics_display_off,
+                    ),
+                    color = if (enabled) Color(0xFF18181A) else Color.White.copy(alpha = 0.66f),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LyricsLanguageSummaryRow(title: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, color = Color.White.copy(alpha = 0.62f), fontSize = 14.sp)
+        Text(value, color = Color.White.copy(alpha = 0.82f), fontSize = 14.sp)
+    }
+}
+
+@Composable
+private fun LyricsDisplayValueRow(
+    title: String,
+    value: String,
+    onClick: () -> Unit,
+) {
+    FocusSurface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().height(56.dp),
+        cornerRadius = 14.dp,
+        showBorder = true,
+        padding = PaddingValues(horizontal = 16.dp),
+        background = Color.White.copy(alpha = 0.08f),
+        focusedBackground = Color.White.copy(alpha = 0.18f),
+    ) { _ ->
+        Row(
+            Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                value,
+                color = Color.White.copy(alpha = 0.68f),
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 20.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun LyricsLanguageChoiceRow(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FocusSurface(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth().height(46.dp).semantics { this.selected = selected },
+        cornerRadius = 13.dp,
+        showBorder = true,
+        padding = PaddingValues(horizontal = 16.dp),
+        background = if (selected) Color.White.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.06f),
+        focusedBackground = Color.White.copy(alpha = 0.22f),
+    ) { _ ->
+        Row(
+            Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            if (selected) {
+                Text("✓", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            }
+        }
     }
 }
 
@@ -2264,7 +2654,24 @@ private fun KaraokeLyricLine(
     isUserScrolling: Boolean,
     positionState: State<Long>,
 ) {
+    val hasMainPronunciation = !line.pronunciationText.isNullOrBlank() ||
+        line.words.any { !it.pronunciationText.isNullOrBlank() }
+    val compactMainLocalization = hasMainPronunciation && !line.translation.isNullOrBlank()
+    val hasBackgroundPronunciation = !line.backgroundPronunciationText.isNullOrBlank() ||
+        line.backgroundWords.any { !it.pronunciationText.isNullOrBlank() }
+    val compactBackgroundLocalization = hasBackgroundPronunciation &&
+        !line.backgroundTranslation.isNullOrBlank()
+
     if (isStaticMode || line.timing == LyricTiming.None) {
+        val staticPronunciation = line.pronunciationText
+            ?: line.words.mapNotNull(LyricWord::pronunciationText).joinToString(" ").takeIf(String::isNotBlank)
+        val staticMainFontSize = if (compactMainLocalization) 22.sp else 24.sp
+        val staticMainLineHeight = if (compactMainLocalization) 29.sp else 32.sp
+        val staticPronunciationFontSize = if (compactMainLocalization) 15.sp else 17.sp
+        val staticPronunciationLineHeight = if (compactMainLocalization) 19.sp else 22.sp
+        val staticTranslationFontSize = if (compactMainLocalization) 17.sp else 19.sp
+        val staticTranslationLineHeight = if (compactMainLocalization) 22.sp else 25.sp
+        val staticLocalizationGap = if (compactMainLocalization) 2.dp else 4.dp
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2274,13 +2681,55 @@ private fun KaraokeLyricLine(
                 ) else Modifier)
                 .padding(horizontal = 14.dp, vertical = 6.dp),
         ) {
-            Text(
-                text = line.text,
-                fontSize = 24.sp,
-                lineHeight = 32.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White.copy(alpha = if (isFocused) 1f else MotionTokens.KaraokePrimaryAlpha),
-            )
+            Column {
+                if (!staticPronunciation.isNullOrBlank()) {
+                    Text(
+                        text = staticPronunciation,
+                        fontSize = staticPronunciationFontSize,
+                        lineHeight = staticPronunciationLineHeight,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White.copy(alpha = 0.58f),
+                        modifier = Modifier.padding(bottom = staticLocalizationGap),
+                    )
+                }
+                Text(
+                    text = line.text,
+                    fontSize = staticMainFontSize,
+                    lineHeight = staticMainLineHeight,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White.copy(alpha = if (isFocused) 1f else MotionTokens.KaraokePrimaryAlpha),
+                )
+                if (!line.translation.isNullOrBlank()) {
+                    Text(
+                        text = line.translation,
+                        fontSize = staticTranslationFontSize,
+                        lineHeight = staticTranslationLineHeight,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.62f),
+                        modifier = Modifier.padding(top = staticLocalizationGap),
+                    )
+                }
+                if (line.backgroundWords.isNotEmpty()) {
+                    Text(
+                        text = "(${line.backgroundText})",
+                        fontSize = 19.sp,
+                        lineHeight = 25.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White.copy(alpha = 0.52f),
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+                if (!line.backgroundTranslation.isNullOrBlank()) {
+                    Text(
+                        text = line.backgroundTranslation,
+                        fontSize = 17.sp,
+                        lineHeight = 22.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.48f),
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+            }
         }
         return
     }
@@ -2361,6 +2810,22 @@ private fun KaraokeLyricLine(
     } else {
         MotionTokens.KaraokeTertiaryAlpha
     }
+    val fullLineStartPadding = if (alignEnd) 0.dp else 6.dp
+    val fullLineEndPadding = if (alignEnd) 6.dp else 0.dp
+    val mainFontSize = if (compactMainLocalization) 31.sp else 34.sp
+    val mainLineHeight = if (compactMainLocalization) 37.sp else 41.sp
+    val mainPronunciationFontSize = if (compactMainLocalization) 15.sp else 17.sp
+    val mainPronunciationLineHeight = if (compactMainLocalization) 19.sp else 22.sp
+    val mainTranslationFontSize = if (compactMainLocalization) 21.sp else 24.sp
+    val mainTranslationLineHeight = if (compactMainLocalization) 25.sp else 29.sp
+    val mainLocalizationGap = if (compactMainLocalization) 2.dp else 4.dp
+    val backgroundFontSize = if (compactBackgroundLocalization) 22.sp else 24.sp
+    val backgroundLineHeight = if (compactBackgroundLocalization) 27.sp else 29.sp
+    val backgroundPronunciationFontSize = if (compactBackgroundLocalization) 15.sp else 16.sp
+    val backgroundPronunciationLineHeight = if (compactBackgroundLocalization) 18.sp else 20.sp
+    val backgroundTranslationFontSize = if (compactBackgroundLocalization) 17.sp else 19.sp
+    val backgroundTranslationLineHeight = if (compactBackgroundLocalization) 22.sp else 25.sp
+    val backgroundLocalizationGap = if (compactBackgroundLocalization) 2.dp else 4.dp
 
     Box(
         modifier = Modifier
@@ -2393,9 +2858,34 @@ private fun KaraokeLyricLine(
                     backgroundPresence = backgroundPresence,
                     unlitAlpha = unlitAlpha,
                     alignEnd = alignEnd,
+                    compactMainLocalization = compactMainLocalization,
+                    compactBackgroundLocalization = compactBackgroundLocalization,
                 )
             } else {
                 // Main vocal FullWidthAlphaGradientFlexboxLayout (karaoke_line_flexbox)
+                if (!line.pronunciationText.isNullOrBlank() &&
+                    line.words.none { !it.pronunciationText.isNullOrBlank() }
+                ) {
+                    Text(
+                        text = line.pronunciationText,
+                        fontSize = mainPronunciationFontSize,
+                        lineHeight = mainPronunciationLineHeight,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White,
+                        textAlign = if (alignEnd) TextAlign.End else TextAlign.Start,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                start = fullLineStartPadding,
+                                end = fullLineEndPadding,
+                                bottom = mainLocalizationGap,
+                            )
+                            .graphicsLayer {
+                            alpha = unlitAlpha +
+                                (MotionTokens.KaraokeBgVocalLitAlpha - unlitAlpha) * activePresence.value
+                        },
+                    )
+                }
                 if (line.words.isNotEmpty()) {
                     KaraokeVocalFlexbox(
                         line = line,
@@ -2406,17 +2896,29 @@ private fun KaraokeLyricLine(
                         unlitAlpha = unlitAlpha,
                         alignEnd = alignEnd,
                         positionState = positionState,
+                        fontSize = mainFontSize,
+                        lineHeight = mainLineHeight,
+                        pronunciationFontSize = mainPronunciationFontSize,
+                        pronunciationLineHeight = mainPronunciationLineHeight,
+                        pronunciationGap = mainLocalizationGap,
                     )
                 }
                 if (!line.translation.isNullOrBlank()) {
                     Text(
                         text = line.translation,
-                        fontSize = 24.sp,
-                        lineHeight = 29.sp,
+                        fontSize = mainTranslationFontSize,
+                        lineHeight = mainTranslationLineHeight,
                         fontWeight = FontWeight.SemiBold,
                         color = Color.White,
                         textAlign = if (alignEnd) TextAlign.End else TextAlign.Start,
-                        modifier = Modifier.padding(top = 4.dp).graphicsLayer {
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                start = fullLineStartPadding,
+                                end = fullLineEndPadding,
+                                top = mainLocalizationGap,
+                            )
+                            .graphicsLayer {
                             alpha = unlitAlpha +
                                 (MotionTokens.KaraokeBgVocalLitAlpha - unlitAlpha) * activePresence.value
                         },
@@ -2425,6 +2927,30 @@ private fun KaraokeLyricLine(
                 // Background vocal FullWidthAlphaGradientFlexboxLayout (bg_line_flexbox)
                 if (line.backgroundWords.isNotEmpty()) {
                     Spacer(Modifier.height(4.dp))
+                    if (!line.backgroundPronunciationText.isNullOrBlank() &&
+                        line.backgroundWords.none { !it.pronunciationText.isNullOrBlank() }
+                    ) {
+                        Text(
+                            text = line.backgroundPronunciationText,
+                            fontSize = backgroundPronunciationFontSize,
+                            lineHeight = backgroundPronunciationLineHeight,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White,
+                            textAlign = if (alignEnd) TextAlign.End else TextAlign.Start,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(
+                                    start = fullLineStartPadding,
+                                    end = fullLineEndPadding,
+                                    bottom = backgroundLocalizationGap,
+                                )
+                                .graphicsLayer {
+                                alpha = unlitAlpha +
+                                    (MotionTokens.KaraokeBgVocalLitAlpha - unlitAlpha) *
+                                    backgroundPresence.value
+                            },
+                        )
+                    }
                     KaraokeVocalFlexbox(
                         line = line,
                         words = line.backgroundWords,
@@ -2434,17 +2960,29 @@ private fun KaraokeLyricLine(
                         unlitAlpha = unlitAlpha,
                         alignEnd = alignEnd,
                         positionState = positionState,
+                        fontSize = backgroundFontSize,
+                        lineHeight = backgroundLineHeight,
+                        pronunciationFontSize = backgroundPronunciationFontSize,
+                        pronunciationLineHeight = backgroundPronunciationLineHeight,
+                        pronunciationGap = backgroundLocalizationGap,
                     )
                 }
                 if (!line.backgroundTranslation.isNullOrBlank()) {
                     Text(
                         text = line.backgroundTranslation,
-                        fontSize = 19.sp,
-                        lineHeight = 25.sp,
+                        fontSize = backgroundTranslationFontSize,
+                        lineHeight = backgroundTranslationLineHeight,
                         fontWeight = FontWeight.SemiBold,
                         color = Color.White,
                         textAlign = if (alignEnd) TextAlign.End else TextAlign.Start,
-                        modifier = Modifier.padding(top = 4.dp).graphicsLayer {
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                start = fullLineStartPadding,
+                                end = fullLineEndPadding,
+                                top = backgroundLocalizationGap,
+                            )
+                            .graphicsLayer {
                             alpha = unlitAlpha +
                                 (MotionTokens.KaraokeBgVocalLitAlpha - unlitAlpha) * backgroundPresence.value
                         },
@@ -2525,6 +3063,8 @@ private fun LineSyncedContent(
     backgroundPresence: State<Float>,
     unlitAlpha: Float,
     alignEnd: Boolean,
+    compactMainLocalization: Boolean,
+    compactBackgroundLocalization: Boolean,
 ) {
     val mainAlphaModifier = Modifier.graphicsLayer {
         alpha = unlitAlpha + (MotionTokens.KaraokePrimaryAlpha - unlitAlpha) * activePresence.value
@@ -2536,77 +3076,86 @@ private fun LineSyncedContent(
         alpha = unlitAlpha + (MotionTokens.KaraokeBgVocalLitAlpha - unlitAlpha) * backgroundPresence.value
     }
     val textAlign = if (alignEnd) TextAlign.End else TextAlign.Start
+    val mainFontSize = if (compactMainLocalization) 31.sp else 34.sp
+    val mainLineHeight = if (compactMainLocalization) 37.sp else 41.sp
+    val pronunciationFontSize = if (compactMainLocalization) 15.sp else 17.sp
+    val pronunciationLineHeight = if (compactMainLocalization) 19.sp else 22.sp
+    val translationFontSize = if (compactMainLocalization) 21.sp else 24.sp
+    val translationLineHeight = if (compactMainLocalization) 25.sp else 29.sp
+    val mainGap = if (compactMainLocalization) 2.dp else 4.dp
+    val backgroundFontSize = if (compactBackgroundLocalization) 22.sp else 24.sp
+    val backgroundLineHeight = if (compactBackgroundLocalization) 27.sp else 29.sp
+    val backgroundPronunciationFontSize = if (compactBackgroundLocalization) 15.sp else 16.sp
+    val backgroundPronunciationLineHeight = if (compactBackgroundLocalization) 18.sp else 20.sp
+    val backgroundTranslationFontSize = if (compactBackgroundLocalization) 17.sp else 19.sp
+    val backgroundTranslationLineHeight = if (compactBackgroundLocalization) 22.sp else 25.sp
+    val backgroundGap = if (compactBackgroundLocalization) 2.dp else 4.dp
 
     if (!line.pronunciationText.isNullOrBlank()) {
         Text(
             text = line.pronunciationText,
-            fontSize = 17.sp,
-            lineHeight = 22.sp,
+            fontSize = pronunciationFontSize,
+            lineHeight = pronunciationLineHeight,
             fontWeight = FontWeight.SemiBold,
             color = Color.White,
             textAlign = textAlign,
-            modifier = subAlphaModifier.padding(bottom = 4.dp),
+            modifier = Modifier.fillMaxWidth().then(subAlphaModifier).padding(bottom = mainGap),
         )
     }
     Text(
         text = line.text,
-        fontSize = 34.sp,
-        lineHeight = 41.sp,
+        fontSize = mainFontSize,
+        lineHeight = mainLineHeight,
         fontWeight = FontWeight.Bold,
         color = Color.White,
         textAlign = textAlign,
-        modifier = mainAlphaModifier,
+        modifier = Modifier.fillMaxWidth().then(mainAlphaModifier),
     )
     if (!line.translation.isNullOrBlank()) {
         Text(
             text = line.translation,
-            fontSize = 24.sp,
-            lineHeight = 29.sp,
+            fontSize = translationFontSize,
+            lineHeight = translationLineHeight,
             fontWeight = FontWeight.SemiBold,
             color = Color.White,
             textAlign = textAlign,
-            modifier = subAlphaModifier.padding(top = 4.dp),
+            modifier = Modifier.fillMaxWidth().then(subAlphaModifier).padding(top = mainGap),
         )
     }
     if (line.backgroundWords.isNotEmpty()) {
         if (!line.backgroundPronunciationText.isNullOrBlank()) {
             Text(
                 text = line.backgroundPronunciationText,
-                fontSize = 16.sp,
-                lineHeight = 20.sp,
+                fontSize = backgroundPronunciationFontSize,
+                lineHeight = backgroundPronunciationLineHeight,
                 fontWeight = FontWeight.SemiBold,
                 color = Color.White,
                 textAlign = textAlign,
-                modifier = backgroundAlphaModifier.padding(top = 4.dp),
+                modifier = Modifier.fillMaxWidth().then(backgroundAlphaModifier).padding(top = backgroundGap),
             )
         }
         Text(
             text = "(${line.backgroundText})",
-            fontSize = 24.sp,
-            lineHeight = 29.sp,
+            fontSize = backgroundFontSize,
+            lineHeight = backgroundLineHeight,
             fontWeight = FontWeight.Bold,
             color = Color.White,
             textAlign = textAlign,
-            modifier = backgroundAlphaModifier.padding(top = 4.dp),
+            modifier = Modifier.fillMaxWidth().then(backgroundAlphaModifier).padding(top = backgroundGap),
         )
     }
     if (!line.backgroundTranslation.isNullOrBlank()) {
         Text(
             text = line.backgroundTranslation,
-            fontSize = 19.sp,
-            lineHeight = 25.sp,
+            fontSize = backgroundTranslationFontSize,
+            lineHeight = backgroundTranslationLineHeight,
             fontWeight = FontWeight.SemiBold,
             color = Color.White,
             textAlign = textAlign,
-            modifier = backgroundAlphaModifier.padding(top = 4.dp),
+            modifier = Modifier.fillMaxWidth().then(backgroundAlphaModifier).padding(top = backgroundGap),
         )
     }
 }
-
-private data class FlexSpanGroup(
-    val groupId: Int?,
-    val wordIndices: IntArray,
-)
 
 private class MaskRowData(
     val indices: IntArray,
@@ -2618,6 +3167,67 @@ private class MaskRowCache(wordCount: Int) {
     val wordBounds: Array<Rect?> = arrayOfNulls(wordCount)
     var rows: List<MaskRowData> = emptyList()
     val alphaMask = TextureAlphaMask()
+}
+
+/**
+ * Plans wrapped karaoke rows while preserving ordinary non-breaking syllable groups.
+ * A malformed or unusually long group is allowed to break between its timed words;
+ * keeping it atomic would place glyphs outside the measured width.
+ */
+internal fun lyricFlexRows(
+    groupIds: List<Int?>,
+    wordWidths: IntArray,
+    maxWidth: Int,
+): List<IntArray> {
+    require(groupIds.size == wordWidths.size)
+    if (groupIds.isEmpty()) return emptyList()
+
+    val availableWidth = maxWidth.coerceAtLeast(1)
+    val units = buildList {
+        var index = 0
+        while (index < groupIds.size) {
+            val groupId = groupIds[index]
+            if (groupId == null) {
+                add(intArrayOf(index++))
+            } else {
+                var end = index + 1
+                while (end < groupIds.size && groupIds[end] == groupId) end++
+                add(IntArray(end - index) { offset -> index + offset })
+                index = end
+            }
+        }
+    }
+
+    val rows = ArrayList<IntArray>(4)
+    val current = ArrayList<Int>(8)
+    var currentWidth = 0
+
+    fun flush() {
+        if (current.isEmpty()) return
+        rows += current.toIntArray()
+        current.clear()
+        currentWidth = 0
+    }
+
+    fun appendUnit(indices: IntArray) {
+        val unitWidth = indices.sumOf { wordWidths[it].coerceAtLeast(0) }
+        if (current.isNotEmpty() && currentWidth + unitWidth > availableWidth) flush()
+        indices.forEach(current::add)
+        currentWidth += unitWidth
+    }
+
+    for (unit in units) {
+        val unitWidth = unit.sumOf { wordWidths[it].coerceAtLeast(0) }
+        if (unit.size > 1 && unitWidth > availableWidth) {
+            // Retain word boundaries and timing, but do not let one producer-side
+            // emphasis group defeat the viewport's hard width constraint.
+            for (wordIndex in unit) appendUnit(intArrayOf(wordIndex))
+        } else {
+            appendUnit(unit)
+        }
+    }
+    flush()
+    return rows
 }
 
 /**
@@ -2641,9 +3251,12 @@ private fun KaraokeVocalFlexbox(
     unlitAlpha: Float,
     alignEnd: Boolean,
     positionState: State<Long>,
+    fontSize: TextUnit,
+    lineHeight: TextUnit,
+    pronunciationFontSize: TextUnit,
+    pronunciationLineHeight: TextUnit,
+    pronunciationGap: Dp,
 ) {
-    val fontSize = if (isBackgroundVocal) 24.sp else 34.sp
-    val lineHeight = if (isBackgroundVocal) 29.sp else 41.sp
     val litAlpha = if (isBackgroundVocal) {
         MotionTokens.KaraokeBgVocalLitAlpha
     } else {
@@ -2656,28 +3269,6 @@ private fun KaraokeVocalFlexbox(
         LyricTimeline.isRightToLeft(words.joinToString("") { it.text })
     }
     val rowCache = remember(words) { MaskRowCache(words.size) }
-    val spanGroups = remember(words) {
-        buildList {
-            var idx = 0
-            while (idx < words.size) {
-                val gid = words[idx].emphasisGroupId
-                if (gid != null) {
-                    val groupIndices = mutableListOf(idx)
-                    var next = idx + 1
-                    while (next < words.size && words[next].emphasisGroupId == gid) {
-                        groupIndices += next
-                        next++
-                    }
-                    add(FlexSpanGroup(gid, groupIndices.toIntArray()))
-                    idx = next
-                } else {
-                    add(FlexSpanGroup(null, intArrayOf(idx)))
-                    idx++
-                }
-            }
-        }
-    }
-
     val density = LocalDensity.current
     val rowSpacingPx = with(density) { 4.dp.roundToPx() }
 
@@ -2720,6 +3311,9 @@ private fun KaraokeVocalFlexbox(
                     activePresence = activePresence,
                     fontSize = fontSize,
                     lineHeight = lineHeight,
+                    pronunciationFontSize = pronunciationFontSize,
+                    pronunciationLineHeight = pronunciationLineHeight,
+                    pronunciationGap = pronunciationGap,
                     positionState = positionState,
                 )
             }
@@ -2739,48 +3333,50 @@ private fun KaraokeVocalFlexbox(
         val wordY = IntArray(placeables.size)
         val builtRows = ArrayList<MaskRowData>(4)
 
-        val currentRowGroups = ArrayList<FlexSpanGroup>(8)
-        var currentRowWidth = 0
         var rowTop = 0
 
-        fun flushRow() {
-            if (currentRowGroups.isEmpty()) return
-            var rowHeight = 0
-            var totalWordCount = 0
-            for (gIdx in 0 until currentRowGroups.size) {
-                val g = currentRowGroups[gIdx]
-                totalWordCount += g.wordIndices.size
-                for (wIdx in g.wordIndices) {
-                    val h = placeables[wIdx].height
-                    if (h > rowHeight) rowHeight = h
-                }
+        val rows = lyricFlexRows(
+            groupIds = words.map(LyricWord::emphasisGroupId),
+            wordWidths = IntArray(placeables.size) { placeables[it].width },
+            maxWidth = contentMaxWidth,
+        )
+        for (rowIndices in rows) {
+            val rowWidth = rowIndices.sumOf { placeables[it].width }
+            var rowBaseline = 0
+            var rowBelowBaseline = 0
+            val baselines = IntArray(rowIndices.size)
+            for (indexInRow in rowIndices.indices) {
+                val placeable = placeables[rowIndices[indexInRow]]
+                val baseline = placeable[LastBaseline]
+                    .takeUnless { it == androidx.compose.ui.layout.AlignmentLine.Unspecified }
+                    ?.coerceIn(0, placeable.height)
+                    ?: placeable.height
+                baselines[indexInRow] = baseline
+                rowBaseline = maxOf(rowBaseline, baseline)
+                rowBelowBaseline = maxOf(rowBelowBaseline, placeable.height - baseline)
             }
-            val rowIndices = IntArray(totalWordCount)
-            var cursor = 0
+            val rowHeight = rowBaseline + rowBelowBaseline
             var x = if (alignEnd) {
-                (constraints.maxWidth - currentRowWidth - startBleedPx).coerceAtLeast(0f).roundToInt()
+                (constraints.maxWidth - rowWidth - startBleedPx).coerceAtLeast(0f).roundToInt()
             } else {
                 startBleedPx.roundToInt()
             }
             val topF = rowTop.toFloat()
             val bottomF = (rowTop + rowHeight).toFloat()
 
-            for (gIdx in 0 until currentRowGroups.size) {
-                val g = currentRowGroups[gIdx]
-                for (wIdx in g.wordIndices) {
-                    val p = placeables[wIdx]
-                    val y = rowTop + (rowHeight - p.height)
-                    wordX[wIdx] = x
-                    wordY[wIdx] = y
-                    rowCache.wordBounds[wIdx] = Rect(
-                        left = x.toFloat(),
-                        top = topF,
-                        right = (x + p.width).toFloat(),
-                        bottom = bottomF,
-                    )
-                    rowIndices[cursor++] = wIdx
-                    x += p.width
-                }
+            for (indexInRow in rowIndices.indices) {
+                val wordIndex = rowIndices[indexInRow]
+                val placeable = placeables[wordIndex]
+                val y = rowTop + rowBaseline - baselines[indexInRow]
+                wordX[wordIndex] = x
+                wordY[wordIndex] = y
+                rowCache.wordBounds[wordIndex] = Rect(
+                    left = x.toFloat(),
+                    top = topF,
+                    right = (x + placeable.width).toFloat(),
+                    bottom = bottomF,
+                )
+                x += placeable.width
             }
             builtRows.add(
                 MaskRowData(
@@ -2790,22 +3386,7 @@ private fun KaraokeVocalFlexbox(
                 ),
             )
             rowTop += rowHeight + rowSpacingPx
-            currentRowGroups.clear()
-            currentRowWidth = 0
         }
-
-        for (group in spanGroups) {
-            var groupWidth = 0
-            for (wIdx in group.wordIndices) {
-                groupWidth += placeables[wIdx].width
-            }
-            if (currentRowGroups.isNotEmpty() && currentRowWidth + groupWidth > contentMaxWidth) {
-                flushRow()
-            }
-            currentRowGroups.add(group)
-            currentRowWidth += groupWidth
-        }
-        flushRow()
 
         rowCache.rows = builtRows
         val totalHeight = if (builtRows.isNotEmpty()) {
@@ -2839,6 +3420,9 @@ private fun KaraokeWordItem(
     activePresence: State<Float>,
     fontSize: TextUnit,
     lineHeight: TextUnit,
+    pronunciationFontSize: TextUnit,
+    pronunciationLineHeight: TextUnit,
+    pronunciationGap: Dp,
     positionState: State<Long>,
 ) {
     val word = words[wordIndex]
@@ -2916,6 +3500,10 @@ private fun KaraokeWordItem(
     }
 
     Column(
+        // The wider of the lyric and pronunciation owns the word cell. Anchor both
+        // to the same leading edge so every pronunciation starts directly above
+        // the lyric syllable it describes; the parent layout aligns lyric baselines
+        // across the complete flex row.
         horizontalAlignment = Alignment.Start,
         modifier = wordModifier,
     ) {
@@ -2926,13 +3514,13 @@ private fun KaraokeWordItem(
                 } else {
                     word.pronunciationText
                 },
-                fontSize = if (isBackgroundVocal) 16.sp else 17.sp,
-                lineHeight = if (isBackgroundVocal) 20.sp else 22.sp,
+                fontSize = pronunciationFontSize,
+                lineHeight = pronunciationLineHeight,
                 fontWeight = FontWeight.SemiBold,
                 color = Color.White.copy(
                     alpha = MotionTokens.KaraokeBgVocalLitAlpha / MotionTokens.KaraokePrimaryAlpha,
                 ),
-                modifier = Modifier.padding(bottom = 4.dp),
+                modifier = Modifier.padding(bottom = pronunciationGap),
             )
         }
 

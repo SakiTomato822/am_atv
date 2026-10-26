@@ -5,6 +5,31 @@ import dev.amatv.model.LyricTiming
 import kotlin.math.abs
 import kotlin.math.ceil
 
+/** Applies display preferences without changing timing, singer or background-vocal structure. */
+internal fun LyricLine.forDisplay(
+    showTranslation: Boolean,
+    showPronunciation: Boolean,
+): LyricLine {
+    if (showTranslation && showPronunciation) return this
+    fun filteredWords(source: List<dev.amatv.model.LyricWord>): List<dev.amatv.model.LyricWord> {
+        if (showPronunciation || source.none {
+                !it.pronunciationText.isNullOrBlank() || it.pronunciationEndMs != null
+            }
+        ) return source
+        return source.map { it.copy(pronunciationText = null, pronunciationEndMs = null) }
+    }
+    return copy(
+        words = filteredWords(words),
+        backgroundWords = filteredWords(backgroundWords),
+        translation = translation.takeIf { showTranslation },
+        backgroundTranslation = backgroundTranslation.takeIf { showTranslation },
+        pronunciationText = pronunciationText.takeIf { showPronunciation },
+        backgroundPronunciationText = backgroundPronunciationText.takeIf { showPronunciation },
+        pronunciationWords = pronunciationWords.takeIf { showPronunciation }.orEmpty(),
+        backgroundPronunciationWords = backgroundPronunciationWords.takeIf { showPronunciation }.orEmpty(),
+    )
+}
+
 /** Only the current viewport and its outgoing scroll context need word trees. */
 internal fun lyricViewportMountOrder(
     tops: FloatArray,
@@ -146,32 +171,170 @@ internal fun resolveActiveLyricAnchor(
 /** Estimates are never painted; mounted rows replace them with exact Compose measurements. */
 internal fun estimateLyricRowHeight(line: LyricLine, widthPx: Float, density: Float, fontScale: Float): Float {
     val sp = density * fontScale
-    fun textRows(text: String, sizeSp: Float, available: Float): Int {
+    fun textWidth(text: String, sizeSp: Float): Float {
         var width = 0f
         for (character in text) width += sizeSp * sp * when {
             character.isWhitespace() -> 0.3f
             character.code >= 0x2e80 -> 1f
             else -> 0.58f
         }
-        return ceil(width / available.coerceAtLeast(sizeSp * sp)).toInt().coerceAtLeast(1)
+        return width
+    }
+    fun textRows(text: String, sizeSp: Float, available: Float): Int {
+        return ceil(textWidth(text, sizeSp) / available.coerceAtLeast(sizeSp * sp))
+            .toInt()
+            .coerceAtLeast(1)
+    }
+    fun karaokeRows(
+        words: List<dev.amatv.model.LyricWord>,
+        mainSizeSp: Float,
+        pronunciationSizeSp: Float,
+        available: Float,
+    ): List<IntArray> {
+        val widths = IntArray(words.size) { index ->
+            val word = words[index]
+            val trailing = if (word.hasTrailingWhitespace && index < words.lastIndex) " " else ""
+            val lyricText = (word.displayText.takeIf { it != word.text } ?: word.text) + trailing
+            val pronunciationText = word.pronunciationText?.plus(trailing).orEmpty()
+            ceil(maxOf(
+                textWidth(lyricText, mainSizeSp),
+                textWidth(pronunciationText, pronunciationSizeSp),
+            )).toInt().coerceAtLeast(1)
+        }
+        return lyricFlexRows(
+            groupIds = words.map { it.emphasisGroupId },
+            wordWidths = widths,
+            maxWidth = available.coerceAtLeast(1f).toInt(),
+        )
+    }
+    fun karaokeBlockHeight(
+        words: List<dev.amatv.model.LyricWord>,
+        mainSizeSp: Float,
+        mainLineHeightSp: Float,
+        pronunciationSizeSp: Float,
+        pronunciationLineHeightSp: Float,
+        pronunciationGapPx: Float,
+        available: Float,
+    ): Float {
+        val rows = karaokeRows(words, mainSizeSp, pronunciationSizeSp, available)
+        return rows.mapIndexed { rowIndex, indices ->
+            mainLineHeightSp * sp +
+                if (indices.any { !words[it].pronunciationText.isNullOrBlank() }) {
+                    pronunciationLineHeightSp * sp + pronunciationGapPx
+                } else {
+                    0f
+                } + if (rowIndex < rows.lastIndex) 4f * density else 0f
+        }.sum()
     }
     if (line.isStatic || line.timing == LyricTiming.None) {
-        return 24f * density + textRows(line.text, 24f, widthPx - 60f * density) * 32f * sp
+        val contentWidth = (widthPx - 60f * density).coerceAtLeast(1f)
+        val hasPronunciation = !line.pronunciationText.isNullOrBlank() ||
+            line.words.any { !it.pronunciationText.isNullOrBlank() }
+        val compactLocalization = hasPronunciation && !line.translation.isNullOrBlank()
+        val mainSizeSp = if (compactLocalization) 22f else 24f
+        val mainLineHeightSp = if (compactLocalization) 29f else 32f
+        val pronunciationSizeSp = if (compactLocalization) 15f else 17f
+        val pronunciationLineHeightSp = if (compactLocalization) 19f else 22f
+        val translationSizeSp = if (compactLocalization) 17f else 19f
+        val translationLineHeightSp = if (compactLocalization) 22f else 25f
+        val localizationGapPx = if (compactLocalization) 2f * density else 4f * density
+        val staticPronunciation = line.pronunciationText
+            ?: line.words.mapNotNull { it.pronunciationText }
+                .joinToString(" ")
+                .takeIf { it.isNotBlank() }
+        var height = 24f * density +
+            textRows(line.text, mainSizeSp, contentWidth) * mainLineHeightSp * sp
+        if (!staticPronunciation.isNullOrBlank()) {
+            height += localizationGapPx +
+                textRows(staticPronunciation, pronunciationSizeSp, contentWidth) *
+                pronunciationLineHeightSp * sp
+        }
+        if (!line.translation.isNullOrBlank()) {
+            height += localizationGapPx +
+                textRows(line.translation, translationSizeSp, contentWidth) *
+                translationLineHeightSp * sp
+        }
+        if (line.backgroundWords.isNotEmpty()) {
+            height += 4f * density + textRows(line.backgroundText, 19f, contentWidth) * 25f * sp
+        }
+        if (!line.backgroundTranslation.isNullOrBlank()) {
+            height += 4f * density + textRows(line.backgroundTranslation, 17f, contentWidth) * 22f * sp
+        }
+        return height
     }
     val contentWidth = ((widthPx - 44f * density) * if (line.isMultiAgentSong) 0.85f else 1f)
         .coerceAtLeast(1f)
-    val mainRows = textRows(line.text, 34f, contentWidth - 12f * density)
-    val pronunciation = if (!line.pronunciationText.isNullOrBlank() || line.words.any { !it.pronunciationText.isNullOrBlank() }) {
-        22f * sp + 4f * density
-    } else 0f
-    var height = 22f * density + mainRows * (41f * sp + pronunciation) + (mainRows - 1) * 4f * density
-    if (!line.translation.isNullOrBlank()) height += 4f * density + textRows(line.translation, 24f, contentWidth) * 29f * sp
-    if (line.backgroundWords.isNotEmpty()) {
-        val rows = textRows(line.backgroundText, 24f, contentWidth - 12f * density)
-        val pronunciationHeight = if (!line.backgroundPronunciationText.isNullOrBlank() ||
-            line.backgroundWords.any { !it.pronunciationText.isNullOrBlank() }) 20f * sp + 4f * density else 0f
-        height += 4f * density + rows * (29f * sp + pronunciationHeight) + (rows - 1) * 4f * density
+    val flexWidth = (contentWidth - 12f * density).coerceAtLeast(1f)
+    val hasWordPronunciation = line.words.any { !it.pronunciationText.isNullOrBlank() }
+    val hasMainPronunciation = !line.pronunciationText.isNullOrBlank() || hasWordPronunciation
+    val compactMainLocalization = hasMainPronunciation && !line.translation.isNullOrBlank()
+    val mainSizeSp = if (compactMainLocalization) 31f else 34f
+    val mainLineHeightSp = if (compactMainLocalization) 37f else 41f
+    val mainPronunciationSizeSp = if (compactMainLocalization) 15f else 17f
+    val mainPronunciationLineHeightSp = if (compactMainLocalization) 19f else 22f
+    val mainTranslationSizeSp = if (compactMainLocalization) 21f else 24f
+    val mainTranslationLineHeightSp = if (compactMainLocalization) 25f else 29f
+    val mainGap = if (compactMainLocalization) 2f * density else 4f * density
+    var height = 22f * density
+    if (!line.pronunciationText.isNullOrBlank() && !hasWordPronunciation) {
+        height += textRows(line.pronunciationText, mainPronunciationSizeSp, flexWidth) *
+            mainPronunciationLineHeightSp * sp + mainGap
     }
-    if (!line.backgroundTranslation.isNullOrBlank()) height += 4f * density + textRows(line.backgroundTranslation, 19f, contentWidth) * 25f * sp
+    height += karaokeBlockHeight(
+        line.words,
+        mainSizeSp,
+        mainLineHeightSp,
+        mainPronunciationSizeSp,
+        mainPronunciationLineHeightSp,
+        mainGap,
+        flexWidth,
+    )
+    if (!line.translation.isNullOrBlank()) {
+        height += mainGap + textRows(line.translation, mainTranslationSizeSp, flexWidth) *
+            mainTranslationLineHeightSp * sp
+    }
+    if (line.backgroundWords.isNotEmpty()) {
+        height += 4f * density
+        val hasBackgroundWordPronunciation = line.backgroundWords.any {
+            !it.pronunciationText.isNullOrBlank()
+        }
+        val hasBackgroundPronunciation = !line.backgroundPronunciationText.isNullOrBlank() ||
+            hasBackgroundWordPronunciation
+        val compactBackgroundLocalization = hasBackgroundPronunciation &&
+            !line.backgroundTranslation.isNullOrBlank()
+        val backgroundSizeSp = if (compactBackgroundLocalization) 22f else 24f
+        val backgroundLineHeightSp = if (compactBackgroundLocalization) 27f else 29f
+        val backgroundPronunciationSizeSp = if (compactBackgroundLocalization) 15f else 16f
+        val backgroundPronunciationLineHeightSp = if (compactBackgroundLocalization) 18f else 20f
+        val backgroundGap = if (compactBackgroundLocalization) 2f * density else 4f * density
+        if (!line.backgroundPronunciationText.isNullOrBlank() && !hasBackgroundWordPronunciation) {
+            height += textRows(
+                line.backgroundPronunciationText,
+                backgroundPronunciationSizeSp,
+                flexWidth,
+            ) * backgroundPronunciationLineHeightSp * sp + backgroundGap
+        }
+        height += karaokeBlockHeight(
+            line.backgroundWords,
+            backgroundSizeSp,
+            backgroundLineHeightSp,
+            backgroundPronunciationSizeSp,
+            backgroundPronunciationLineHeightSp,
+            backgroundGap,
+            flexWidth,
+        )
+    }
+    if (!line.backgroundTranslation.isNullOrBlank()) {
+        val compactBackgroundLocalization = (!line.backgroundPronunciationText.isNullOrBlank() ||
+            line.backgroundWords.any { !it.pronunciationText.isNullOrBlank() })
+        val backgroundTranslationSizeSp = if (compactBackgroundLocalization) 17f else 19f
+        val backgroundTranslationLineHeightSp = if (compactBackgroundLocalization) 22f else 25f
+        val backgroundGap = if (compactBackgroundLocalization) 2f * density else 4f * density
+        height += backgroundGap + textRows(
+            line.backgroundTranslation,
+            backgroundTranslationSizeSp,
+            flexWidth,
+        ) * backgroundTranslationLineHeightSp * sp
+    }
     return height
 }

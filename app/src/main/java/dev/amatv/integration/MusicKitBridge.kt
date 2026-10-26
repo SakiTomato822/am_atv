@@ -218,6 +218,8 @@ class MusicKitBridge(private val context: Context) {
             // Never emit the beginning of a restored song. Readiness and any
             // resume seek are confirmed before the intent machine issues play().
             issuedPrepareGeneration = generation
+            Log.i(TAG, "Prepare generation=$generation catalog=$storeId kind=${track.catalogKind} " +
+                "source=${track.resourceType}:${track.resourceId} positionMs=$positionMs playWhenReady=$desiredPlaying")
             prepare.invoke(currentController, provider, false)
         }
         return generation
@@ -532,6 +534,13 @@ class MusicKitBridge(private val context: Context) {
                 }
             }
             if (decision.failure != null) {
+                // Log once when the native queue/readiness watchdog fails. The
+                // UI message alone cannot distinguish an unadopted queue from
+                // buffering, a mismatched item, or a failed position restore.
+                Log.w(TAG, "Native readiness failure generation=$generation requested=${requestedTrack?.catalogId} " +
+                    "native=${currentTrack?.catalogId} hasItem=${currentQueueItem != null} " +
+                    "state=$playbackState rate=$playbackRate buffering=$buffering " +
+                    "positionMs=$position queue=${queue.take(5).map { it.catalogId }} reason=${decision.failure}")
                 pendingFailureKind = decision.failure
                 pendingPlaybackError = when (decision.failure) {
                     PlaybackFailureKind.PositionRestore -> AppText.text(R.string.services_playback_restore_failed)
@@ -614,6 +623,8 @@ class MusicKitBridge(private val context: Context) {
             lyrics = fallback?.lyrics.orEmpty(),
             catalogId = storeId,
             catalogKind = CatalogKind.Song,
+            resourceId = fallback?.resourceId,
+            resourceType = fallback?.resourceType,
             artworkUrl = artwork?.takeIf { it.startsWith("https://") } ?: fallback?.artworkUrl,
             hasLyricsAvailable = item.callOrNull("hasLyricsAvailable") as? Boolean
                 ?: fallback?.hasLyricsAvailable

@@ -80,6 +80,8 @@
     <string name="services_auth_retry">Try Signing In Again</string>
     <string name="services_auth_invalid_token_format">Apple Music returned an invalid authorization format.</string>
     <string name="services_auth_incomplete">Apple Music sign-in is incomplete\n%1$s\n\nPress Back to return to the app and try again.</string>
+    <string name="services_auth_webview_incomplete">The Apple sign-in form did not finish loading.\nSystem web component: %1$s\n\nPress OK to reload it, or Back to leave.</string>
+    <string name="services_auth_renderer_stopped">The system web component stopped while loading Apple sign-in (%1$s). Return to the app and try again.</string>
     <string name="services_playback_channel_name">Media Playback</string>
     <string name="services_playback_channel_desc">Background media playback notification</string>
 </resources>

@@ -6,6 +6,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Locale
@@ -127,6 +128,31 @@ class AppleTtmlParserTest {
     }
 
     @Test
+    fun identicalLatinPronunciationIsNotRenderedTwice() {
+        val line = AppleTtmlParser.parse(
+            """<tt xmlns="http://www.w3.org/ns/ttml"
+                xmlns:itunes="http://music.apple.com/lyric-ttml-internal"
+                itunes:timing="Word">
+              <head><metadata><itunes:iTunesMetadata>
+                <itunes:transliterations>
+                  <itunes:transliteration xml:lang="en-Latn">
+                    <itunes:text for="L1">
+                      <span begin="1.000" end="1.500">Kind</span>
+                      <span begin="1.500" end="2.000">ness</span>
+                    </itunes:text>
+                  </itunes:transliteration>
+                </itunes:transliterations>
+              </itunes:iTunesMetadata></metadata></head>
+              <body><div><p begin="1.000" end="2.000" itunes:key="L1">
+                <span begin="1.000" end="1.500">Kind</span><span begin="1.500" end="2.000">ness</span>
+              </p></div></body>
+            </tt>""",
+        ).single()
+
+        assertEquals(listOf(null, null), line.words.map { it.pronunciationText })
+    }
+
+    @Test
     fun parsesLineTimingWithoutInventingWordIntervals() {
         val lines = AppleTtmlParser.parse(
             """<tt xmlns="http://www.w3.org/ns/ttml"><body><div>
@@ -142,7 +168,7 @@ class AppleTtmlParserTest {
     }
 
     @Test
-    fun localeUtilAndExtractTtmlFollowApkLogic() {
+    fun localeUtilAndCanonicalTtmlSelectionUseAppLanguageWithoutReplacingBase() {
         assertEquals("zh-Hant", AppleLocaleUtil.getSystemLyricsLanguage(Locale.TAIWAN))
         assertEquals("zh-Hans", AppleLocaleUtil.getSystemLyricsLanguage(Locale.SIMPLIFIED_CHINESE))
         assertEquals("en-US", AppleLocaleUtil.getSystemLyricsLanguage(Locale.US))
@@ -151,22 +177,116 @@ class AppleTtmlParserTest {
             storefront = "tw",
             userToken = { "token" },
         )
-        assertEquals(
-            "<tt>localized</tt>",
-            client.selectTtml(ttmlLocalizations = "<tt>localized</tt>", ttml = "<tt>base</tt>", preferLocalizations = true),
+        val documents = client.extractTtmlDocuments(JSONObject(
+            """{"data":[{"attributes":{"ttml":"<tt>base</tt>","ttmlLocalizations":"<tt>localized</tt>"}}]}""",
+        ))
+        assertEquals("<tt>base</tt>", documents.canonical)
+        assertEquals("<tt>localized</tt>", documents.localizations)
+
+        val fallback = client.extractTtmlDocuments(JSONObject(
+            """{"data":[{"attributes":{"ttmlLocalizations":"<tt>localized</tt>"}}]}""",
+        ))
+        assertEquals("<tt>localized</tt>", fallback.canonical)
+        assertEquals(null, fallback.localizations)
+
+        val unavailable = assertThrows(LyricsRequestException::class.java) {
+            client.extractTtmlDocuments(JSONObject(
+                """{"data":[{"attributes":{"ttml":null,"ttmlLocalizations":null}}]}""",
+            ))
+        }
+        assertEquals(LyricsFailureReason.Unavailable, unavailable.reason)
+    }
+
+    @Test
+    fun localizationRequestUsesAppleCoupledLocalizationParametersWhileDisplayFlagsStayIndependent() {
+        assertTrue(LyricsLocalizationRequest.Disabled.queryParameters().isEmpty())
+
+        val translation = LyricsLocalizationRequest(
+            languageTag = "zh-TW",
+            includeTranslations = true,
+            includePronunciations = false,
+        ).queryParameters()
+        assertEquals("zh-Hant", translation["l[lyrics]"])
+        assertEquals("ttmlLocalizations", translation["extend"])
+        assertTrue(translation["l[script]"].orEmpty().startsWith("en-"))
+
+        val pronunciation = LyricsLocalizationRequest(
+            languageTag = "en-US",
+            includeTranslations = false,
+            includePronunciations = true,
+        ).queryParameters()
+        assertEquals("en-US", pronunciation["l[lyrics]"])
+        assertEquals("ttmlLocalizations", pronunciation["extend"])
+        assertTrue(pronunciation["l[script]"].orEmpty().startsWith("en-"))
+    }
+
+    @Test
+    fun localizedOverlayPreservesCanonicalDuetTimingAndBackgroundVocals() {
+        val canonical = """
+            <tt xmlns="http://www.w3.org/ns/ttml"
+                xmlns:ttm="http://www.w3.org/ns/ttml#metadata"
+                xmlns:itunes="http://music.apple.com/lyric-ttml-internal"
+                itunes:timing="Word">
+              <head><metadata>
+                <ttm:agent xml:id="lead" type="person"/>
+                <ttm:agent xml:id="duet" type="person"/>
+              </metadata></head>
+              <body><div>
+                <p begin="10.000" end="13.000" itunes:key="L1" ttm:agent="lead">
+                  <span begin="10.000" end="11.000">君</span>
+                  <span ttm:role="x-bg"><span begin="11.000" end="12.000">yeah</span></span>
+                </p>
+                <p begin="11.500" end="14.000" itunes:key="L2" ttm:agent="duet">
+                  <span begin="11.500" end="13.500">Harmony</span>
+                </p>
+              </div></body>
+            </tt>
+        """.trimIndent()
+        val localizations = """
+            <tt xmlns="http://www.w3.org/ns/ttml"
+                xmlns:itunes="http://music.apple.com/lyric-ttml-internal">
+              <head><metadata><itunes:iTunesMetadata>
+                <itunes:translations>
+                  <itunes:translation xml:lang="zh-Hans">
+                    <itunes:text for="L1">简体翻译</itunes:text>
+                  </itunes:translation>
+                  <itunes:translation xml:lang="zh-Hant">
+                    <itunes:text for="L1">繁體翻譯<span role="x-bg">背景翻譯</span></itunes:text>
+                  </itunes:translation>
+                </itunes:translations>
+                <itunes:transliterations>
+                  <itunes:transliteration xml:lang="ja-Latn">
+                    <itunes:text for="L1"><span begin="10.000" end="11.000">kimi</span></itunes:text>
+                  </itunes:transliteration>
+                </itunes:transliterations>
+              </itunes:iTunesMetadata></metadata></head>
+              <body><div xml:lang="zh-Hant">
+                <p begin="1.000" end="2.000" itunes:key="EXTRA">絕不能成為歌詞行</p>
+              </div></body>
+            </tt>
+        """.trimIndent()
+
+        val baseLines = AppleTtmlParser.parse(canonical)
+        val merged = AppleTtmlParser.parse(
+            canonicalTtml = canonical,
+            localizationTtml = localizations,
+            translationLocale = Locale.TAIWAN,
+            pronunciationLocale = Locale.US,
+            includeTranslations = true,
+            includePronunciations = true,
         )
-        assertEquals(
-            "<tt>base</tt>",
-            client.selectTtml(ttmlLocalizations = "<tt>localized</tt>", ttml = "<tt>base</tt>", preferLocalizations = false),
-        )
-        assertEquals(
-            "<tt>base</tt>",
-            client.selectTtml(ttmlLocalizations = "", ttml = "<tt>base</tt>", preferLocalizations = false),
-        )
-        assertEquals(
-            "<tt>localized</tt>",
-            client.selectTtml(ttmlLocalizations = "<tt>localized</tt>", ttml = "", preferLocalizations = false),
-        )
+
+        assertEquals(2, merged.size)
+        assertEquals(baseLines.map { it.text }, merged.map { it.text })
+        assertEquals(baseLines.map { it.startMs to it.endMs }, merged.map { it.startMs to it.endMs })
+        assertEquals(baseLines.map { it.agentId }, merged.map { it.agentId })
+        assertTrue(merged.all { it.isMultiAgentSong })
+        assertTrue(merged[1].isOppositeAgent)
+        assertEquals(listOf("yeah"), merged[0].backgroundWords.map { it.text })
+        assertEquals("繁體翻譯", merged[0].translation)
+        assertEquals("背景翻譯", merged[0].backgroundTranslation)
+        assertEquals("kimi", merged[0].words.single().pronunciationText)
+        assertEquals(null, merged[1].translation)
     }
 
     @Test

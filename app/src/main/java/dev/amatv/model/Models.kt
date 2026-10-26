@@ -168,6 +168,8 @@ data class LyricLine(
     },
     /** Songwriters metadata (`SongInfo.getSongwriters()`) attached to the song. */
     val songwriters: List<String> = emptyList(),
+    /** Stable Apple `itunes:key` used only to attach localized text to the canonical line. */
+    val sourceKey: String? = null,
 ) {
     val startMs: Long = lineStartMs
             ?: words.firstOrNull()?.startMs
