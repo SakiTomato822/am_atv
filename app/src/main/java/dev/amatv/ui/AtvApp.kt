@@ -326,14 +326,14 @@ fun AmAtvApp() {
         lyricsByTrackId = recent.entries.toList().takeLast(24).associate { it.toPair() }
     }
 
-    fun acceptResolvedLibraryTrack(original: Track, resolved: Track): Track {
+    fun acceptResolvedTrack(original: Track, resolved: Track): Track {
         if (original.catalogId == resolved.catalogId) return resolved
         val oldIdentity = original.lyricsIdentity()
         val newIdentity = resolved.lyricsIdentity()
         val currentLines = activeLyrics.lines.takeIf { activeLyrics.trackIdentity == oldIdentity }
             ?: original.lyrics
         val updated = resolved.copy(lyrics = currentLines)
-        queueController.updateLibraryCatalogIdentity(original, updated)
+        queueController.updateCatalogIdentity(original, updated)
         if (track.lyricsIdentity() == oldIdentity && track.resourceId == original.resourceId) {
             lyricsByTrackId = lyricsByTrackId.entries.associate { (key, lines) ->
                 val migrated = if (key.startsWith("$oldIdentity|")) newIdentity + key.removePrefix(oldIdentity) else key
@@ -481,7 +481,7 @@ fun AmAtvApp() {
             try {
                 val resolved = services.resolvePlayableTrack(nextTrack)
                 if (selection != selectionGeneration) return@launch
-                val playableTrack = acceptResolvedLibraryTrack(nextTrack, resolved)
+                val playableTrack = acceptResolvedTrack(nextTrack, resolved)
                 pendingRequestedSongCatalogId = playableTrack.catalogId.takeIf {
                     playableTrack.catalogKind == CatalogKind.Song
                 }
@@ -1252,7 +1252,7 @@ fun AmAtvApp() {
         if (resolvedTrack.catalogId != originalTrack.catalogId) {
             // Re-key the same library song before any request/cache lookup. The
             // changed identity reruns this effect without flashing empty lyrics.
-            acceptResolvedLibraryTrack(originalTrack, resolvedTrack)
+            acceptResolvedTrack(originalTrack, resolvedTrack)
             return@LaunchedEffect
         }
         val currentLyricsKey = lyricsCacheKey(lookupIdentity, lyricsVariant)

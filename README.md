@@ -41,6 +41,8 @@ Requires JDK 17, Android SDK 36, and the official [MusicKit Android SDK](https:/
 ```sh
 ./gradlew :app:assembleDebug
 tools/build-standalone.sh
+# Alternate APK with GeckoView for Apple Music sign-in:
+tools/build-standalone-gecko.sh
 ```
 
 The standalone APK is written to `dist/`. See [APK and source distribution](docs/standalone-distribution.md) for signing and packaging.

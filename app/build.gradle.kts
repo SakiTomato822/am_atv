@@ -2,6 +2,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import com.android.build.api.instrumentation.FramesComputationMode
 import com.android.build.api.instrumentation.InstrumentationScope
 import dev.amatv.build.MusicKitSongIdVisitorFactory
+import dev.amatv.build.MusicKitStackMapFrames
 import dev.amatv.build.VerifyMusicKitSdkTask
 import java.util.Properties
 import java.util.Base64
@@ -41,6 +42,9 @@ android {
         targetSdk = 36
         versionCode = 14
         versionName = "0.6.1"
+
+        buildConfigField("String", "AUTH_BROWSER_ACTIVITY", "\"dev.amatv.integration.MusicKitWebAuthActivity\"")
+        buildConfigField("boolean", "AUTH_BROWSER_IS_GECKO", "false")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
@@ -86,6 +90,20 @@ android {
             matchingFallbacks += "release"
             buildConfigField("String", "MUSICKIT_TOKEN_ENDPOINT", "\"\"")
         }
+        create("standaloneGecko") {
+            initWith(getByName("standalone"))
+            matchingFallbacks += listOf("standalone", "release")
+            proguardFile("src/standaloneGecko/proguard-rules.pro")
+            buildConfigField("String", "AUTH_BROWSER_ACTIVITY", "\"dev.amatv.integration.GeckoMusicKitAuthActivity\"")
+            buildConfigField("boolean", "AUTH_BROWSER_IS_GECKO", "true")
+            // The default supports both ARM architectures; a device-specific
+            // APK can omit the other engine with -Pamatv.geckoAbi=<ABI>.
+            val geckoAbi = providers.gradleProperty("amatv.geckoAbi").orNull
+            require(geckoAbi == null || geckoAbi in listOf("armeabi-v7a", "arm64-v8a")) {
+                "amatv.geckoAbi must be armeabi-v7a or arm64-v8a"
+            }
+            ndk.abiFilters += geckoAbi?.let(::listOf) ?: listOf("armeabi-v7a", "arm64-v8a")
+        }
         create("benchmark") {
             initWith(getByName("standalone"))
             matchingFallbacks += listOf("standalone", "release")
@@ -120,14 +138,26 @@ val verifyMusicKitSdkCompatibility = tasks.register<VerifyMusicKitSdkTask>("veri
 }
 tasks.named("preBuild").configure { dependsOn(verifyMusicKitSdkCompatibility) }
 
+val musicKitFrameSdkAars = fileTree("libs") { include("mediaplayback*.aar", "musickitauth*.aar") }
+val musicKitFrameRepairClasses = providers.provider {
+    MusicKitStackMapFrames.missingFrameClasses(musicKitFrameSdkAars.files)
+}
+
 androidComponents {
     onVariants(selector().all()) { variant ->
+        if (variant.name == "standaloneGecko") {
+            // Direct APK distribution benefits from compressed browser binaries.
+            // Android extracts the selected architecture once during installation.
+            variant.packaging.jniLibs.useLegacyPackaging.set(true)
+        }
         variant.instrumentation.transformClassesWith(
             MusicKitSongIdVisitorFactory::class.java,
             InstrumentationScope.ALL,
-        ) {}
+        ) { parameters ->
+            parameters.frameRepairClasses.set(musicKitFrameRepairClasses)
+        }
         variant.instrumentation.setAsmFramesComputationMode(
-            FramesComputationMode.COMPUTE_FRAMES_FOR_INSTRUMENTED_METHODS,
+            FramesComputationMode.COMPUTE_FRAMES_FOR_INSTRUMENTED_CLASSES,
         )
     }
 }
@@ -149,7 +179,7 @@ val verifyStandaloneCredential = tasks.register("verifyStandaloneCredential") {
         logger.lifecycle("Standalone developer credential expires ${Instant.ofEpochSecond(expiry)}")
     }
 }
-tasks.matching { it.name == "preStandaloneBuild" || it.name == "preBenchmarkBuild" }
+tasks.matching { it.name == "preStandaloneBuild" || it.name == "preStandaloneGeckoBuild" || it.name == "preBenchmarkBuild" }
     .configureEach { dependsOn(verifyStandaloneCredential) }
 
 dependencies {
@@ -174,4 +204,12 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")
+
+    // The last stable Gecko release compatible with this project's Kotlin 2.3.21
+    // and compileSdk 36. It is packaged only in the alternate sign-in APK.
+    add("standaloneGeckoImplementation", "org.mozilla.geckoview:geckoview:153.0.20260810162159") {
+        // Bundling a browser must not replace the app's existing artwork/player
+        // Media3 version. MusicKit remains the sole music playback engine.
+        exclude(group = "androidx.media3")
+    }
 }

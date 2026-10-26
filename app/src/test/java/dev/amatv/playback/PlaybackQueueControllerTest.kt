@@ -101,7 +101,7 @@ class PlaybackQueueControllerTest {
         val before = controller.state.value
         val callbacks = playedTracks.size
         val resolved = old.copy(id = "apple:6790045614", catalogId = "6790045614")
-        controller.updateLibraryCatalogIdentity(old, resolved)
+        controller.updateCatalogIdentity(old, resolved)
         val after = controller.state.value
         assertEquals(before.sessionEntries.map { it.entryId }, after.sessionEntries.map { it.entryId })
         assertEquals(before.sessionId, after.sessionId)
@@ -110,6 +110,19 @@ class PlaybackQueueControllerTest {
         assertEquals("6790045614", after.recommendationSeed?.catalogId)
         assertEquals(listOf("6790045614", "other", "6790045614"), after.contextEntries.map { it.track.catalogId })
         assertEquals(callbacks, playedTracks.size)
+    }
+
+    @Test fun retiredCatalogQueueRepairKeepsDuplicateEntriesAndOriginalSources() {
+        val controller = createController()
+        val original = testTrack("1465074689", "君はQueen", "Punipunidenki")
+        controller.playContext(listOf(original, original, testTrack("other", "Other", "Artist")), 0)
+        val before = controller.state.value
+        controller.updateCatalogIdentity(original, original.copy(id = "apple:6790045614", catalogId = "6790045614"))
+        val after = controller.state.value
+        assertEquals(before.sessionEntries.map { it.entryId }, after.sessionEntries.map { it.entryId })
+        assertEquals(listOf("6790045614", "6790045614", "other"), after.sessionEntries.map { it.track.catalogId })
+        assertEquals(listOf("1465074689", "1465074689"), after.sessionEntries.take(2).map { it.track.resourceId })
+        assertEquals("6790045614", after.recommendationSeed?.catalogId)
     }
 
     private fun createController(): PlaybackQueueController {

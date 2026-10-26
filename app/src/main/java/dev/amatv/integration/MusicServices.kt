@@ -165,9 +165,11 @@ class MusicServices(context: Context) : RecommendationProvider {
         )
 
     suspend fun webAuthenticationIntent(): Intent {
-        webAuthenticationSession.prepareForSignIn()
+        // Gecko owns a fresh private profile. Do not initialize the system
+        // WebView provider on a compatibility build whose provider may be broken.
+        if (!BuildConfig.AUTH_BROWSER_IS_GECKO) webAuthenticationSession.prepareForSignIn()
         val developerToken = developerTokens.token()
-        return Intent(appContext, MusicKitWebAuthActivity::class.java).putExtra(
+        return Intent().setClassName(appContext, BuildConfig.AUTH_BROWSER_ACTIVITY).putExtra(
             MusicKitWebAuthActivity.EXTRA_DEVELOPER_TOKEN,
             developerToken,
         )
@@ -218,18 +220,11 @@ class MusicServices(context: Context) : RecommendationProvider {
         return appleLyrics.lyricsFor(checkNotNull(playable.catalogId), localization)
     }
 
-    /** Restore library entries through their durable i.* resource, not retired reporting IDs. */
+    /** Resolve all songs through account-storefront equivalence, retaining source provenance. */
     suspend fun resolvePlayableTrack(track: Track): Track {
-        val original = checkNotNull(track.catalogId) { AppText.text(R.string.services_catalog_id_missing) }
-        val libraryId = track.resourceId?.takeIf { it.startsWith("i.") }
-            ?: original.takeIf { it.startsWith("i.") }
-            ?: return track
         if (track.catalogKind != dev.amatv.model.CatalogKind.Song) return track
-        val resolved = api.resolveCatalogSongId(libraryId)
-        return if (resolved == original) track else track.copy(
-            id = "apple:$resolved", catalogId = resolved,
-            resourceId = libraryId, resourceType = track.resourceType ?: "library-songs",
-        )
+        checkNotNull(track.catalogId) { AppText.text(R.string.services_catalog_id_missing) }
+        return resolvePlayableSongTrack(track, api::resolveCatalogSongId)
     }
 
     suspend fun prepareAndPlay(track: Track): Long = preparePlayback(track)

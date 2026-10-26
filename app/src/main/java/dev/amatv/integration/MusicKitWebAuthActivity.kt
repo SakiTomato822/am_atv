@@ -10,7 +10,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
-import android.text.TextUtils
+import android.view.KeyEvent
 import android.util.Base64
 import android.util.Log
 import android.view.Gravity
@@ -29,7 +29,6 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
-import dev.amatv.BuildConfig
 import dev.amatv.R
 import org.json.JSONObject
 
@@ -44,14 +43,19 @@ class MusicKitWebAuthActivity : Activity() {
     private lateinit var browserContainer: FrameLayout
     private lateinit var webView: WebView
     private lateinit var status: TextView
+    private var diagnostics: AuthDiagnosticsOverlay? = null
     private var popupWebView: WebView? = null
     private val authHandler = Handler(Looper.getMainLooper())
     private var popupLoadGeneration = 0
     private var lastPopupResourceFailure: String? = null
     private var popupPageReady = false
+    private var lastPopupReadiness: String? = null
     private var popupHasShownInteractiveContent = false
     private var mainWebViewDestroyed = false
     private var rendererFailureReported = false
+    private val signInUiScript by lazy {
+        assets.open("gecko-auth/signin-ui.js").bufferedReader().use { it.readText() }
+    }
 
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(ContextCompat.getContextForLanguage(newBase))
@@ -108,7 +112,17 @@ class MusicKitWebAuthActivity : Activity() {
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f,
             ))
         }
-        setContentView(rootContainer)
+        val content = FrameLayout(this).apply {
+            addView(rootContainer, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT,
+            ))
+        }
+        diagnostics = AuthDiagnosticsOverlay.attach(content).also {
+            it.event("System WebView: ${currentWebViewLabel()}")
+            it.event("Android ${android.os.Build.VERSION.RELEASE}, ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+            it.event("MENU: show/hide console")
+        }
+        setContentView(content)
         webView.loadDataWithBaseURL(
             AUTH_ORIGIN,
             authorizationPage(developerToken),
@@ -116,6 +130,14 @@ class MusicKitWebAuthActivity : Activity() {
             "UTF-8",
             null,
         )
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_MENU) {
+            diagnostics?.toggleVisibility()
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
     }
 
     @Deprecated("Deprecated in Java")
@@ -134,6 +156,8 @@ class MusicKitWebAuthActivity : Activity() {
     }
 
     override fun onDestroy() {
+        diagnostics?.dispose()
+        diagnostics = null
         authHandler.removeCallbacksAndMessages(null)
         popupWebView?.let(::closePopupWebView)
         if (::webView.isInitialized && !mainWebViewDestroyed) {
@@ -198,6 +222,9 @@ class MusicKitWebAuthActivity : Activity() {
                     if (consoleMessage?.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR) {
                         Log.w(TAG, "Authorization script error at ${resourceLabel(consoleMessage.sourceId())}:${consoleMessage.lineNumber()}")
                     }
+                    consoleMessage?.let {
+                        diagnostics?.add(it.messageLevel().name, it.message(), it.sourceId(), it.lineNumber())
+                    }
                     return true
                 }
             }
@@ -213,6 +240,7 @@ class MusicKitWebAuthActivity : Activity() {
                     favicon: android.graphics.Bitmap?,
                 ) {
                     if (captureAuthorizationCallback(url?.let(Uri::parse))) return
+                    diagnostics?.add("NAV", url.orEmpty())
                     if (isPopup && isAppleAuthorizationUrl(url)) {
                         beginPopupLoad(view, url)
                     }
@@ -220,6 +248,10 @@ class MusicKitWebAuthActivity : Activity() {
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
+                    if (view != null && isAppleAuthorizationUrl(url)) {
+                        view.evaluateJavascript(signInUiScript, null)
+                    }
+                    diagnostics?.add("PAGE", "Document finished", url)
                     if (!isPopup && popupWebView == null) {
                         hideStatus()
                         view?.requestFocus()
@@ -232,6 +264,7 @@ class MusicKitWebAuthActivity : Activity() {
                     error: WebResourceError?,
                 ) {
                     val failingUrl = request?.url?.toString().orEmpty()
+                    diagnostics?.add("NETWORK", "WebView ${error?.errorCode}: ${error?.description}", failingUrl)
                     if (isPopup && request?.isForMainFrame != true && isRelevantAuthResource(failingUrl)) {
                         lastPopupResourceFailure = "WebView ${error?.errorCode}"
                         Log.w(TAG, "Apple auth resource failed: ${resourceLabel(failingUrl)} (${lastPopupResourceFailure})")
@@ -249,6 +282,7 @@ class MusicKitWebAuthActivity : Activity() {
                     errorResponse: WebResourceResponse?,
                 ) {
                     val failingUrl = request?.url?.toString().orEmpty()
+                    diagnostics?.add("HTTP", "HTTP ${errorResponse?.statusCode ?: 0}", failingUrl)
                     if (isPopup && isRelevantAuthResource(failingUrl)) {
                         lastPopupResourceFailure = "HTTP ${errorResponse?.statusCode ?: 0}"
                         Log.w(TAG, "Apple auth HTTP error: ${resourceLabel(failingUrl)} (${lastPopupResourceFailure})")
@@ -312,6 +346,7 @@ class MusicKitWebAuthActivity : Activity() {
         popupLoadGeneration++
         val generation = popupLoadGeneration
         popupPageReady = false
+        lastPopupReadiness = null
         hideStatus()
         Log.i(TAG, "Apple authorization navigation: ${Uri.parse(url).host}")
         authHandler.postDelayed(
@@ -325,6 +360,10 @@ class MusicKitWebAuthActivity : Activity() {
         popup.evaluateJavascript(POPUP_READINESS_PROBE) { rawResult ->
             if (popupWebView !== popup || generation != popupLoadGeneration || isFinishing) {
                 return@evaluateJavascript
+            }
+            if (lastPopupReadiness != rawResult) {
+                lastPopupReadiness = rawResult
+                diagnostics?.add("FORM", rawResult.orEmpty(), popup.url)
             }
             if (rawResult == "\"interactive\"") {
                 // A hydrated form stays ready until a real main-frame navigation.
@@ -375,116 +414,8 @@ class MusicKitWebAuthActivity : Activity() {
         "${uri.host.orEmpty()}${uri.path.orEmpty()}"
     }.getOrDefault("unknown")
 
-    private fun authorizationPage(developerToken: String): String {
-        val tokenLiteral = JSONObject.quote(developerToken)
-        val buildLiteral = JSONObject.quote(BuildConfig.VERSION_NAME)
-        val labels = JSONObject()
-            .put("continue", getString(R.string.services_auth_continue))
-            .put("componentFailed", getString(R.string.services_auth_component_failed))
-            .put("waiting", getString(R.string.services_auth_waiting))
-            .put("invalidAuthorization", getString(R.string.services_auth_invalid_user_token))
-            .put("retry", getString(R.string.services_auth_retry))
-        return """
-            <!doctype html>
-            <html lang="${resources.configuration.locales[0].toLanguageTag()}">
-              <head>
-                <meta charset="utf-8">
-                <meta name="viewport" content="width=device-width,initial-scale=1">
-                <style>
-                  * { box-sizing: border-box; }
-                  body { margin: 0; min-height: 100vh; display: grid; place-items: center;
-                    background: radial-gradient(circle at 50% 0%, #40152d, #09090b 60%);
-                    color: #fff; font: 24px -apple-system, BlinkMacSystemFont, sans-serif; }
-                  main { width: 84vw; max-width: 760px; text-align: center; }
-                  h1 { font-size: 46px; margin: 0 0 18px; }
-                  p { color: rgba(255,255,255,.68); line-height: 1.5; }
-                  button { margin-top: 28px; min-width: 360px; padding: 20px 34px; border: 0;
-                    border-radius: 38px; background: #fff; color: #111; font-size: 24px;
-                    font-weight: 700; outline: 0; cursor: pointer; }
-                  button:focus { transform: scale(1.04); box-shadow: 0 0 0 5px #ff375f; }
-                  button:disabled { opacity: .45; }
-                  #error { color: #ff9bab; min-height: 36px; margin-top: 18px; font-size: 18px; }
-                </style>
-              </head>
-              <body>
-                <main>
-                  <h1>${TextUtils.htmlEncode(getString(R.string.services_auth_title))}</h1>
-                  <button id="signin" disabled onclick="authorizeMusic()">${TextUtils.htmlEncode(getString(R.string.services_auth_preparing))}</button>
-                  <p id="error"></p>
-                </main>
-                <script>
-                  // This synthetic origin only holds our MusicKit bootstrap
-                  // state. Never let its old token bypass a fresh local sign-in.
-                  try {
-                    window.localStorage.clear();
-                    window.sessionStorage.clear();
-                  } catch (storageUnavailable) { }
-                  var button = document.getElementById('signin');
-                  var error = document.getElementById('error');
-                  var labels = $labels;
-                  function readableError(value) {
-                    return value && value.message ? value.message : String(value);
-                  }
-                  function showAuthorizeError(value, reload) {
-                    error.textContent = readableError(value);
-                    button.disabled = false;
-                    button.textContent = labels.retry;
-                    button.onclick = reload ? function() { window.location.reload(); } : authorizeMusic;
-                    button.focus();
-                  }
-                  document.addEventListener('musickitloaded', function() {
-                    try {
-                      var configuration = MusicKit.configure({
-                        developerToken: $tokenLiteral,
-                        app: { name: 'AM for TV', build: $buildLiteral }
-                      });
-                      Promise.resolve(configuration).then(function() {
-                        button.disabled = false;
-                        button.textContent = labels.continue;
-                        button.onclick = authorizeMusic;
-                        button.focus();
-                      }, function(value) {
-                        showAuthorizeError(value, true);
-                      });
-                    } catch (e) {
-                      showAuthorizeError(e, true);
-                    }
-                  });
-                  function scriptFailed() {
-                    var message = labels.componentFailed;
-                    error.textContent = message;
-                    button.disabled = false;
-                    button.textContent = labels.retry;
-                    button.onclick = function() { window.location.reload(); };
-                    button.focus();
-                  }
-                  function authorizeMusic() {
-                    button.disabled = true;
-                    button.textContent = labels.waiting;
-                    error.textContent = '';
-                    try {
-                      var instance = MusicKit.getInstance();
-                      Promise.resolve(instance.authorize()).then(function(token) {
-                        var resolved = (typeof token === 'string' && token.length > 20)
-                          ? token
-                          : (typeof instance.musicUserToken === 'string' ? instance.musicUserToken : '');
-                        if (resolved && resolved.length > 20) {
-                          $JS_BRIDGE.authorized(resolved);
-                        } else {
-                          showAuthorizeError(new Error(labels.invalidAuthorization));
-                        }
-                      }, showAuthorizeError);
-                    } catch (e) {
-                      showAuthorizeError(e);
-                    }
-                  }
-                </script>
-                <script src="https://js-cdn.music.apple.com/musickit/v3/musickit.js"
-                  onerror="scriptFailed()"></script>
-              </body>
-            </html>
-        """.trimIndent()
-    }
+    private fun authorizationPage(developerToken: String): String =
+        musicKitAuthorizationPage(this, developerToken)
 
     private fun showStatus(message: String, onRetry: (() -> Unit)? = null) = runOnUiThread {
         status.text = message

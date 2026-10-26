@@ -103,9 +103,13 @@ class AppleMusicApi(
 
     private val parseDispatcher = Dispatchers.Default.limitedParallelism(2)
     private val userStorefrontMutex = Mutex()
-    private val libraryCatalogMutex = Mutex()
-    private var libraryCatalogToken: String? = null
-    private val libraryCatalogIds = LinkedHashMap<String, String>()
+    private val catalogSongResolver = CatalogSongResolver(
+        accountToken = userToken,
+        storefront = ::userStorefront,
+        libraryCatalogId = ::libraryCatalogSongId,
+        equivalentCatalogId = ::equivalentSongId,
+        authorizationMessage = { AppText.text(R.string.services_sign_in_apple_music) },
+    )
 
     @Volatile
     private var userStorefrontCache: UserStorefrontCache? = null
@@ -235,49 +239,42 @@ class AppleMusicApi(
         LibraryPage(items = mergeLibraryPage(emptyList(), tracks), nextPage = next, requestedPage = path)
     }
 
-    suspend fun resolveCatalogSongId(id: String): String {
-        if (!id.startsWith("i.")) return id
-        return libraryCatalogMutex.withLock {
-            val account = userToken()?.takeIf(String::isNotBlank)
-                ?: throw CatalogRequestException(CatalogFailureReason.Authorization,
-                    AppText.text(R.string.services_sign_in_apple_music))
-            if (libraryCatalogToken != account) {
-                libraryCatalogIds.clear()
-                libraryCatalogToken = account
-            }
-            libraryCatalogIds[id]?.let { return@withLock it }
-            val root = requestRoot(
-                path = "/v1/me/library/songs/${URLEncoder.encode(id, Charsets.UTF_8.name())}?include=catalog",
-                needsUserToken = true,
-            )
-            val item = root.optJSONArray("data")?.optJSONObject(0)
-                ?: throw CatalogRequestException(CatalogFailureReason.Unavailable,
-                    AppText.text(R.string.services_library_song_catalog_missing, id))
-            val linked = item.optJSONObject("relationships")?.optJSONObject("catalog")
-                ?.optJSONArray("data")?.optJSONObject(0)
-            val resolved = catalogPlaybackId(id, "library-songs",
-                item.optJSONObject("attributes")?.optJSONObject("playParams"), linked)
-            if (resolved == id || resolved.startsWith("i.")) {
-                throw CatalogRequestException(CatalogFailureReason.Unavailable,
-                    AppText.text(R.string.services_uploaded_song_lyrics_unavailable))
-            }
-            // Library links can outlive a catalog release. Apple owns equivalence
-            // across retired releases and account storefronts; never guess by title.
-            val sf = userStorefront()
-            val equivalents = requestRoot(
-                path = "/v1/catalog/$sf/songs?filter%5Bequivalents%5D=${URLEncoder.encode(resolved, Charsets.UTF_8.name())}",
-                needsUserToken = false,
-            )
-            val playable = requireEquivalentCatalogSongId(
-                equivalents, resolved,
-                unavailableMessage = AppText.text(R.string.services_track_unavailable),
-                transientMessage = AppText.text(R.string.services_song_connection_failed),
-            )
-            Log.i(TAG, "Library catalog mapping: $id -> $playable (sourceCatalog=$resolved, storefront=$sf)")
-            libraryCatalogIds[id] = playable
-            if (libraryCatalogIds.size > 64) libraryCatalogIds.remove(libraryCatalogIds.keys.first())
-            playable
+    suspend fun resolveCatalogSongId(id: String): String = catalogSongResolver.resolve(id)
+
+    private suspend fun libraryCatalogSongId(id: String): String {
+        val root = requestRoot(
+            path = "/v1/me/library/songs/${URLEncoder.encode(id, Charsets.UTF_8.name())}?include=catalog",
+            needsUserToken = true,
+        )
+        val item = root.optJSONArray("data")?.optJSONObject(0)
+            ?: throw CatalogRequestException(CatalogFailureReason.Unavailable,
+                AppText.text(R.string.services_library_song_catalog_missing, id))
+        val linked = item.optJSONObject("relationships")?.optJSONObject("catalog")
+            ?.optJSONArray("data")?.optJSONObject(0)
+        val resolved = catalogPlaybackId(id, "library-songs",
+            item.optJSONObject("attributes")?.optJSONObject("playParams"), linked)
+        if (resolved == id || resolved.startsWith("i.")) {
+            throw CatalogRequestException(CatalogFailureReason.Unavailable,
+                AppText.text(R.string.services_uploaded_song_lyrics_unavailable))
         }
+        Log.i(TAG, "Library source catalog: $id -> $resolved")
+        return resolved
+    }
+
+    private suspend fun equivalentSongId(storefront: String, id: String): String {
+        // Catalog queues as well as library links can outlive a release. Apple
+        // owns the recording equivalence; the account storefront owns availability.
+        val equivalents = requestRoot(
+            path = "/v1/catalog/$storefront/songs?filter%5Bequivalents%5D=${URLEncoder.encode(id, Charsets.UTF_8.name())}",
+            needsUserToken = false,
+        )
+        val playable = requireEquivalentCatalogSongId(
+            equivalents, id,
+            unavailableMessage = AppText.text(R.string.services_track_unavailable),
+            transientMessage = AppText.text(R.string.services_song_connection_failed),
+        )
+        Log.i(TAG, "Catalog equivalence: $id -> $playable (storefront=$storefront)")
+        return playable
     }
 
     suspend fun charts(types: String = "albums,songs,playlists"): List<Track> {

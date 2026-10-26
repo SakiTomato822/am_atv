@@ -41,6 +41,8 @@ Android TV 9+，需 Apple Music 訂閱。安裝 APK 後登入 Apple Music。
 ```sh
 ./gradlew :app:assembleDebug
 tools/build-standalone.sh
+# 使用 GeckoView 登入的替代 APK：
+tools/build-standalone-gecko.sh
 ```
 
 獨立版 APK 輸出至 `dist/`。簽章與打包方式見 [APK 與原始碼發佈](docs/standalone-distribution.md)。

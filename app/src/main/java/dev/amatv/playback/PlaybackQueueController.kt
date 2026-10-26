@@ -507,20 +507,22 @@ class PlaybackQueueController(
         triggerRefillIfNeeded()
     }
 
-    /** A library resource can be relinked by Apple; keep entry IDs and context order intact. */
-    fun updateLibraryCatalogIdentity(original: Track, resolved: Track) {
+    /** Apple can relink any recording; keep stable entries, source metadata and order. */
+    fun updateCatalogIdentity(original: Track, resolved: Track) {
         val libraryId = original.resourceId?.takeIf { it.startsWith("i.") }
-            ?: original.catalogId?.takeIf { it.startsWith("i.") } ?: return
+            ?: original.catalogId?.takeIf { it.startsWith("i.") }
         if (original.catalogId == resolved.catalogId) return
-        fun Track.isSameLibraryResource(): Boolean = resourceId == libraryId ||
-            (resourceId == null && catalogId == libraryId)
+        fun Track.isSameSource(): Boolean = if (libraryId != null) {
+            resourceId == libraryId || (resourceId == null && catalogId == libraryId)
+        } else original.catalogId != null && catalogId == original.catalogId
         val seedChanged = _state.value.recommendationSeed?.let {
-            it.isSameLibraryResource() && it.catalogId != resolved.catalogId
+            it.isSameSource() && it.catalogId != resolved.catalogId
         } == true
         if (seedChanged) cancelRefill()
-        fun Track.updated(): Track = if (isSameLibraryResource()) {
+        fun Track.updated(): Track = if (isSameSource()) {
             copy(id = resolved.id, catalogId = resolved.catalogId,
-                resourceId = libraryId, resourceType = resourceType ?: "library-songs")
+                resourceId = resourceId ?: libraryId ?: original.catalogId,
+                resourceType = resourceType ?: if (libraryId != null) "library-songs" else "songs")
         } else this
         fun QueueEntry.updated(): QueueEntry {
             val updatedTrack = track.updated()
