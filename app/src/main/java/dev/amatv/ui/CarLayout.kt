@@ -7,6 +7,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
+import dev.amatv.BuildConfig
 
 /** Scale the app's content, never change the head unit's global wm density. */
 @Composable
@@ -15,7 +16,10 @@ fun CarLayout(content: @Composable () -> Unit) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // Match autoenergy-fuel-mod's 1920x968 design reference and fit both axes.
         // Insets can reduce this to 1920x896; use the actual content window.
-        val scale = carContentScale(maxWidth.value, maxHeight.value)
+        val scale = if (BuildConfig.FLYME_UI_PREVIEW) {
+            // Preview the car viewport on a high-density Xiaomi phone as well.
+            (1.5f * minOf(maxWidth.value / 1920f, maxHeight.value / 968f)).coerceIn(0.4f, 1.5f)
+        } else carContentScale(maxWidth.value, maxHeight.value)
         CompositionLocalProvider(
             LocalDensity provides Density(systemDensity.density * scale, systemDensity.fontScale),
             content = content,

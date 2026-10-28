@@ -79,6 +79,8 @@ Windows 可以使用 `tools/build-flyme.ps1`。输出文件为 `app/build/output
 
 普通构建会检查官方播放/认证 AAR 和 token/endpoint 配置，缺失时明确失败，避免把缺少真实播放引擎的演示包当成车机交付包。
 
+Windows 的 `tools/build-flyme-preview.ps1` 可生成独立包名 `dev.amatv.flyme.preview` 的 ARM64 界面预览包，用于手机横屏检查字体、歌词和触摸控件。该包显示本地演示歌曲，不代表 Apple Music 登录或播放可用；窗口缩放允许适配手机较高密度。正式车机包仍使用车机缩放范围。
+
 如需只使用标准 Android MediaSession 排查原生接入问题：
 
 ```sh
@@ -100,16 +102,18 @@ adb shell dumpsys media_session
 - Android instrumentation 使用真实 Parcel 和模拟系统 Binder，验证注册身份、类型 6、无启动抢播、未知协议拒绝、控制回调及厂商状态编码。
 - 触屏 smoke test 使用未配置账号的演示界面，检查播放控件常显、队列和返回。
 - 模拟器的 `-Pflyme.uiVerification=true -Pamatv.testBuildType=flymeGecko` 使用 x86_64、关闭缩减并启用调试，只用于测试；正式车机包仍为 ARM64。
-- 本地缺少官方 MusicKit AAR。为了验证应用代码，测试环境可以提供仅编译使用的 TokenProvider 接口；它不是播放 SDK，不打包，不发布模拟器验证 APK。这样的测试不能证明 MusicKit 链接、DRM、真实登录或播放正确。
+- 本地已接入用户提供的官方 `mediaplayback-release-1.1.1.aar` 和 `musickitauth-release-1.1.2.aar`，播放库通过上游 SHA-256 校验。SDK 文件仅保存在被 Git 忽略的 `app/libs`，不随仓库分发。真实登录、DRM 和播放仍需开发者 token 配置及 ARM64 实机验证。
 
 实车仍需核对：1920×968 与实际系统栏安全区、Gecko 登录、长时间后台播放、导航/电话打断与恢复、媒体源列表、方向盘控制、封面和仪表显示、重启后的源恢复。此清单是交付验收范围，不是本次已完成的实车测试结果。
 
 ### 本次验证记录（2026-10-28）
 
 - 376 项 JVM 单元测试通过，0 failures / 0 errors。
-- Android 11 / API 30 模拟器：4 项 Binder 协议测试通过；触摸播放/暂停、队列、返回、5 秒后控制仍可见的 smoke test 通过。
+- Android 11 / API 30 模拟器：6 项测试通过（4 项 Binder、1 项中英混排字体、1 项触屏 smoke test）。触屏测试覆盖歌词字号循环与持久化、播放/暂停、队列、返回、5 秒后控制仍可见。
 - 单独断言状态栏和导航栏均可见，测量到 **1920×968** 与 **1920×896** 两种真实内容区；两者 UI smoke test 均通过。模拟器系统栏为 top=24 / bottom=56；这不是 Flyme 实车系统栏尺寸。
-- 普通构建在官方 SDK 缺失时按预期拒绝；通过本地 compile-only 接口完成的 x86_64 验证包仅用于上述测试，没有作为可播放版发布。
+- 接入真实 SDK 后，x86_64 预览构建、instrumentation 测试 APK 和 JVM 测试构建通过；当前正式构建停在开发者 token/endpoint 缺失检查，尚未交付可播放版。早期缺少 SDK 时使用过仅编译接口，当前验证已移除该临时依赖。
+
+字体使用 Inter 和 Noto Sans SC，许可证及文件校验见 [字体记录](flyme-fonts.md)。歌词提供标准、大、特大三档，并为底部播放控制保留空间。
 
 下面是模拟器中的本地演示歌曲，展示界面布局，不代表实车播放结果。
 

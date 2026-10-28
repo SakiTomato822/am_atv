@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="flyme_lyrics_text_size">歌詞字級</string>
+    <string name="flyme_text_standard">標準</string>
+    <string name="flyme_text_large">大</string>
+    <string name="flyme_text_extra_large">特大</string>
+</resources>

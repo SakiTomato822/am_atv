@@ -3,6 +3,10 @@ Copyright (c) 2026 AM for TV contributors
 Project source: MIT License (MIT.txt).
 
 Open-source components used by the application:
+- Inter typeface: Rasmus Andersson and the Inter Project authors; SIL OFL 1.1 (Inter-OFL.txt).
+- Noto Sans SC typeface: Adobe and the Noto Project authors; SIL OFL 1.1 (NotoSansSC-OFL.txt).
+  Original font files: https://github.com/google/fonts/tree/main/ofl/inter
+  and https://github.com/google/fonts/tree/main/ofl/notosanssc .
 - AndroidX, Jetpack Compose, Material and Media3: Android Open Source Project contributors.
 - Kotlin and kotlinx.coroutines: JetBrains and Kotlin contributors.
 - Coil: Coil contributors.

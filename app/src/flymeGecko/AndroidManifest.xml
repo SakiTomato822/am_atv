@@ -7,7 +7,7 @@
         <package android:name="com.ecarx.sdk.openapi" />
         <package android:name="ecarx.xsf.mediacenter" />
     </queries>
-    <application android:label="@string/flyme_app_name"
+    <application android:label="${flymeApplicationLabel}"
         android:networkSecurityConfig="@xml/gecko_auth_network_security"
         tools:replace="android:label">
         <activity android:name=".MainActivity"

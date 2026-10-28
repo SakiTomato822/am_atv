@@ -246,6 +246,7 @@ fun AmAtvApp() {
     var shuffleEnabled by remember { mutableStateOf(playbackPrefs.shuffleEnabled) }
     var autoplayEnabled by remember { mutableStateOf(playbackPrefs.autoplayEnabled) }
     var lyricOffsetMs by remember { mutableLongStateOf(playbackPrefs.lyricOffsetMs) }
+    var lyricTextSize by remember { mutableStateOf(playbackPrefs.lyricTextSize) }
     var lyricTranslationEnabled by remember {
         mutableStateOf(playbackPrefs.lyricTranslationEnabled)
     }
@@ -1895,6 +1896,11 @@ fun AmAtvApp() {
                         onSeekBy = ::seekPlaybackBy,
                         onSelectTrack = (::selectQueueTrack),
                         onBack = { destination = previousDestination },
+                        lyricTextSize = lyricTextSize,
+                        onLyricTextSizeChange = {
+                            lyricTextSize = it
+                            playbackPrefs.lyricTextSize = it
+                        },
                         lowPerformanceMode = lowPerformanceMode,
                         lyricTranslationEnabled = lyricTranslationEnabled,
                         lyricPronunciationEnabled = lyricPronunciationEnabled,

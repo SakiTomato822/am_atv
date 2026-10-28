@@ -19,6 +19,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -56,6 +58,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.Slider
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -107,12 +110,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import dev.amatv.R
 import dev.amatv.BuildConfig
+import dev.amatv.integration.LyricTextSize
 import dev.amatv.integration.PlaybackRepeatMode
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.LyricLine
@@ -137,6 +142,8 @@ private enum class PlayerPresentation {
     Lyrics,
     Queue,
 }
+
+private val LyricPrimaryWeight = if (BuildConfig.FLYME_AUTO) FontWeight.SemiBold else FontWeight.Bold
 
 private enum class PlayerNavigationZone {
     Controls,
@@ -218,6 +225,8 @@ fun PlayerScreen(
     onLyricTranslationLanguageChange: (String) -> Unit = {},
     onLyricPronunciationLanguageChange: (String) -> Unit = {},
     onBack: () -> Unit = {},
+    lyricTextSize: LyricTextSize = LyricTextSize.Standard,
+    onLyricTextSizeChange: (LyricTextSize) -> Unit = {},
 ) {
     val playbackStateDescription = stringResource(when {
         isPlaying -> R.string.player_state_playing
@@ -648,6 +657,7 @@ fun PlayerScreen(
             focusedQueueIndex = focusedQueueIndex,
             selectionVisible = navigationZone == PlayerNavigationZone.QueueItems,
             lowPerformanceMode = lowPerformanceMode,
+            lyricTextSize = lyricTextSize,
             onSelectQueueTrack = { index ->
                 if (isActiveScreen && showQueue) {
                     controlsActivity++
@@ -850,6 +860,8 @@ fun PlayerScreen(
                 onTranslationLanguageChange = onLyricTranslationLanguageChange,
                 onPronunciationLanguageChange = onLyricPronunciationLanguageChange,
                 onDismiss = { showLyricsSettings = false },
+                lyricTextSize = lyricTextSize,
+                onLyricTextSizeChange = onLyricTextSizeChange,
             )
         }
 
@@ -1083,6 +1095,8 @@ private fun LyricsDisplaySettingsDialog(
     onTranslationLanguageChange: (String) -> Unit,
     onPronunciationLanguageChange: (String) -> Unit,
     onDismiss: () -> Unit,
+    lyricTextSize: LyricTextSize,
+    onLyricTextSizeChange: (LyricTextSize) -> Unit,
 ) {
     var languagePicker by remember { mutableStateOf<LyricsLanguagePicker?>(null) }
     val firstFocus = remember { FocusRequester() }
@@ -1116,7 +1130,7 @@ private fun LyricsDisplaySettingsDialog(
             },
             text = {
                 Column(
-                    modifier = Modifier.width(520.dp),
+                    modifier = Modifier.width(520.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     when (languagePicker) {
@@ -1164,6 +1178,18 @@ private fun LyricsDisplaySettingsDialog(
                             }
                         }
                         null -> {
+                            if (BuildConfig.FLYME_AUTO) {
+                                LyricsDisplayValueRow(
+                                    title = stringResource(R.string.flyme_lyrics_text_size),
+                                    value = stringResource(when (lyricTextSize) {
+                                        LyricTextSize.Standard -> R.string.flyme_text_standard
+                                        LyricTextSize.Large -> R.string.flyme_text_large
+                                        LyricTextSize.ExtraLarge -> R.string.flyme_text_extra_large
+                                    }),
+                                    onClick = { onLyricTextSizeChange(lyricTextSize.next()) },
+                                    modifier = Modifier.automationId("lyrics-text-size"),
+                                )
+                            }
                             LyricsLanguageSummaryRow(
                                 title = stringResource(R.string.player_lyrics_source_language),
                                 value = stringResource(R.string.player_lyrics_source_auto),
@@ -1319,10 +1345,11 @@ private fun LyricsDisplayValueRow(
     title: String,
     value: String,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     FocusSurface(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth().height(56.dp),
+        modifier = modifier.fillMaxWidth().height(56.dp),
         cornerRadius = 14.dp,
         showBorder = true,
         padding = PaddingValues(horizontal = 16.dp),
@@ -1413,6 +1440,7 @@ private fun PlayerStage(
     selectionVisible: Boolean,
     lowPerformanceMode: Boolean = false,
     onSelectQueueTrack: (Int) -> Unit,
+    lyricTextSize: LyricTextSize,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -1514,13 +1542,18 @@ private fun PlayerStage(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(start = lyricsStartDp, end = lyricsEndDp)
+                    .padding(start = lyricsStartDp, end = lyricsEndDp,
+                        top = if (BuildConfig.FLYME_AUTO) 16.dp else 0.dp,
+                        bottom = if (BuildConfig.FLYME_AUTO && controlsVisible) 196.dp else 0.dp)
                     .graphicsLayer {
                         alpha = lyricsAlpha.value
                         translationX = (1f - lyricsAlpha.value) * slideDistancePx
                     },
             ) {
                 if (track.lyrics.isNotEmpty()) {
+                    val lyricScale = if (BuildConfig.FLYME_AUTO) lyricTextSize.scale else 1f
+                    CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * lyricScale)) {
+                    key(lyricScale) {
                     LyricsPanel(
                         lines = track.lyrics,
                         isVisible = isVisibleOnScreen && presentation == PlayerPresentation.Lyrics,
@@ -1532,6 +1565,8 @@ private fun PlayerStage(
                         manualScrollTrigger = manualScrollTrigger,
                         manualScrollDelta = manualScrollDelta,
                     )
+                    }
+                    }
                 } else {
                     LyricsUnavailablePanel(
                         isLoading = lyricsLoading,
@@ -2762,7 +2797,7 @@ private fun KaraokeLyricLine(
                     text = line.text,
                     fontSize = staticMainFontSize,
                     lineHeight = staticMainLineHeight,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = LyricPrimaryWeight,
                     color = Color.White.copy(alpha = if (isFocused) 1f else MotionTokens.KaraokePrimaryAlpha),
                 )
                 if (!line.translation.isNullOrBlank()) {
@@ -3172,7 +3207,7 @@ private fun LineSyncedContent(
         text = line.text,
         fontSize = mainFontSize,
         lineHeight = mainLineHeight,
-        fontWeight = FontWeight.Bold,
+        fontWeight = LyricPrimaryWeight,
         color = Color.White,
         textAlign = textAlign,
         modifier = Modifier.fillMaxWidth().then(mainAlphaModifier),
@@ -3204,7 +3239,7 @@ private fun LineSyncedContent(
             text = "(${line.backgroundText})",
             fontSize = backgroundFontSize,
             lineHeight = backgroundLineHeight,
-            fontWeight = FontWeight.Bold,
+            fontWeight = LyricPrimaryWeight,
             color = Color.White,
             textAlign = textAlign,
             modifier = Modifier.fillMaxWidth().then(backgroundAlphaModifier).padding(top = backgroundGap),
@@ -3534,8 +3569,9 @@ private fun KaraokeWordItem(
     val density = LocalDensity.current
     val liftDistancePx = with(density) { MotionTokens.KaraokeWordLiftDp.dp.toPx() }
     val shadowRadiusPx = with(density) { MotionTokens.KaraokeEmphasisShadowDp.dp.toPx() }
-    val shadowStyle = remember(shadowRadiusPx) {
-        TextStyle(
+    val baseTextStyle = LocalTextStyle.current
+    val shadowStyle = remember(shadowRadiusPx, baseTextStyle) {
+        baseTextStyle.copy(
             shadow = Shadow(
                 color = Color.White,
                 blurRadius = shadowRadiusPx,
@@ -3595,7 +3631,7 @@ private fun KaraokeWordItem(
                 text = renderedString,
                 fontSize = fontSize,
                 lineHeight = lineHeight,
-                fontWeight = FontWeight.Bold,
+                fontWeight = LyricPrimaryWeight,
                 color = Color.White,
             )
         } else {
@@ -3618,7 +3654,7 @@ private fun KaraokeWordItem(
                             text = " ",
                             fontSize = fontSize,
                             lineHeight = lineHeight,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = LyricPrimaryWeight,
                             color = Color.White,
                         )
                     } else {
@@ -3665,7 +3701,7 @@ private fun KaraokeWordItem(
                                     text = ch.toString(),
                                     fontSize = fontSize,
                                     lineHeight = lineHeight,
-                                    fontWeight = FontWeight.Bold,
+                                    fontWeight = LyricPrimaryWeight,
                                     color = Color.Transparent,
                                     style = shadowStyle,
                                     modifier = Modifier.graphicsLayer {
@@ -3684,7 +3720,7 @@ private fun KaraokeWordItem(
                                 text = ch.toString(),
                                 fontSize = fontSize,
                                 lineHeight = lineHeight,
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = LyricPrimaryWeight,
                                 color = Color.White,
                                 onTextLayout = { result ->
                                     charWidthsPx[localCharIdx] = result.size.width.toFloat()

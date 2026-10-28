@@ -132,6 +132,13 @@ class PlaybackPreferences(context: Context) : QueuePreferences {
             preferences.edit().putBoolean(KEY_LYRIC_TRANSLATION_ENABLED, value).apply()
         }
 
+    var lyricTextSize: LyricTextSize
+        get() = enumValueOrDefault(
+            preferences.getString(KEY_LYRIC_TEXT_SIZE, null).orEmpty(),
+            if (dev.amatv.BuildConfig.FLYME_AUTO) LyricTextSize.Large else LyricTextSize.Standard,
+        )
+        set(value) { preferences.edit().putString(KEY_LYRIC_TEXT_SIZE, value.name).apply() }
+
     var lyricPronunciationEnabled: Boolean
         get() = preferences.getBoolean(KEY_LYRIC_PRONUNCIATION_ENABLED, false)
         set(value) {
@@ -190,5 +197,6 @@ class PlaybackPreferences(context: Context) : QueuePreferences {
         const val KEY_LYRIC_TRANSLATION_LANGUAGE = "pref_lyric_translation_language"
         const val KEY_LYRIC_PRONUNCIATION_LANGUAGE = "pref_lyric_pronunciation_language"
         const val KEY_LOW_PERFORMANCE_MODE = "pref_playback_low_performance_mode"
+        const val KEY_LYRIC_TEXT_SIZE = "pref_lyric_text_size"
     }
 }

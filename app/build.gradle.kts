@@ -45,6 +45,7 @@ android {
         versionName = "0.6.2"
         buildConfigField("boolean", "FLYME_AUTO", "false")
         buildConfigField("boolean", "FLYME_NATIVE_MEDIA", "false")
+        buildConfigField("boolean", "FLYME_UI_PREVIEW", "false")
 
         buildConfigField("String", "AUTH_BROWSER_ACTIVITY", "\"dev.amatv.integration.MusicKitWebAuthActivity\"")
         buildConfigField("boolean", "AUTH_BROWSER_IS_GECKO", "false")
@@ -115,6 +116,7 @@ android {
             initWith(getByName("standaloneGecko"))
             applicationIdSuffix = ".flyme"
             versionNameSuffix = "-flyme"
+            manifestPlaceholders["flymeApplicationLabel"] = "@string/flyme_app_name"
             matchingFallbacks += listOf("standaloneGecko", "standalone", "release")
             buildConfigField("boolean", "FLYME_AUTO", "true")
             buildConfigField("boolean", "FLYME_NATIVE_MEDIA", localSetting("flyme.nativeMedia", "true"))
@@ -128,8 +130,14 @@ android {
                 isMinifyEnabled = false
                 isShrinkResources = false
                 isDebuggable = true
+                applicationIdSuffix = ".flyme.preview"
+                versionNameSuffix = "-flyme-preview"
+                manifestPlaceholders["flymeApplicationLabel"] = "@string/flyme_preview_name"
+                buildConfigField("boolean", "FLYME_UI_PREVIEW", "true")
+                val previewAbi = localSetting("flyme.previewAbi", "x86_64")
+                require(previewAbi in listOf("arm64-v8a", "x86_64")) { "Unsupported preview ABI" }
                 ndk.abiFilters.clear()
-                ndk.abiFilters += "x86_64"
+                ndk.abiFilters += previewAbi
             }
         }
     }

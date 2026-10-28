@@ -51,7 +51,32 @@ class FlymeTouchSmokeTest {
             )
         }
         assertNotNull(device.findObject(By.res("player-touch-progress")))
-        play.click()
+        val lyricsBounds = device.findObject(By.res("lyrics-panel"))?.visibleBounds
+        val progressBounds = device.findObject(By.res("player-touch-progress")).visibleBounds
+        if (lyricsBounds != null) assertTrue("Lyrics stay above playback controls", lyricsBounds.bottom <= progressBounds.top)
+        val prefs = dev.amatv.integration.PlaybackPreferences(context)
+        val initialTextSize = prefs.lyricTextSize
+        device.findObject(By.res("player-lyrics-display")).click()
+        val textSizeRow = device.wait(Until.findObject(By.res("lyrics-text-size")), 5000)
+        assertNotNull(textSizeRow)
+        var expectedTextSize = initialTextSize
+        // Wait for the new rendered value before clicking again: UIAutomator's
+        // idle signal alone does not guarantee a Compose recomposition finished.
+        repeat(3) {
+            device.findObject(By.res("lyrics-text-size")).click()
+            expectedTextSize = expectedTextSize.next()
+            val label = context.getString(when (expectedTextSize) {
+                dev.amatv.integration.LyricTextSize.Standard -> dev.amatv.R.string.flyme_text_standard
+                dev.amatv.integration.LyricTextSize.Large -> dev.amatv.R.string.flyme_text_large
+                dev.amatv.integration.LyricTextSize.ExtraLarge -> dev.amatv.R.string.flyme_text_extra_large
+            })
+            assertTrue("Updated lyric size is rendered", device.wait(Until.hasObject(By.text(label)), 5000))
+            assertEquals(expectedTextSize, prefs.lyricTextSize)
+        }
+        assertEquals(initialTextSize, prefs.lyricTextSize)
+        device.findObject(By.text(context.getString(dev.amatv.R.string.player_lyrics_display_done))).click()
+        device.waitForIdle()
+        device.findObject(By.res("player-play-pause")).click()
         assertTrue("Touch play changes the playback control",
             device.wait(Until.hasObject(By.desc(context.getString(dev.amatv.R.string.player_pause))), 5000))
         device.findObject(By.res("player-play-pause")).click()
