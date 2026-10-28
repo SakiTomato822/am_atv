@@ -143,7 +143,7 @@ private enum class PlayerPresentation {
     Queue,
 }
 
-private val LyricPrimaryWeight = if (BuildConfig.FLYME_AUTO) FontWeight.SemiBold else FontWeight.Bold
+private val LyricPrimaryWeight = FontWeight.Bold
 
 private enum class PlayerNavigationZone {
     Controls,

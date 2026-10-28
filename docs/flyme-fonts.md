@@ -16,4 +16,4 @@ File hashes:
 
 The app theme applies this family across the app's Compose pages, dialogs, lyric words and local Gecko status text. Apple's remote sign-in page retains its own styling.
 
-Lyrics have a separate Standard/Large/Extra large setting (100% / 115% / 130%); the car default is Large. Main lyrics use weight 600, and translated/pronunciation lines scale with them. Font changes remeasure the lyric viewport while preserving the current track and playback position. The lyric viewport reserves the bottom playback-control area.
+Lyrics have a separate Standard/Large/Extra large setting (100% / 115% / 130%); the car default is Large. Main lyrics use weight 700, and translated/pronunciation lines keep their lighter weights and scale with them. Font changes remeasure the lyric viewport while preserving the current track and playback position. The lyric viewport reserves the bottom playback-control area.
