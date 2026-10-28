@@ -1,5 +1,7 @@
 # AM for TV
 
+> This fork's `flyme-auto` branch adds an experimental **AM for Flyme Auto** variant: a 1920×968 design reference, visible system bars, Gecko sign-in, touch controls and a native media-source interoperability client. See [Flyme Auto adaptation and validation limits](docs/flyme-auto.md).
+
 **The smoothest Apple Music client for Android TV**
 
 Offers an experience close to the native Apple Music app on Apple TV.

@@ -66,6 +66,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.amatv.R
+import dev.amatv.BuildConfig
 import dev.amatv.data.MockCatalog
 import dev.amatv.i18n.AppText
 import dev.amatv.i18n.destinationLabel
@@ -185,7 +186,7 @@ fun AmAtvApp() {
     var playWhenReady by remember { mutableStateOf(false) }
 
     val currentView = androidx.compose.ui.platform.LocalView.current
-    val shouldKeepScreenOn = isPlaying || playWhenReady
+    val shouldKeepScreenOn = !BuildConfig.FLYME_AUTO && (isPlaying || playWhenReady)
     DisposableEffect(shouldKeepScreenOn) {
         currentView.keepScreenOn = shouldKeepScreenOn
         onDispose {
@@ -1630,7 +1631,7 @@ fun AmAtvApp() {
 
     val isNowPlaying = destination == Destination.NowPlaying
     LaunchedEffect(isNowPlaying, isPlaying, spectrumPermissionGranted) {
-        if (isNowPlaying && isPlaying && !spectrumPermissionGranted && !spectrumPermissionAsked) {
+        if (!BuildConfig.FLYME_AUTO && isNowPlaying && isPlaying && !spectrumPermissionGranted && !spectrumPermissionAsked) {
             spectrumPermissionAsked = true
             spectrumPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
@@ -1842,7 +1843,9 @@ fun AmAtvApp() {
                     )
                 }
                 }
-                if (hasCurrentTrack || isNowPlaying || playerTransitionVisible) {
+                // Retained native player views can intercept touches even at
+                // alpha=0. The car mounts the player only while it is visible.
+                if (isNowPlaying || playerTransitionVisible || (!BuildConfig.FLYME_AUTO && hasCurrentTrack)) {
                     val isPlayerVisible = isNowPlaying || playerTransitionVisible
                     CompositionLocalProvider(
                         LocalFocusFrameEnabled provides isNowPlaying,
@@ -1891,6 +1894,7 @@ fun AmAtvApp() {
                         onSkipNext = { skip(1) },
                         onSeekBy = ::seekPlaybackBy,
                         onSelectTrack = (::selectQueueTrack),
+                        onBack = { destination = previousDestination },
                         lowPerformanceMode = lowPerformanceMode,
                         lyricTranslationEnabled = lyricTranslationEnabled,
                         lyricPronunciationEnabled = lyricPronunciationEnabled,
@@ -2138,6 +2142,7 @@ private fun BrowseShell(
                 CompositionLocalProvider(LocalContentFocusEntry provides detailFocus) {
                     key(collection.resourceType, collection.resourceId, collection.id) {
                         CollectionScreen(
+                            onBack = ::closeCollection,
                             state = collectionState,
                             currentTrack = currentTrack,
                             isPlaying = isPlaying,

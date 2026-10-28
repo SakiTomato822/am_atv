@@ -17,6 +17,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +39,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AllInclusive
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ClearAll
@@ -53,6 +55,7 @@ import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.Slider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -109,6 +112,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import dev.amatv.R
+import dev.amatv.BuildConfig
 import dev.amatv.integration.PlaybackRepeatMode
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.LyricLine
@@ -213,6 +217,7 @@ fun PlayerScreen(
     onLyricPronunciationEnabledChange: (Boolean) -> Unit = {},
     onLyricTranslationLanguageChange: (String) -> Unit = {},
     onLyricPronunciationLanguageChange: (String) -> Unit = {},
+    onBack: () -> Unit = {},
 ) {
     val playbackStateDescription = stringResource(when {
         isPlaying -> R.string.player_state_playing
@@ -329,8 +334,51 @@ fun PlayerScreen(
             line.backgroundWords.any { !it.pronunciationText.isNullOrBlank() }
     }
 
+    fun activateControl(control: PlayerControl) {
+        if (!isActiveScreen) return
+        controlsActivity++
+        controlsVisible = true
+        focusedControl = control
+        when (control) {
+            PlayerControl.Previous -> if (canSkipPrevious) onSkipPrevious()
+            PlayerControl.PlayPause -> onTogglePlayback()
+            PlayerControl.Next -> if (canSkipNext) onSkipNext()
+            PlayerControl.Lyrics -> {
+                userToggledLyrics = true
+                if (lyricsTransientFailure && track.lyrics.isEmpty()) {
+                    showLyrics = true
+                    onRetryLyrics()
+                } else showLyrics = !showLyrics
+                showQueue = false
+                navigationZone = PlayerNavigationZone.Controls
+            }
+            PlayerControl.LyricsDisplay -> showLyricsSettings = true
+            PlayerControl.Queue -> {
+                showQueue = !showQueue
+                if (showQueue) {
+                    showLyrics = false
+                    focusQueueIndex(currentQueueIndex)
+                    navigationZone = PlayerNavigationZone.QueueItems
+                } else navigationZone = PlayerNavigationZone.Controls
+            }
+            PlayerControl.Radio -> if (canSetAutoplay) onToggleAutoplay()
+        }
+    }
+
+    fun activateQueueMode(mode: QueueModeControl) {
+        if (!isActiveScreen) return
+        controlsActivity++
+        when (mode) {
+            QueueModeControl.Shuffle -> if (canSetShuffle && !autoplayEnabled) onToggleShuffle()
+            QueueModeControl.Repeat -> if (canSetRepeat && !autoplayEnabled) onCycleRepeat()
+            QueueModeControl.Autoplay -> if (canSetAutoplay) onToggleAutoplay()
+            QueueModeControl.Source -> onToggleAutoplaySource()
+            QueueModeControl.Clear -> if (canClearQueue) onClearQueue()
+        }
+    }
+
     LaunchedEffect(controlsVisible, controlsActivity, isActiveScreen, isScrubbing, showLyricsSettings) {
-        if (controlsVisible && isActiveScreen && !isScrubbing && !showLyricsSettings) {
+        if (!BuildConfig.FLYME_AUTO && controlsVisible && isActiveScreen && !isScrubbing && !showLyricsSettings) {
             delay(5_000L)
             controlsVisible = false
             isScrubbing = false
@@ -433,54 +481,11 @@ fun PlayerScreen(
                             }
                             PlayerNavigationZone.QueueModes -> {
                                 if (showQueue) {
-                                    when (focusedQueueMode) {
-                                        QueueModeControl.Shuffle -> if (
-                                            canSetShuffle && !autoplayEnabled
-                                        ) onToggleShuffle()
-                                        QueueModeControl.Repeat -> if (
-                                            canSetRepeat && !autoplayEnabled
-                                        ) onCycleRepeat()
-                                        QueueModeControl.Autoplay -> if (canSetAutoplay) {
-                                            onToggleAutoplay()
-                                        }
-                                        QueueModeControl.Source -> onToggleAutoplaySource()
-                                        QueueModeControl.Clear -> if (canClearQueue) onClearQueue()
-                                    }
+                                    activateQueueMode(focusedQueueMode)
                                 }
                             }
                             PlayerNavigationZone.Controls -> {
-                                when (focusedControl) {
-                                    PlayerControl.Previous -> onSkipPrevious()
-                                    PlayerControl.PlayPause -> onTogglePlayback()
-                                    PlayerControl.Next -> onSkipNext()
-                                    PlayerControl.Lyrics -> {
-                                        userToggledLyrics = true
-                                        if (lyricsTransientFailure && track.lyrics.isEmpty()) {
-                                            showLyrics = true
-                                            onRetryLyrics()
-                                        } else {
-                                            showLyrics = !showLyrics
-                                        }
-                                        showQueue = false
-                                        if (!showLyrics && navigationZone == PlayerNavigationZone.Lyrics) {
-                                            navigationZone = PlayerNavigationZone.Controls
-                                        }
-                                    }
-                                    PlayerControl.LyricsDisplay -> {
-                                        showLyricsSettings = true
-                                    }
-                                    PlayerControl.Queue -> {
-                                        showQueue = !showQueue
-                                        if (showQueue) {
-                                            showLyrics = false
-                                            focusQueueIndex(currentQueueIndex)
-                                            navigationZone = PlayerNavigationZone.QueueItems
-                                        } else {
-                                            navigationZone = PlayerNavigationZone.Controls
-                                        }
-                                    }
-                                    PlayerControl.Radio -> if (canSetAutoplay) onToggleAutoplay()
-                                }
+                                activateControl(focusedControl)
                             }
                         }
                         true
@@ -643,8 +648,26 @@ fun PlayerScreen(
             focusedQueueIndex = focusedQueueIndex,
             selectionVisible = navigationZone == PlayerNavigationZone.QueueItems,
             lowPerformanceMode = lowPerformanceMode,
+            onSelectQueueTrack = { index ->
+                if (isActiveScreen && showQueue) {
+                    controlsActivity++
+                    focusQueueIndex(index)
+                    onSelectTrack(index)
+                }
+            },
             modifier = Modifier.fillMaxSize(),
         )
+        if (BuildConfig.FLYME_AUTO && isActiveScreen) {
+            FocusSurface(
+                onClick = onBack,
+                modifier = Modifier.align(Alignment.TopStart).padding(16.dp).size(56.dp)
+                    .automationId("player-back"),
+            ) {
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack,
+                    contentDescription = stringResource(R.string.browse_back),
+                    modifier = Modifier.align(Alignment.Center).size(28.dp))
+            }
+        }
         if (statusMessage != null) {
             Text(
                 text = statusMessage,
@@ -668,6 +691,7 @@ fun PlayerScreen(
                     repeatMode, shuffleEnabled, autoplayEnabled, autoplaySource,
                     canSetRepeat, canSetShuffle, canSetAutoplay, canClearQueue,
                     focusedQueueMode.takeIf { navigationZone == PlayerNavigationZone.QueueModes },
+                    onModeClick = ::activateQueueMode,
                 )
             }
         }
@@ -702,6 +726,10 @@ fun PlayerScreen(
                     durationMs = track.durationMs,
                     isFocused = navigationZone == PlayerNavigationZone.ProgressBar,
                     scrubPositionMs = if (isScrubbing) scrubPositionMs else null,
+                    onSeekTo = { target ->
+                        if (isActiveScreen) onSeekBy(target - playbackPosition.value)
+                    },
+                    enabled = isActiveScreen,
                 )
                 Spacer(Modifier.height(8.dp))
                 Row(
@@ -719,6 +747,7 @@ fun PlayerScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                         PlayerButton(
                             controlId = "player-previous",
+                            onClick = { activateControl(PlayerControl.Previous) },
                             icon = Icons.Rounded.SkipPrevious,
                             contentDescription = stringResource(R.string.player_previous_track),
                             enabled = canSkipPrevious,
@@ -728,6 +757,7 @@ fun PlayerScreen(
                         )
                         PlayerButton(
                             controlId = "player-play-pause",
+                            onClick = { activateControl(PlayerControl.PlayPause) },
                             icon = if (playWhenReady) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                             contentDescription = stringResource(if (playWhenReady) R.string.player_pause else R.string.player_play),
                             focused = navigationZone == PlayerNavigationZone.Controls &&
@@ -736,6 +766,7 @@ fun PlayerScreen(
                         )
                         PlayerButton(
                             controlId = "player-next",
+                            onClick = { activateControl(PlayerControl.Next) },
                             icon = Icons.Rounded.SkipNext,
                             contentDescription = stringResource(R.string.player_next_track),
                             enabled = canSkipNext,
@@ -756,6 +787,7 @@ fun PlayerScreen(
                         if (supportsLyrics) {
                             PlayerButton(
                                 controlId = "player-lyrics-display",
+                                onClick = { activateControl(PlayerControl.LyricsDisplay) },
                                 icon = Icons.Rounded.Translate,
                                 contentDescription = stringResource(R.string.player_lyrics_display_settings),
                                 selected = lyricTranslationEnabled || lyricPronunciationEnabled,
@@ -765,6 +797,7 @@ fun PlayerScreen(
                             )
                             PlayerButton(
                                 controlId = "player-lyrics",
+                                onClick = { activateControl(PlayerControl.Lyrics) },
                                 icon = Icons.Rounded.Lyrics,
                                 contentDescription = stringResource(R.string.player_lyrics),
                                 selected = showLyrics,
@@ -775,6 +808,7 @@ fun PlayerScreen(
                         }
                         PlayerButton(
                             controlId = "player-queue",
+                            onClick = { activateControl(PlayerControl.Queue) },
                             icon = Icons.AutoMirrored.Rounded.QueueMusic,
                             contentDescription = stringResource(R.string.player_queue),
                             selected = showQueue,
@@ -791,6 +825,7 @@ fun PlayerScreen(
                             enabled = canSetAutoplay,
                             ytmBadge = false,
                             frameKey = "player-main-radio",
+                            onClick = { activateControl(PlayerControl.Radio) },
                         )
                         }
                     }
@@ -828,7 +863,31 @@ private fun Progress(
     durationMs: Long,
     isFocused: Boolean = false,
     scrubPositionMs: Long? = null,
+    onSeekTo: (Long) -> Unit,
+    enabled: Boolean,
 ) {
+    if (BuildConfig.FLYME_AUTO) {
+        var touchPosition by remember(positionState, durationMs) { mutableStateOf<Float?>(null) }
+        val displayed = touchPosition ?: positionState.value.toFloat()
+        Column(Modifier.fillMaxWidth().automationId("player-touch-progress")) {
+            Slider(
+                value = displayed.coerceIn(0f, durationMs.coerceAtLeast(1L).toFloat()),
+                onValueChange = { touchPosition = it },
+                onValueChangeFinished = {
+                    touchPosition?.let { onSeekTo(it.toLong()) }
+                    touchPosition = null
+                },
+                valueRange = 0f..durationMs.coerceAtLeast(1L).toFloat(),
+                enabled = enabled && durationMs > 0L,
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(formatTime(displayed.toLong()), fontSize = 14.sp)
+                Text("−${formatTime((durationMs - displayed.toLong()).coerceAtLeast(0L))}", fontSize = 14.sp)
+            }
+        }
+        return
+    }
     // The clock animates the bar in drawing; labels only need one update per second.
     val displayedSecond by remember(positionState, scrubPositionMs) {
         derivedStateOf { (scrubPositionMs ?: positionState.value) / 1_000L }
@@ -951,6 +1010,7 @@ private fun Progress(
 @Composable
 private fun PlayerButton(
     controlId: String,
+    onClick: () -> Unit,
     icon: ImageVector,
     contentDescription: String,
     selected: Boolean = false,
@@ -959,6 +1019,7 @@ private fun PlayerButton(
     width: Dp = 46.dp,
     height: Dp = 40.dp,
 ) {
+    val interactive = enabled && LocalFocusTargetsEnabled.current
     val scale by animateFloatAsState(
         targetValue = if (focused) 1.08f else 1.0f,
         animationSpec = tween(180, easing = ArtworkDecelerateEasing),
@@ -968,13 +1029,15 @@ private fun PlayerButton(
         modifier = Modifier
             .automationId(controlId)
             .semantics { this.selected = focused; stateDescription = contentDescription }
-            .size(width = width, height = height)
+            .size(width = if (BuildConfig.FLYME_AUTO) maxOf(width, 56.dp) else width,
+                height = if (BuildConfig.FLYME_AUTO) maxOf(height, 56.dp) else height)
             .focusFrameTarget(focused, "player-control:$controlId", 20.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
             }
             .clip(RoundedCornerShape(20.dp))
+            .clickable(enabled = interactive, onClick = onClick)
             .background(
                 when {
                     focused -> Color.White
@@ -1349,6 +1412,7 @@ private fun PlayerStage(
     focusedQueueIndex: Int,
     selectionVisible: Boolean,
     lowPerformanceMode: Boolean = false,
+    onSelectQueueTrack: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -1548,6 +1612,8 @@ private fun PlayerStage(
                     isPlaying = audioIsPlaying,
                     audioSpectrum = audioSpectrum,
                     bandsEnabled = isVisibleOnScreen && presentation == PlayerPresentation.Queue,
+                    onSelectTrack = onSelectQueueTrack,
+                    interactive = presentation == PlayerPresentation.Queue && LocalFocusTargetsEnabled.current,
                 )
                 }
             }
@@ -3805,6 +3871,8 @@ private fun QueuePanel(
     isPlaying: Boolean,
     audioSpectrum: () -> AudioSpectrum,
     bandsEnabled: Boolean,
+    onSelectTrack: (Int) -> Unit,
+    interactive: Boolean,
 ) {
     val density = LocalDensity.current
     val targetStageOffsetPx = with(density) {
@@ -3866,7 +3934,8 @@ private fun QueuePanel(
                     )
                     Box(
                         modifier = Modifier
-                            .width(cardWidth),
+                            .width(cardWidth)
+                            .clickable(enabled = interactive) { onSelectTrack(index) },
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             MotionArtwork(
@@ -3931,6 +4000,7 @@ private fun QueueModeControls(
     canSetAutoplay: Boolean,
     canClearQueue: Boolean,
     focusedMode: QueueModeControl?,
+    onModeClick: (QueueModeControl) -> Unit,
 ) {
             Row(Modifier.automationId("queue-mode-controls"), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 QueueModeButton(
@@ -3940,6 +4010,7 @@ private fun QueueModeControls(
                     focused = focusedMode == QueueModeControl.Shuffle,
                     enabled = canSetShuffle && !autoplayEnabled,
                     frameKey = "player-mode:shuffle",
+                    onClick = { onModeClick(QueueModeControl.Shuffle) },
                 )
                 QueueModeButton(
                     icon = if (repeatMode == PlaybackRepeatMode.One) {
@@ -3954,6 +4025,7 @@ private fun QueueModeControls(
                     focused = focusedMode == QueueModeControl.Repeat,
                     enabled = canSetRepeat && !autoplayEnabled,
                     frameKey = "player-mode:repeat",
+                    onClick = { onModeClick(QueueModeControl.Repeat) },
                 )
                 QueueModeButton(
                     icon = Icons.Rounded.AllInclusive,
@@ -3962,6 +4034,7 @@ private fun QueueModeControls(
                     focused = focusedMode == QueueModeControl.Autoplay,
                     enabled = canSetAutoplay,
                     frameKey = "player-mode:autoplay",
+                    onClick = { onModeClick(QueueModeControl.Autoplay) },
                     ytmBadge = false,
                 )
                 QueueModeButton(
@@ -3975,6 +4048,7 @@ private fun QueueModeControls(
                     focused = focusedMode == QueueModeControl.Source,
                     enabled = true,
                     frameKey = "player-mode:source",
+                    onClick = { onModeClick(QueueModeControl.Source) },
                     ytmBadge = false,
                 )
                 QueueModeButton(
@@ -3984,6 +4058,7 @@ private fun QueueModeControls(
                     focused = focusedMode == QueueModeControl.Clear,
                     enabled = canClearQueue,
                     frameKey = "player-mode:clear",
+                    onClick = { onModeClick(QueueModeControl.Clear) },
                     ytmBadge = false,
                 )
             }
@@ -3998,7 +4073,9 @@ private fun QueueModeButton(
     enabled: Boolean,
     frameKey: String,
     ytmBadge: Boolean = false,
+    onClick: () -> Unit,
 ) {
+    val interactive = enabled && LocalFocusTargetsEnabled.current
     val scale by animateFloatAsState(
         targetValue = if (focused) 1.06f else 1f,
         animationSpec = tween(180, easing = MotionTokens.KaraokeLineEasing),
@@ -4012,6 +4089,7 @@ private fun QueueModeButton(
                 scaleY = scale
             }
             .clip(RoundedCornerShape(22.dp))
+            .clickable(enabled = interactive, onClick = onClick)
             .background(
                 when {
                     focused -> Color.White.copy(alpha = 0.94f)

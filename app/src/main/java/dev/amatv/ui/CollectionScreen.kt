@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import dev.amatv.R
+import dev.amatv.BuildConfig
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -43,6 +44,7 @@ internal fun CollectionScreen(
     firstFocus: FocusRequester,
     onRetry: () -> Unit,
     onPlay: (index: Int, shuffle: Boolean) -> Unit,
+    onBack: () -> Unit = {},
 ) {
     val collection = state.collection ?: return
     val listState = rememberLazyListState()
@@ -72,6 +74,10 @@ internal fun CollectionScreen(
     val duration = remember(state.tracks) { state.tracks.sumOf { it.durationMs }.coerceAtLeast(0L) }
 
     Column(Modifier.fillMaxSize().automationId("collection-screen").padding(bottom = 20.dp)) {
+        if (BuildConfig.FLYME_AUTO) {
+            CollectionAction(stringResource(R.string.browse_back), null, onBack,
+                modifier = Modifier.width(112.dp).height(56.dp).padding(bottom = 8.dp))
+        }
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(36.dp)) {
             Column(
                 Modifier.width(270.dp).fillMaxHeight(),

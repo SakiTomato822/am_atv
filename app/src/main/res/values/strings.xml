@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name" translatable="false">AM for TV</string>
+    <string name="flyme_app_name" translatable="false">AM for Flyme Auto</string>
 </resources>
 

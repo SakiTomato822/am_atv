@@ -49,6 +49,7 @@ class MusicServices(context: Context) : RecommendationProvider {
     private val bridge = MusicKitBridge(appContext)
     private val songSpectrum = SongAudioSpectrum(appContext, bridge::audioSessionId)
     private val mediaSession = PlaybackMediaSession(appContext)
+    private val flymeMediaSource = if (BuildConfig.FLYME_NATIVE_MEDIA) FlymeMediaSource(appContext) else null
     private val playbackPreparation = Mutex()
     private val api = AppleMusicApi(
         storefront = BuildConfig.APPLE_MUSIC_STOREFRONT,
@@ -181,6 +182,7 @@ class MusicServices(context: Context) : RecommendationProvider {
         ) { AppText.text(R.string.services_auth_invalid_user_token) }
         tokenStore.writeUserToken(userToken)
         mediaSession.clear()
+        flymeMediaSource?.clear()
         bridge.release()
         return userToken
     }
@@ -189,6 +191,7 @@ class MusicServices(context: Context) : RecommendationProvider {
         webAuthenticationSession.markLocalWebSessionForReset()
         songSpectrum.setActive(false)
         mediaSession.clear()
+        flymeMediaSource?.clear()
         bridge.release()
         tokenStore.clear()
     }
@@ -238,7 +241,10 @@ class MusicServices(context: Context) : RecommendationProvider {
         val developerToken = developerTokens.token()
         return playbackPreparation.withLock {
             withContext(Dispatchers.Default) {
-                if (playWhenReady) mediaSession.playbackRequested()
+                if (playWhenReady) {
+                    mediaSession.playbackRequested()
+                    flymeMediaSource?.playbackRequested()
+                }
                 bridge.preparePlayback(track, developerToken, userToken, positionMs, playWhenReady)
             }
         }
@@ -249,10 +255,12 @@ class MusicServices(context: Context) : RecommendationProvider {
 
     fun play() {
         mediaSession.playbackRequested()
+        flymeMediaSource?.playbackRequested()
         bridge.play()
     }
     fun pause() {
         mediaSession.playbackPaused()
+        flymeMediaSource?.playbackPaused()
         bridge.pause()
     }
     fun seekTo(positionMs: Long) = bridge.seekTo(positionMs)
@@ -264,13 +272,18 @@ class MusicServices(context: Context) : RecommendationProvider {
     fun playbackSnapshot(): PlaybackSnapshot? = bridge.playbackSnapshot()
     fun setPlaybackListener(listener: ((PlaybackSnapshot) -> Unit)?) =
         bridge.setPlaybackListener(listener)
-    fun setSystemPlaybackCallbacks(callbacks: PlaybackMediaSession.Callbacks?) =
+    fun setSystemPlaybackCallbacks(callbacks: PlaybackMediaSession.Callbacks?) {
         mediaSession.setCallbacks(callbacks)
-    fun publishSystemPlayback(snapshot: PlaybackSnapshot, canSkipNext: Boolean, canSkipPrevious: Boolean) =
+        flymeMediaSource?.setCallbacks(callbacks)
+    }
+    fun publishSystemPlayback(snapshot: PlaybackSnapshot, canSkipNext: Boolean, canSkipPrevious: Boolean) {
         mediaSession.publish(snapshot, canSkipNext, canSkipPrevious)
+        flymeMediaSource?.publish(snapshot.copy(canSkipNext = canSkipNext, canSkipPrevious = canSkipPrevious))
+    }
     fun release() {
         songSpectrum.release()
         mediaSession.release()
+        flymeMediaSource?.release()
         bridge.release()
     }
 }

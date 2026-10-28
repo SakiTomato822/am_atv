@@ -35,6 +35,7 @@ plugins {
 android {
     namespace = "dev.amatv"
     compileSdk = 36
+    testBuildType = localSetting("amatv.testBuildType", "debug")
 
     defaultConfig {
         applicationId = "dev.amatv"
@@ -42,6 +43,8 @@ android {
         targetSdk = 36
         versionCode = 15
         versionName = "0.6.2"
+        buildConfigField("boolean", "FLYME_AUTO", "false")
+        buildConfigField("boolean", "FLYME_NATIVE_MEDIA", "false")
 
         buildConfigField("String", "AUTH_BROWSER_ACTIVITY", "\"dev.amatv.integration.MusicKitWebAuthActivity\"")
         buildConfigField("boolean", "AUTH_BROWSER_IS_GECKO", "false")
@@ -108,6 +111,33 @@ android {
             initWith(getByName("standalone"))
             matchingFallbacks += listOf("standalone", "release")
         }
+        create("flymeGecko") {
+            initWith(getByName("standaloneGecko"))
+            applicationIdSuffix = ".flyme"
+            versionNameSuffix = "-flyme"
+            matchingFallbacks += listOf("standaloneGecko", "standalone", "release")
+            buildConfigField("boolean", "FLYME_AUTO", "true")
+            buildConfigField("boolean", "FLYME_NATIVE_MEDIA", localSetting("flyme.nativeMedia", "true"))
+            // Keep the configurable token endpoint in this variant. SDK-free
+            // builds can exercise the UI; real playback still needs MusicKit.
+            buildConfigField("String", "MUSICKIT_TOKEN_ENDPOINT", quotedBuildConfig(localSetting("AM_TOKEN_ENDPOINT")))
+            ndk.abiFilters.clear()
+            ndk.abiFilters += "arm64-v8a"
+            if (localSetting("flyme.uiVerification", "false").toBoolean()) {
+                // Instrumentation on the existing x86_64 Android 11 emulator.
+                isMinifyEnabled = false
+                isShrinkResources = false
+                isDebuggable = true
+                ndk.abiFilters.clear()
+                ndk.abiFilters += "x86_64"
+            }
+        }
+    }
+
+    sourceSets.getByName("flymeGecko") {
+        java.srcDir("src/standaloneGecko/java")
+        assets.srcDir("src/standaloneGecko/assets")
+        res.srcDir("src/standaloneGecko/res")
     }
 
     compileOptions {
@@ -145,7 +175,7 @@ val musicKitFrameRepairClasses = providers.provider {
 
 androidComponents {
     onVariants(selector().all()) { variant ->
-        if (variant.name == "standaloneGecko") {
+        if (variant.name == "standaloneGecko" || variant.name == "flymeGecko") {
             // Direct APK distribution benefits from compressed browser binaries.
             // Android extracts the selected architecture once during installation.
             variant.packaging.jniLibs.useLegacyPackaging.set(true)
@@ -182,6 +212,21 @@ val verifyStandaloneCredential = tasks.register("verifyStandaloneCredential") {
 tasks.matching { it.name == "preStandaloneBuild" || it.name == "preStandaloneGeckoBuild" || it.name == "preBenchmarkBuild" }
     .configureEach { dependsOn(verifyStandaloneCredential) }
 
+val verifyFlymeRuntime = tasks.register("verifyFlymeRuntime") {
+    doLast {
+        if (!localSetting("flyme.uiVerification", "false").toBoolean()) {
+            check(fileTree("libs") { include("mediaplayback*.aar") }.files.isNotEmpty() &&
+                fileTree("libs") { include("musickitauth*.aar") }.files.isNotEmpty()) {
+                "Flyme playback builds require the official MusicKit playback and authentication AARs in app/libs. See docs/flyme-auto.md."
+            }
+            check(bundledDeveloperToken.isNotBlank() || localSetting("AM_TOKEN_ENDPOINT").isNotBlank()) {
+                "Configure AM_DEVELOPER_TOKEN_FILE or AM_TOKEN_ENDPOINT before building the Flyme playback APK."
+            }
+        }
+    }
+}
+tasks.matching { it.name == "preFlymeGeckoBuild" }.configureEach { dependsOn(verifyFlymeRuntime) }
+
 dependencies {
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
     implementation(platform("androidx.compose:compose-bom:2026.06.01"))
@@ -204,12 +249,18 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.4.0")
 
     // The last stable Gecko release compatible with this project's Kotlin 2.3.21
     // and compileSdk 36. It is packaged only in the alternate sign-in APK.
     add("standaloneGeckoImplementation", "org.mozilla.geckoview:geckoview:153.0.20260810162159") {
         // Bundling a browser must not replace the app's existing artwork/player
         // Media3 version. MusicKit remains the sole music playback engine.
+        exclude(group = "androidx.media3")
+    }
+    add("flymeGeckoImplementation", "org.mozilla.geckoview:geckoview:153.0.20260810162159") {
         exclude(group = "androidx.media3")
     }
 }
