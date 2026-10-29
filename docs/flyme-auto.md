@@ -77,6 +77,18 @@
 
 Windows 可以使用 `tools/build-flyme.ps1`。输出文件为 `app/build/outputs/apk/flymeGecko/app-flymeGecko.apk`。目前沿用上游 standalone 的本地 debug 签名，升级需保存同一签名文件。该变体使用独立包名，首次安装需要重新登录，不继承上游包的数据。
 
+### GitHub Actions 测试版
+
+`.github/workflows/flyme-auto.yml` 仅手动触发，检出 `flyme-auto` 分支，运行 JVM 测试并在成功后发布 ARM64 预发布 APK。工作流需同时存在于默认分支，才能在 Actions 页面手动运行。不要在公开源码中填写凭证或 SDK 下载地址。
+
+仓库 Actions Secrets：
+
+- `MUSICKIT_SDK_DOWNLOAD_URL`：维护者已下载的官方 SDK ZIP 的临时受控下载地址。地址过期后需刷新，工作流不会将 SDK AAR 作为发布附件。
+- `AM_DEVELOPER_TOKEN`：经许可使用的开发者 Token。编译后会内置进 APK，因此 APK 接收者能够提取它；Secrets 只保护源配置和日志，不能使 APK 内的 Token 保密。公开发布前需明确授权相应使用范围。
+- `FLYME_SIGNING_KEYSTORE_BASE64`：沿用本地调试签名的 keystore，以 Base64 存储。仅用于现有 `android` 默认调试签名配置，保留同一文件可覆盖升级；不要上传到 Releases。
+
+工作流对 ZIP 和两份 AAR 校验 SHA-256，检查 Token 格式和有效期，并核对最终 APK 签名、包名、ARM64 MusicKit/Gecko 库及关闭演示模式。Actions 无法代替实车登录和播放测试。
+
 普通构建会检查官方播放/认证 AAR 和 token/endpoint 配置，缺失时明确失败，避免把缺少真实播放引擎的演示包当成车机交付包。
 
 Windows 的 `tools/build-flyme-preview.ps1` 可生成独立包名 `dev.amatv.flyme.preview` 的 ARM64 界面预览包，用于手机横屏检查字体、歌词和触摸控件。该包显示本地演示歌曲，不代表 Apple Music 登录或播放可用；窗口缩放允许适配手机较高密度。正式车机包仍使用车机缩放范围。
