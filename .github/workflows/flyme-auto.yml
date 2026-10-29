@@ -61,7 +61,7 @@ jobs:
           expiry = decode(parts[1]).get('exp', 0)
           assert expiry > time.time() + 86400, 'Developer token expires too soon'
           (work / 'developer-token.jwt').write_text(token)
-          signing = pathlib.Path.home() / '.android' / 'debug.keystore'
+          signing = work / 'flyme-signing.keystore'
           signing.parent.mkdir(exist_ok=True)
           signing.write_bytes(base64.b64decode(os.environ['SIGNING_KEYSTORE'], validate=True))
           print('SDK checksums and developer token expiry checks passed.')
@@ -83,14 +83,20 @@ jobs:
       - name: Build and run unit tests
         run: |
           chmod +x gradlew
-          ./gradlew '-PAM_DEVELOPER_TOKEN_FILE=../work/ci/developer-token.jwt' '-Pamatv.testBuildType=flymeGecko' :app:assembleFlymeGecko :app:testFlymeGeckoUnitTest --console=plain --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8'
+          ./gradlew '-PAM_DEVELOPER_TOKEN_FILE=../work/ci/developer-token.jwt' '-PFLYME_SIGNING_KEYSTORE_FILE=work/ci/flyme-signing.keystore' '-Pamatv.testBuildType=flymeGecko' :app:assembleFlymeGecko :app:testFlymeGeckoUnitTest --console=plain --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8'
 
       - name: Verify APK and prepare release
         shell: bash
         run: |
           mkdir -p dist
           cp app/build/outputs/apk/flymeGecko/app-flymeGecko.apk dist/AMATV-FlymeAuto-Gecko-arm64.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/AMATV-FlymeAuto-Gecko-arm64.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs dist/AMATV-FlymeAuto-Gecko-arm64.apk | tee work/ci/signer.txt
+          python3 - <<'PY'
+          import pathlib, re
+          expected = '91f7b9d6496414a0fab0a87c8fcc60f929df0dd9fa4d4a9a52215869178bab8d'
+          signers = re.findall(r'certificate SHA-256 digest: ([0-9a-fA-F]{64})', pathlib.Path('work/ci/signer.txt').read_text())
+          assert [value.lower() for value in signers] == [expected], 'Signing certificate changed: refusing an incompatible update'
+          PY
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging dist/AMATV-FlymeAuto-Gecko-arm64.apk > work/ci/badging.txt
           grep "package: name='dev.amatv.flyme'" work/ci/badging.txt
           grep "native-code: 'arm64-v8a'" work/ci/badging.txt
@@ -109,9 +115,12 @@ jobs:
           cat > dist/release-notes.md <<'EOF'
           Flyme Auto 非官方适配测试版（ARM64，Android 9+）。
 
+          签名迁移：前两版 CI 没有实际使用保存的固定 keystore，证书各不相同。本版起显式指定并校验证书，后续版本保持一致。已安装前两版的用户，普通覆盖安装会失败，需要卸载旧版后安装并重新登录一次；卸载会删除旧版应用数据。
+
           - Gecko 登录与原版 MusicKit 播放引擎；安装后请登录自己的 Apple Music 订阅账号。
           - 修复字重映射：Inter / Noto Sans SC 实际 800 字重主歌词，125% / 155% / 185% 三档字号。
           - 和声约为主歌词六成字号、600 字重，逐字、逐行、静态歌词保持层级区别。
+          - 新增 EVCC 主歌词输出：通过现有 MediaSession 发送已加载的原文歌词，不含和声、译文和注音；已按 EVCC 3.4.5 实际读取规则适配，联动效果待实车验收。
           - 资料库提供播放列表、艺人、专辑、歌曲四个入口，艺人进入已收藏专辑，支持分页。
           - 按确认的 Cider 参考图重排播放页：左侧通高封面与播放控制，右侧大字歌词和渐进模糊。
           - 账号页设置显示原厂媒体桥接状态，帮助实车定位授权或版本不匹配。
@@ -133,5 +142,5 @@ jobs:
       - name: Remove private build inputs
         if: always()
         run: |
-          rm -f work/ci/developer-token.jwt work/ci/MusicKit.zip "$HOME/.android/debug.keystore"
+          rm -f work/ci/developer-token.jwt work/ci/MusicKit.zip work/ci/flyme-signing.keystore
           rm -f app/libs/mediaplayback-release-1.1.1.aar app/libs/musickitauth-release-1.1.2.aar
