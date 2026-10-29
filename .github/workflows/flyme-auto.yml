@@ -1,0 +1,130 @@
+name: Flyme Auto ARM64 test release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: flyme-auto-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: flyme-auto
+          persist-credentials: false
+
+      - name: Retrieve private build inputs
+        env:
+          SDK_URL: ${{ secrets.MUSICKIT_SDK_DOWNLOAD_URL }}
+          DEVELOPER_TOKEN: ${{ secrets.AM_DEVELOPER_TOKEN }}
+          SIGNING_KEYSTORE: ${{ secrets.FLYME_SIGNING_KEYSTORE_BASE64 }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, os, pathlib, time, urllib.request, zipfile
+          for name in ('SDK_URL', 'DEVELOPER_TOKEN', 'SIGNING_KEYSTORE'):
+              if not os.environ.get(name):
+                  raise SystemExit(f'Missing private build input: {name}')
+          work = pathlib.Path('work/ci')
+          work.mkdir(parents=True, exist_ok=True)
+          sdk = work / 'MusicKit.zip'
+          try:
+              with urllib.request.urlopen(os.environ['SDK_URL'], timeout=120) as r:
+                  with sdk.open('wb') as f:
+                      while chunk := r.read(1024 * 1024):
+                          f.write(chunk)
+          except Exception:
+              raise SystemExit('SDK download failed. Refresh the expiring MUSICKIT_SDK_DOWNLOAD_URL secret.') from None
+          assert hashlib.sha256(sdk.read_bytes()).hexdigest() == '02b36be75a63e0c630fcb297b3367d8350a07bf37fc5e613ec26d24344e7f72b', 'Unexpected SDK archive'
+          libs = pathlib.Path('app/libs')
+          libs.mkdir(parents=True, exist_ok=True)
+          with zipfile.ZipFile(sdk) as z:
+              for name, sha in (
+                  ('mediaplayback-release-1.1.1.aar', '39bc28cbc2413c0ce0477c1ef4d3b9e51bb163a7723d930c46bc089715116e3c'),
+                  ('musickitauth-release-1.1.2.aar', 'c8f6f7ffec1baa5fb7fcdf04d3fcacfeb52c1de0c84c34b92a44dc6e431c4ef5'),
+              ):
+                  data = z.read('Android-MusicKit-SDK-1.1.2/' + name)
+                  assert hashlib.sha256(data).hexdigest() == sha, 'Unexpected SDK library'
+                  (libs / name).write_bytes(data)
+          token = os.environ['DEVELOPER_TOKEN'].strip()
+          parts = token.split('.')
+          assert len(parts) == 3, 'Invalid developer token format'
+          decode = lambda p: json.loads(base64.urlsafe_b64decode(p + '=' * (-len(p) % 4)))
+          assert decode(parts[0]).get('alg') == 'ES256', 'Unexpected developer token algorithm'
+          expiry = decode(parts[1]).get('exp', 0)
+          assert expiry > time.time() + 86400, 'Developer token expires too soon'
+          (work / 'developer-token.jwt').write_text(token)
+          signing = pathlib.Path.home() / '.android' / 'debug.keystore'
+          signing.parent.mkdir(exist_ok=True)
+          signing.write_bytes(base64.b64decode(os.environ['SIGNING_KEYSTORE'], validate=True))
+          print('SDK checksums and developer token expiry checks passed.')
+          PY
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - name: Install Android build tools
+        run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+
+      - name: Build and run unit tests
+        run: |
+          chmod +x gradlew
+          ./gradlew '-PAM_DEVELOPER_TOKEN_FILE=../work/ci/developer-token.jwt' '-Pamatv.testBuildType=flymeGecko' :app:assembleFlymeGecko :app:testFlymeGeckoUnitTest --console=plain --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8'
+
+      - name: Verify APK and prepare release
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/flymeGecko/app-flymeGecko.apk dist/AMATV-FlymeAuto-Gecko-arm64.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/AMATV-FlymeAuto-Gecko-arm64.apk
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging dist/AMATV-FlymeAuto-Gecko-arm64.apk > work/ci/badging.txt
+          grep "package: name='dev.amatv.flyme'" work/ci/badging.txt
+          grep "native-code: 'arm64-v8a'" work/ci/badging.txt
+          python3 - <<'PY'
+          import pathlib, zipfile
+          with zipfile.ZipFile('dist/AMATV-FlymeAuto-Gecko-arm64.apk') as z:
+              names = set(z.namelist())
+              assert 'lib/arm64-v8a/libappleMusicSDK.so' in names
+              assert 'lib/arm64-v8a/libxul.so' in names
+              assert not any(n.startswith('lib/') and not n.startswith('lib/arm64-v8a/') for n in names)
+          config = pathlib.Path('app/build/generated/source/buildConfig/flymeGecko/dev/amatv/BuildConfig.java').read_text()
+          assert 'FLYME_UI_PREVIEW = false' in config
+          assert 'AUTH_BROWSER_IS_GECKO = true' in config
+          PY
+          (cd dist && sha256sum AMATV-FlymeAuto-Gecko-arm64.apk > SHA256SUMS.txt)
+          cat > dist/release-notes.md <<'EOF'
+          Flyme Auto 非官方适配测试版（ARM64，Android 9+）。
+
+          - Gecko 登录与原版 MusicKit 播放引擎；安装后请登录自己的 Apple Music 订阅账号。
+          - Inter / Noto Sans SC 字体，700 字重主歌词，三档歌词字号。
+          - 默认显示状态栏与底栏，按 1920×968 / 1920×896 内容区适配触屏布局。
+          - 标准 Android 媒体控制及 Flyme 原厂媒体源接入；原厂接口仍需实车验证。
+
+          本版沿用上游 APK 的内置开发者 Token，有效期字段为 2027-04-22；不包含签名私钥或任何用户登录凭证。是否被服务端撤销、真实登录和播放效果需实机验证。后续 Token 更新方式仍待与上游协商。
+
+          包名 dev.amatv.flyme，与 UI Preview 包可并存。请下载 AMATV-FlymeAuto-Gecko-arm64.apk。
+          EOF
+
+      - name: Publish prerelease APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="flyme-auto-test-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          gh release create "$tag" dist/AMATV-FlymeAuto-Gecko-arm64.apk dist/SHA256SUMS.txt --target "$(git rev-parse HEAD)" --prerelease --latest=false --title "Flyme Auto 测试版 · ${GITHUB_RUN_NUMBER}" --notes-file dist/release-notes.md
+
+      - name: Remove private build inputs
+        if: always()
+        run: |
+          rm -f work/ci/developer-token.jwt work/ci/MusicKit.zip "$HOME/.android/debug.keystore"
+          rm -f app/libs/mediaplayback-release-1.1.1.aar app/libs/musickitauth-release-1.1.2.aar
