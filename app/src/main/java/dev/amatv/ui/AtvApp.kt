@@ -965,9 +965,10 @@ fun AmAtvApp() {
     }
 
     fun publishSystemSnapshot(snapshot: PlaybackSnapshot) {
-        val published = if (!playWhenReady && (snapshot.isPlaying || snapshot.isBuffering)) {
+        val playback = if (!playWhenReady && (snapshot.isPlaying || snapshot.isBuffering)) {
             snapshot.copy(isPlaying = false, isBuffering = false)
         } else snapshot
+        val published = playback.withSystemLyrics(activeLyrics.trackIdentity, activeLyrics.lines)
         systemPlaybackSnapshot.value = published
         val live = queueController.state.value
         services.publishSystemPlayback(published, live.canSkipNext, live.canSkipPrevious)
@@ -1179,6 +1180,16 @@ fun AmAtvApp() {
         activeLyrics.lines
     } else {
         track.lyrics
+    }
+
+    // Lyrics arrive independently of MusicKit's playback clock. Publish their
+    // completion/clearing immediately, rather than waiting for the next SDK event.
+    LaunchedEffect(currentLyricsIdentity, currentLyricsLines, hasCurrentTrack) {
+        if (!hasCurrentTrack) return@LaunchedEffect
+        systemPlaybackSnapshot.value?.takeIf {
+            it.requestGeneration == expectedPlaybackGeneration &&
+                it.currentTrack?.lyricsIdentity() == currentLyricsIdentity
+        }?.let(::publishSystemSnapshot)
     }
 
     val prefetchTargets = remember(queueState.current?.entryId, queueState.upNext, queueState.autoplay) {

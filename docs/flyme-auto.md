@@ -72,10 +72,10 @@
 按 [MusicKit 设置](musickit-setup.md) 放入官方播放与认证 AAR、配置开发者 token 或自己的 token endpoint。仓库不包含这些凭证或 SDK。
 
 ```sh
-./gradlew :app:assembleFlymeGecko
+./gradlew :app:assembleFlymeGecko -PFLYME_SIGNING_KEYSTORE_FILE=/private/path/flyme.keystore
 ```
 
-Windows 可以使用 `tools/build-flyme.ps1`。输出文件为 `app/build/outputs/apk/flymeGecko/app-flymeGecko.apk`。目前沿用上游 standalone 的本地 debug 签名，升级需保存同一签名文件。该变体使用独立包名，首次安装需要重新登录，不继承上游包的数据。
+Windows 可以使用 `tools/build-flyme.ps1 -SigningKeystore C:\private\flyme.keystore`，也可以在本地配置 `FLYME_SIGNING_KEYSTORE_FILE`。输出文件为 `app/build/outputs/apk/flymeGecko/app-flymeGecko.apk`。Flyme.3 起正式包必须明确指定固定签名文件，使用现有 keystore 的 `androiddebugkey` 别名与 `android` 密码；同一路径内容、别名和证书应与 Actions 使用的 keystore 保持一致。预览包不受此要求影响。该变体使用独立包名，不继承上游包的数据。
 
 ### GitHub Actions 测试版
 
@@ -85,7 +85,7 @@ Windows 可以使用 `tools/build-flyme.ps1`。输出文件为 `app/build/output
 
 - `MUSICKIT_SDK_DOWNLOAD_URL`：维护者已下载的官方 SDK ZIP 的临时受控下载地址。地址过期后需刷新，工作流不会将 SDK AAR 作为发布附件。
 - `AM_DEVELOPER_TOKEN`：经许可使用的开发者 Token。编译后会内置进 APK，因此 APK 接收者能够提取它；Secrets 只保护源配置和日志，不能使 APK 内的 Token 保密。公开发布前需明确授权相应使用范围。
-- `FLYME_SIGNING_KEYSTORE_BASE64`：沿用本地调试签名的 keystore，以 Base64 存储。仅用于现有 `android` 默认调试签名配置，保留同一文件可覆盖升级；不要上传到 Releases。
+- `FLYME_SIGNING_KEYSTORE_BASE64`：固定 keystore 的 Base64。CI 还原到 `work/ci/flyme-signing.keystore`，再通过 `FLYME_SIGNING_KEYSTORE_FILE` 明确传给 Gradle。使用 `androiddebugkey` 别名与 `android` 密码，发布前校验证书指纹；不要上传私钥到 Releases。
 
 工作流对 ZIP 和两份 AAR 校验 SHA-256，检查 Token 格式和有效期，并核对最终 APK 签名、包名、ARM64 MusicKit/Gecko 库及关闭演示模式。Actions 无法代替实车登录和播放测试。
 
@@ -96,7 +96,7 @@ Windows 的 `tools/build-flyme-preview.ps1` 可生成独立包名 `dev.amatv.fly
 如需只使用标准 Android MediaSession 排查原生接入问题：
 
 ```sh
-./gradlew :app:assembleFlymeGecko -Pflyme.nativeMedia=false
+./gradlew :app:assembleFlymeGecko -Pflyme.nativeMedia=false -PFLYME_SIGNING_KEYSTORE_FILE=/private/path/flyme.keystore
 ```
 
 检查原生媒体源：
@@ -142,6 +142,14 @@ adb shell dumpsys media_session
 - API 30 模拟器 10 项 Android 测试通过：4 项原厂桥接 Binder、2 项真实字体、1 项触控流程、1 项和声三种模式、1 项四个资料库分类、1 项模糊渲染。
 - 1920×968、1920×896 和 1280×896 内容区的播放控制检查通过，保留上下系统栏。API 30 的 0/2/4dp 模糊截图已人工检查，并检查实际文字像素不为空。
 - 以上为本地测试数据与模拟器结果，不代表原厂媒体源注册、EVCC 歌词互通或真实账号资料库已经通过实车验收。
+
+### Flyme.3：EVCC 主歌词输出
+
+- 根据官方 EVCC 3.4.5 APK 的实际接收逻辑，通过现有 Android MediaSession 的 `lyrics` 字符串字段发送原文主歌词。已有时间轴发送完整 LRC，静态内容保留纯文本；和声、译文、注音不进入外部输出，应用内和声显示继续保留。
+- 账号歌词异步加载完成后主动刷新系统播放元数据，并按歌曲身份及播放请求代次隔离旧结果。歌词版本与元数据更新关联，切歌/清会话清理应用自己的旧数据。
+- 414 项 JVM 测试、API 30 的 12 项 Android 测试通过，包含真实 MediaController 读回、迟到歌词、和声过滤及切歌清理。没有安装或运行 EVCC；实际车机联动仍需验收。
+- 不依赖 EVCC 的独立原厂桥接改进按用户要求暂缓，不包含在本次发布中。接收规则、静态检查依据和 EVCC 自身缓存限制见 [EVCC 歌词输出](evcc-lyrics.md)。
+- 实际证书比对发现前两版 CI 使用了不同的临时签名，旧私钥未保留。Flyme.3 起通过 `FLYME_SIGNING_KEYSTORE_FILE` 明确指定固定 keystore，并校验 `91f7b9…78bab8d` 证书；旧两版迁移需要卸载重装并重新登录一次，后续固定签名版本可覆盖更新。
 
 下面是模拟器中的本地演示歌曲，展示界面布局，不代表实车播放结果。
 

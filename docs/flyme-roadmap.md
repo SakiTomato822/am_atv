@@ -15,4 +15,10 @@ Installation, Apple Music playback and EVCC controls work. EVCC displays lyrics 
 
 The primary agent owns integration in AtvApp/PlayerScreen, reviews each work stream, runs relevant unit and Android tests, and inspects 1920×968, 1920×896 and a reduced-width viewport. Contributors work on separate files and return explicit integration instructions. Changes are published through the existing Actions workflow using the existing signing identity. Real-account library contents, OEM registration and EVCC interoperability remain vehicle acceptance checks; passing emulator tests does not establish those outcomes.
 
-Protocol documentation from the EVCC developer is the remaining input for the exact lyric transport. Independent typography, library and layout work proceeds while that is clarified.
+EVCC 3.4.5's actual lyric receiver was verified against its official signed APK. The current release uses the MediaMetadata `lyrics` String key and exports main lyrics only; see [receiver evidence and verification scope](evcc-lyrics.md).
+
+## Independent in-car controls follow-up
+
+Deferred at the user's request. Do not include new standalone bridge work in the current EVCC lyric release.
+
+The user requested a later follow-up that uses EVCC's bridge behavior as an interoperability reference, so this app can provide vehicle controls without an EVCC installation. Keep MusicKit as the playback engine and the app's existing MediaSession and MediaCenter client as the control routes. Investigate source registration, supported MediaCenter versions, connection recovery, command callbacks and background/restart behavior using the app's own identity. Verify with EVCC music forwarding disabled: media-source discovery, title/artwork, steering-wheel previous/next/play/pause, seeking where supported, reconnect after MediaCenter restart, and navigation/phone audio-focus interactions. Vehicle acceptance and any source-registration requirements must be recorded separately from successful Android MediaSession control tests. Finish the current EVCC lyric output release before expanding this follow-up.

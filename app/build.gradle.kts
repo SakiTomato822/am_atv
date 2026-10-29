@@ -114,8 +114,19 @@ android {
         }
         create("flymeGecko") {
             initWith(getByName("standaloneGecko"))
+            val fixedKeystorePath = localSetting("FLYME_SIGNING_KEYSTORE_FILE")
+            if (fixedKeystorePath.isNotBlank()) {
+                val fixedKeystore = rootProject.file(fixedKeystorePath)
+                require(fixedKeystore.isFile) { "Flyme signing keystore file is missing" }
+                signingConfig = signingConfigs.create("flymeFixed") {
+                    storeFile = fixedKeystore
+                    storePassword = "android"
+                    keyAlias = "androiddebugkey"
+                    keyPassword = "android"
+                }
+            }
             applicationIdSuffix = ".flyme"
-            versionNameSuffix = "-flyme.2"
+            versionNameSuffix = "-flyme.3"
             manifestPlaceholders["flymeApplicationLabel"] = "@string/flyme_app_name"
             matchingFallbacks += listOf("standaloneGecko", "standalone", "release")
             buildConfigField("boolean", "FLYME_AUTO", "true")
@@ -184,7 +195,7 @@ val musicKitFrameRepairClasses = providers.provider {
 androidComponents {
     onVariants(selector().all()) { variant ->
         if (variant.name == "flymeGecko") {
-            variant.outputs.forEach { it.versionCode.set(16) }
+            variant.outputs.forEach { it.versionCode.set(17) }
         }
         if (variant.name == "standaloneGecko" || variant.name == "flymeGecko") {
             // Direct APK distribution benefits from compressed browser binaries.
@@ -226,6 +237,10 @@ tasks.matching { it.name == "preStandaloneBuild" || it.name == "preStandaloneGec
 val verifyFlymeRuntime = tasks.register("verifyFlymeRuntime") {
     doLast {
         if (!localSetting("flyme.uiVerification", "false").toBoolean()) {
+            val fixedKeystorePath = localSetting("FLYME_SIGNING_KEYSTORE_FILE")
+            check(fixedKeystorePath.isNotBlank() && rootProject.file(fixedKeystorePath).isFile) {
+                "Vehicle builds require FLYME_SIGNING_KEYSTORE_FILE; refusing a generated debug key"
+            }
             check(fileTree("libs") { include("mediaplayback*.aar") }.files.isNotEmpty() &&
                 fileTree("libs") { include("musickitauth*.aar") }.files.isNotEmpty()) {
                 "Flyme playback builds require the official MusicKit playback and authentication AARs in app/libs. See docs/flyme-auto.md."

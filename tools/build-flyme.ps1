@@ -1,9 +1,14 @@
-param([switch]$StandardMediaOnly)
+param([switch]$StandardMediaOnly, [string]$SigningKeystore)
 $ErrorActionPreference = 'Stop'
 $projectDir = Split-Path -Parent $PSScriptRoot
 Push-Location $projectDir
 try {
     $buildArgs = @(':app:assembleFlymeGecko')
+    if ($SigningKeystore) {
+        if (-not (Test-Path -LiteralPath $SigningKeystore -PathType Leaf)) { throw 'Signing keystore file not found.' }
+        $keystorePath = (Resolve-Path -LiteralPath $SigningKeystore).ProviderPath
+        $buildArgs += "-PFLYME_SIGNING_KEYSTORE_FILE=$keystorePath"
+    }
     if ($StandardMediaOnly) { $buildArgs += '-Pflyme.nativeMedia=false' }
     & .\gradlew.bat @buildArgs
     if ($LASTEXITCODE -ne 0) { throw 'Flyme Gecko build failed.' }
