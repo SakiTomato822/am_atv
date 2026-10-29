@@ -69,6 +69,7 @@ class GeckoMusicKitAuthActivity : Activity() {
         }
         val outer = FrameLayout(this)
         status = TextView(this).apply {
+            if (dev.amatv.BuildConfig.FLYME_AUTO) typeface = dev.amatv.ui.CarFonts.typeface(resources)
             setTextColor(Color.WHITE)
             setBackgroundColor(Color.rgb(20, 20, 24))
             textSize = 16f

@@ -169,8 +169,15 @@ fun HomeScreen(
                         headingOverride = stringResource(R.string.browse_library_sign_in),
                     )
                 } else {
+                    var libraryCategory by remember { mutableStateOf(LibraryCategory.Playlists) }
+                    val libraryContentFocus = remember { FocusRequester() }
+                    LibraryCategories(selected = libraryCategory,
+                        onSelect = { libraryCategory = it },
+                        firstFocus = firstContentFocusRequester,
+                        contentFocus = libraryContentFocus,
+                        navigationFocus = navigationFocusRequester)
                     HomeShelves(
-                        shelves = homeShelves,
+                        shelves = homeShelves.filter { it.id == libraryCategory.shelfId },
                         loading = homeLoading,
                         connectionState = connectionState,
                         setupMessage = setupMessage,
@@ -179,8 +186,8 @@ fun HomeScreen(
                         onOpenTrack = onOpenTrack,
                         pagination = homeShelfPagination,
                         onLoadMoreShelf = onLoadMoreShelf,
-                        firstContentFocusRequester = firstContentFocusRequester,
-                        navigationFocusRequester = navigationFocusRequester,
+                        firstContentFocusRequester = libraryContentFocus,
+                        navigationFocusRequester = firstContentFocusRequester,
                     )
                 }
             }
@@ -1633,6 +1640,7 @@ private fun firstRowFocusModifier(
 @Composable
 private fun Track.eyebrow(): String = when (catalogKind) {
     CatalogKind.Song -> album.takeIf { it.isNotBlank() && it != "Song" } ?: stringResource(R.string.browse_kind_song)
+    CatalogKind.Artist -> stringResource(R.string.browse_kind_artist)
     CatalogKind.Album -> stringResource(R.string.browse_kind_album)
     CatalogKind.Playlist -> artist.takeIf { it.isNotBlank() } ?: stringResource(R.string.browse_kind_playlist)
     CatalogKind.Station -> stringResource(R.string.browse_kind_station)

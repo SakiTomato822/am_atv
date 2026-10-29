@@ -46,6 +46,7 @@
     <string name="browse_load_more_retry">Retry Loading</string>
     <string name="browse_load_more_error">More items could not be loaded.</string>
     <string name="browse_kind_song">Song</string>
+    <string name="browse_kind_artist">Artist</string>
     <string name="browse_kind_album">Album</string>
     <string name="browse_kind_playlist">Playlist</string>
     <string name="browse_kind_station">Station</string>

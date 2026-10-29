@@ -80,6 +80,7 @@ data class ContentShelf(
 
 enum class CatalogKind {
     Song,
+    Artist,
     Album,
     Playlist,
     Station,

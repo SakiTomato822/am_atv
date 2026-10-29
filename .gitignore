@@ -19,6 +19,7 @@ secrets.properties
 *.keystore
 *.hprof
 *.perfetto-trace
+hs_err_pid*.log
 *.trace
 /dist/
 /work/

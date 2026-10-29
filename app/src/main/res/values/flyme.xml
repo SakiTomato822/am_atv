@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="flyme_player_more">More playback options</string>
+    <string name="app_library_artists">Artists</string>
+    <string name="app_library_albums">Saved albums</string>
+    <string name="flyme_media_status">Native media bridge status</string>
+    <string name="flyme_preview_name" translatable="false">AM for Flyme Auto · UI Preview</string>
+    <string name="flyme_lyrics_text_size">Lyrics text size</string>
+    <string name="flyme_text_standard">Standard</string>
+    <string name="flyme_text_large">Large</string>
+    <string name="flyme_text_extra_large">Extra large</string>
+</resources>

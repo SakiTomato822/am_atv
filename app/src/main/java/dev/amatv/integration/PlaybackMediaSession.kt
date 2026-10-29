@@ -10,6 +10,11 @@ import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
 import dev.amatv.playback.PlaybackService
+import dev.amatv.model.LyricLine
+import dev.amatv.model.Track
+
+/** EVCC 3.4.5 scans MediaMetadata string keys containing lyric/lrc, case-insensitively. */
+internal const val EVCC_LYRICS_METADATA_KEY = "lyrics"
 
 /** Publishes the app queue to Android. MusicKit remains the sole audio-focus owner. */
 class PlaybackMediaSession(private val context: Context) {
@@ -28,6 +33,9 @@ class PlaybackMediaSession(private val context: Context) {
     private var acceptPlayingActivation = true
     private var durationMs = 0L
     private var metadataKey: MetadataKey? = null
+    private var lyricTrackIdentity: String? = null
+    private var lyricLines: List<LyricLine>? = null
+    private var lyricDocument: PlaybackLyricExport? = null
     private var lastPublishedState = PlaybackState.STATE_NONE
     private var lastPublishedActions = 0L
     private var lastPublishedPosition = -1L
@@ -79,6 +87,8 @@ class PlaybackMediaSession(private val context: Context) {
         }, mainHandler)
     }
 
+    internal val sessionToken: MediaSession.Token get() = session.sessionToken
+
     fun setCallbacks(value: Callbacks?) = onMain {
         callbacks = value
         session.isActive = value != null && activatedByPlayback
@@ -116,6 +126,7 @@ class PlaybackMediaSession(private val context: Context) {
             album = track.album,
             artworkUrl = track.artworkUrl,
             durationMs = durationMs,
+            lyrics = lyricsFor(track),
         )
         if (metadataKey != nextMetadata) {
             metadataKey = nextMetadata
@@ -125,6 +136,7 @@ class PlaybackMediaSession(private val context: Context) {
                 .putString(MediaMetadata.METADATA_KEY_ARTIST, nextMetadata.artist)
                 .putString(MediaMetadata.METADATA_KEY_ALBUM, nextMetadata.album)
                 .putLong(MediaMetadata.METADATA_KEY_DURATION, nextMetadata.durationMs)
+                .putString(EVCC_LYRICS_METADATA_KEY, nextMetadata.lyrics)
                 .apply {
                     nextMetadata.artworkUrl?.let {
                         // Let system clients fetch their preferred image size;
@@ -197,6 +209,7 @@ class PlaybackMediaSession(private val context: Context) {
         session.isActive = false
         session.setCallback(null)
         session.release()
+        clearLyricDocument()
         released = true
         stopForegroundService()
     }
@@ -205,6 +218,7 @@ class PlaybackMediaSession(private val context: Context) {
         activatedByPlayback = false
         acceptPlayingActivation = true
         metadataKey = null
+        clearLyricDocument()
         durationMs = 0L
         lastPublishedState = PlaybackState.STATE_NONE
         lastPublishedActions = 0L
@@ -234,6 +248,23 @@ class PlaybackMediaSession(private val context: Context) {
         }
     }
 
+    private fun lyricsFor(track: Track): String {
+        val identity = track.catalogId?.takeIf(String::isNotBlank) ?: track.id
+        if (identity.isBlank()) return ""
+        if (lyricTrackIdentity != identity || lyricLines !== track.lyrics) {
+            lyricDocument = PlaybackLyricExport.create(identity, track.lyrics, includeBackgroundVocals = false)
+            lyricTrackIdentity = identity
+            lyricLines = track.lyrics
+        }
+        return evccLyricsMetadataValue(lyricDocument)
+    }
+
+    private fun clearLyricDocument() {
+        lyricTrackIdentity = null
+        lyricLines = null
+        lyricDocument = null
+    }
+
     private fun stopForegroundService() {
         if (foregroundServiceStarted) PlaybackService.stop(context)
         foregroundServiceStarted = false
@@ -256,5 +287,6 @@ class PlaybackMediaSession(private val context: Context) {
         val album: String,
         val artworkUrl: String?,
         val durationMs: Long,
+        val lyrics: String,
     )
 }

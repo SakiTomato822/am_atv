@@ -10,11 +10,34 @@ data class LibraryPage(
 )
 
 enum class LibraryCollection(val resourceType: String) {
+    Artists("library-artists"),
+    Albums("library-albums"),
     Playlists("library-playlists"),
     Songs("library-songs");
 
     internal val request: CollectionRequest
-        get() = CollectionRequest("/v1/me/library/${if (this == Playlists) "playlists" else "songs"}", true)
+        get() = CollectionRequest(
+            "/v1/me/library/${when (this) {
+                Artists -> "artists"
+                Albums -> "albums"
+                Playlists -> "playlists"
+                Songs -> "songs"
+            }}",
+            true,
+        )
+}
+
+/** Artist IDs from `/me/library/artists` must remain the source for their saved albums. */
+internal fun libraryArtistAlbumsRequest(artist: Track): CollectionRequest {
+    require(artist.catalogKind == dev.amatv.model.CatalogKind.Artist &&
+        artist.resourceType == LibraryCollection.Artists.resourceType) {
+        "A library artist resource is required"
+    }
+    val libraryId = checkNotNull(artist.resourceId) { "Library artist ID is missing" }
+    require(libraryId.matches(Regex("[A-Za-z0-9._-]+"))) {
+        "Library artist ID is invalid"
+    }
+    return CollectionRequest("/v1/me/library/artists/$libraryId/albums", true)
 }
 
 /** Library entries have durable resource identities, even when catalog releases are relinked. */

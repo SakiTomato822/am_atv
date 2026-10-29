@@ -9,11 +9,18 @@ object MockCatalog {
     val tracks = listOf(
         track(
             id = "aurora",
-            title = "After the Aurora",
-            artist = "Northbound",
+            title = if (dev.amatv.BuildConfig.FLYME_UI_PREVIEW) "晚风与霓虹 · Night Drive" else "After the Aurora",
+            artist = if (dev.amatv.BuildConfig.FLYME_UI_PREVIEW) "本地字体预览 · Inter / Noto" else "Northbound",
             album = "Glass Horizons",
             colors = listOf(Color(0xFF28135B), Color(0xFFB12C68), Color(0xFFEF6A62)),
-            lines = listOf(
+            lines = if (dev.amatv.BuildConfig.FLYME_UI_PREVIEW) listOf(
+                "晚风轻轻吹过这座城市",
+                "把今天的故事慢慢唱给你听",
+                "We keep moving through the city lights",
+                "让每一个平凡的瞬间都闪闪发亮",
+                "Stay with me until the morning comes",
+                "所有美好都会在下一站相遇",
+            ) else listOf(
                 "City lights dissolve into the rain",
                 "We keep moving like a midnight train",
                 "Hold the silence close and let it glow",
@@ -86,7 +93,8 @@ object MockCatalog {
     ): Track {
         var cursor = 2_000L
         val timedLines = lines.map { line ->
-            val words = line.split(" ").map { word ->
+            val isCjkPreview = dev.amatv.BuildConfig.FLYME_UI_PREVIEW && line.any { it in '\u4e00'..'\u9fff' }
+            val words = (if (isCjkPreview) line.map(Char::toString) else line.split(" ")).map { word ->
                 val start = cursor
                 cursor += 520L
                 LyricWord(
@@ -100,7 +108,7 @@ object MockCatalog {
                 )
             }
             cursor += 1_100L
-            LyricLine(words)
+            LyricLine(words, joinWithSpaces = !isCjkPreview)
         }
         return Track(id, title, artist, album, 48_000L, colors, timedLines)
     }

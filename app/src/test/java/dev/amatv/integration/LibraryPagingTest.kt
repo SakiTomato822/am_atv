@@ -68,6 +68,52 @@ class LibraryPagingTest {
         assertEquals(listOf("p.one"), page.items.map { it.resourceId })
     }
 
+    @Test fun albumsUseTheirOwnLibraryEndpointAndPreserveApplePageOrder() = runBlocking {
+        val requested = mutableListOf<String>()
+        val page = api.libraryPage(LibraryCollection.Albums) { path ->
+            requested += path
+            JSONObject("""{"data":[
+              {"id":"l.first","type":"library-albums","attributes":{"name":"First","artistName":"Artist"}},
+              {"id":"l.second","type":"library-albums","attributes":{"name":"Second","artistName":"Artist"}}],
+              "next":"/v1/me/library/albums?offset=2"}""")
+        }
+        assertEquals(listOf("/v1/me/library/albums?limit=100&include=catalog"), requested)
+        assertEquals(listOf("First", "Second"), page.items.map { it.title })
+        assertEquals("/v1/me/library/albums?offset=2&include=catalog", page.nextPage)
+    }
+
+    @Test fun cataloglessLibraryContainersKeepLibraryIdentityWithoutCatalogPlaybackIds() = runBlocking {
+        val root = JSONObject("""{"data":[
+          {"id":"l.owned-album","type":"library-albums","attributes":{"name":"Owned Album","artistName":"Artist"}},
+          {"id":"p.owned-playlist","type":"library-playlists","attributes":{"name":"Owned Playlist",
+            "playParams":{"id":"p.owned-playlist","kind":"playlist","isLibrary":true},
+            "hasCatalog":false,"canEdit":false}}]}""")
+        val album = api.libraryPage(LibraryCollection.Albums) { root }.items.single()
+        val playlist = api.libraryPage(LibraryCollection.Playlists) { root }.items.single()
+
+        assertNull(album.catalogId)
+        assertEquals("l.owned-album", album.resourceId)
+        assertEquals("library-albums", album.resourceType)
+        assertEquals("/v1/me/library/albums/l.owned-album/tracks?limit=100&include=catalog",
+            album.collectionRequest("tw").firstPage)
+        assertNull(playlist.catalogId)
+        assertEquals("p.owned-playlist", playlist.resourceId)
+        assertEquals("library-playlists", playlist.resourceType)
+        assertEquals("/v1/me/library/playlists/p.owned-playlist/tracks?limit=100&include=catalog",
+            playlist.collectionRequest("tw").firstPage)
+    }
+
+    @Test fun libraryContainerUsesCatalogIdOnlyWhenAppleProvidesCatalogMapping() = runBlocking {
+        val page = api.libraryPage(LibraryCollection.Albums) {
+            JSONObject("""{"data":[{"id":"l.owned-album","type":"library-albums",
+              "attributes":{"name":"Owned Album","artistName":"Artist"},
+              "relationships":{"catalog":{"data":[{"id":"12345","type":"albums",
+                "attributes":{"name":"Catalog Album","artistName":"Artist"}}]}}}]}""")
+        }
+        assertEquals("12345", page.items.single().catalogId)
+        assertEquals("l.owned-album", page.items.single().resourceId)
+    }
+
     @Test fun aContinuationCannotSendAccountRequestsOutsideItsLibraryEndpoint() = runBlocking {
         for (next in listOf("https://evil.test/v1/me/library/songs?offset=100",
             "/v1/me/library/playlists?offset=100", "//evil.test/v1/me/library/songs")) {

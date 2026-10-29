@@ -17,7 +17,10 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -38,6 +41,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AllInclusive
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ClearAll
@@ -50,9 +54,14 @@ import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Translate
+import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.Slider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -104,11 +113,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import dev.amatv.R
+import dev.amatv.BuildConfig
+import dev.amatv.integration.LyricTextSize
 import dev.amatv.integration.PlaybackRepeatMode
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.LyricLine
@@ -134,6 +146,8 @@ private enum class PlayerPresentation {
     Queue,
 }
 
+private val LyricPrimaryWeight = if (BuildConfig.FLYME_AUTO) FontWeight.ExtraBold else FontWeight.Bold
+
 private enum class PlayerNavigationZone {
     Controls,
     ProgressBar,
@@ -142,7 +156,7 @@ private enum class PlayerNavigationZone {
     QueueItems,
 }
 
-private data class PlayerChromeState(val controlsVisible: Boolean, val showQueue: Boolean)
+private data class PlayerChromeState(val controlsVisible: Boolean, val showQueue: Boolean, val showLyrics: Boolean)
 
 private enum class QueueModeControl { Shuffle, Repeat, Autoplay, Source, Clear }
 
@@ -213,6 +227,9 @@ fun PlayerScreen(
     onLyricPronunciationEnabledChange: (Boolean) -> Unit = {},
     onLyricTranslationLanguageChange: (String) -> Unit = {},
     onLyricPronunciationLanguageChange: (String) -> Unit = {},
+    onBack: () -> Unit = {},
+    lyricTextSize: LyricTextSize = LyricTextSize.Standard,
+    onLyricTextSizeChange: (LyricTextSize) -> Unit = {},
 ) {
     val playbackStateDescription = stringResource(when {
         isPlaying -> R.string.player_state_playing
@@ -329,14 +346,57 @@ fun PlayerScreen(
             line.backgroundWords.any { !it.pronunciationText.isNullOrBlank() }
     }
 
+    fun activateControl(control: PlayerControl) {
+        if (!isActiveScreen) return
+        controlsActivity++
+        controlsVisible = true
+        focusedControl = control
+        when (control) {
+            PlayerControl.Previous -> if (canSkipPrevious) onSkipPrevious()
+            PlayerControl.PlayPause -> onTogglePlayback()
+            PlayerControl.Next -> if (canSkipNext) onSkipNext()
+            PlayerControl.Lyrics -> {
+                userToggledLyrics = true
+                if (lyricsTransientFailure && track.lyrics.isEmpty()) {
+                    showLyrics = true
+                    onRetryLyrics()
+                } else showLyrics = !showLyrics
+                showQueue = false
+                navigationZone = PlayerNavigationZone.Controls
+            }
+            PlayerControl.LyricsDisplay -> showLyricsSettings = true
+            PlayerControl.Queue -> {
+                showQueue = !showQueue
+                if (showQueue) {
+                    showLyrics = false
+                    focusQueueIndex(currentQueueIndex)
+                    navigationZone = PlayerNavigationZone.QueueItems
+                } else navigationZone = PlayerNavigationZone.Controls
+            }
+            PlayerControl.Radio -> if (canSetAutoplay) onToggleAutoplay()
+        }
+    }
+
+    fun activateQueueMode(mode: QueueModeControl) {
+        if (!isActiveScreen) return
+        controlsActivity++
+        when (mode) {
+            QueueModeControl.Shuffle -> if (canSetShuffle && !autoplayEnabled) onToggleShuffle()
+            QueueModeControl.Repeat -> if (canSetRepeat && !autoplayEnabled) onCycleRepeat()
+            QueueModeControl.Autoplay -> if (canSetAutoplay) onToggleAutoplay()
+            QueueModeControl.Source -> onToggleAutoplaySource()
+            QueueModeControl.Clear -> if (canClearQueue) onClearQueue()
+        }
+    }
+
     LaunchedEffect(controlsVisible, controlsActivity, isActiveScreen, isScrubbing, showLyricsSettings) {
-        if (controlsVisible && isActiveScreen && !isScrubbing && !showLyricsSettings) {
+        if (!BuildConfig.FLYME_AUTO && controlsVisible && isActiveScreen && !isScrubbing && !showLyricsSettings) {
             delay(5_000L)
             controlsVisible = false
             isScrubbing = false
         }
     }
-    val chromeTransition = updateTransition(PlayerChromeState(controlsVisible, showQueue), label = "player-chrome")
+    val chromeTransition = updateTransition(PlayerChromeState(controlsVisible, showQueue, showLyrics), label = "player-chrome")
     val chromeAlpha = chromeTransition.animateFloat(
         transitionSpec = {
             if (targetState.controlsVisible) tween(280, easing = MotionTokens.KaraokeLineEasing)
@@ -433,54 +493,11 @@ fun PlayerScreen(
                             }
                             PlayerNavigationZone.QueueModes -> {
                                 if (showQueue) {
-                                    when (focusedQueueMode) {
-                                        QueueModeControl.Shuffle -> if (
-                                            canSetShuffle && !autoplayEnabled
-                                        ) onToggleShuffle()
-                                        QueueModeControl.Repeat -> if (
-                                            canSetRepeat && !autoplayEnabled
-                                        ) onCycleRepeat()
-                                        QueueModeControl.Autoplay -> if (canSetAutoplay) {
-                                            onToggleAutoplay()
-                                        }
-                                        QueueModeControl.Source -> onToggleAutoplaySource()
-                                        QueueModeControl.Clear -> if (canClearQueue) onClearQueue()
-                                    }
+                                    activateQueueMode(focusedQueueMode)
                                 }
                             }
                             PlayerNavigationZone.Controls -> {
-                                when (focusedControl) {
-                                    PlayerControl.Previous -> onSkipPrevious()
-                                    PlayerControl.PlayPause -> onTogglePlayback()
-                                    PlayerControl.Next -> onSkipNext()
-                                    PlayerControl.Lyrics -> {
-                                        userToggledLyrics = true
-                                        if (lyricsTransientFailure && track.lyrics.isEmpty()) {
-                                            showLyrics = true
-                                            onRetryLyrics()
-                                        } else {
-                                            showLyrics = !showLyrics
-                                        }
-                                        showQueue = false
-                                        if (!showLyrics && navigationZone == PlayerNavigationZone.Lyrics) {
-                                            navigationZone = PlayerNavigationZone.Controls
-                                        }
-                                    }
-                                    PlayerControl.LyricsDisplay -> {
-                                        showLyricsSettings = true
-                                    }
-                                    PlayerControl.Queue -> {
-                                        showQueue = !showQueue
-                                        if (showQueue) {
-                                            showLyrics = false
-                                            focusQueueIndex(currentQueueIndex)
-                                            navigationZone = PlayerNavigationZone.QueueItems
-                                        } else {
-                                            navigationZone = PlayerNavigationZone.Controls
-                                        }
-                                    }
-                                    PlayerControl.Radio -> if (canSetAutoplay) onToggleAutoplay()
-                                }
+                                activateControl(focusedControl)
                             }
                         }
                         true
@@ -643,8 +660,39 @@ fun PlayerScreen(
             focusedQueueIndex = focusedQueueIndex,
             selectionVisible = navigationZone == PlayerNavigationZone.QueueItems,
             lowPerformanceMode = lowPerformanceMode,
+            lyricTextSize = lyricTextSize,
+            carTransport = { transportModifier, geometry ->
+                CarTransportCard(track = track, positionState = playbackPosition,
+                    playWhenReady = playWhenReady, canSkipPrevious = canSkipPrevious,
+                    canSkipNext = canSkipNext, supportsLyrics = supportsLyrics,
+                    canSetAutoplay = canSetAutoplay, focusedControl = focusedControl,
+                    controlsFocused = navigationZone == PlayerNavigationZone.Controls,
+                    progressFocused = navigationZone == PlayerNavigationZone.ProgressBar,
+                    onControl = ::activateControl,
+                    onSeekTo = { target -> if (isActiveScreen) onSeekBy(target - playbackPosition.value) },
+                    enabled = isActiveScreen, compact = geometry.compactTransport,
+                    modifier = transportModifier)
+            },
+            onSelectQueueTrack = { index ->
+                if (isActiveScreen && showQueue) {
+                    controlsActivity++
+                    focusQueueIndex(index)
+                    onSelectTrack(index)
+                }
+            },
             modifier = Modifier.fillMaxSize(),
         )
+        if (BuildConfig.FLYME_AUTO && isActiveScreen) {
+            FocusSurface(
+                onClick = onBack,
+                modifier = Modifier.align(Alignment.TopStart).padding(16.dp).size(56.dp)
+                    .automationId("player-back"),
+            ) {
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack,
+                    contentDescription = stringResource(R.string.browse_back),
+                    modifier = Modifier.align(Alignment.Center).size(28.dp))
+            }
+        }
         if (statusMessage != null) {
             Text(
                 text = statusMessage,
@@ -668,11 +716,12 @@ fun PlayerScreen(
                     repeatMode, shuffleEnabled, autoplayEnabled, autoplaySource,
                     canSetRepeat, canSetShuffle, canSetAutoplay, canClearQueue,
                     focusedQueueMode.takeIf { navigationZone == PlayerNavigationZone.QueueModes },
+                    onModeClick = ::activateQueueMode,
                 )
             }
         }
         chromeTransition.AnimatedVisibility(
-            visible = { it.controlsVisible },
+            visible = { it.controlsVisible && (!BuildConfig.FLYME_AUTO || !it.showLyrics || it.showQueue) },
             enter = fadeIn(
                 tween(280, easing = MotionTokens.KaraokeLineEasing),
             ) + slideInVertically(
@@ -702,6 +751,10 @@ fun PlayerScreen(
                     durationMs = track.durationMs,
                     isFocused = navigationZone == PlayerNavigationZone.ProgressBar,
                     scrubPositionMs = if (isScrubbing) scrubPositionMs else null,
+                    onSeekTo = { target ->
+                        if (isActiveScreen) onSeekBy(target - playbackPosition.value)
+                    },
+                    enabled = isActiveScreen,
                 )
                 Spacer(Modifier.height(8.dp))
                 Row(
@@ -719,6 +772,7 @@ fun PlayerScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                         PlayerButton(
                             controlId = "player-previous",
+                            onClick = { activateControl(PlayerControl.Previous) },
                             icon = Icons.Rounded.SkipPrevious,
                             contentDescription = stringResource(R.string.player_previous_track),
                             enabled = canSkipPrevious,
@@ -728,6 +782,7 @@ fun PlayerScreen(
                         )
                         PlayerButton(
                             controlId = "player-play-pause",
+                            onClick = { activateControl(PlayerControl.PlayPause) },
                             icon = if (playWhenReady) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                             contentDescription = stringResource(if (playWhenReady) R.string.player_pause else R.string.player_play),
                             focused = navigationZone == PlayerNavigationZone.Controls &&
@@ -736,6 +791,7 @@ fun PlayerScreen(
                         )
                         PlayerButton(
                             controlId = "player-next",
+                            onClick = { activateControl(PlayerControl.Next) },
                             icon = Icons.Rounded.SkipNext,
                             contentDescription = stringResource(R.string.player_next_track),
                             enabled = canSkipNext,
@@ -756,6 +812,7 @@ fun PlayerScreen(
                         if (supportsLyrics) {
                             PlayerButton(
                                 controlId = "player-lyrics-display",
+                                onClick = { activateControl(PlayerControl.LyricsDisplay) },
                                 icon = Icons.Rounded.Translate,
                                 contentDescription = stringResource(R.string.player_lyrics_display_settings),
                                 selected = lyricTranslationEnabled || lyricPronunciationEnabled,
@@ -765,6 +822,7 @@ fun PlayerScreen(
                             )
                             PlayerButton(
                                 controlId = "player-lyrics",
+                                onClick = { activateControl(PlayerControl.Lyrics) },
                                 icon = Icons.Rounded.Lyrics,
                                 contentDescription = stringResource(R.string.player_lyrics),
                                 selected = showLyrics,
@@ -775,6 +833,7 @@ fun PlayerScreen(
                         }
                         PlayerButton(
                             controlId = "player-queue",
+                            onClick = { activateControl(PlayerControl.Queue) },
                             icon = Icons.AutoMirrored.Rounded.QueueMusic,
                             contentDescription = stringResource(R.string.player_queue),
                             selected = showQueue,
@@ -791,6 +850,7 @@ fun PlayerScreen(
                             enabled = canSetAutoplay,
                             ytmBadge = false,
                             frameKey = "player-main-radio",
+                            onClick = { activateControl(PlayerControl.Radio) },
                         )
                         }
                     }
@@ -815,6 +875,8 @@ fun PlayerScreen(
                 onTranslationLanguageChange = onLyricTranslationLanguageChange,
                 onPronunciationLanguageChange = onLyricPronunciationLanguageChange,
                 onDismiss = { showLyricsSettings = false },
+                lyricTextSize = lyricTextSize,
+                onLyricTextSizeChange = onLyricTextSizeChange,
             )
         }
 
@@ -823,12 +885,104 @@ fun PlayerScreen(
 
 
 @Composable
+private fun CarTransportCard(
+    track: Track,
+    positionState: State<Long>,
+    playWhenReady: Boolean,
+    canSkipPrevious: Boolean,
+    canSkipNext: Boolean,
+    supportsLyrics: Boolean,
+    canSetAutoplay: Boolean,
+    focusedControl: PlayerControl,
+    controlsFocused: Boolean,
+    progressFocused: Boolean,
+    onControl: (PlayerControl) -> Unit,
+    onSeekTo: (Long) -> Unit,
+    enabled: Boolean,
+    compact: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Column(modifier.automationId("player-controls")) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                Text(track.title, color = Color.White, fontSize = if (compact) 18.sp else 20.sp,
+                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(track.artist, color = Color.White.copy(alpha = 0.72f), fontSize = 15.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            PlayerButton("player-previous", { onControl(PlayerControl.Previous) },
+                Icons.Rounded.SkipPrevious, stringResource(R.string.player_previous_track),
+                enabled = enabled && canSkipPrevious,
+                focused = controlsFocused && focusedControl == PlayerControl.Previous)
+            PlayerButton("player-play-pause", { onControl(PlayerControl.PlayPause) },
+                if (playWhenReady) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                stringResource(if (playWhenReady) R.string.player_pause else R.string.player_play),
+                enabled = enabled, focused = controlsFocused && focusedControl == PlayerControl.PlayPause,
+                width = 64.dp)
+            PlayerButton("player-next", { onControl(PlayerControl.Next) },
+                Icons.Rounded.SkipNext, stringResource(R.string.player_next_track),
+                enabled = enabled && canSkipNext,
+                focused = controlsFocused && focusedControl == PlayerControl.Next)
+            Box {
+                PlayerButton("player-more", { menuOpen = true }, Icons.Rounded.MoreHoriz,
+                    stringResource(R.string.flyme_player_more), enabled = enabled, focused = false)
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    if (supportsLyrics) {
+                        DropdownMenuItem(text = { Text(stringResource(R.string.player_lyrics_display_settings)) },
+                            modifier = Modifier.automationId("player-lyrics-display"),
+                            onClick = { menuOpen = false; onControl(PlayerControl.LyricsDisplay) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.player_lyrics)) },
+                            modifier = Modifier.automationId("player-lyrics"),
+                            onClick = { menuOpen = false; onControl(PlayerControl.Lyrics) })
+                    }
+                    DropdownMenuItem(text = { Text(stringResource(R.string.player_queue)) },
+                        modifier = Modifier.automationId("player-queue"),
+                        onClick = { menuOpen = false; onControl(PlayerControl.Queue) })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.player_radio)) },
+                        modifier = Modifier.automationId("player-radio"), enabled = canSetAutoplay,
+                        onClick = { menuOpen = false; onControl(PlayerControl.Radio) })
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Progress(positionState, track.durationMs, isFocused = progressFocused,
+            onSeekTo = onSeekTo, enabled = enabled, compact = compact)
+    }
+}
+
+@Composable
 private fun Progress(
     positionState: State<Long>,
     durationMs: Long,
     isFocused: Boolean = false,
     scrubPositionMs: Long? = null,
+    onSeekTo: (Long) -> Unit,
+    enabled: Boolean,
+    compact: Boolean = false,
 ) {
+    if (BuildConfig.FLYME_AUTO) {
+        var touchPosition by remember(positionState, durationMs) { mutableStateOf<Float?>(null) }
+        val displayed = touchPosition ?: positionState.value.toFloat()
+        Column(Modifier.fillMaxWidth().automationId("player-touch-progress")) {
+            Slider(
+                value = displayed.coerceIn(0f, durationMs.coerceAtLeast(1L).toFloat()),
+                onValueChange = { touchPosition = it },
+                onValueChangeFinished = {
+                    touchPosition?.let { onSeekTo(it.toLong()) }
+                    touchPosition = null
+                },
+                valueRange = 0f..durationMs.coerceAtLeast(1L).toFloat(),
+                enabled = enabled && durationMs > 0L,
+                modifier = Modifier.fillMaxWidth().height(if (compact) 40.dp else 56.dp),
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(formatTime(displayed.toLong()), fontSize = 14.sp)
+                Text("−${formatTime((durationMs - displayed.toLong()).coerceAtLeast(0L))}", fontSize = 14.sp)
+            }
+        }
+        return
+    }
     // The clock animates the bar in drawing; labels only need one update per second.
     val displayedSecond by remember(positionState, scrubPositionMs) {
         derivedStateOf { (scrubPositionMs ?: positionState.value) / 1_000L }
@@ -951,6 +1105,7 @@ private fun Progress(
 @Composable
 private fun PlayerButton(
     controlId: String,
+    onClick: () -> Unit,
     icon: ImageVector,
     contentDescription: String,
     selected: Boolean = false,
@@ -959,6 +1114,7 @@ private fun PlayerButton(
     width: Dp = 46.dp,
     height: Dp = 40.dp,
 ) {
+    val interactive = enabled && LocalFocusTargetsEnabled.current
     val scale by animateFloatAsState(
         targetValue = if (focused) 1.08f else 1.0f,
         animationSpec = tween(180, easing = ArtworkDecelerateEasing),
@@ -968,13 +1124,15 @@ private fun PlayerButton(
         modifier = Modifier
             .automationId(controlId)
             .semantics { this.selected = focused; stateDescription = contentDescription }
-            .size(width = width, height = height)
+            .size(width = if (BuildConfig.FLYME_AUTO) maxOf(width, 56.dp) else width,
+                height = if (BuildConfig.FLYME_AUTO) maxOf(height, 56.dp) else height)
             .focusFrameTarget(focused, "player-control:$controlId", 20.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
             }
             .clip(RoundedCornerShape(20.dp))
+            .clickable(enabled = interactive, onClick = onClick)
             .background(
                 when {
                     focused -> Color.White
@@ -1020,6 +1178,8 @@ private fun LyricsDisplaySettingsDialog(
     onTranslationLanguageChange: (String) -> Unit,
     onPronunciationLanguageChange: (String) -> Unit,
     onDismiss: () -> Unit,
+    lyricTextSize: LyricTextSize,
+    onLyricTextSizeChange: (LyricTextSize) -> Unit,
 ) {
     var languagePicker by remember { mutableStateOf<LyricsLanguagePicker?>(null) }
     val firstFocus = remember { FocusRequester() }
@@ -1053,7 +1213,7 @@ private fun LyricsDisplaySettingsDialog(
             },
             text = {
                 Column(
-                    modifier = Modifier.width(520.dp),
+                    modifier = Modifier.width(520.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     when (languagePicker) {
@@ -1101,6 +1261,18 @@ private fun LyricsDisplaySettingsDialog(
                             }
                         }
                         null -> {
+                            if (BuildConfig.FLYME_AUTO) {
+                                LyricsDisplayValueRow(
+                                    title = stringResource(R.string.flyme_lyrics_text_size),
+                                    value = stringResource(when (lyricTextSize) {
+                                        LyricTextSize.Standard -> R.string.flyme_text_standard
+                                        LyricTextSize.Large -> R.string.flyme_text_large
+                                        LyricTextSize.ExtraLarge -> R.string.flyme_text_extra_large
+                                    }),
+                                    onClick = { onLyricTextSizeChange(lyricTextSize.next()) },
+                                    modifier = Modifier.automationId("lyrics-text-size"),
+                                )
+                            }
                             LyricsLanguageSummaryRow(
                                 title = stringResource(R.string.player_lyrics_source_language),
                                 value = stringResource(R.string.player_lyrics_source_auto),
@@ -1256,10 +1428,11 @@ private fun LyricsDisplayValueRow(
     title: String,
     value: String,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     FocusSurface(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth().height(56.dp),
+        modifier = modifier.fillMaxWidth().height(56.dp),
         cornerRadius = 14.dp,
         showBorder = true,
         padding = PaddingValues(horizontal = 16.dp),
@@ -1349,6 +1522,9 @@ private fun PlayerStage(
     focusedQueueIndex: Int,
     selectionVisible: Boolean,
     lowPerformanceMode: Boolean = false,
+    onSelectQueueTrack: (Int) -> Unit,
+    lyricTextSize: LyricTextSize,
+    carTransport: @Composable (Modifier, CarNowPlayingGeometry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -1434,6 +1610,60 @@ private fun PlayerStage(
     val slideDistancePx = with(density) { 26.dp.toPx() }
 
     BoxWithConstraints(modifier = modifier) {
+        if (BuildConfig.FLYME_AUTO && presentation == PlayerPresentation.Lyrics) {
+            CarNowPlayingLayout(
+                modifier = Modifier.fillMaxSize(),
+                artwork = { artworkModifier, geometry ->
+                    if (artworkStageVisible) {
+                        Box(
+                            modifier = artworkModifier.graphicsLayer {
+                                alpha = artworkColumnAlpha.value
+                            },
+                        ) {
+                            MotionArtwork(
+                                track = track,
+                                modifier = Modifier.fillMaxSize(),
+                                animate = isPlaying && !lowPerformanceMode,
+                                cornerRadius = 0.dp,
+                                crossfadeTrackChanges = true,
+                            )
+                        }
+                    }
+                },
+                transportInfo = carTransport,
+                lyrics = { lyricsModifier, _ ->
+                    if (lyricsStageVisible) {
+                        Box(lyricsModifier.graphicsLayer {
+                            alpha = lyricsAlpha.value
+                            translationX = (1f - lyricsAlpha.value) * slideDistancePx
+                        }) {
+                            if (track.lyrics.isNotEmpty()) {
+                                val lyricScale = lyricTextSize.scale
+                                CompositionLocalProvider(LocalDensity provides Density(
+                                    density.density, density.fontScale * lyricScale,
+                                )) {
+                                    key(lyricScale) {
+                                        LyricsPanel(lines = track.lyrics,
+                                            isVisible = isVisibleOnScreen && presentation == PlayerPresentation.Lyrics,
+                                            positionState = positionState, lyricOffsetMs = lyricOffsetMs,
+                                            controlsVisible = controlsVisible,
+                                            stageOffsetPx = remember { mutableStateOf(0f) },
+                                            selectedLyricIndex = selectedLyricIndex,
+                                            manualScrollTrigger = manualScrollTrigger,
+                                            manualScrollDelta = manualScrollDelta)
+                                    }
+                                }
+                            } else {
+                                LyricsUnavailablePanel(isLoading = lyricsLoading,
+                                    confirmedUnavailable = lyricsLookupFailed,
+                                    hasFailed = lyricsTransientFailure,
+                                    stageOffsetPx = remember { mutableStateOf(0f) })
+                            }
+                        }
+                    }
+                },
+            )
+        } else {
         val viewportWidthPx = with(density) { maxWidth.toPx() }
         val columnWidthDp = 288.dp
         val columnWidthPx = with(density) { columnWidthDp.toPx() }
@@ -1450,13 +1680,18 @@ private fun PlayerStage(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(start = lyricsStartDp, end = lyricsEndDp)
+                    .padding(start = lyricsStartDp, end = lyricsEndDp,
+                        top = if (BuildConfig.FLYME_AUTO) 16.dp else 0.dp,
+                        bottom = if (BuildConfig.FLYME_AUTO && controlsVisible) 196.dp else 0.dp)
                     .graphicsLayer {
                         alpha = lyricsAlpha.value
                         translationX = (1f - lyricsAlpha.value) * slideDistancePx
                     },
             ) {
                 if (track.lyrics.isNotEmpty()) {
+                    val lyricScale = if (BuildConfig.FLYME_AUTO) lyricTextSize.scale else 1f
+                    CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * lyricScale)) {
+                    key(lyricScale) {
                     LyricsPanel(
                         lines = track.lyrics,
                         isVisible = isVisibleOnScreen && presentation == PlayerPresentation.Lyrics,
@@ -1468,6 +1703,8 @@ private fun PlayerStage(
                         manualScrollTrigger = manualScrollTrigger,
                         manualScrollDelta = manualScrollDelta,
                     )
+                    }
+                    }
                 } else {
                     LyricsUnavailablePanel(
                         isLoading = lyricsLoading,
@@ -1526,6 +1763,8 @@ private fun PlayerStage(
             }
         }
 
+        }
+
         // Queue presentation overlay
         if (queueStageVisible) {
             Box(
@@ -1548,6 +1787,8 @@ private fun PlayerStage(
                     isPlaying = audioIsPlaying,
                     audioSpectrum = audioSpectrum,
                     bandsEnabled = isVisibleOnScreen && presentation == PlayerPresentation.Queue,
+                    onSelectTrack = onSelectQueueTrack,
+                    interactive = presentation == PlayerPresentation.Queue && LocalFocusTargetsEnabled.current,
                 )
                 }
             }
@@ -1939,7 +2180,7 @@ private fun LyricsPanel(
     ) {
         val density = LocalDensity.current
         val viewportHeightPx = with(density) { maxHeight.toPx() }
-        val focalAnchorY = (viewportHeightPx * MotionTokens.LyricsTvScrollAnchorTopFraction)
+        val focalAnchorY = (viewportHeightPx * if (BuildConfig.FLYME_AUTO) 0.47f else MotionTokens.LyricsTvScrollAnchorTopFraction)
             .roundToInt()
             .toFloat() - with(density) { 2.dp.toPx() }
         val maxScroll = (layoutInfo.totalHeight - viewportHeightPx).coerceAtLeast(0f)
@@ -2335,16 +2576,40 @@ private fun LyricsLineRow(
             )
         }
     }
-    KaraokeLyricLine(
-        line = item.line,
-        isActive = isActive,
-        retainedPresence = retainedPresence,
-        retainedBackgroundPresence = retainedBackgroundPresence,
-        isFocused = isFocused,
-        isStaticMode = isStaticMode,
-        isUserScrolling = isUserScrolling,
-        positionState = positionState,
-    )
+    val softFocusRadius by remember(item.lineIndex, snapshotState, retainedPresence,
+        retainedBackgroundPresence, isFocused, isStaticMode, isUserScrolling) {
+        derivedStateOf {
+            val snapshot = snapshotState.value
+            if (!BuildConfig.FLYME_AUTO || isStaticMode || isFocused || isUserScrolling ||
+                item.lineIndex in snapshot.activeLineIndices ||
+                retainedPresence.value > 0f || retainedBackgroundPresence.value > 0f) 0.dp
+            else {
+                val distance = kotlin.math.abs(item.lineIndex - snapshot.scrollAnchorLineIndex)
+                when (distance) {
+                    0 -> 0.dp
+                    1 -> 1.5.dp
+                    2 -> 2.5.dp
+                    else -> 3.5.dp
+                }
+            }
+        }
+    }
+    CarLyricSoftFocus(
+        radius = softFocusRadius,
+        contentKey = listOf(item.line, isStaticMode, isFocused, isUserScrolling,
+            isActive, LyricPrimaryWeight),
+    ) {
+        KaraokeLyricLine(
+            line = item.line,
+            isActive = isActive,
+            retainedPresence = retainedPresence,
+            retainedBackgroundPresence = retainedBackgroundPresence,
+            isFocused = isFocused,
+            isStaticMode = isStaticMode,
+            isUserScrolling = isUserScrolling,
+            positionState = positionState,
+        )
+    }
 }
 
 /**
@@ -2672,6 +2937,16 @@ private fun KaraokeLyricLine(
         val staticTranslationFontSize = if (compactMainLocalization) 17.sp else 19.sp
         val staticTranslationLineHeight = if (compactMainLocalization) 22.sp else 25.sp
         val staticLocalizationGap = if (compactMainLocalization) 2.dp else 4.dp
+        val staticBackgroundPronunciation = line.backgroundPronunciationText
+            ?: line.backgroundWords.mapNotNull(LyricWord::pronunciationText)
+                .joinToString(" ")
+                .takeIf(String::isNotBlank)
+        val staticBackgroundTypography = backgroundVocalTypography(
+            flymeAuto = BuildConfig.FLYME_AUTO,
+            isStaticMode = true,
+            compactMainLocalization = compactMainLocalization,
+            compactBackgroundLocalization = compactBackgroundLocalization,
+        )
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2696,7 +2971,7 @@ private fun KaraokeLyricLine(
                     text = line.text,
                     fontSize = staticMainFontSize,
                     lineHeight = staticMainLineHeight,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = LyricPrimaryWeight,
                     color = Color.White.copy(alpha = if (isFocused) 1f else MotionTokens.KaraokePrimaryAlpha),
                 )
                 if (!line.translation.isNullOrBlank()) {
@@ -2709,11 +2984,24 @@ private fun KaraokeLyricLine(
                         modifier = Modifier.padding(top = staticLocalizationGap),
                     )
                 }
+                if (BuildConfig.FLYME_AUTO && !staticBackgroundPronunciation.isNullOrBlank()) {
+                    Text(
+                        text = staticBackgroundPronunciation,
+                        fontSize = staticBackgroundTypography.pronunciationSizeSp.sp,
+                        lineHeight = staticBackgroundTypography.pronunciationLineHeightSp.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White.copy(alpha = 0.48f),
+                        modifier = Modifier.padding(
+                            top = 4.dp,
+                            bottom = staticBackgroundTypography.localizationGapDp.dp,
+                        ),
+                    )
+                }
                 if (line.backgroundWords.isNotEmpty()) {
                     Text(
                         text = "(${line.backgroundText})",
-                        fontSize = 19.sp,
-                        lineHeight = 25.sp,
+                        fontSize = staticBackgroundTypography.fontSizeSp.sp,
+                        lineHeight = staticBackgroundTypography.lineHeightSp.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Color.White.copy(alpha = 0.52f),
                         modifier = Modifier.padding(top = 4.dp),
@@ -2722,8 +3010,8 @@ private fun KaraokeLyricLine(
                 if (!line.backgroundTranslation.isNullOrBlank()) {
                     Text(
                         text = line.backgroundTranslation,
-                        fontSize = 17.sp,
-                        lineHeight = 22.sp,
+                        fontSize = staticBackgroundTypography.translationSizeSp.sp,
+                        lineHeight = staticBackgroundTypography.translationLineHeightSp.sp,
                         fontWeight = FontWeight.Medium,
                         color = Color.White.copy(alpha = 0.48f),
                         modifier = Modifier.padding(top = 4.dp),
@@ -2819,13 +3107,19 @@ private fun KaraokeLyricLine(
     val mainTranslationFontSize = if (compactMainLocalization) 21.sp else 24.sp
     val mainTranslationLineHeight = if (compactMainLocalization) 25.sp else 29.sp
     val mainLocalizationGap = if (compactMainLocalization) 2.dp else 4.dp
-    val backgroundFontSize = if (compactBackgroundLocalization) 22.sp else 24.sp
-    val backgroundLineHeight = if (compactBackgroundLocalization) 27.sp else 29.sp
-    val backgroundPronunciationFontSize = if (compactBackgroundLocalization) 15.sp else 16.sp
-    val backgroundPronunciationLineHeight = if (compactBackgroundLocalization) 18.sp else 20.sp
-    val backgroundTranslationFontSize = if (compactBackgroundLocalization) 17.sp else 19.sp
-    val backgroundTranslationLineHeight = if (compactBackgroundLocalization) 22.sp else 25.sp
-    val backgroundLocalizationGap = if (compactBackgroundLocalization) 2.dp else 4.dp
+    val backgroundTypography = backgroundVocalTypography(
+        flymeAuto = BuildConfig.FLYME_AUTO,
+        isStaticMode = false,
+        compactMainLocalization = compactMainLocalization,
+        compactBackgroundLocalization = compactBackgroundLocalization,
+    )
+    val backgroundFontSize = backgroundTypography.fontSizeSp.sp
+    val backgroundLineHeight = backgroundTypography.lineHeightSp.sp
+    val backgroundPronunciationFontSize = backgroundTypography.pronunciationSizeSp.sp
+    val backgroundPronunciationLineHeight = backgroundTypography.pronunciationLineHeightSp.sp
+    val backgroundTranslationFontSize = backgroundTypography.translationSizeSp.sp
+    val backgroundTranslationLineHeight = backgroundTypography.translationLineHeightSp.sp
+    val backgroundLocalizationGap = backgroundTypography.localizationGapDp.dp
 
     Box(
         modifier = Modifier
@@ -3083,13 +3377,19 @@ private fun LineSyncedContent(
     val translationFontSize = if (compactMainLocalization) 21.sp else 24.sp
     val translationLineHeight = if (compactMainLocalization) 25.sp else 29.sp
     val mainGap = if (compactMainLocalization) 2.dp else 4.dp
-    val backgroundFontSize = if (compactBackgroundLocalization) 22.sp else 24.sp
-    val backgroundLineHeight = if (compactBackgroundLocalization) 27.sp else 29.sp
-    val backgroundPronunciationFontSize = if (compactBackgroundLocalization) 15.sp else 16.sp
-    val backgroundPronunciationLineHeight = if (compactBackgroundLocalization) 18.sp else 20.sp
-    val backgroundTranslationFontSize = if (compactBackgroundLocalization) 17.sp else 19.sp
-    val backgroundTranslationLineHeight = if (compactBackgroundLocalization) 22.sp else 25.sp
-    val backgroundGap = if (compactBackgroundLocalization) 2.dp else 4.dp
+    val backgroundTypography = backgroundVocalTypography(
+        flymeAuto = BuildConfig.FLYME_AUTO,
+        isStaticMode = false,
+        compactMainLocalization = compactMainLocalization,
+        compactBackgroundLocalization = compactBackgroundLocalization,
+    )
+    val backgroundFontSize = backgroundTypography.fontSizeSp.sp
+    val backgroundLineHeight = backgroundTypography.lineHeightSp.sp
+    val backgroundPronunciationFontSize = backgroundTypography.pronunciationSizeSp.sp
+    val backgroundPronunciationLineHeight = backgroundTypography.pronunciationLineHeightSp.sp
+    val backgroundTranslationFontSize = backgroundTypography.translationSizeSp.sp
+    val backgroundTranslationLineHeight = backgroundTypography.translationLineHeightSp.sp
+    val backgroundGap = backgroundTypography.localizationGapDp.dp
 
     if (!line.pronunciationText.isNullOrBlank()) {
         Text(
@@ -3106,7 +3406,7 @@ private fun LineSyncedContent(
         text = line.text,
         fontSize = mainFontSize,
         lineHeight = mainLineHeight,
-        fontWeight = FontWeight.Bold,
+        fontWeight = LyricPrimaryWeight,
         color = Color.White,
         textAlign = textAlign,
         modifier = Modifier.fillMaxWidth().then(mainAlphaModifier),
@@ -3138,7 +3438,7 @@ private fun LineSyncedContent(
             text = "(${line.backgroundText})",
             fontSize = backgroundFontSize,
             lineHeight = backgroundLineHeight,
-            fontWeight = FontWeight.Bold,
+            fontWeight = if (BuildConfig.FLYME_AUTO) FontWeight.SemiBold else LyricPrimaryWeight,
             color = Color.White,
             textAlign = textAlign,
             modifier = Modifier.fillMaxWidth().then(backgroundAlphaModifier).padding(top = backgroundGap),
@@ -3468,8 +3768,9 @@ private fun KaraokeWordItem(
     val density = LocalDensity.current
     val liftDistancePx = with(density) { MotionTokens.KaraokeWordLiftDp.dp.toPx() }
     val shadowRadiusPx = with(density) { MotionTokens.KaraokeEmphasisShadowDp.dp.toPx() }
-    val shadowStyle = remember(shadowRadiusPx) {
-        TextStyle(
+    val baseTextStyle = LocalTextStyle.current
+    val shadowStyle = remember(shadowRadiusPx, baseTextStyle) {
+        baseTextStyle.copy(
             shadow = Shadow(
                 color = Color.White,
                 blurRadius = shadowRadiusPx,
@@ -3529,7 +3830,9 @@ private fun KaraokeWordItem(
                 text = renderedString,
                 fontSize = fontSize,
                 lineHeight = lineHeight,
-                fontWeight = FontWeight.Bold,
+                fontWeight = if (isBackgroundVocal && BuildConfig.FLYME_AUTO) {
+                    FontWeight.SemiBold
+                } else LyricPrimaryWeight,
                 color = Color.White,
             )
         } else {
@@ -3552,7 +3855,9 @@ private fun KaraokeWordItem(
                             text = " ",
                             fontSize = fontSize,
                             lineHeight = lineHeight,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = if (isBackgroundVocal && BuildConfig.FLYME_AUTO) {
+                                FontWeight.SemiBold
+                            } else LyricPrimaryWeight,
                             color = Color.White,
                         )
                     } else {
@@ -3599,7 +3904,9 @@ private fun KaraokeWordItem(
                                     text = ch.toString(),
                                     fontSize = fontSize,
                                     lineHeight = lineHeight,
-                                    fontWeight = FontWeight.Bold,
+                                    fontWeight = if (isBackgroundVocal && BuildConfig.FLYME_AUTO) {
+                                        FontWeight.SemiBold
+                                    } else LyricPrimaryWeight,
                                     color = Color.Transparent,
                                     style = shadowStyle,
                                     modifier = Modifier.graphicsLayer {
@@ -3618,7 +3925,9 @@ private fun KaraokeWordItem(
                                 text = ch.toString(),
                                 fontSize = fontSize,
                                 lineHeight = lineHeight,
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = if (isBackgroundVocal && BuildConfig.FLYME_AUTO) {
+                                    FontWeight.SemiBold
+                                } else LyricPrimaryWeight,
                                 color = Color.White,
                                 onTextLayout = { result ->
                                     charWidthsPx[localCharIdx] = result.size.width.toFloat()
@@ -3805,6 +4114,8 @@ private fun QueuePanel(
     isPlaying: Boolean,
     audioSpectrum: () -> AudioSpectrum,
     bandsEnabled: Boolean,
+    onSelectTrack: (Int) -> Unit,
+    interactive: Boolean,
 ) {
     val density = LocalDensity.current
     val targetStageOffsetPx = with(density) {
@@ -3866,7 +4177,8 @@ private fun QueuePanel(
                     )
                     Box(
                         modifier = Modifier
-                            .width(cardWidth),
+                            .width(cardWidth)
+                            .clickable(enabled = interactive) { onSelectTrack(index) },
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             MotionArtwork(
@@ -3931,6 +4243,7 @@ private fun QueueModeControls(
     canSetAutoplay: Boolean,
     canClearQueue: Boolean,
     focusedMode: QueueModeControl?,
+    onModeClick: (QueueModeControl) -> Unit,
 ) {
             Row(Modifier.automationId("queue-mode-controls"), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 QueueModeButton(
@@ -3940,6 +4253,7 @@ private fun QueueModeControls(
                     focused = focusedMode == QueueModeControl.Shuffle,
                     enabled = canSetShuffle && !autoplayEnabled,
                     frameKey = "player-mode:shuffle",
+                    onClick = { onModeClick(QueueModeControl.Shuffle) },
                 )
                 QueueModeButton(
                     icon = if (repeatMode == PlaybackRepeatMode.One) {
@@ -3954,6 +4268,7 @@ private fun QueueModeControls(
                     focused = focusedMode == QueueModeControl.Repeat,
                     enabled = canSetRepeat && !autoplayEnabled,
                     frameKey = "player-mode:repeat",
+                    onClick = { onModeClick(QueueModeControl.Repeat) },
                 )
                 QueueModeButton(
                     icon = Icons.Rounded.AllInclusive,
@@ -3962,6 +4277,7 @@ private fun QueueModeControls(
                     focused = focusedMode == QueueModeControl.Autoplay,
                     enabled = canSetAutoplay,
                     frameKey = "player-mode:autoplay",
+                    onClick = { onModeClick(QueueModeControl.Autoplay) },
                     ytmBadge = false,
                 )
                 QueueModeButton(
@@ -3975,6 +4291,7 @@ private fun QueueModeControls(
                     focused = focusedMode == QueueModeControl.Source,
                     enabled = true,
                     frameKey = "player-mode:source",
+                    onClick = { onModeClick(QueueModeControl.Source) },
                     ytmBadge = false,
                 )
                 QueueModeButton(
@@ -3984,6 +4301,7 @@ private fun QueueModeControls(
                     focused = focusedMode == QueueModeControl.Clear,
                     enabled = canClearQueue,
                     frameKey = "player-mode:clear",
+                    onClick = { onModeClick(QueueModeControl.Clear) },
                     ytmBadge = false,
                 )
             }
@@ -3998,7 +4316,9 @@ private fun QueueModeButton(
     enabled: Boolean,
     frameKey: String,
     ytmBadge: Boolean = false,
+    onClick: () -> Unit,
 ) {
+    val interactive = enabled && LocalFocusTargetsEnabled.current
     val scale by animateFloatAsState(
         targetValue = if (focused) 1.06f else 1f,
         animationSpec = tween(180, easing = MotionTokens.KaraokeLineEasing),
@@ -4012,6 +4332,7 @@ private fun QueueModeButton(
                 scaleY = scale
             }
             .clip(RoundedCornerShape(22.dp))
+            .clickable(enabled = interactive, onClick = onClick)
             .background(
                 when {
                     focused -> Color.White.copy(alpha = 0.94f)

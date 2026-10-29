@@ -66,6 +66,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.amatv.R
+import dev.amatv.BuildConfig
 import dev.amatv.data.MockCatalog
 import dev.amatv.i18n.AppText
 import dev.amatv.i18n.destinationLabel
@@ -185,7 +186,7 @@ fun AmAtvApp() {
     var playWhenReady by remember { mutableStateOf(false) }
 
     val currentView = androidx.compose.ui.platform.LocalView.current
-    val shouldKeepScreenOn = isPlaying || playWhenReady
+    val shouldKeepScreenOn = !BuildConfig.FLYME_AUTO && (isPlaying || playWhenReady)
     DisposableEffect(shouldKeepScreenOn) {
         currentView.keepScreenOn = shouldKeepScreenOn
         onDispose {
@@ -245,6 +246,7 @@ fun AmAtvApp() {
     var shuffleEnabled by remember { mutableStateOf(playbackPrefs.shuffleEnabled) }
     var autoplayEnabled by remember { mutableStateOf(playbackPrefs.autoplayEnabled) }
     var lyricOffsetMs by remember { mutableLongStateOf(playbackPrefs.lyricOffsetMs) }
+    var lyricTextSize by remember { mutableStateOf(playbackPrefs.lyricTextSize) }
     var lyricTranslationEnabled by remember {
         mutableStateOf(playbackPrefs.lyricTranslationEnabled)
     }
@@ -379,6 +381,8 @@ fun AmAtvApp() {
             try {
                 val page = retryCatalogRequest({
                     when (shelfId) {
+                        "lib-artists" -> services.libraryArtistsPage(nextPage)
+                        "lib-albums" -> services.libraryAlbumsPage(nextPage)
                         "lib-playlists" -> services.libraryPlaylistsPage(nextPage)
                         "lib-songs" -> services.librarySongsPage(nextPage)
                         else -> error("Unknown library shelf")
@@ -961,9 +965,10 @@ fun AmAtvApp() {
     }
 
     fun publishSystemSnapshot(snapshot: PlaybackSnapshot) {
-        val published = if (!playWhenReady && (snapshot.isPlaying || snapshot.isBuffering)) {
+        val playback = if (!playWhenReady && (snapshot.isPlaying || snapshot.isBuffering)) {
             snapshot.copy(isPlaying = false, isBuffering = false)
         } else snapshot
+        val published = playback.withSystemLyrics(activeLyrics.trackIdentity, activeLyrics.lines)
         systemPlaybackSnapshot.value = published
         val live = queueController.state.value
         services.publishSystemPlayback(published, live.canSkipNext, live.canSkipPrevious)
@@ -1175,6 +1180,16 @@ fun AmAtvApp() {
         activeLyrics.lines
     } else {
         track.lyrics
+    }
+
+    // Lyrics arrive independently of MusicKit's playback clock. Publish their
+    // completion/clearing immediately, rather than waiting for the next SDK event.
+    LaunchedEffect(currentLyricsIdentity, currentLyricsLines, hasCurrentTrack) {
+        if (!hasCurrentTrack) return@LaunchedEffect
+        systemPlaybackSnapshot.value?.takeIf {
+            it.requestGeneration == expectedPlaybackGeneration &&
+                it.currentTrack?.lyricsIdentity() == currentLyricsIdentity
+        }?.let(::publishSystemSnapshot)
     }
 
     val prefetchTargets = remember(queueState.current?.entryId, queueState.upNext, queueState.autoplay) {
@@ -1535,6 +1550,8 @@ fun AmAtvApp() {
 
                 Destination.Library -> {
                     val recentlyAdded = async { cancellableResult { services.recentlyAdded() } }
+                    val artists = async { cancellableResult { services.libraryArtistsPage() } }
+                    val albums = async { cancellableResult { services.libraryAlbumsPage() } }
                     val playlists = async { cancellableResult { services.libraryPlaylistsPage() } }
                     val songs = async { cancellableResult { services.librarySongsPage() } }
                     val recentPlayed = async { cancellableResult { services.recentlyPlayedTracks() } }
@@ -1554,6 +1571,31 @@ fun AmAtvApp() {
                                 }
                             },
                             onFailure = errors::add,
+                        )
+                        artists.await().fold(
+                            onSuccess = { page ->
+                                rememberLibraryPage("lib-artists", page)
+                                add(ContentShelf("lib-artists", AppText.text(R.string.app_library_artists), page.items))
+                            },
+                            onFailure = { error ->
+                                errors += error
+                                libraryFailedShelves = libraryFailedShelves + "lib-artists"
+                                add(ContentShelf("lib-artists", AppText.text(R.string.app_library_artists), emptyList()))
+                            },
+                        )
+                        albums.await().fold(
+                            onSuccess = { page ->
+                                rememberLibraryPage("lib-albums", page)
+                                if (page.items.isNotEmpty() || page.nextPage != null) {
+                                    add(ContentShelf("lib-albums", AppText.text(R.string.app_library_albums),
+                                        page.items, featured = isEmpty()))
+                                }
+                            },
+                            onFailure = { error ->
+                                errors += error
+                                libraryFailedShelves = libraryFailedShelves + "lib-albums"
+                                add(ContentShelf("lib-albums", AppText.text(R.string.app_library_albums), emptyList()))
+                            },
                         )
                         playlists.await().fold(
                             onSuccess = { page ->
@@ -1630,7 +1672,7 @@ fun AmAtvApp() {
 
     val isNowPlaying = destination == Destination.NowPlaying
     LaunchedEffect(isNowPlaying, isPlaying, spectrumPermissionGranted) {
-        if (isNowPlaying && isPlaying && !spectrumPermissionGranted && !spectrumPermissionAsked) {
+        if (!BuildConfig.FLYME_AUTO && isNowPlaying && isPlaying && !spectrumPermissionGranted && !spectrumPermissionAsked) {
             spectrumPermissionAsked = true
             spectrumPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
@@ -1822,6 +1864,7 @@ fun AmAtvApp() {
                         },
                         onOpenTrack = { item, q -> playTrack(item, contextQueue = q) },
                         loadCollection = services::collectionTracks,
+                        loadArtistAlbums = services::libraryArtistAlbumsPage,
                         onPlayCollection = ::playCollection,
                         lyricOffsetMs = lyricOffsetMs,
                         onLyricOffsetChange = { offset: Long ->
@@ -1837,12 +1880,15 @@ fun AmAtvApp() {
                         },
                         cacheSettingsContent = {
                             LanguageSettings()
+                            FlymeMediaSettings(services)
                             ContentCacheSettings(services.contentCache)
                         },
                     )
                 }
                 }
-                if (hasCurrentTrack || isNowPlaying || playerTransitionVisible) {
+                // Retained native player views can intercept touches even at
+                // alpha=0. The car mounts the player only while it is visible.
+                if (isNowPlaying || playerTransitionVisible || (!BuildConfig.FLYME_AUTO && hasCurrentTrack)) {
                     val isPlayerVisible = isNowPlaying || playerTransitionVisible
                     CompositionLocalProvider(
                         LocalFocusFrameEnabled provides isNowPlaying,
@@ -1891,6 +1937,12 @@ fun AmAtvApp() {
                         onSkipNext = { skip(1) },
                         onSeekBy = ::seekPlaybackBy,
                         onSelectTrack = (::selectQueueTrack),
+                        onBack = { destination = previousDestination },
+                        lyricTextSize = lyricTextSize,
+                        onLyricTextSizeChange = {
+                            lyricTextSize = it
+                            playbackPrefs.lyricTextSize = it
+                        },
                         lowPerformanceMode = lowPerformanceMode,
                         lyricTranslationEnabled = lyricTranslationEnabled,
                         lyricPronunciationEnabled = lyricPronunciationEnabled,
@@ -1967,6 +2019,7 @@ private fun BrowseShell(
     onSearch: (String) -> Unit,
     onOpenTrack: (Track, List<Track>) -> Unit,
     loadCollection: suspend (Track) -> List<Track>,
+    loadArtistAlbums: suspend (Track, String?) -> LibraryPage,
     onPlayCollection: (Track, List<Track>, Int, Boolean) -> Unit,
     lyricOffsetMs: Long = 0L,
     onLyricOffsetChange: (Long) -> Unit = {},
@@ -1995,27 +2048,34 @@ private fun BrowseShell(
     val browser = remember(destination) { CollectionBrowser(scope) { currentLoader(it) } }
     val collectionState by browser.state.collectAsState()
     val collection = collectionState.collection
+    val currentArtistLoader by rememberUpdatedState(loadArtistAlbums)
+    val artistBrowser = remember(destination) { LibraryArtistBrowser(scope) { item, next -> currentArtistLoader(item, next) } }
+    val artistState by artistBrowser.state.collectAsState()
+    val artist = artistState.artist
+    val artistFirstFocus = remember(destination) { FocusRequester() }
+    val detailVisible = collection != null || artist != null
     var station by remember(destination) { mutableStateOf<Track?>(null) }
     var returnToContent by remember(destination) { mutableIntStateOf(0) }
     val detailFocus = remember(destination) { ContentFocusEntry() }
     val detailFirstFocus = remember(destination) { FocusRequester() }
     DisposableEffect(browser) { onDispose { browser.close() } }
+    DisposableEffect(artistBrowser) { onDispose { artistBrowser.close() } }
     val firstContentFocus = remember(destination) { FocusRequester() }
     val contentFocusEntry = remember(destination) { ContentFocusEntry() }
     fun closeCollection() {
         browser.close()
-        if (destination == Destination.Home) {
-            returnToContent++
-        } else {
-            onDestination(Destination.Home)
-        }
+        returnToContent++
     }
-    BackHandler(enabled = isBrowseVisible && collection != null) { closeCollection() }
-    LaunchedEffect(destination, isBrowseVisible, collection?.id, collectionState.loading, collectionState.error, returnToContent) {
+    fun closeArtist() { artistBrowser.close(); returnToContent++ }
+    BackHandler(enabled = isBrowseVisible && detailVisible) {
+        if (collection != null) closeCollection() else closeArtist()
+    }
+    LaunchedEffect(destination, isBrowseVisible, collection?.id, artist?.id, collectionState.loading, collectionState.error, returnToContent) {
         if (!isBrowseVisible) return@LaunchedEffect
         withFrameNanos { }
         when {
             collection != null -> detailFocus.requestFocus(detailFirstFocus)
+            artist != null -> runCatching { artistFirstFocus.requestFocus() }
             returnToContent > 0 -> contentFocusEntry.requestFocus(firstContentFocus)
             else -> runCatching { navigationFocus[destination]?.requestFocus() }
         }
@@ -2033,14 +2093,14 @@ private fun BrowseShell(
             ),
     ) {
         CompositionLocalProvider(
-            LocalFocusFrameEnabled provides (collection == null && isBrowseVisible),
-            LocalFocusTargetsEnabled provides (collection == null && isBrowseVisible),
+            LocalFocusFrameEnabled provides (!detailVisible && isBrowseVisible),
+            LocalFocusTargetsEnabled provides (!detailVisible && isBrowseVisible),
         ) {
         Column(
             Modifier
                 .fillMaxSize()
-                .then(if (collection != null) Modifier.clearAndSetSemantics {} else Modifier)
-                .graphicsLayer { alpha = if (collection == null) 1f else 0f },
+                .then(if (detailVisible) Modifier.clearAndSetSemantics {} else Modifier)
+                .graphicsLayer { alpha = if (detailVisible) 0f else 1f },
         ) {
             TopNavigation(
                 selected = destination,
@@ -2094,6 +2154,7 @@ private fun BrowseShell(
                             onSearch = onSearch,
                             onOpenTrack = { item, queue ->
                                 when (item.openAction) {
+                                    CatalogOpenAction.OpenArtist -> artistBrowser.open(item)
                                     CatalogOpenAction.Collection -> browser.open(item)
                                     CatalogOpenAction.Station -> station = item
                                     CatalogOpenAction.Play -> onOpenTrack(item, queue.filter {
@@ -2122,6 +2183,17 @@ private fun BrowseShell(
             }
         }
         }
+        if (artist != null && collection == null) {
+            CompositionLocalProvider(
+                LocalFocusFrameEnabled provides isBrowseVisible,
+                LocalFocusTargetsEnabled provides isBrowseVisible,
+            ) {
+                LibraryArtistScreen(state = artistState, currentTrack = currentTrack,
+                    firstFocus = artistFirstFocus, onBack = ::closeArtist,
+                    onRetry = artistBrowser::retry, onLoadMore = artistBrowser::loadMore,
+                    onOpenAlbum = browser::open)
+            }
+        }
         if (collection != null) {
             Box(
                 Modifier.fillMaxSize()
@@ -2138,6 +2210,7 @@ private fun BrowseShell(
                 CompositionLocalProvider(LocalContentFocusEntry provides detailFocus) {
                     key(collection.resourceType, collection.resourceId, collection.id) {
                         CollectionScreen(
+                            onBack = ::closeCollection,
                             state = collectionState,
                             currentTrack = currentTrack,
                             isPlaying = isPlaying,

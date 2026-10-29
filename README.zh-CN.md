@@ -1,5 +1,7 @@
 # AM for TV
 
+> 本 Fork 的 `flyme-auto` 分支提供 **AM for Flyme Auto** 适配候选：参考 AutoEnergy Fuel 的 1920×968 视口、保留状态栏和底栏、Gecko 登录、触屏控制与原生媒体源互操作接入。构建方式、协议依据和未完成的实车验收见 [Flyme Auto 适配说明](docs/flyme-auto.md)。
+
 **Android TV 上最流畅的 Apple Music 客户端**
 
 提供接近 Apple TV 原生 Apple Music 的使用体验。
