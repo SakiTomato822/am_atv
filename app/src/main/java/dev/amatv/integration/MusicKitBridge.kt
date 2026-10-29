@@ -386,22 +386,25 @@ class MusicKitBridge(private val context: Context) {
                         "onPlaybackError" -> {
                             val nativeCurrent = currentController.callOrNull("getCurrentItem")?.let(::trackFromQueueItem)
                             val stationContainerMatches = isCurrentStationContainer(currentController, requestedTrack)
-                            if (nativeCurrent == null || nativeCurrent.catalogId == requestedTrack?.catalogId ||
-                                stationContainerMatches
+                            if (isPlaybackErrorForActiveRequest(
+                                    callbackGeneration = generation,
+                                    requestGeneration = prepareGeneration.get(),
+                                    activeGeneration = activeGeneration,
+                                    issuedPrepareGeneration = issuedPrepareGeneration,
+                                    isCurrentController = currentController === controller,
+                                    requestPreparing = preparing,
+                                    nativeCatalogId = nativeCurrent?.catalogId,
+                                    requestedCatalogId = requestedTrack?.catalogId,
+                                    stationContainerMatches = stationContainerMatches,
+                                )
                             ) {
                                 val error = args?.lastOrNull()
                                 val firstFailure = pendingPlaybackError == null
                                 pendingPlaybackError = describePlaybackError(error)
                                 pendingFailureKind = classifyNativeFailure(error)
                                 if (firstFailure) {
-                                    fun errorNumber(name: String): Int? = runCatching {
-                                        (error?.javaClass?.getMethod(name)?.invoke(error) as? Number)?.toInt()
-                                    }.getOrNull()
-                                    val errorType = errorNumber("getType")
-                                    val errorCode = errorNumber("getErrorCode")
-                                    val componentCode = errorNumber("getComponentErrorCode")
                                     Log.w(TAG, "Native playback failure generation=$generation " +
-                                        "type=$errorType code=$errorCode component=$componentCode kind=$pendingFailureKind")
+                                        "${nativePlaybackErrorDiagnostics(error)} kind=$pendingFailureKind")
                                 }
                                 dispatchSnapshot()
                             }
@@ -814,3 +817,82 @@ internal fun radioStationContainerType(mediaContainerTypeClass: Class<*>): Int =
         ?: MUSIC_KIT_RADIO_STATION_CONTAINER_TYPE
 
 internal const val MUSIC_KIT_RADIO_STATION_CONTAINER_TYPE = 3
+
+/** Queue errors belong to an in-flight request even when the controller still exposes the prior item. */
+internal fun isPlaybackErrorForActiveRequest(
+    callbackGeneration: Long,
+    requestGeneration: Long,
+    activeGeneration: Long,
+    issuedPrepareGeneration: Long,
+    isCurrentController: Boolean,
+    requestPreparing: Boolean,
+    nativeCatalogId: String?,
+    requestedCatalogId: String?,
+    stationContainerMatches: Boolean,
+): Boolean {
+    if (callbackGeneration != requestGeneration || callbackGeneration != activeGeneration ||
+        callbackGeneration != issuedPrepareGeneration || !isCurrentController
+    ) return false
+    return requestPreparing || nativeCatalogId == null || nativeCatalogId == requestedCatalogId ||
+        stationContainerMatches
+}
+
+/** Log exception structure only: vendor messages and causes can contain request details or credentials. */
+internal fun nativePlaybackErrorDiagnostics(error: Any?): String {
+    fun errorNumber(name: String): Int? = runCatching {
+        (error?.javaClass?.getMethod(name)?.invoke(error) as? Number)?.toInt()
+    }.getOrNull()
+
+    fun errorType(value: Int?): String = when (value) {
+        0 -> "TYPE_UNKNOWN"
+        1 -> "TYPE_IO"
+        2 -> "TYPE_DRM"
+        3 -> "TYPE_PLAYBACK_QUEUE"
+        4 -> "TYPE_PLAYBACK_LEASE"
+        5 -> "TYPE_CHROMECAST_ERROR"
+        6 -> "TYPE_EXPLICIT_VERIFY_AGE"
+        null -> "unavailable"
+        else -> value.toString()
+    }
+
+    fun code(value: Int?): String = when (value) {
+        Int.MIN_VALUE -> "ERROR_UNKNOWN"
+        null -> "unavailable"
+        else -> value.toString()
+    }
+
+    val causes = generateSequence(error as? Throwable) { it.cause }.take(5).toList()
+    val causeTypes = causes
+        .map { it.javaClass.name }
+        .joinToString(">", prefix = "[", postfix = "]")
+    val messageHints = causes.mapNotNull(::safeNativePlaybackMessageHint)
+        .distinct()
+        .joinToString(",", prefix = "[", postfix = "]")
+
+    return "class=${error?.javaClass?.name ?: "unavailable"} " +
+        "type=${errorType(errorNumber("getType"))} " +
+        "code=${code(errorNumber("getErrorCode"))} " +
+        "component=${code(errorNumber("getComponentErrorCode"))} " +
+        "causeTypes=$causeTypes messageHints=$messageHints"
+}
+
+/** Reduce exception text to fixed labels; never write vendor messages, URLs, or query data to logcat. */
+private fun safeNativePlaybackMessageHint(error: Throwable): String? {
+    val message = error.message?.lowercase(java.util.Locale.ROOT).orEmpty()
+    val className = error.javaClass.name.lowercase(java.util.Locale.ROOT)
+    val httpStatus = Regex(
+        "\\b(?:http(?:/[0-9.]+)?|status(?:\\s+code)?|response(?:\\s+status)?(?:\\s+code)?)\\s*[:=]?\\s*([1-5][0-9]{2})\\b",
+    ).find(message)?.groupValues?.getOrNull(1)
+    if (httpStatus != null) return "http_status_$httpStatus"
+    return when {
+        "unknownhost" in className || "name or service not known" in message -> "dns_failure"
+        "timeoutexception" in className || "timed out" in message -> "timeout"
+        "ssl" in className || "certificate" in message || "tls" in message -> "tls_failure"
+        "unauthorized" in message || "forbidden" in message -> "authorization_rejected"
+        "subscription" in message || "not entitled" in message -> "subscription_required"
+        "drm" in message || "license" in message -> "drm_failure"
+        "not found" in message || "unavailable" in message -> "resource_unavailable"
+        "connection reset" in message -> "connection_reset"
+        else -> null
+    }
+}
