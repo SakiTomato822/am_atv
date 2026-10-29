@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="player_live_stream">Live</string>
     <string name="player_previous_track">Previous Track</string>
     <string name="player_pause">Pause</string>
     <string name="player_play">Play</string>

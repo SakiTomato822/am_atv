@@ -8,7 +8,6 @@ import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -56,7 +55,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.lifecycle.Lifecycle
@@ -240,8 +238,6 @@ fun AmAtvApp() {
     var advancingEndedTrackId by remember { mutableStateOf<String?>(null) }
     var ytmPairing by remember { mutableStateOf<GoogleTvPairing?>(null) }
     var ytmSignedIn by remember { mutableStateOf(services.ytmSignedIn) }
-    var canSkipNext by remember { mutableStateOf(true) }
-    var canSkipPrevious by remember { mutableStateOf(true) }
     var repeatMode by remember { mutableStateOf(playbackPrefs.repeatMode) }
     var shuffleEnabled by remember { mutableStateOf(playbackPrefs.shuffleEnabled) }
     var autoplayEnabled by remember { mutableStateOf(playbackPrefs.autoplayEnabled) }
@@ -276,8 +272,6 @@ fun AmAtvApp() {
             "|pron=${lyricsLocalization.includePronunciations}" +
             "|pronLang=${lyricsLocalization.pronunciationLanguageTag}"
     }
-    var canSetRepeat by remember { mutableStateOf(false) }
-    var canSetShuffle by remember { mutableStateOf(false) }
     var pendingRestore by remember {
         mutableStateOf(startupCheckpoint?.takeIf { track.catalogId != null })
     }
@@ -310,6 +304,18 @@ fun AmAtvApp() {
     // Read only by callbacks/effects: native position polls do not recompose the app.
     val systemPlaybackSnapshot = remember { mutableStateOf<PlaybackSnapshot?>(null) }
     lateinit var queueController: PlaybackQueueController
+
+    fun stationQueueTrack(): Track? = queueController.state.value.current?.track
+        ?.takeIf { it.catalogKind == CatalogKind.Station }
+
+    fun isStationPlayback(): Boolean = stationQueueTrack() != null
+
+    fun requestedPlaybackTrack(): Track = stationQueueTrack() ?: track
+
+    fun requestedPlaybackPositionMs(): Long = if (isStationPlayback()) 0L else positionAnchorMs
+
+    fun currentPlaybackSnapshot(): PlaybackSnapshot? = systemPlaybackSnapshot.value
+        ?.takeIf { it.requestGeneration != 0L && it.requestGeneration == expectedPlaybackGeneration }
 
     fun withCachedLyrics(candidate: Track): Track {
         val identity = candidate.lyricsIdentity()
@@ -480,6 +486,7 @@ fun AmAtvApp() {
         expectedPlaybackGeneration = 0L
         lastPlaybackFailure = null
         commandFailure = null
+        // Stations intentionally resolve to individual song items; only gate exact song requests.
         pendingRequestedSongCatalogId = nextTrack.catalogId.takeIf { nextTrack.catalogKind == CatalogKind.Song }
         playbackRequestJob = scope.launch {
             try {
@@ -526,10 +533,11 @@ fun AmAtvApp() {
         // Play while Next is resolving belongs to the incoming entry, not
         // the old song still used as the queue's continuation anchor.
         if (waitingQueueEntryId != null) return
-        if (track.catalogId != null) {
+        val requestedTrack = requestedPlaybackTrack()
+        if (requestedTrack.catalogId != null) {
             if (lastPlaybackFailure != null || (expectedPlaybackGeneration == 0L && playbackRequestJob?.isActive != true)) {
                 selectionGeneration++
-                launchNativePlayback(track, positionAnchorMs)
+                launchNativePlayback(requestedTrack, requestedPlaybackPositionMs())
             } else if (expectedPlaybackGeneration != 0L) services.play()
         } else {
             playStartedRealtimeMs = android.os.SystemClock.elapsedRealtime()
@@ -552,6 +560,9 @@ fun AmAtvApp() {
     }
 
     fun seekPlaybackBy(delta: Long) {
+        val snapshot = currentPlaybackSnapshot()
+        if (snapshot?.isLiveStream == true || snapshot?.canSeek == false) return
+        if (isStationPlayback() && snapshot?.isPrepared != true) return
         positionAnchorMs = (currentPositionMs() + delta).coerceIn(0L, track.durationMs.coerceAtLeast(0L))
         playStartedRealtimeMs = android.os.SystemClock.elapsedRealtime()
         pendingRestore = pendingRestore?.copy(positionMs = positionAnchorMs)
@@ -562,7 +573,7 @@ fun AmAtvApp() {
                 .onFailure { playbackMessage = AppText.text(R.string.app_seek_failed) }
         } else if (hasUserPlaybackRequest) {
             selectionGeneration++
-            launchNativePlayback(track, positionAnchorMs)
+            launchNativePlayback(requestedPlaybackTrack(), requestedPlaybackPositionMs())
         }
     }
 
@@ -792,7 +803,8 @@ fun AmAtvApp() {
     }
 
     fun playTrack(nextTrack: Track, contextQueue: List<Track> = emptyList()) {
-        if (nextTrack.openAction != CatalogOpenAction.Play) return
+        val isStation = nextTrack.catalogKind == CatalogKind.Station
+        if (nextTrack.openAction != CatalogOpenAction.Play && !isStation) return
         if (nextTrack.catalogId != null && connectionState != MusicConnectionState.SignedIn) {
             serviceMessage = AppText.text(R.string.app_apple_sign_in_required)
             startSignIn()
@@ -803,7 +815,9 @@ fun AmAtvApp() {
         if (destination != Destination.NowPlaying) previousDestination = destination
         pendingRestore = null
 
-        val fullQueue = if (contextQueue.isNotEmpty()) {
+        val fullQueue = if (isStation) {
+            listOf(withCachedLyrics(nextTrack))
+        } else if (contextQueue.isNotEmpty()) {
             contextQueue.map(::withCachedLyrics)
         } else if (nextTrack.catalogId == null) {
             MockCatalog.tracks
@@ -817,9 +831,9 @@ fun AmAtvApp() {
             tracks = fullQueue,
             startIndex = trackIndex,
             context = PlaybackContext(
-                kind = ContextKind.SongList,
+                kind = if (isStation) ContextKind.Single else ContextKind.SongList,
                 id = nextTrack.catalogId,
-                title = nextTrack.album,
+                title = if (isStation) nextTrack.title else nextTrack.album,
             ),
         )
         destination = Destination.NowPlaying
@@ -873,6 +887,13 @@ fun AmAtvApp() {
     }
 
     fun skip(relative: Int) {
+        if (isStationPlayback()) {
+            val snapshot = currentPlaybackSnapshot() ?: return
+            val canSkip = if (relative > 0) snapshot.canSkipNext else snapshot.canSkipPrevious
+            if (!canSkip) return
+            if (relative > 0) services.skipToNext() else services.skipToPrevious()
+            return
+        }
         dispatchQueueAction(if (relative > 0) StartupQueueAction.Next else StartupQueueAction.Previous)
     }
 
@@ -902,7 +923,7 @@ fun AmAtvApp() {
         services.pause()
         networkRetryJob?.cancel()
         networkRetryJob = null
-        if (kind == PlaybackFailureKind.TrackUnavailable && playWhenReady) {
+        if (kind == PlaybackFailureKind.TrackUnavailable && playWhenReady && !isStationPlayback()) {
             val entry = queueController.state.value.current
             val next = entry?.let { queueController.skipFailedCurrent(it.entryId) }
             // onPlayTrack can already have started another request synchronously.
@@ -918,8 +939,8 @@ fun AmAtvApp() {
         } else if (kind == PlaybackFailureKind.Network && playWhenReady && networkRetryCount < 2) {
             networkRetryCount++
             val retrySelection = selection
-            val retryTrack = track
-            val retryPosition = positionAnchorMs
+            val retryTrack = requestedPlaybackTrack()
+            val retryPosition = requestedPlaybackPositionMs()
             networkRetryJob = scope.launch {
                 for (countdown in 3 downTo 1) {
                     if (retrySelection != selectionGeneration || !playWhenReady) return@launch
@@ -971,7 +992,12 @@ fun AmAtvApp() {
         val published = playback.withSystemLyrics(activeLyrics.trackIdentity, activeLyrics.lines)
         systemPlaybackSnapshot.value = published
         val live = queueController.state.value
-        services.publishSystemPlayback(published, live.canSkipNext, live.canSkipPrevious)
+        val stationPlayback = live.current?.track?.catalogKind == CatalogKind.Station
+        services.publishSystemPlayback(
+            published,
+            if (stationPlayback) published.canSkipNext else live.canSkipNext,
+            if (stationPlayback) published.canSkipPrevious else live.canSkipPrevious,
+        )
     }
 
     fun applyPlaybackSnapshot(snapshot: PlaybackSnapshot) {
@@ -983,6 +1009,7 @@ fun AmAtvApp() {
             return
         }
         val pendingCatalogId = pendingRequestedSongCatalogId
+        // A Station request may report its current Song, so it must never pass this song-only gate.
         if (pendingCatalogId != null &&
             (!snapshot.hasPlayerCurrentTrack || snapshot.currentTrack?.catalogId != pendingCatalogId)
         ) return
@@ -1005,7 +1032,13 @@ fun AmAtvApp() {
         ) {
             advancingEndedTrackId = endedEntryKey
             isPlaying = false
-            advanceNextTrack(isAuto = true)
+            if (isStationPlayback()) {
+                playWhenReady = false
+                playbackPrepared = false
+                expectedPlaybackGeneration = 0L
+            } else {
+                advanceNextTrack(isAuto = true)
+            }
             return
         }
         val trackChanged = snapshot.currentTrack != null && (
@@ -1046,10 +1079,6 @@ fun AmAtvApp() {
         if (playStateChanged) {
             isPlaying = snapshot.isPlaying
         }
-        canSkipNext = queueState.canSkipNext
-        canSkipPrevious = queueState.canSkipPrevious
-        canSetRepeat = true
-        canSetShuffle = true
         playbackMessage = null
     }
 
@@ -1078,11 +1107,11 @@ fun AmAtvApp() {
             services.release()
         }
     }
-    LaunchedEffect(queueState.canSkipNext, queueState.canSkipPrevious) {
+    LaunchedEffect(queueState.canSkipNext, queueState.canSkipPrevious, queueState.current?.entryId) {
         systemPlaybackSnapshot.value?.takeIf {
-            it.requestGeneration == expectedPlaybackGeneration && it.currentTrack?.catalogId == track.catalogId
+            it.requestGeneration == expectedPlaybackGeneration
         }?.let {
-            services.publishSystemPlayback(it, queueState.canSkipNext, queueState.canSkipPrevious)
+            publishSystemSnapshot(it)
         }
     }
 
@@ -1670,6 +1699,22 @@ fun AmAtvApp() {
         }
     }
 
+    val stationQueueContext = queueState.current?.track?.catalogKind == CatalogKind.Station
+    val activePlaybackSnapshot = currentPlaybackSnapshot()
+    val isLiveStream = activePlaybackSnapshot?.isLiveStream == true
+    val canSeekPlayback = !isLiveStream && activePlaybackSnapshot?.canSeek != false &&
+        (!stationQueueContext || activePlaybackSnapshot?.isPrepared == true)
+    val canSkipPrevious = if (stationQueueContext) {
+        activePlaybackSnapshot?.canSkipPrevious == true
+    } else {
+        queueState.canSkipPrevious
+    }
+    val canSkipNext = if (stationQueueContext) {
+        activePlaybackSnapshot?.canSkipNext == true
+    } else {
+        queueState.canSkipNext
+    }
+
     val isNowPlaying = destination == Destination.NowPlaying
     LaunchedEffect(isNowPlaying, isPlaying, spectrumPermissionGranted) {
         if (!BuildConfig.FLYME_AUTO && isNowPlaying && isPlaying && !spectrumPermissionGranted && !spectrumPermissionAsked) {
@@ -1908,19 +1953,24 @@ fun AmAtvApp() {
                         queueEntryIds = timelineEntryIds,
                         queueCurrentIndex = queueState.currentTimelineIndex,
                         queueSessionId = queueState.sessionId,
-                        canClearQueue = queueState.upNext.isNotEmpty() || queueState.autoplay.isNotEmpty(),
-                        canSkipPrevious = queueState.canSkipPrevious,
-                        canSkipNext = queueState.canSkipNext,
+                        canClearQueue = !stationQueueContext &&
+                            (queueState.upNext.isNotEmpty() || queueState.autoplay.isNotEmpty()),
+                        canSkipPrevious = canSkipPrevious,
+                        canSkipNext = canSkipNext,
                         repeatMode = queueState.repeat,
                         shuffleEnabled = queueState.shuffle,
                         autoplayEnabled = queueState.infinite,
-                        canSetRepeat = true,
-                        canSetShuffle = true,
-                        canSetAutoplay = track.catalogId != null &&
+                        canSetRepeat = !stationQueueContext,
+                        canSetShuffle = !stationQueueContext,
+                        canSetAutoplay = !stationQueueContext && track.catalogId != null &&
                             track.catalogKind == dev.amatv.model.CatalogKind.Song,
                         autoplaySource = queueState.source,
-                        onToggleAutoplaySource = { dispatchQueueAction(StartupQueueAction.ToggleSource) },
-                        onClearQueue = { dispatchQueueAction(StartupQueueAction.ClearUpcoming) },
+                        onToggleAutoplaySource = {
+                            if (!stationQueueContext) dispatchQueueAction(StartupQueueAction.ToggleSource)
+                        },
+                        onClearQueue = {
+                            if (!stationQueueContext) dispatchQueueAction(StartupQueueAction.ClearUpcoming)
+                        },
                         lyricsLoading = activeLyrics.trackIdentity == currentLyricsIdentity &&
                             activeLyrics.phase == LyricsLoadPhase.Loading,
                         lyricsLookupFailed = activeLyrics.trackIdentity == currentLyricsIdentity &&
@@ -1936,6 +1986,8 @@ fun AmAtvApp() {
                         onSkipPrevious = { skip(-1) },
                         onSkipNext = { skip(1) },
                         onSeekBy = ::seekPlaybackBy,
+                        canSeek = canSeekPlayback,
+                        isLiveStream = isLiveStream,
                         onSelectTrack = (::selectQueueTrack),
                         onBack = { destination = previousDestination },
                         lyricTextSize = lyricTextSize,
@@ -1969,9 +2021,15 @@ fun AmAtvApp() {
                             lyricPronunciationLanguageTag = languageTag
                             playbackPrefs.lyricPronunciationLanguageTag = languageTag
                         },
-                        onCycleRepeat = { dispatchQueueAction(StartupQueueAction.CycleRepeat) },
-                        onToggleShuffle = { dispatchQueueAction(StartupQueueAction.ToggleShuffle) },
-                        onToggleAutoplay = { dispatchQueueAction(StartupQueueAction.ToggleInfinite) },
+                        onCycleRepeat = {
+                            if (!stationQueueContext) dispatchQueueAction(StartupQueueAction.CycleRepeat)
+                        },
+                        onToggleShuffle = {
+                            if (!stationQueueContext) dispatchQueueAction(StartupQueueAction.ToggleShuffle)
+                        },
+                        onToggleAutoplay = {
+                            if (!stationQueueContext) dispatchQueueAction(StartupQueueAction.ToggleInfinite)
+                        },
                         modifier = Modifier
                             .fillMaxSize()
                             .focusProperties { canFocus = isNowPlaying }
@@ -2029,7 +2087,6 @@ private fun BrowseShell(
     onLowPerformanceModeChange: (Boolean) -> Unit = {},
     cacheSettingsContent: @Composable () -> Unit = {},
 ) {
-    val density = LocalDensity.current
     val navigationDestinations = remember {
         listOf(
             Destination.Home,
@@ -2054,7 +2111,6 @@ private fun BrowseShell(
     val artist = artistState.artist
     val artistFirstFocus = remember(destination) { FocusRequester() }
     val detailVisible = collection != null || artist != null
-    var station by remember(destination) { mutableStateOf<Track?>(null) }
     var returnToContent by remember(destination) { mutableIntStateOf(0) }
     val detailFocus = remember(destination) { ContentFocusEntry() }
     val detailFirstFocus = remember(destination) { FocusRequester() }
@@ -2118,21 +2174,15 @@ private fun BrowseShell(
                     .fillMaxSize()
                     .padding(start = 40.dp, end = 40.dp, top = 20.dp),
             ) {
-                key(destination) {
-                    val entrance = remember { Animatable(0f) }
-                    val travelPx = with(density) { 10.dp.toPx() }
-                    LaunchedEffect(Unit) {
-                        entrance.animateTo(
-                            targetValue = 1f,
-                            animationSpec = tween(
-                                durationMillis = 190,
-                                easing = MotionTokens.KaraokeLineEasing,
-                            ),
-                        )
-                    }
-                    CompositionLocalProvider(LocalContentFocusEntry provides contentFocusEntry) {
+                CompositionLocalProvider(LocalContentFocusEntry provides contentFocusEntry) {
+                    BrowseContentMotion(
+                        targetState = destination,
+                        modifier = Modifier.fillMaxSize(),
+                        label = "browse-destination",
+                    ) { visibleDestination ->
+                        val visibleFirstFocus = remember(visibleDestination) { firstContentFocus }
                         HomeScreen(
-                            destination = destination,
+                            destination = visibleDestination,
                             currentTrack = currentTrack,
                             tracks = searchTracks,
                             searchLoading = searchLoading,
@@ -2156,7 +2206,7 @@ private fun BrowseShell(
                                 when (item.openAction) {
                                     CatalogOpenAction.OpenArtist -> artistBrowser.open(item)
                                     CatalogOpenAction.Collection -> browser.open(item)
-                                    CatalogOpenAction.Station -> station = item
+                                    CatalogOpenAction.Station -> onOpenTrack(item, listOf(item))
                                     CatalogOpenAction.Play -> onOpenTrack(item, queue.filter {
                                         it.openAction == CatalogOpenAction.Play
                                     })
@@ -2169,14 +2219,9 @@ private fun BrowseShell(
                             lowPerformanceMode = lowPerformanceMode,
                             onLowPerformanceModeChange = onLowPerformanceModeChange,
                             cacheSettingsContent = cacheSettingsContent,
-                            firstContentFocusRequester = firstContentFocus,
-                            navigationFocusRequester = navigationFocus[destination],
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer {
-                                    alpha = entrance.value
-                                    translationY = (1f - entrance.value) * travelPx
-                                },
+                            firstContentFocusRequester = visibleFirstFocus,
+                            navigationFocusRequester = navigationFocus[visibleDestination],
+                            modifier = Modifier.fillMaxSize(),
                         )
                     }
                 }
@@ -2223,9 +2268,6 @@ private fun BrowseShell(
                     }
                 }
             }
-        }
-        station?.let { item ->
-            StationUnavailableDialog(item, onDismiss = { station = null })
         }
     }
 }

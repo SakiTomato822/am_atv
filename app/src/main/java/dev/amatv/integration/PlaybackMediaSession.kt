@@ -32,6 +32,7 @@ class PlaybackMediaSession(private val context: Context) {
     private var activatedByPlayback = false
     private var acceptPlayingActivation = true
     private var durationMs = 0L
+    private var seekAllowed = false
     private var metadataKey: MetadataKey? = null
     private var lyricTrackIdentity: String? = null
     private var lyricLines: List<LyricLine>? = null
@@ -79,8 +80,9 @@ class PlaybackMediaSession(private val context: Context) {
             override fun onSkipToNext() { callbacks?.next?.invoke() }
             override fun onSkipToPrevious() { callbacks?.previous?.invoke() }
             override fun onSeekTo(pos: Long) {
+                if (!seekAllowed || durationMs <= 0L) return
                 val target = pos.coerceAtLeast(0L).let {
-                    if (durationMs > 0L) it.coerceAtMost(durationMs) else it
+                    it.coerceAtMost(durationMs)
                 }
                 callbacks?.seekTo?.invoke(target)
             }
@@ -118,7 +120,10 @@ class PlaybackMediaSession(private val context: Context) {
             clearOnMain()
             return@onMain
         }
-        durationMs = snapshot.durationMs.takeIf { it > 0L } ?: track.durationMs.coerceAtLeast(0L)
+        durationMs = if (snapshot.isLiveStream) 0L else {
+            snapshot.durationMs.takeIf { it > 0L } ?: track.durationMs.coerceAtLeast(0L)
+        }
+        seekAllowed = !snapshot.isLiveStream && snapshot.canSeek && durationMs > 0L
         val nextMetadata = MetadataKey(
             id = track.catalogId ?: track.id,
             title = track.title,
@@ -156,7 +161,7 @@ class PlaybackMediaSession(private val context: Context) {
         }
         var actions = PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or
             PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_STOP
-        if (durationMs > 0L) actions = actions or PlaybackState.ACTION_SEEK_TO
+        if (seekAllowed) actions = actions or PlaybackState.ACTION_SEEK_TO
         if (canSkipNext) actions = actions or PlaybackState.ACTION_SKIP_TO_NEXT
         if (canSkipPrevious) actions = actions or PlaybackState.ACTION_SKIP_TO_PREVIOUS
         val position = snapshot.positionMs.coerceAtLeast(0L).let {
@@ -220,6 +225,7 @@ class PlaybackMediaSession(private val context: Context) {
         metadataKey = null
         clearLyricDocument()
         durationMs = 0L
+        seekAllowed = false
         lastPublishedState = PlaybackState.STATE_NONE
         lastPublishedActions = 0L
         lastPublishedPosition = -1L

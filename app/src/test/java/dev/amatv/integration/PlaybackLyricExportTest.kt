@@ -7,6 +7,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PlaybackLyricExportTest {
+    @Test fun parsedTtmlExportsSyllablesAsWordsAndChineseWithoutInsertedSpaces() {
+        val lines = AppleTtmlParser.parse("""
+            <tt xmlns="http://www.w3.org/ns/ttml"><body><div>
+              <p begin="0s" end="3s"><span begin="0s" end="0.5s">Lis</span><span begin="0.5s" end="1s">ten</span><span begin="1s" end="1.5s">ing</span> <span begin="1.5s" end="3s">now</span></p>
+              <p begin="3s" end="6s"><span begin="3s" end="4s">你</span><span begin="4s" end="5s">好</span><span begin="5s" end="6s">吗</span> </p>
+            </div></body></tt>
+        """.trimIndent())
+        val export = PlaybackLyricExport.create("track:parsed", lines, includeBackgroundVocals = false)
+        assertEquals("Listening now\n你好吗", export.plainText)
+        assertEquals("[00:00.000]Listening now\n[00:03.000]你好吗", export.timedLrc)
+    }
+
     private fun line(
         main: String? = null,
         mainMs: Long = 0L,
@@ -100,6 +112,123 @@ class PlaybackLyricExportTest {
         assertEquals(originalExport.timedLrc, withHarmonyOnlyLine.timedLrc)
         assertEquals(originalExport.currentLineAt(1_200L), withHarmonyOnlyLine.currentLineAt(1_200L))
         assertEquals(originalExport.nextLineAfter(500L), withHarmonyOnlyLine.nextLineAfter(500L))
+    }
+
+    @Test fun renderedWordTextKeepsSyllablesChineseAndActualEnglishWordBoundaries() {
+        val listening = LyricLine(
+            words = listOf(
+                LyricWord("lis", 0L, 300L, emphasisGroupId = 1, hasTrailingWhitespace = false),
+                LyricWord("ten", 300L, 600L, emphasisGroupId = 1, hasTrailingWhitespace = false),
+                LyricWord("ing", 600L, 900L, emphasisGroupId = 1, hasTrailingWhitespace = true),
+            ),
+            joinWithSpaces = true,
+            timing = LyricTiming.Word,
+        )
+        val accept = LyricLine(
+            words = listOf(
+                LyricWord("acc", 1_000L, 1_300L, emphasisGroupId = 2, hasTrailingWhitespace = false),
+                LyricWord("ept", 1_300L, 1_600L, emphasisGroupId = 2, hasTrailingWhitespace = true),
+            ),
+            joinWithSpaces = true,
+            timing = LyricTiming.Word,
+        )
+        val chinese = LyricLine(
+            words = listOf(
+                LyricWord("主", 2_000L, 2_200L, hasTrailingWhitespace = true),
+                LyricWord("歌", 2_200L, 2_400L, hasTrailingWhitespace = true),
+                LyricWord("词", 2_400L, 2_600L, hasTrailingWhitespace = true),
+            ),
+            joinWithSpaces = false,
+            timing = LyricTiming.Word,
+        )
+        val englishWords = LyricLine(
+            words = listOf(
+                LyricWord("Good", 3_000L, 3_400L, hasTrailingWhitespace = true),
+                LyricWord("morning", 3_500L, 4_000L, hasTrailingWhitespace = true),
+            ),
+            joinWithSpaces = true,
+            timing = LyricTiming.Word,
+        )
+        val displayTextWords = LyricLine(
+            words = listOf(
+                LyricWord(
+                    text = "Hello,", startMs = 4_500L, endMs = 4_800L,
+                    displayText = "“Hello, ", hasTrailingWhitespace = true,
+                ),
+                LyricWord(
+                    text = "world!", startMs = 4_800L, endMs = 5_100L,
+                    displayText = "world!”", hasTrailingWhitespace = true,
+                ),
+            ),
+            joinWithSpaces = true,
+            timing = LyricTiming.Word,
+        )
+
+        val export = PlaybackLyricExport.create(
+            "track:rendered-words",
+            listOf(listening, accept, chinese, englishWords, displayTextWords),
+            includeBackgroundVocals = false,
+        )
+
+        assertEquals(PlaybackLyricExportStatus.Ready, export.status)
+        assertEquals("listening\naccept\n主歌词\nGood morning\n“Hello, world!”", export.plainText)
+        assertEquals(
+            "[00:00.000]listening\n" +
+                "[00:01.000]accept\n" +
+                "[00:02.000]主歌词\n" +
+                "[00:03.000]Good morning\n" +
+                "[00:04.500]“Hello, world!”",
+            export.timedLrc,
+        )
+        assertEquals("listening", export.currentLineAt(0L)?.text)
+        assertEquals("accept", export.currentLineAt(1_000L)?.text)
+        assertEquals("主歌词", export.currentLineAt(2_000L)?.text)
+        assertEquals("Good morning", export.currentLineAt(3_000L)?.text)
+        assertEquals("“Hello, world!”", export.currentLineAt(4_500L)?.text)
+    }
+
+    @Test fun staticLineUsesItsOriginalDisplayTextWithoutSyntheticSpacing() {
+        val static = LyricLine(
+            words = listOf(
+                LyricWord(
+                    text = "Static English lyric",
+                    startMs = 0L,
+                    endMs = 0L,
+                    displayText = "Static English lyric",
+                    hasTrailingWhitespace = true,
+                ),
+            ),
+            joinWithSpaces = true,
+            isStatic = true,
+            timing = LyricTiming.None,
+        )
+
+        val export = PlaybackLyricExport.create("track:static-line", listOf(static), includeBackgroundVocals = false)
+
+        assertEquals(PlaybackLyricExportStatus.MissingTimestamps, export.status)
+        assertEquals("Static English lyric", export.plainText)
+        assertNull(export.timedLrc)
+        assertNull(export.currentLineAt(0L))
+    }
+
+    @Test fun fullExportUsesRecordedBoundariesForBackgroundVocalsToo() {
+        val line = LyricLine(
+            words = listOf(
+                LyricWord("sing", 1_000L, 1_200L, hasTrailingWhitespace = false),
+                LyricWord("ing", 1_200L, 1_400L, hasTrailingWhitespace = true),
+            ),
+            backgroundWords = listOf(
+                LyricWord("har", 800L, 1_000L, hasTrailingWhitespace = false, isBackgroundVocal = true),
+                LyricWord("mony", 1_000L, 1_200L, hasTrailingWhitespace = true, isBackgroundVocal = true),
+            ),
+            joinWithSpaces = true,
+            timing = LyricTiming.Word,
+        )
+
+        val export = PlaybackLyricExport.create("track:harmony-rendering", listOf(line))
+
+        assertEquals("singing\nharmony", export.plainText)
+        assertEquals("[00:00.800]harmony\n[00:01.000]singing", export.timedLrc)
     }
 
     @Test fun simultaneousVoicesAndRepeatedLinesKeepStableSourceOrder() {

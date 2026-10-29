@@ -15,6 +15,7 @@ internal data class NativePlaybackProbe(
     val paused: Boolean,
     val ended: Boolean,
     val nowMs: Long,
+    val isLiveStream: Boolean = false,
 )
 
 internal sealed interface NativePlaybackCommand {
@@ -168,14 +169,21 @@ internal class NativePlaybackIntent {
             recoveryPlayingPosition = null
         }
         bufferingSince = null
-        if (phase == Phase.Loading && (probe.canSeek || (startPosition <= POSITION_TOLERANCE_MS && !probe.playing && !probe.buffering))) {
-            if (probe.durationMs > 0L) startPosition = startPosition.coerceAtMost((probe.durationMs - 500L).coerceAtLeast(0L))
-            if (abs(probe.positionMs - startPosition) > POSITION_TOLERANCE_MS) {
-                if (!probe.canSeek) return result()
-                phase = Phase.Seeking
-                seekAt = probe.nowMs
-                seekAttempts = 1
-                return result(listOf(NativePlaybackCommand.Seek(startPosition)))
+        if (phase == Phase.Loading && (probe.canSeek || probe.isLiveStream ||
+                (startPosition <= POSITION_TOLERANCE_MS && !probe.playing && !probe.buffering)
+            )
+        ) {
+            if (!probe.isLiveStream) {
+                if (probe.durationMs > 0L) {
+                    startPosition = startPosition.coerceAtMost((probe.durationMs - 500L).coerceAtLeast(0L))
+                }
+                if (abs(probe.positionMs - startPosition) > POSITION_TOLERANCE_MS) {
+                    if (!probe.canSeek) return result()
+                    phase = Phase.Seeking
+                    seekAt = probe.nowMs
+                    seekAttempts = 1
+                    return result(listOf(NativePlaybackCommand.Seek(startPosition)))
+                }
             }
             phase = Phase.Ready
         }

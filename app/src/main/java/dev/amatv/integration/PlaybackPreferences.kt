@@ -115,7 +115,7 @@ class PlaybackPreferences(context: Context) : QueuePreferences {
         }
 
     override var lowPerformanceMode: Boolean
-        get() = preferences.getBoolean(KEY_LOW_PERFORMANCE_MODE, dev.amatv.BuildConfig.FLYME_AUTO)
+        get() = preferences.getBoolean(KEY_LOW_PERFORMANCE_MODE, false)
         set(value) {
             preferences.edit().putBoolean(KEY_LOW_PERFORMANCE_MODE, value).apply()
         }

@@ -3,6 +3,8 @@ package dev.amatv.ui
 import android.os.SystemClock
 import android.view.KeyEvent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
@@ -10,6 +12,7 @@ import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -19,6 +22,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -39,6 +44,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -54,13 +60,10 @@ import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Translate
-import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.Slider
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -104,6 +107,7 @@ import androidx.compose.ui.layout.LastBaseline
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -156,7 +160,7 @@ private enum class PlayerNavigationZone {
     QueueItems,
 }
 
-private data class PlayerChromeState(val controlsVisible: Boolean, val showQueue: Boolean, val showLyrics: Boolean)
+private data class PlayerChromeState(val controlsVisible: Boolean, val showQueue: Boolean)
 
 private enum class QueueModeControl { Shuffle, Repeat, Autoplay, Source, Clear }
 
@@ -210,6 +214,8 @@ fun PlayerScreen(
     isVisibleOnScreen: Boolean = true,
     modifier: Modifier = Modifier,
     playWhenReady: Boolean = isPlaying,
+    canSeek: Boolean = true,
+    isLiveStream: Boolean = false,
     queueEntryIds: List<Long> = emptyList(),
     queueCurrentIndex: Int = -1,
     queueSessionId: Long = 0L,
@@ -396,7 +402,7 @@ fun PlayerScreen(
             isScrubbing = false
         }
     }
-    val chromeTransition = updateTransition(PlayerChromeState(controlsVisible, showQueue, showLyrics), label = "player-chrome")
+    val chromeTransition = updateTransition(PlayerChromeState(controlsVisible, showQueue), label = "player-chrome")
     val chromeAlpha = chromeTransition.animateFloat(
         transitionSpec = {
             if (targetState.controlsVisible) tween(280, easing = MotionTokens.KaraokeLineEasing)
@@ -471,13 +477,13 @@ fun PlayerScreen(
                         when (navigationZone) {
                             PlayerNavigationZone.Lyrics -> {
                                 val targetLine = displayedLyrics.getOrNull(selectedLyricIndex)
-                                if (targetLine != null) {
+                                if (targetLine != null && canSeek && !isLiveStream) {
                                     val delta = targetLine.startMs - playbackPosition.value
                                     onSeekBy(delta)
                                 }
                             }
                             PlayerNavigationZone.ProgressBar -> {
-                                if (isScrubbing) {
+                                if (isScrubbing && canSeek && !isLiveStream) {
                                     val targetMs = scrubPositionMs
                                     isScrubbing = false
                                     val delta = targetMs - playbackPosition.value
@@ -505,6 +511,7 @@ fun PlayerScreen(
                     KeyEvent.KEYCODE_DPAD_LEFT -> {
                         when (navigationZone) {
                             PlayerNavigationZone.ProgressBar -> {
+                                if (!canSeek || isLiveStream) return@onPreviewKeyEvent true
                                 val currentAnchor = if (isScrubbing) scrubPositionMs else playbackPosition.value
                                 isScrubbing = true
                                 scrubPositionMs = (currentAnchor - 5_000L).coerceIn(0L, track.durationMs)
@@ -533,6 +540,7 @@ fun PlayerScreen(
                     KeyEvent.KEYCODE_DPAD_RIGHT -> {
                         when (navigationZone) {
                             PlayerNavigationZone.ProgressBar -> {
+                                if (!canSeek || isLiveStream) return@onPreviewKeyEvent true
                                 val currentAnchor = if (isScrubbing) scrubPositionMs else playbackPosition.value
                                 isScrubbing = true
                                 scrubPositionMs = (currentAnchor + 5_000L).coerceIn(0L, track.durationMs)
@@ -661,18 +669,6 @@ fun PlayerScreen(
             selectionVisible = navigationZone == PlayerNavigationZone.QueueItems,
             lowPerformanceMode = lowPerformanceMode,
             lyricTextSize = lyricTextSize,
-            carTransport = { transportModifier, geometry ->
-                CarTransportCard(track = track, positionState = playbackPosition,
-                    playWhenReady = playWhenReady, canSkipPrevious = canSkipPrevious,
-                    canSkipNext = canSkipNext, supportsLyrics = supportsLyrics,
-                    canSetAutoplay = canSetAutoplay, focusedControl = focusedControl,
-                    controlsFocused = navigationZone == PlayerNavigationZone.Controls,
-                    progressFocused = navigationZone == PlayerNavigationZone.ProgressBar,
-                    onControl = ::activateControl,
-                    onSeekTo = { target -> if (isActiveScreen) onSeekBy(target - playbackPosition.value) },
-                    enabled = isActiveScreen, compact = geometry.compactTransport,
-                    modifier = transportModifier)
-            },
             onSelectQueueTrack = { index ->
                 if (isActiveScreen && showQueue) {
                     controlsActivity++
@@ -721,7 +717,7 @@ fun PlayerScreen(
             }
         }
         chromeTransition.AnimatedVisibility(
-            visible = { it.controlsVisible && (!BuildConfig.FLYME_AUTO || !it.showLyrics || it.showQueue) },
+            visible = { it.controlsVisible },
             enter = fadeIn(
                 tween(280, easing = MotionTokens.KaraokeLineEasing),
             ) + slideInVertically(
@@ -749,12 +745,13 @@ fun PlayerScreen(
                 Progress(
                     positionState = playbackPosition,
                     durationMs = track.durationMs,
+                    isLiveStream = isLiveStream,
                     isFocused = navigationZone == PlayerNavigationZone.ProgressBar,
                     scrubPositionMs = if (isScrubbing) scrubPositionMs else null,
                     onSeekTo = { target ->
                         if (isActiveScreen) onSeekBy(target - playbackPosition.value)
                     },
-                    enabled = isActiveScreen,
+                    enabled = isActiveScreen && canSeek && !isLiveStream,
                 )
                 Spacer(Modifier.height(8.dp))
                 Row(
@@ -885,73 +882,6 @@ fun PlayerScreen(
 
 
 @Composable
-private fun CarTransportCard(
-    track: Track,
-    positionState: State<Long>,
-    playWhenReady: Boolean,
-    canSkipPrevious: Boolean,
-    canSkipNext: Boolean,
-    supportsLyrics: Boolean,
-    canSetAutoplay: Boolean,
-    focusedControl: PlayerControl,
-    controlsFocused: Boolean,
-    progressFocused: Boolean,
-    onControl: (PlayerControl) -> Unit,
-    onSeekTo: (Long) -> Unit,
-    enabled: Boolean,
-    compact: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    var menuOpen by remember { mutableStateOf(false) }
-    Column(modifier.automationId("player-controls")) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f).padding(end = 8.dp)) {
-                Text(track.title, color = Color.White, fontSize = if (compact) 18.sp else 20.sp,
-                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(track.artist, color = Color.White.copy(alpha = 0.72f), fontSize = 15.sp,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            PlayerButton("player-previous", { onControl(PlayerControl.Previous) },
-                Icons.Rounded.SkipPrevious, stringResource(R.string.player_previous_track),
-                enabled = enabled && canSkipPrevious,
-                focused = controlsFocused && focusedControl == PlayerControl.Previous)
-            PlayerButton("player-play-pause", { onControl(PlayerControl.PlayPause) },
-                if (playWhenReady) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                stringResource(if (playWhenReady) R.string.player_pause else R.string.player_play),
-                enabled = enabled, focused = controlsFocused && focusedControl == PlayerControl.PlayPause,
-                width = 64.dp)
-            PlayerButton("player-next", { onControl(PlayerControl.Next) },
-                Icons.Rounded.SkipNext, stringResource(R.string.player_next_track),
-                enabled = enabled && canSkipNext,
-                focused = controlsFocused && focusedControl == PlayerControl.Next)
-            Box {
-                PlayerButton("player-more", { menuOpen = true }, Icons.Rounded.MoreHoriz,
-                    stringResource(R.string.flyme_player_more), enabled = enabled, focused = false)
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    if (supportsLyrics) {
-                        DropdownMenuItem(text = { Text(stringResource(R.string.player_lyrics_display_settings)) },
-                            modifier = Modifier.automationId("player-lyrics-display"),
-                            onClick = { menuOpen = false; onControl(PlayerControl.LyricsDisplay) })
-                        DropdownMenuItem(text = { Text(stringResource(R.string.player_lyrics)) },
-                            modifier = Modifier.automationId("player-lyrics"),
-                            onClick = { menuOpen = false; onControl(PlayerControl.Lyrics) })
-                    }
-                    DropdownMenuItem(text = { Text(stringResource(R.string.player_queue)) },
-                        modifier = Modifier.automationId("player-queue"),
-                        onClick = { menuOpen = false; onControl(PlayerControl.Queue) })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.player_radio)) },
-                        modifier = Modifier.automationId("player-radio"), enabled = canSetAutoplay,
-                        onClick = { menuOpen = false; onControl(PlayerControl.Radio) })
-                }
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        Progress(positionState, track.durationMs, isFocused = progressFocused,
-            onSeekTo = onSeekTo, enabled = enabled, compact = compact)
-    }
-}
-
-@Composable
 private fun Progress(
     positionState: State<Long>,
     durationMs: Long,
@@ -960,7 +890,19 @@ private fun Progress(
     onSeekTo: (Long) -> Unit,
     enabled: Boolean,
     compact: Boolean = false,
+    isLiveStream: Boolean = false,
 ) {
+    if (isLiveStream) {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(56.dp).automationId("player-live-status"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(Modifier.size(8.dp).background(Color.White, CircleShape))
+            Text(stringResource(R.string.player_live_stream), fontSize = 14.sp)
+        }
+        return
+    }
     if (BuildConfig.FLYME_AUTO) {
         var touchPosition by remember(positionState, durationMs) { mutableStateOf<Float?>(null) }
         val displayed = touchPosition ?: positionState.value.toFloat()
@@ -1115,15 +1057,33 @@ private fun PlayerButton(
     height: Dp = 40.dp,
 ) {
     val interactive = enabled && LocalFocusTargetsEnabled.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (focused) 1.08f else 1.0f,
-        animationSpec = tween(180, easing = ArtworkDecelerateEasing),
+        targetValue = when {
+            pressed -> 0.92f
+            focused -> 1.08f
+            else -> 1f
+        },
+        animationSpec = spring(dampingRatio = 0.82f, stiffness = 550f),
         label = "player-button-scale",
+    )
+    val background by animateColorAsState(
+        targetValue = when {
+            focused -> Color.White
+            selected -> Color.White.copy(alpha = 0.22f)
+            pressed -> Color.White.copy(alpha = 0.15f)
+            else -> Color.Transparent
+        },
+        animationSpec = tween(160), label = "player-button-container",
     )
     Box(
         modifier = Modifier
             .automationId(controlId)
-            .semantics { this.selected = focused; stateDescription = contentDescription }
+            .semantics {
+                this.selected = focused
+                this.contentDescription = contentDescription
+            }
             .size(width = if (BuildConfig.FLYME_AUTO) maxOf(width, 56.dp) else width,
                 height = if (BuildConfig.FLYME_AUTO) maxOf(height, 56.dp) else height)
             .focusFrameTarget(focused, "player-control:$controlId", 20.dp)
@@ -1132,27 +1092,28 @@ private fun PlayerButton(
                 scaleY = scale
             }
             .clip(RoundedCornerShape(20.dp))
-            .clickable(enabled = interactive, onClick = onClick)
-            .background(
-                when {
-                    focused -> Color.White
-                    selected -> Color.White.copy(alpha = 0.22f)
-                    else -> Color.Transparent
-                },
-            ),
+            .clickable(
+                enabled = interactive,
+                interactionSource = interactionSource,
+                indication = androidx.compose.material3.ripple(),
+                onClick = onClick,
+            )
+            .background(background),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = when {
-                !enabled -> Color.White.copy(alpha = 0.25f)
-                focused -> Color(0xFF18181A)
-                selected -> Color.White
-                else -> Color.White.copy(alpha = 0.88f)
-            },
-            modifier = Modifier.size(24.dp),
-        )
+        Crossfade(targetState = icon, animationSpec = tween(160), label = "player-control-icon") { displayedIcon ->
+            Icon(
+                imageVector = displayedIcon,
+                contentDescription = null,
+                tint = when {
+                    !enabled -> Color.White.copy(alpha = 0.25f)
+                    focused -> Color(0xFF18181A)
+                    selected -> Color.White
+                    else -> Color.White.copy(alpha = 0.88f)
+                },
+                modifier = Modifier.size(24.dp),
+            )
+        }
     }
 }
 
@@ -1524,7 +1485,6 @@ private fun PlayerStage(
     lowPerformanceMode: Boolean = false,
     onSelectQueueTrack: (Int) -> Unit,
     lyricTextSize: LyricTextSize,
-    carTransport: @Composable (Modifier, CarNowPlayingGeometry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -1610,60 +1570,6 @@ private fun PlayerStage(
     val slideDistancePx = with(density) { 26.dp.toPx() }
 
     BoxWithConstraints(modifier = modifier) {
-        if (BuildConfig.FLYME_AUTO && presentation == PlayerPresentation.Lyrics) {
-            CarNowPlayingLayout(
-                modifier = Modifier.fillMaxSize(),
-                artwork = { artworkModifier, geometry ->
-                    if (artworkStageVisible) {
-                        Box(
-                            modifier = artworkModifier.graphicsLayer {
-                                alpha = artworkColumnAlpha.value
-                            },
-                        ) {
-                            MotionArtwork(
-                                track = track,
-                                modifier = Modifier.fillMaxSize(),
-                                animate = isPlaying && !lowPerformanceMode,
-                                cornerRadius = 0.dp,
-                                crossfadeTrackChanges = true,
-                            )
-                        }
-                    }
-                },
-                transportInfo = carTransport,
-                lyrics = { lyricsModifier, _ ->
-                    if (lyricsStageVisible) {
-                        Box(lyricsModifier.graphicsLayer {
-                            alpha = lyricsAlpha.value
-                            translationX = (1f - lyricsAlpha.value) * slideDistancePx
-                        }) {
-                            if (track.lyrics.isNotEmpty()) {
-                                val lyricScale = lyricTextSize.scale
-                                CompositionLocalProvider(LocalDensity provides Density(
-                                    density.density, density.fontScale * lyricScale,
-                                )) {
-                                    key(lyricScale) {
-                                        LyricsPanel(lines = track.lyrics,
-                                            isVisible = isVisibleOnScreen && presentation == PlayerPresentation.Lyrics,
-                                            positionState = positionState, lyricOffsetMs = lyricOffsetMs,
-                                            controlsVisible = controlsVisible,
-                                            stageOffsetPx = remember { mutableStateOf(0f) },
-                                            selectedLyricIndex = selectedLyricIndex,
-                                            manualScrollTrigger = manualScrollTrigger,
-                                            manualScrollDelta = manualScrollDelta)
-                                    }
-                                }
-                            } else {
-                                LyricsUnavailablePanel(isLoading = lyricsLoading,
-                                    confirmedUnavailable = lyricsLookupFailed,
-                                    hasFailed = lyricsTransientFailure,
-                                    stageOffsetPx = remember { mutableStateOf(0f) })
-                            }
-                        }
-                    }
-                },
-            )
-        } else {
         val viewportWidthPx = with(density) { maxWidth.toPx() }
         val columnWidthDp = 288.dp
         val columnWidthPx = with(density) { columnWidthDp.toPx() }
@@ -1763,8 +1669,6 @@ private fun PlayerStage(
             }
         }
 
-        }
-
         // Queue presentation overlay
         if (queueStageVisible) {
             Box(
@@ -1837,8 +1741,9 @@ private fun TrackIdentity(
     // Keep the centred artwork column's height independent of fallback font
     // metrics (for example moving between Latin and CJK song names).
     Column(Modifier.fillMaxWidth().height((titleSize * 2 + 14).dp)) {
+    Crossfade(targetState = track.title, animationSpec = tween(220), label = "track-title-change") { title ->
     Text(
-        text = track.title,
+        text = title,
         fontSize = titleSize.sp,
         lineHeight = (titleSize + 8).sp,
         fontWeight = FontWeight.SemiBold,
@@ -1848,6 +1753,7 @@ private fun TrackIdentity(
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier.fillMaxWidth(),
     )
+    }
     Spacer(Modifier.height(4.dp))
     ArtistWithAudioBands(
         artist = track.artist,
@@ -2180,7 +2086,7 @@ private fun LyricsPanel(
     ) {
         val density = LocalDensity.current
         val viewportHeightPx = with(density) { maxHeight.toPx() }
-        val focalAnchorY = (viewportHeightPx * if (BuildConfig.FLYME_AUTO) 0.47f else MotionTokens.LyricsTvScrollAnchorTopFraction)
+        val focalAnchorY = (viewportHeightPx * MotionTokens.LyricsTvScrollAnchorTopFraction)
             .roundToInt()
             .toFloat() - with(density) { 2.dp.toPx() }
         val maxScroll = (layoutInfo.totalHeight - viewportHeightPx).coerceAtLeast(0f)
@@ -2576,40 +2482,16 @@ private fun LyricsLineRow(
             )
         }
     }
-    val softFocusRadius by remember(item.lineIndex, snapshotState, retainedPresence,
-        retainedBackgroundPresence, isFocused, isStaticMode, isUserScrolling) {
-        derivedStateOf {
-            val snapshot = snapshotState.value
-            if (!BuildConfig.FLYME_AUTO || isStaticMode || isFocused || isUserScrolling ||
-                item.lineIndex in snapshot.activeLineIndices ||
-                retainedPresence.value > 0f || retainedBackgroundPresence.value > 0f) 0.dp
-            else {
-                val distance = kotlin.math.abs(item.lineIndex - snapshot.scrollAnchorLineIndex)
-                when (distance) {
-                    0 -> 0.dp
-                    1 -> 1.5.dp
-                    2 -> 2.5.dp
-                    else -> 3.5.dp
-                }
-            }
-        }
-    }
-    CarLyricSoftFocus(
-        radius = softFocusRadius,
-        contentKey = listOf(item.line, isStaticMode, isFocused, isUserScrolling,
-            isActive, LyricPrimaryWeight),
-    ) {
-        KaraokeLyricLine(
-            line = item.line,
-            isActive = isActive,
-            retainedPresence = retainedPresence,
-            retainedBackgroundPresence = retainedBackgroundPresence,
-            isFocused = isFocused,
-            isStaticMode = isStaticMode,
-            isUserScrolling = isUserScrolling,
-            positionState = positionState,
-        )
-    }
+    KaraokeLyricLine(
+        line = item.line,
+        isActive = isActive,
+        retainedPresence = retainedPresence,
+        retainedBackgroundPresence = retainedBackgroundPresence,
+        isFocused = isFocused,
+        isStaticMode = isStaticMode,
+        isUserScrolling = isUserScrolling,
+        positionState = positionState,
+    )
 }
 
 /**

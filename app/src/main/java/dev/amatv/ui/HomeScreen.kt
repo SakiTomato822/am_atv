@@ -176,19 +176,25 @@ fun HomeScreen(
                         firstFocus = firstContentFocusRequester,
                         contentFocus = libraryContentFocus,
                         navigationFocus = navigationFocusRequester)
-                    HomeShelves(
-                        shelves = homeShelves.filter { it.id == libraryCategory.shelfId },
-                        loading = homeLoading,
-                        connectionState = connectionState,
-                        setupMessage = setupMessage,
-                        onSignIn = onSignIn,
-                        onRetry = onRetry,
-                        onOpenTrack = onOpenTrack,
-                        pagination = homeShelfPagination,
-                        onLoadMoreShelf = onLoadMoreShelf,
-                        firstContentFocusRequester = libraryContentFocus,
-                        navigationFocusRequester = firstContentFocusRequester,
-                    )
+                    BrowseContentMotion(
+                        targetState = libraryCategory,
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        label = "library-category-content",
+                    ) { category ->
+                        HomeShelves(
+                            shelves = homeShelves.filter { it.id == category.shelfId },
+                            loading = homeLoading,
+                            connectionState = connectionState,
+                            setupMessage = setupMessage,
+                            onSignIn = onSignIn,
+                            onRetry = onRetry,
+                            onOpenTrack = onOpenTrack,
+                            pagination = homeShelfPagination,
+                            onLoadMoreShelf = onLoadMoreShelf,
+                            firstContentFocusRequester = libraryContentFocus,
+                            navigationFocusRequester = firstContentFocusRequester,
+                        )
+                    }
                 }
             }
 
@@ -829,6 +835,65 @@ internal data class ShelfFocusScroll(val shelfIndex: Int, val destinationOffset:
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HomeShelves(
+    shelves: List<ContentShelf>,
+    loading: Boolean,
+    connectionState: MusicConnectionState,
+    setupMessage: String?,
+    onSignIn: () -> Unit,
+    onRetry: () -> Unit,
+    onOpenTrack: (Track, List<Track>) -> Unit,
+    pagination: Map<String, LibraryShelfPagination> = emptyMap(),
+    onLoadMoreShelf: (String) -> Unit = {},
+    firstContentFocusRequester: FocusRequester?,
+    navigationFocusRequester: FocusRequester?,
+) {
+    val displayState = when {
+        shelves.isNotEmpty() -> HomeShelvesDisplayState.Content
+        loading -> HomeShelvesDisplayState.Loading
+        else -> HomeShelvesDisplayState.Empty
+    }
+    var retainedShelves by remember { mutableStateOf(shelves) }
+    if (shelves.isNotEmpty()) {
+        SideEffect { retainedShelves = shelves }
+    }
+
+    BrowseContentMotion(
+        targetState = displayState,
+        modifier = Modifier.fillMaxSize(),
+        label = "home-shelves-content",
+    ) { state ->
+        val stateShelves = if (state == HomeShelvesDisplayState.Content) {
+            shelves.ifEmpty { retainedShelves }
+        } else {
+            emptyList()
+        }
+        val stateLoading = state == HomeShelvesDisplayState.Loading ||
+            (state == HomeShelvesDisplayState.Content && loading)
+        HomeShelvesBody(
+            shelves = stateShelves,
+            loading = stateLoading,
+            connectionState = connectionState,
+            setupMessage = setupMessage,
+            onSignIn = onSignIn,
+            onRetry = onRetry,
+            onOpenTrack = onOpenTrack,
+            pagination = pagination,
+            onLoadMoreShelf = onLoadMoreShelf,
+            firstContentFocusRequester = firstContentFocusRequester,
+            navigationFocusRequester = navigationFocusRequester,
+        )
+    }
+}
+
+private enum class HomeShelvesDisplayState {
+    Loading,
+    Empty,
+    Content,
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun HomeShelvesBody(
     shelves: List<ContentShelf>,
     loading: Boolean,
     connectionState: MusicConnectionState,

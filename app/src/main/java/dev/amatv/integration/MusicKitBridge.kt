@@ -58,6 +58,10 @@ data class PlaybackSnapshot(
     val requestGeneration: Long = 0L,
     val isPrepared: Boolean = true,
     val failureKind: PlaybackFailureKind? = null,
+    /** True for an unseekable live station stream whose item position is not a song duration. */
+    val isLiveStream: Boolean = false,
+    /** Seek capability; older controllers without this method fall back to !isLiveStream. */
+    val canSeek: Boolean = true,
 )
 
 /**
@@ -166,6 +170,7 @@ class MusicKitBridge(private val context: Context) {
         val currentController = controller ?: createController(developerToken, userToken)
             .also { controller = it }
         val storeId = checkNotNull(track.catalogId) { AppText.text(R.string.services_catalog_id_missing) }
+        val requestedPosition = if (track.catalogKind == CatalogKind.Station) 0L else positionMs
         if (playbackListener != null) {
             mainHandler.removeCallbacks(snapshotPoll)
             mainHandler.post(snapshotPoll)
@@ -174,48 +179,9 @@ class MusicKitBridge(private val context: Context) {
             if (generation != prepareGeneration.get()) return@postPlaybackAction
             activeGeneration = generation
             installRequestListener(currentController, generation)
-            playbackIntent.begin(track.catalogId, positionMs, desiredPlaying, SystemClock.elapsedRealtime())
+            playbackIntent.begin(track.catalogId, requestedPosition, desiredPlaying, SystemClock.elapsedRealtime())
             val builderClass = Class.forName(QUEUE_BUILDER)
-            val builder = builderClass.getConstructor().newInstance()
-            when (track.catalogKind) {
-                CatalogKind.Song -> builderClass.getMethod(
-                    "items",
-                    Int::class.javaPrimitiveType,
-                    Array<String>::class.java,
-                ).invoke(builder, 1, arrayOf(storeId))
-
-                CatalogKind.MusicVideo -> error(
-                    AppText.text(R.string.services_video_unsupported),
-                )
-
-                CatalogKind.Artist -> error(
-                    AppText.text(R.string.services_collection_required),
-                )
-
-                CatalogKind.Album,
-                CatalogKind.Playlist,
-                -> {
-                    val containerType = when (track.catalogKind) {
-                        CatalogKind.Album -> 1
-                        CatalogKind.Playlist -> 2
-                        CatalogKind.Song,
-                        CatalogKind.Artist,
-                        CatalogKind.MusicVideo,
-                        CatalogKind.Station,
-                        -> error(AppText.text(R.string.services_container_unsupported))
-                    }
-                    builderClass.getMethod(
-                        "containers",
-                        Int::class.javaPrimitiveType,
-                        Array<String>::class.java,
-                    ).invoke(builder, containerType, arrayOf(storeId))
-                }
-
-                CatalogKind.Station -> error(
-                    AppText.text(R.string.services_station_unsupported),
-                )
-            }
-            val provider = builderClass.getMethod("build").invoke(builder)
+            val provider = createCatalogPlaybackQueueProvider(track, builderClass)
             val prepare = currentController.javaClass.methods.first {
                 it.name == "prepare" && it.parameterTypes.size == 2 &&
                     it.parameterTypes[1] == Boolean::class.javaPrimitiveType
@@ -252,6 +218,7 @@ class MusicKitBridge(private val context: Context) {
     fun seekTo(positionMs: Long) {
         val value = checkNotNull(controller) { AppText.text(R.string.services_playback_not_prepared) }
         postPlaybackAction("seekToPosition") {
+            if (value.callOrNull("isLiveStream") == true || value.callOrNull("canSeek") == false) return@postPlaybackAction
             playbackIntent.requestSeek()
             endedCatalogId = null
             value.javaClass.getMethod("seekToPosition", Long::class.javaPrimitiveType).invoke(value, positionMs)
@@ -418,7 +385,10 @@ class MusicKitBridge(private val context: Context) {
                     when (method.name) {
                         "onPlaybackError" -> {
                             val nativeCurrent = currentController.callOrNull("getCurrentItem")?.let(::trackFromQueueItem)
-                            if (nativeCurrent == null || nativeCurrent.catalogId == requestedTrack?.catalogId) {
+                            val stationContainerMatches = isCurrentStationContainer(currentController, requestedTrack)
+                            if (nativeCurrent == null || nativeCurrent.catalogId == requestedTrack?.catalogId ||
+                                stationContainerMatches
+                            ) {
                                 val error = args?.lastOrNull()
                                 val firstFailure = pendingPlaybackError == null
                                 pendingPlaybackError = describePlaybackError(error)
@@ -499,6 +469,10 @@ class MusicKitBridge(private val context: Context) {
     private fun readSnapshot(currentController: Any, generation: Long): PlaybackSnapshot {
         val currentQueueItem = currentController.callOrNull("getCurrentItem")
         val currentTrack = currentQueueItem?.let(::trackFromQueueItem) ?: requestedTrack
+        val liveStream = currentController.callOrNull("isLiveStream") as? Boolean ?: false
+        val canSeek = currentController.callOrNull("canSeek") as? Boolean ?: !liveStream
+        val currentStationContainer = isCurrentStationContainer(currentController, requestedTrack, liveStream)
+        val observedCatalogId = if (currentStationContainer) requestedTrack?.catalogId else currentTrack?.catalogId
         @Suppress("UNCHECKED_CAST")
         val queueItems = currentController.callOrNull("getQueueItems") as? List<Any?>
         val queue = queueItems.orEmpty().mapNotNull { it?.let(::trackFromQueueItem) }
@@ -512,13 +486,14 @@ class MusicKitBridge(private val context: Context) {
         val buffering = currentController.callOrNull("isBuffering") as? Boolean ?: false
         val nativeEnded = !preparing && endedCatalogId != null && endedCatalogId == currentTrack?.catalogId
         val decision = playbackIntent.observe(NativePlaybackProbe(
-            catalogId = currentTrack?.catalogId,
+            catalogId = observedCatalogId,
             hasCurrentItem = currentQueueItem != null,
             positionMs = position,
-            durationMs = controllerDuration ?: currentTrack?.durationMs ?: 0L,
+            durationMs = if (liveStream) 0L else controllerDuration ?: currentTrack?.durationMs ?: 0L,
             playing = playbackState == PLAYBACK_STATE_PLAYING && playbackRate > 0f,
             buffering = buffering,
-            canSeek = currentController.callOrNull("canSeek") as? Boolean ?: false,
+            canSeek = canSeek,
+            isLiveStream = liveStream,
             paused = playbackState == 2,
             ended = nativeEnded,
             nowMs = SystemClock.elapsedRealtime(),
@@ -582,7 +557,7 @@ class MusicKitBridge(private val context: Context) {
             hasPlayerCurrentTrack = currentQueueItem != null,
             queue = queue,
             positionMs = decision.positionMs,
-            durationMs = controllerDuration ?: currentTrack?.durationMs ?: 1L,
+            durationMs = if (liveStream) 0L else controllerDuration ?: currentTrack?.durationMs ?: 1L,
             isPlaying = decision.playing && pendingPlaybackError == null,
             isBuffering = buffering,
             canSkipNext = currentController.callOrNull("canSkipToNextItem") as? Boolean ?: false,
@@ -598,7 +573,24 @@ class MusicKitBridge(private val context: Context) {
             requestGeneration = generation,
             isPrepared = decision.prepared,
             failureKind = pendingFailureKind,
+            isLiveStream = liveStream,
+            canSeek = canSeek,
         )
+    }
+
+    private fun isCurrentStationContainer(
+        currentController: Any,
+        station: Track?,
+        liveStream: Boolean = currentController.callOrNull("isLiveStream") as? Boolean ?: false,
+    ): Boolean {
+        if (station?.catalogKind != CatalogKind.Station) return false
+        val stationId = station.catalogId ?: return false
+        val containerType = (currentController.callOrNull("getCurrentContainerType") as? Number)?.toInt()
+            ?: return false
+        val containerTypeClass = Class.forName(MEDIA_CONTAINER_TYPE, false, currentController.javaClass.classLoader)
+        val stationType = radioStationContainerType(containerTypeClass)
+        val containerId = currentController.callOrNull("getCurrentContainerStoreId") as? String
+        return containerType == stationType && (containerId == stationId || liveStream)
     }
 
     private fun trackFromQueueItem(queueItem: Any): Track? {
@@ -713,7 +705,7 @@ class MusicKitBridge(private val context: Context) {
                 if (generation != prepareGeneration.get()) return@post
                 val cause = (error as? InvocationTargetException)?.targetException ?: error
                 pendingPlaybackError = describePlaybackError(cause)
-                pendingFailureKind = if (requestedTrack?.catalogKind in setOf(CatalogKind.MusicVideo, CatalogKind.Station)) {
+                pendingFailureKind = if (requestedTrack?.catalogKind == CatalogKind.MusicVideo) {
                     PlaybackFailureKind.TrackUnavailable
                 } else classifyNativeFailure(cause)
                 Log.e(TAG, "MusicKit $name failed (${cause.javaClass.simpleName})")
@@ -771,6 +763,7 @@ class MusicKitBridge(private val context: Context) {
             "com.apple.android.music.playback.controller.MediaPlayerController\$Listener"
         const val QUEUE_BUILDER =
             "com.apple.android.music.playback.queue.CatalogPlaybackQueueItemProvider\$Builder"
+        const val MEDIA_CONTAINER_TYPE = "com.apple.android.music.playback.model.MediaContainerType"
         const val PLAYBACK_STATE_PLAYING = 1
         const val CONTINUOUS_PLAYBACK_ON = 2
         const val SNAPSHOT_DELAY_MS = 80L
@@ -780,3 +773,44 @@ class MusicKitBridge(private val context: Context) {
     }
 
 }
+
+/** Build the catalog queue provider using the SDK's declared item/container types. */
+internal fun createCatalogPlaybackQueueProvider(track: Track, builderClass: Class<*>): Any {
+    val storeId = checkNotNull(track.catalogId) { AppText.text(R.string.services_catalog_id_missing) }
+    val builder = builderClass.getConstructor().newInstance()
+    val typeMethod = builderClass.getMethod(
+        if (track.catalogKind == CatalogKind.Song) "items" else "containers",
+        Int::class.javaPrimitiveType,
+        Array<String>::class.java,
+    )
+    when (track.catalogKind) {
+        CatalogKind.Song -> typeMethod.invoke(builder, 1, arrayOf(storeId))
+        CatalogKind.Station -> {
+            val mediaContainerType = Class.forName(
+                "com.apple.android.music.playback.model.MediaContainerType",
+                false,
+                builderClass.classLoader,
+            )
+            typeMethod.invoke(builder, radioStationContainerType(mediaContainerType), arrayOf(storeId))
+        }
+        CatalogKind.Album -> typeMethod.invoke(builder, 1, arrayOf(storeId))
+        CatalogKind.Playlist -> typeMethod.invoke(builder, 2, arrayOf(storeId))
+        CatalogKind.Artist -> error(AppText.text(R.string.services_collection_required))
+        CatalogKind.MusicVideo -> error(AppText.text(R.string.services_video_unsupported))
+    }
+    return checkNotNull(builderClass.getMethod("build").invoke(builder)) {
+        "MusicKit catalog queue builder returned null"
+    }
+}
+
+/**
+ * The 1.1.1 playback AAR omits this public-field constant, but Apple's Android SDK
+ * documentation defines MediaContainerType.RADIO_STATION as 3. Use the field when
+ * a newer AAR provides it and retain the documented value for the bundled artifact.
+ */
+internal fun radioStationContainerType(mediaContainerTypeClass: Class<*>): Int =
+    mediaContainerTypeClass.fields.firstOrNull { it.name == "RADIO_STATION" }
+        ?.getInt(null)
+        ?: MUSIC_KIT_RADIO_STATION_CONTAINER_TYPE
+
+internal const val MUSIC_KIT_RADIO_STATION_CONTAINER_TYPE = 3

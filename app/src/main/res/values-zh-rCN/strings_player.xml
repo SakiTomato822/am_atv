@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="player_live_stream">直播</string>
     <string name="player_previous_track">上一首</string>
     <string name="player_pause">暂停</string>
     <string name="player_play">播放</string>

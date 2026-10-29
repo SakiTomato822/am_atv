@@ -1,5 +1,7 @@
 package dev.amatv.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -8,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -36,6 +39,31 @@ internal fun LibraryCategories(
 ) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         LibraryCategory.entries.forEach { category ->
+            val isSelected = category == selected
+            val background by animateColorAsState(
+                targetValue = Color.White.copy(alpha = if (isSelected) 0.18f else 0.06f),
+                animationSpec = tween(
+                    MotionTokens.BrowseCategoryChangeMillis,
+                    easing = MotionTokens.BrowseContentEasing,
+                ),
+                label = "library-category-background",
+            )
+            val focusedBackground by animateColorAsState(
+                targetValue = Color.White.copy(alpha = if (isSelected) 0.24f else 0.14f),
+                animationSpec = tween(
+                    MotionTokens.BrowseCategoryChangeMillis,
+                    easing = MotionTokens.BrowseContentEasing,
+                ),
+                label = "library-category-focused-background",
+            )
+            val textColor by animateColorAsState(
+                targetValue = Color.White.copy(alpha = if (isSelected) 1f else 0.78f),
+                animationSpec = tween(
+                    MotionTokens.BrowseCategoryChangeMillis,
+                    easing = MotionTokens.BrowseContentEasing,
+                ),
+                label = "library-category-label",
+            )
             FocusSurface(
                 onClick = { onSelect(category) },
                 modifier = Modifier.weight(1f).height(56.dp)
@@ -47,12 +75,12 @@ internal fun LibraryCategories(
                     },
                 cornerRadius = 14.dp,
                 padding = PaddingValues(horizontal = 16.dp),
-                background = Color.White.copy(alpha = if (category == selected) 0.18f else 0.06f),
-                focusedBackground = Color.White.copy(alpha = 0.24f),
+                background = background,
+                focusedBackground = focusedBackground,
             ) {
                 Text(stringResource(category.title), fontSize = 19.sp,
-                    fontWeight = if (category == selected) FontWeight.Bold else FontWeight.Medium,
-                    color = Color.White)
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    color = textColor)
             }
         }
     }

@@ -3,6 +3,7 @@ package dev.amatv.ui
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.HoverInteraction
@@ -28,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -120,6 +122,8 @@ fun FocusSurface(
     }
     val scale: State<Float>
     val focusProgress: State<Float>
+    val pressTarget = if (pressed && interactive) 1f else 0f
+    val pressProgress: State<Float>
     if (deferredInteraction != null) {
         if (visualsStarted) {
             // A newly focused card must spring from rest, never initialize at
@@ -135,9 +139,19 @@ fun FocusSurface(
             }
             scale = scaleAnimation.asState()
             focusProgress = progressAnimation.asState()
+            pressProgress = animateFloatAsState(
+                targetValue = pressTarget,
+                animationSpec = tween(
+                    durationMillis = if (pressTarget > 0f) MotionTokens.FocusPressEnterMillis
+                    else MotionTokens.FocusPressExitMillis,
+                    easing = MotionTokens.BrowseContentEasing,
+                ),
+                label = "focus-press",
+            )
         } else {
             scale = RestingFocusScale
             focusProgress = RestingFocusProgress
+            pressProgress = RestingPressProgress
         }
     } else {
         scale = animateFloatAsState(
@@ -149,6 +163,15 @@ fun FocusSurface(
             targetValue = if (active) 1f else 0f,
             animationSpec = spring(dampingRatio = 0.86f, stiffness = 380f),
             label = "focus-progress",
+        )
+        pressProgress = animateFloatAsState(
+            targetValue = pressTarget,
+            animationSpec = tween(
+                durationMillis = if (pressTarget > 0f) MotionTokens.FocusPressEnterMillis
+                else MotionTokens.FocusPressExitMillis,
+                easing = MotionTokens.BrowseContentEasing,
+            ),
+            label = "focus-press",
         )
     }
     val shape = RoundedCornerShape(cornerRadius)
@@ -216,6 +239,16 @@ fun FocusSurface(
                     )
                 }
             } else Modifier)
+            .then(if (visualsStarted) Modifier.drawWithContent {
+                drawContent()
+                val pressAlpha = MotionTokens.FocusPressOverlayAlpha * pressProgress.value
+                if (pressAlpha > 0f) {
+                    drawRoundRect(
+                        color = Color.White.copy(alpha = pressAlpha),
+                        cornerRadius = CornerRadius(cornerRadiusPx, cornerRadiusPx),
+                    )
+                }
+            } else Modifier)
             .focusRequester(contentRequester)
             .onFocusChanged {
                 focused = it.isFocused
@@ -248,6 +281,7 @@ fun FocusSurface(
 
 private val RestingFocusScale: State<Float> = object : State<Float> { override val value = 1f }
 private val RestingFocusProgress: State<Float> = object : State<Float> { override val value = 0f }
+private val RestingPressProgress: State<Float> = object : State<Float> { override val value = 0f }
 private val ZeroFocusPadding = PaddingValues(0.dp)
 
 /** Records paired input directly, avoiding a collector coroutine for every idle Home card. */

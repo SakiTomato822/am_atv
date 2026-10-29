@@ -10,6 +10,10 @@ The interoperability rule was checked statically against the official beta EVCC 
 
 `kr3.lIl()` passes the text into its lyric classifier. Standard timestamped LRC is recognized as a complete document; plain multiline text is recognized as full text and a single untimed line as a current sentence. Keys containing `current`, `sentence`, or `full` have additional semantics, so this app uses the neutral `lyrics` key. The receiver conditionally URL-decodes percent-escaped values; literal percent escapes and plus signs are protected when needed.
 
+## Flyme.4 text boundary repair
+
+The vehicle feedback showed spaces inserted between Chinese characters and inside English words. The exporter previously treated each timed syllable as a word separator. It now preserves each token's original `displayText` and `hasTrailingWhitespace` boundary, matching the application's lyric renderer. A line-level `joinWithSpaces` flag alone no longer inserts a space after every token. Main-only filtering and original punctuation remain intact. EVCC may retain the previous document in its own title/artist cache, so vehicle retesting should also include an unplayed song.
+
 ## Producer behavior
 
 - The account lyric request finishes independently of SDK playback snapshots. `AtvApp` attaches resolved lyrics only when the catalog identity matches, then republishes the current generation immediately when the document arrives or is cleared.

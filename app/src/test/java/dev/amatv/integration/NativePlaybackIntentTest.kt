@@ -35,6 +35,31 @@ class NativePlaybackIntentTest {
         assertEquals(listOf(NativePlaybackCommand.Play), initial.commands)
     }
 
+    @Test fun liveStationStreamCanPrepareWhileAlreadyPlayingWithoutASeek() {
+        val intent = NativePlaybackIntent()
+        intent.begin("ra.station", 0L, true, 0L)
+
+        val playing = intent.observe(
+            NativePlaybackProbe(
+                catalogId = "ra.station",
+                hasCurrentItem = true,
+                positionMs = 30_000L,
+                durationMs = 0L,
+                playing = true,
+                buffering = false,
+                canSeek = false,
+                paused = false,
+                ended = false,
+                nowMs = 1_000L,
+                isLiveStream = true,
+            ),
+        )
+
+        assertTrue(playing.prepared)
+        assertTrue(playing.playing)
+        assertTrue(playing.commands.isEmpty())
+    }
+
     @Test fun restoreSeeksSilentlyAndWaitsForPositionAcknowledgementBeforePlaying() {
         val intent = NativePlaybackIntent()
         intent.begin("song", 80_000L, true, 0L)

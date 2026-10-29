@@ -6,6 +6,19 @@ import kotlin.math.roundToInt
 /** Shared player and lyric motion timings, geometry and easing curves. */
 object MotionTokens {
 
+    // Browsing surfaces use short, low-distance transitions so list content stays
+    // readable and remote focus can move as soon as the incoming state exists.
+    const val BrowseContentEnterMillis = 240
+    const val BrowseContentExitMillis = 180
+    const val BrowseContentTravelDp = 10f
+    const val BrowseContentExitTravelDp = 5f
+    const val BrowseCategoryChangeMillis = 210
+    const val FocusPressEnterMillis = 90
+    const val FocusPressExitMillis = 140
+    const val FocusPressOverlayAlpha = 0.08f
+    val BrowseContentEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+    val BrowseContentExitEasing = CubicBezierEasing(0.4f, 0f, 1f, 1f)
+
     // E0.java (Artwork card state scale)
     const val ArtworkCardScalePlaying = 1.0f
     const val ArtworkCardScalePaused = 0.85f

@@ -105,9 +105,7 @@ class PlaybackLyricExport private constructor(
                 } else {
                     line.words.filterNot(LyricWord::isBackgroundVocal)
                 }
-                val main = cleanLyricText(
-                    mainWords.joinToString(if (line.joinWithSpaces) " " else "") { it.text },
-                )
+                val main = cleanLyricText(renderLyricWords(mainWords, line.joinWithSpaces))
                 if (main.isNotEmpty()) {
                     val startMs = lineTimestamp(line, mainWords)
                     if (startMs == null) missingTimestamp = true
@@ -122,7 +120,9 @@ class PlaybackLyricExport private constructor(
                 }
 
                 if (includeBackgroundVocals) {
-                    val background = cleanLyricText(line.backgroundText)
+                    val background = cleanLyricText(
+                        renderLyricWords(line.backgroundWords, line.joinWithSpaces),
+                    )
                     if (background.isNotEmpty()) {
                         val startMs = lineTimestamp(line, line.backgroundWords)
                         if (startMs == null) missingTimestamp = true
@@ -196,6 +196,21 @@ class PlaybackLyricExport private constructor(
             if (words.any { it.startMs < 0L }) return null
             return words.minOfOrNull(LyricWord::startMs)
         }
+
+        /** Mirrors KaraokeWordItem's renderedString rules when producing a whole lyric line. */
+        private fun renderLyricWords(words: List<LyricWord>, joinWithSpaces: Boolean): String =
+            buildString {
+                words.forEachIndexed { index, word ->
+                    when {
+                        word.displayText != word.text -> append(word.displayText)
+                        joinWithSpaces && word.hasTrailingWhitespace && index < words.lastIndex -> {
+                            append(word.text)
+                            append(' ')
+                        }
+                        else -> append(word.text)
+                    }
+                }
+            }
 
         private fun cleanLyricText(text: String): String = text
             .replace(Regex("[\\r\\n\\u0085\\u2028\\u2029]+"), " ")
