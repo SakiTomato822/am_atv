@@ -1,6 +1,6 @@
 # Flyme Auto fonts
 
-Inter is the Latin/numeric family; Noto Sans SC is its Android custom fallback for Chinese. Android 10+ uses a real two-family Typeface fallback chain with 400/500/600/700 weights; Android 9 uses Inter with system CJK fallback. Other scripts retain Android system fallback. The font files are unmodified and keep their original family names.
+Inter is the Latin/numeric family; Noto Sans SC is its Android custom fallback for Chinese. Android 10+ uses a real two-family Typeface fallback chain with 400/500/600/700/800/900 weights; Android 9 uses Inter with system CJK fallback. Other scripts retain Android system fallback. The font files are unmodified and keep their original family names.
 
 Sources (downloaded 2026-10-28):
 
@@ -16,4 +16,6 @@ File hashes:
 
 The app theme applies this family across the app's Compose pages, dialogs, lyric words and local Gecko status text. Apple's remote sign-in page retains its own styling.
 
-Lyrics have a separate Standard/Large/Extra large setting (100% / 115% / 130%); the car default is Large. Main lyrics use weight 700, and translated/pronunciation lines keep their lighter weights and scale with them. Font changes remeasure the lyric viewport while preserving the current track and playback position. The lyric viewport reserves the bottom playback-control area.
+Lyrics have a separate Standard/Large/Extra large setting (125% / 155% / 185% of the TV lyric sizes); the car default remains Large, so an existing Large preference also receives the larger sizes. Main lyrics use real weight 800, and translated/pronunciation lines keep their lighter weights and scale with them. Background vocals use about 60% of the main text size and weight 600 in every timing mode. Font changes remeasure the lyric viewport while preserving the current track and playback position. In the Cider layout the right lyric viewport is separate from the lower-left playback-control card.
+
+The initial `FontFamily(Typeface)` wrapper did not honor Compose weight requests: AndroidX's `AndroidTypefaceWrapper.getNativeTypeface()` returns the same native typeface for every requested weight. The replacement uses a font list of blocking `AndroidFont` descriptors, one for each actual native weight. The regression test resolves the Compose family at 400 and 800 and verifies that Chinese 800 glyphs have measurably more rasterized ink, with font synthesis disabled.

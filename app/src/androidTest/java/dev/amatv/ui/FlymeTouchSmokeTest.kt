@@ -53,10 +53,17 @@ class FlymeTouchSmokeTest {
         assertNotNull(device.findObject(By.res("player-touch-progress")))
         val lyricsBounds = device.findObject(By.res("lyrics-panel"))?.visibleBounds
         val progressBounds = device.findObject(By.res("player-touch-progress")).visibleBounds
-        if (lyricsBounds != null) assertTrue("Lyrics stay above playback controls", lyricsBounds.bottom <= progressBounds.top)
+        if (lyricsBounds != null) assertFalse("Lyrics and playback controls must not overlap",
+            android.graphics.Rect.intersects(lyricsBounds, progressBounds))
+        fun clickPlaybackOption(id: String) {
+            if (device.findObject(By.res(id)) == null) {
+                device.findObject(By.res("player-more")).click()
+            }
+            device.wait(Until.findObject(By.res(id)), 5000).click()
+        }
         val prefs = dev.amatv.integration.PlaybackPreferences(context)
         val initialTextSize = prefs.lyricTextSize
-        device.findObject(By.res("player-lyrics-display")).click()
+        clickPlaybackOption("player-lyrics-display")
         val textSizeRow = device.wait(Until.findObject(By.res("lyrics-text-size")), 5000)
         assertNotNull(textSizeRow)
         var expectedTextSize = initialTextSize
@@ -76,7 +83,9 @@ class FlymeTouchSmokeTest {
         assertEquals(initialTextSize, prefs.lyricTextSize)
         device.findObject(By.text(context.getString(dev.amatv.R.string.player_lyrics_display_done))).click()
         device.waitForIdle()
-        device.findObject(By.res("player-play-pause")).click()
+        val resumedPlay = device.wait(Until.findObject(By.res("player-play-pause")), 5000)
+        assertNotNull("Playback control returns after closing settings", resumedPlay)
+        resumedPlay.click()
         assertTrue("Touch play changes the playback control",
             device.wait(Until.hasObject(By.desc(context.getString(dev.amatv.R.string.player_pause))), 5000))
         device.findObject(By.res("player-play-pause")).click()
@@ -85,7 +94,7 @@ class FlymeTouchSmokeTest {
         Thread.sleep(5500) // TV hides its controls after five seconds; the car must retain them.
         assertNotNull(device.findObject(By.res("player-play-pause")))
         assertTrue(device.takeScreenshot(File(context.filesDir, "flyme-player.png")))
-        device.findObject(By.res("player-queue")).click()
+        clickPlaybackOption("player-queue")
         assertTrue(device.wait(Until.hasObject(By.res("queue-panel")), 5000))
         assertTrue(device.takeScreenshot(File(context.filesDir, "flyme-queue.png")))
         device.findObject(By.res("player-back")).click()

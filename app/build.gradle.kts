@@ -115,7 +115,7 @@ android {
         create("flymeGecko") {
             initWith(getByName("standaloneGecko"))
             applicationIdSuffix = ".flyme"
-            versionNameSuffix = "-flyme"
+            versionNameSuffix = "-flyme.2"
             manifestPlaceholders["flymeApplicationLabel"] = "@string/flyme_app_name"
             matchingFallbacks += listOf("standaloneGecko", "standalone", "release")
             buildConfigField("boolean", "FLYME_AUTO", "true")
@@ -183,6 +183,9 @@ val musicKitFrameRepairClasses = providers.provider {
 
 androidComponents {
     onVariants(selector().all()) { variant ->
+        if (variant.name == "flymeGecko") {
+            variant.outputs.forEach { it.versionCode.set(16) }
+        }
         if (variant.name == "standaloneGecko" || variant.name == "flymeGecko") {
             // Direct APK distribution benefits from compressed browser binaries.
             // Android extracts the selected architecture once during installation.

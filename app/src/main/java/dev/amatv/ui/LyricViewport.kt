@@ -1,5 +1,6 @@
 package dev.amatv.ui
 
+import dev.amatv.BuildConfig
 import dev.amatv.model.LyricLine
 import dev.amatv.model.LyricTiming
 import kotlin.math.abs
@@ -242,6 +243,16 @@ internal fun estimateLyricRowHeight(line: LyricLine, widthPx: Float, density: Fl
             ?: line.words.mapNotNull { it.pronunciationText }
                 .joinToString(" ")
                 .takeIf { it.isNotBlank() }
+        val hasBackgroundPronunciation = !line.backgroundPronunciationText.isNullOrBlank() ||
+            line.backgroundWords.any { !it.pronunciationText.isNullOrBlank() }
+        val compactBackgroundLocalization = hasBackgroundPronunciation &&
+            !line.backgroundTranslation.isNullOrBlank()
+        val backgroundTypography = backgroundVocalTypography(
+            flymeAuto = BuildConfig.FLYME_AUTO,
+            isStaticMode = true,
+            compactMainLocalization = compactLocalization,
+            compactBackgroundLocalization = compactBackgroundLocalization,
+        )
         var height = 24f * density +
             textRows(line.text, mainSizeSp, contentWidth) * mainLineHeightSp * sp
         if (!staticPronunciation.isNullOrBlank()) {
@@ -254,11 +265,29 @@ internal fun estimateLyricRowHeight(line: LyricLine, widthPx: Float, density: Fl
                 textRows(line.translation, translationSizeSp, contentWidth) *
                 translationLineHeightSp * sp
         }
+        val staticBackgroundPronunciation = line.backgroundPronunciationText
+            ?: line.backgroundWords.mapNotNull { it.pronunciationText }
+                .joinToString(" ")
+                .takeIf { it.isNotBlank() }
+        if (BuildConfig.FLYME_AUTO && !staticBackgroundPronunciation.isNullOrBlank()) {
+            height += 4f * density +
+                textRows(staticBackgroundPronunciation, backgroundTypography.pronunciationSizeSp, contentWidth) *
+                backgroundTypography.pronunciationLineHeightSp * sp +
+                backgroundTypography.localizationGapDp * density
+        }
         if (line.backgroundWords.isNotEmpty()) {
-            height += 4f * density + textRows(line.backgroundText, 19f, contentWidth) * 25f * sp
+            height += 4f * density + textRows(
+                "(${line.backgroundText})",
+                backgroundTypography.fontSizeSp,
+                contentWidth,
+            ) * backgroundTypography.lineHeightSp * sp
         }
         if (!line.backgroundTranslation.isNullOrBlank()) {
-            height += 4f * density + textRows(line.backgroundTranslation, 17f, contentWidth) * 22f * sp
+            height += 4f * density + textRows(
+                line.backgroundTranslation,
+                backgroundTypography.translationSizeSp,
+                contentWidth,
+            ) * backgroundTypography.translationLineHeightSp * sp
         }
         return height
     }
@@ -302,39 +331,105 @@ internal fun estimateLyricRowHeight(line: LyricLine, widthPx: Float, density: Fl
             hasBackgroundWordPronunciation
         val compactBackgroundLocalization = hasBackgroundPronunciation &&
             !line.backgroundTranslation.isNullOrBlank()
-        val backgroundSizeSp = if (compactBackgroundLocalization) 22f else 24f
-        val backgroundLineHeightSp = if (compactBackgroundLocalization) 27f else 29f
-        val backgroundPronunciationSizeSp = if (compactBackgroundLocalization) 15f else 16f
-        val backgroundPronunciationLineHeightSp = if (compactBackgroundLocalization) 18f else 20f
-        val backgroundGap = if (compactBackgroundLocalization) 2f * density else 4f * density
+        val backgroundTypography = backgroundVocalTypography(
+            flymeAuto = BuildConfig.FLYME_AUTO,
+            isStaticMode = false,
+            compactMainLocalization = compactMainLocalization,
+            compactBackgroundLocalization = compactBackgroundLocalization,
+        )
         if (!line.backgroundPronunciationText.isNullOrBlank() && !hasBackgroundWordPronunciation) {
             height += textRows(
                 line.backgroundPronunciationText,
-                backgroundPronunciationSizeSp,
+                backgroundTypography.pronunciationSizeSp,
                 flexWidth,
-            ) * backgroundPronunciationLineHeightSp * sp + backgroundGap
+            ) * backgroundTypography.pronunciationLineHeightSp * sp +
+                backgroundTypography.localizationGapDp * density
         }
         height += karaokeBlockHeight(
             line.backgroundWords,
-            backgroundSizeSp,
-            backgroundLineHeightSp,
-            backgroundPronunciationSizeSp,
-            backgroundPronunciationLineHeightSp,
-            backgroundGap,
+            backgroundTypography.fontSizeSp,
+            backgroundTypography.lineHeightSp,
+            backgroundTypography.pronunciationSizeSp,
+            backgroundTypography.pronunciationLineHeightSp,
+            backgroundTypography.localizationGapDp * density,
             flexWidth,
         )
     }
     if (!line.backgroundTranslation.isNullOrBlank()) {
-        val compactBackgroundLocalization = (!line.backgroundPronunciationText.isNullOrBlank() ||
-            line.backgroundWords.any { !it.pronunciationText.isNullOrBlank() })
-        val backgroundTranslationSizeSp = if (compactBackgroundLocalization) 17f else 19f
-        val backgroundTranslationLineHeightSp = if (compactBackgroundLocalization) 22f else 25f
-        val backgroundGap = if (compactBackgroundLocalization) 2f * density else 4f * density
-        height += backgroundGap + textRows(
+        val hasBackgroundPronunciation = !line.backgroundPronunciationText.isNullOrBlank() ||
+            line.backgroundWords.any { !it.pronunciationText.isNullOrBlank() }
+        val compactBackgroundLocalization = hasBackgroundPronunciation &&
+            !line.backgroundTranslation.isNullOrBlank()
+        val backgroundTypography = backgroundVocalTypography(
+            flymeAuto = BuildConfig.FLYME_AUTO,
+            isStaticMode = false,
+            compactMainLocalization = compactMainLocalization,
+            compactBackgroundLocalization = compactBackgroundLocalization,
+        )
+        height += backgroundTypography.localizationGapDp * density + textRows(
             line.backgroundTranslation,
-            backgroundTranslationSizeSp,
+            backgroundTypography.translationSizeSp,
             flexWidth,
-        ) * backgroundTranslationLineHeightSp * sp
+        ) * backgroundTypography.translationLineHeightSp * sp
     }
     return height
+}
+
+internal data class BackgroundVocalTypography(
+    val fontSizeSp: Float,
+    val lineHeightSp: Float,
+    val pronunciationSizeSp: Float,
+    val pronunciationLineHeightSp: Float,
+    val translationSizeSp: Float,
+    val translationLineHeightSp: Float,
+    val localizationGapDp: Float,
+)
+
+/** Shared background-vocal sizes for rendering and the pre-measure row-height estimate. */
+internal fun backgroundVocalTypography(
+    flymeAuto: Boolean,
+    isStaticMode: Boolean,
+    compactMainLocalization: Boolean,
+    compactBackgroundLocalization: Boolean,
+): BackgroundVocalTypography {
+    if (!flymeAuto) {
+        if (isStaticMode) {
+            return BackgroundVocalTypography(
+                fontSizeSp = 19f,
+                lineHeightSp = 25f,
+                pronunciationSizeSp = 16f,
+                pronunciationLineHeightSp = 20f,
+                translationSizeSp = 17f,
+                translationLineHeightSp = 22f,
+                localizationGapDp = 4f,
+            )
+        }
+        return if (compactBackgroundLocalization) {
+            BackgroundVocalTypography(22f, 27f, 15f, 18f, 17f, 22f, 2f)
+        } else {
+            BackgroundVocalTypography(24f, 29f, 16f, 20f, 19f, 25f, 4f)
+        }
+    }
+
+    val compactSubtext = compactMainLocalization || compactBackgroundLocalization
+    if (isStaticMode) {
+        return BackgroundVocalTypography(
+            fontSizeSp = if (compactMainLocalization) 13.5f else 14.5f,
+            lineHeightSp = if (compactMainLocalization) 17f else 19f,
+            pronunciationSizeSp = if (compactSubtext) 10.5f else 11.5f,
+            pronunciationLineHeightSp = if (compactSubtext) 13f else 15f,
+            translationSizeSp = if (compactSubtext) 11.5f else 12.5f,
+            translationLineHeightSp = if (compactSubtext) 15f else 16f,
+            localizationGapDp = if (compactSubtext) 2f else 4f,
+        )
+    }
+    return BackgroundVocalTypography(
+        fontSizeSp = if (compactMainLocalization) 18.5f else 20f,
+        lineHeightSp = if (compactMainLocalization) 23f else 25f,
+        pronunciationSizeSp = if (compactSubtext) 12f else 13f,
+        pronunciationLineHeightSp = if (compactSubtext) 15f else 17f,
+        translationSizeSp = if (compactSubtext) 14f else 15f,
+        translationLineHeightSp = if (compactSubtext) 18f else 19f,
+        localizationGapDp = if (compactSubtext) 2f else 4f,
+    )
 }

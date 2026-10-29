@@ -200,13 +200,57 @@ class AppleMusicApi(
 
     suspend fun libraryPlaylists(): List<Track> = libraryPlaylistsPage().items
 
+    suspend fun libraryAlbums(): List<Track> = libraryAlbumsPage().items
+
+    suspend fun libraryArtists(): List<Track> = libraryArtistsPage().items
+
     suspend fun librarySongs(): List<Track> = librarySongsPage().items
+
+    suspend fun libraryAlbumsPage(nextPage: String? = null): LibraryPage =
+        libraryPage(LibraryCollection.Albums, nextPage) { requestRoot(it, needsUserToken = true) }
+
+    suspend fun libraryArtistsPage(nextPage: String? = null): LibraryPage =
+        libraryPage(LibraryCollection.Artists, nextPage) { requestRoot(it, needsUserToken = true) }
 
     suspend fun libraryPlaylistsPage(nextPage: String? = null): LibraryPage =
         libraryPage(LibraryCollection.Playlists, nextPage) { requestRoot(it, needsUserToken = true) }
 
     suspend fun librarySongsPage(nextPage: String? = null): LibraryPage =
         libraryPage(LibraryCollection.Songs, nextPage) { requestRoot(it, needsUserToken = true) }
+
+    suspend fun libraryArtistAlbumsPage(artist: Track, nextPage: String? = null): LibraryPage =
+        libraryArtistAlbumsPage(artist, nextPage) { requestRoot(it, needsUserToken = true) }
+
+    internal suspend fun libraryArtistAlbumsPage(
+        artist: Track,
+        nextPage: String? = null,
+        fetchPage: suspend (String) -> JSONObject,
+    ): LibraryPage = withContext(parseDispatcher) {
+        val request = libraryArtistAlbumsRequest(artist)
+        val path = nextPage?.let(request::nextPage) ?: request.firstPage
+        currentCoroutineContext().ensureActive()
+        val root = fetchPage(path)
+        val data = checkNotNull(root.optJSONArray("data")) {
+            AppText.text(R.string.services_playlist_tracks_unavailable)
+        }
+        // This relationship is specifically LibraryAlbums. Ignore catalog album
+        // resources so an artist's catalog discography cannot masquerade as saved.
+        val albums = buildList {
+            for (index in 0 until data.length()) {
+                val item = data.optJSONObject(index) ?: continue
+                val type = item.optString("type")
+                if (type != LibraryCollection.Albums.resourceType) continue
+                val attributes = item.optJSONObject("attributes") ?: JSONObject()
+                val linked = item.optJSONObject("relationships")?.optJSONObject("catalog")
+                    ?.optJSONArray("data")?.optJSONObject(0)
+                attributes.toTrack(item.getString("id"), CatalogKind.Album, linked, type)?.let(::add)
+            }
+        }
+        val next = root.optString("next").takeIf { it.isNotBlank() && it != "null" }
+            ?.let(request::nextPage)
+        check(next != path) { AppText.text(R.string.services_playlist_page_repeated) }
+        LibraryPage(items = mergeLibraryPage(emptyList(), albums), nextPage = next, requestedPage = path)
+    }
 
     internal suspend fun libraryPage(
         collection: LibraryCollection,
@@ -227,7 +271,9 @@ class AppleMusicApi(
                 val item = data.optJSONObject(index) ?: continue
                 val type = item.optString("type")
                 if (type != collection.resourceType) continue
-                val attributes = item.optJSONObject("attributes") ?: continue
+                // The API's resource id and type identify the library item. Keep
+                // it visible even when Apple omits optional display attributes.
+                val attributes = item.optJSONObject("attributes") ?: JSONObject()
                 val linked = item.optJSONObject("relationships")?.optJSONObject("catalog")
                     ?.optJSONArray("data")?.optJSONObject(0)
                 attributes.toTrack(item.getString("id"), checkNotNull(catalogKind(type)), linked, type)?.let(::add)
@@ -534,7 +580,16 @@ class AppleMusicApi(
     ): Track? {
         val catalogAttrs = linkedCatalog?.optJSONObject("attributes")
         val playParams = optJSONObject("playParams")
-        val resolvedCatalogId = catalogPlaybackId(id, resourceType, playParams, linkedCatalog)
+        val isLibraryArtist = resourceType == LibraryCollection.Artists.resourceType && kind == CatalogKind.Artist
+        val isLibraryContainer = resourceType?.startsWith("library-") == true &&
+            kind in setOf(CatalogKind.Album, CatalogKind.Playlist)
+        val resolvedCatalogId = if (isLibraryArtist) {
+            null
+        } else if (isLibraryContainer) {
+            libraryContainerCatalogId(id, kind, playParams, linkedCatalog)
+        } else {
+            catalogPlaybackId(id, resourceType, playParams, linkedCatalog)
+        }
 
         val rawName = optString("name").ifBlank {
             catalogAttrs?.optString("name").orEmpty()
@@ -552,7 +607,7 @@ class AppleMusicApi(
 
         // Skip unplayable unmatched iCloud Music Library local stub containers
         // (e.g. `l.z-...` or `i.eoD...` with no catalog match and no metadata).
-        val isUnmatchedLocalContainer = (id.startsWith("l.z-") || id.startsWith("i.")) &&
+        val isUnmatchedLocalContainer = !isLibraryContainer && (id.startsWith("l.z-") || id.startsWith("i.")) &&
             resolvedCatalogId == id &&
             artwork == null &&
             (rawName.isBlank() || rawName == "Unknown Album" || rawArtist.isBlank())
@@ -563,10 +618,15 @@ class AppleMusicApi(
         val name = rawName.ifBlank {
             editorialNotes?.optString("name").orEmpty().ifBlank { AppText.text(R.string.services_unknown_title) }
         }
-        val artist = rawArtist.ifBlank { "Apple Music" }
+        val artist = when {
+            kind == CatalogKind.Artist -> AppText.text(R.string.services_kind_artist)
+            rawArtist.isNotBlank() -> rawArtist
+            else -> "Apple Music"
+        }
         val album = optString("albumName").ifBlank {
             catalogAttrs?.optString("albumName").orEmpty().ifBlank {
                 when (kind) {
+                    CatalogKind.Artist -> AppText.text(R.string.services_kind_artist)
                     CatalogKind.Album -> AppText.text(R.string.services_kind_album)
                     CatalogKind.Playlist -> AppText.text(R.string.services_kind_playlist)
                     CatalogKind.Station -> AppText.text(R.string.services_kind_station)
@@ -576,11 +636,13 @@ class AppleMusicApi(
             }
         }
         val motion = findEditorialMotion() ?: catalogAttrs?.findEditorialMotion()
-        val palettes = paletteFor(resolvedCatalogId)
+        val resourceIdentity = "${resourceType.orEmpty()}:$id"
+        val stableIdentity = resolvedCatalogId ?: "library:$resourceIdentity"
+        val palettes = paletteFor(stableIdentity)
         val hasLyrics = optBoolean("hasLyrics", false) ||
             (catalogAttrs?.optBoolean("hasLyrics", false) == true)
         return Track(
-            id = "apple:$resolvedCatalogId",
+            id = "apple:$stableIdentity",
             title = name,
             artist = artist,
             album = album,
@@ -658,11 +720,33 @@ class AppleMusicApi(
 
     private fun catalogKind(type: String): CatalogKind? = when (type) {
         "songs", "library-songs" -> CatalogKind.Song
+        "library-artists" -> CatalogKind.Artist
         "albums", "library-albums" -> CatalogKind.Album
         "playlists", "library-playlists" -> CatalogKind.Playlist
         "stations" -> CatalogKind.Station
         "music-videos", "library-music-videos" -> CatalogKind.MusicVideo
         else -> null
+    }
+
+    /** A container's library ID is for /me/library/... requests, never catalog playback. */
+    private fun libraryContainerCatalogId(
+        resourceId: String,
+        kind: CatalogKind,
+        playParams: JSONObject?,
+        linkedCatalog: JSONObject?,
+    ): String? {
+        val expectedType = when (kind) {
+            CatalogKind.Album -> "albums"
+            CatalogKind.Playlist -> "playlists"
+            else -> return null
+        }
+        fun catalogId(value: String?): String? = value?.takeIf {
+            it.isNotBlank() && it != "null" && it != resourceId &&
+                !it.startsWith("i.") && !it.startsWith("l.") && !it.startsWith("p.")
+        }
+        val linkedId = linkedCatalog?.takeIf { it.optString("type") == expectedType }
+            ?.optString("id")
+        return catalogId(linkedId) ?: catalogId(playParams?.optString("catalogId"))
     }
 
     private fun paletteFor(id: String): List<Color> {

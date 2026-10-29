@@ -58,6 +58,7 @@
     <string name="services_ytm_http_error">YouTube Music request failed (HTTP %1$d).</string>
     <string name="services_unknown_title">Untitled</string>
     <string name="services_kind_album">Album</string>
+    <string name="services_kind_artist">Artist</string>
     <string name="services_kind_playlist">Playlist</string>
     <string name="services_kind_station">Station</string>
     <string name="services_kind_music_video">Music Video</string>

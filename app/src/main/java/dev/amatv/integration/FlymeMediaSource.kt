@@ -290,7 +290,7 @@ internal class FlymeMediaSource(private val context: Context, private val autoBi
 
     private inline fun safely(block: () -> Unit) {
         try { block() } catch (error: Exception) {
-            report("Native media unavailable: ${error.javaClass.simpleName}")
+            report("Native media unavailable: ${error.message?.take(180) ?: error.javaClass.simpleName}")
             Log.w("AM-FlymeMedia", "Native media operation failed", error)
         }
     }

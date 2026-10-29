@@ -188,6 +188,10 @@ class MusicKitBridge(private val context: Context) {
                     AppText.text(R.string.services_video_unsupported),
                 )
 
+                CatalogKind.Artist -> error(
+                    AppText.text(R.string.services_collection_required),
+                )
+
                 CatalogKind.Album,
                 CatalogKind.Playlist,
                 -> {
@@ -195,6 +199,7 @@ class MusicKitBridge(private val context: Context) {
                         CatalogKind.Album -> 1
                         CatalogKind.Playlist -> 2
                         CatalogKind.Song,
+                        CatalogKind.Artist,
                         CatalogKind.MusicVideo,
                         CatalogKind.Station,
                         -> error(AppText.text(R.string.services_container_unsupported))

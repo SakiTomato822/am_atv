@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="flyme_player_more">更多播放選項</string>
+    <string name="app_library_artists">藝人</string>
+    <string name="app_library_albums">收藏的專輯</string>
+    <string name="flyme_media_status">原廠媒體橋接狀態</string>
     <string name="flyme_lyrics_text_size">歌詞字級</string>
     <string name="flyme_text_standard">標準</string>
     <string name="flyme_text_large">大</string>

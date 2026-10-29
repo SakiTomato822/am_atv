@@ -46,6 +46,7 @@
     <string name="browse_load_more_retry">重试载入</string>
     <string name="browse_load_more_error">无法载入后续项目。</string>
     <string name="browse_kind_song">歌曲</string>
+    <string name="browse_kind_artist">艺人</string>
     <string name="browse_kind_album">专辑</string>
     <string name="browse_kind_playlist">播放列表</string>
     <string name="browse_kind_station">电台</string>

@@ -50,6 +50,7 @@ class MusicServices(context: Context) : RecommendationProvider {
     private val songSpectrum = SongAudioSpectrum(appContext, bridge::audioSessionId)
     private val mediaSession = PlaybackMediaSession(appContext)
     private val flymeMediaSource = if (BuildConfig.FLYME_NATIVE_MEDIA) FlymeMediaSource(appContext) else null
+    val nativeMediaStatus get() = flymeMediaSource?.status
     private val playbackPreparation = Mutex()
     private val api = AppleMusicApi(
         storefront = BuildConfig.APPLE_MUSIC_STOREFRONT,
@@ -202,9 +203,15 @@ class MusicServices(context: Context) : RecommendationProvider {
     suspend fun recentlyPlayedTracks(): List<Track> = api.recentlyPlayedTracks()
     suspend fun recentlyAdded(): List<Track> = api.recentlyAdded()
     suspend fun libraryPlaylists(): List<Track> = api.libraryPlaylists()
+    suspend fun libraryAlbums(): List<Track> = api.libraryAlbums()
+    suspend fun libraryArtists(): List<Track> = api.libraryArtists()
     suspend fun librarySongs(): List<Track> = api.librarySongs()
+    suspend fun libraryAlbumsPage(nextPage: String? = null): LibraryPage = api.libraryAlbumsPage(nextPage)
+    suspend fun libraryArtistsPage(nextPage: String? = null): LibraryPage = api.libraryArtistsPage(nextPage)
     suspend fun libraryPlaylistsPage(nextPage: String? = null): LibraryPage = api.libraryPlaylistsPage(nextPage)
     suspend fun librarySongsPage(nextPage: String? = null): LibraryPage = api.librarySongsPage(nextPage)
+    suspend fun libraryArtistAlbumsPage(artist: Track, nextPage: String? = null): LibraryPage =
+        api.libraryArtistAlbumsPage(artist, nextPage)
     suspend fun charts(types: String = "albums,songs,playlists"): List<Track> =
         api.charts(types)
     suspend fun liveRadio(): List<Track> = api.liveRadio()
