@@ -1887,6 +1887,8 @@ private fun FlymePlayerStage(
                                     selectedLyricIndex = selectedLyricIndex,
                                     manualScrollTrigger = manualScrollTrigger,
                                     manualScrollDelta = manualScrollDelta,
+                                    onLineClick = { startMs: Long -> onSeekTo((startMs - lyricOffsetMs).coerceAtLeast(0L)) }
+                                        .takeIf { canSeek && !isLiveStream },
                                 )
                             }
                         }
@@ -2352,6 +2354,8 @@ private fun LyricsPanel(
     selectedLyricIndex: Int? = null,
     manualScrollTrigger: Int = 0,
     manualScrollDelta: Float = 0f,
+    /** Touch: tapping a timed line seeks to its start (lyric time, before the offset). */
+    onLineClick: ((Long) -> Unit)? = null,
 ) {
     val isStaticMode = remember(lines) { lines.all { it.isStatic } }
     val effectiveLyricPositionState = remember(positionState, lyricOffsetMs) {
@@ -2700,6 +2704,7 @@ private fun LyricsPanel(
                 selectedLyricIndex = selectedLyricIndex,
                 isStaticMode = isStaticMode,
                 isUserScrolling = isUserScrolling,
+                onLineClick = onLineClick.takeIf { !isStaticMode },
             )
             if (currentGap != null) {
                 key("instrumental-slot-${currentGap.beforeLineIndex}-${currentGap.startMs}") {
@@ -2776,11 +2781,16 @@ private fun LyricsRows(
     selectedLyricIndex: Int?,
     isStaticMode: Boolean,
     isUserScrolling: Boolean,
+    onLineClick: ((Long) -> Unit)? = null,
 ) {
     mountedRowsState.value.sorted().forEach { index ->
         val item = displayItems.getOrNull(index) ?: return@forEach
         key(item.key) {
-            Box(Modifier.layoutId(index).automationId("lyrics-row-$index")) {
+            val seek = (item as? LyricsDisplayItem.Line)?.let { line ->
+                onLineClick?.let { click -> Modifier.clickable(indication = null,
+                    interactionSource = remember { MutableInteractionSource() }) { click(line.line.startMs) } }
+            } ?: Modifier
+            Box(Modifier.layoutId(index).automationId("lyrics-row-$index").then(seek)) {
             when (item) {
                 is LyricsDisplayItem.Line -> LyricsLineRow(
                     item = item,
