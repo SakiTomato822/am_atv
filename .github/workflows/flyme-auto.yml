@@ -20,28 +20,31 @@ jobs:
           ref: flyme-auto
           persist-credentials: false
 
+      # The SDK is not redistributable: it lives as a release asset of a private repo,
+      # read with a fine-grained token limited to that repo.
+      - name: Retrieve MusicKit SDK
+        env:
+          GH_TOKEN: ${{ secrets.MUSICKIT_SDK_TOKEN }}
+        shell: bash
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo 'Missing private build input: MUSICKIT_SDK_TOKEN'; exit 1; fi
+          mkdir -p work/ci
+          gh release download sdk-1.1.2 -R SakiTomato822/am_atv-sdk -p 'AndroidMusicKitSDK1.1.2.zip' -O work/ci/MusicKit.zip \
+            || { echo 'SDK download failed. Check that MUSICKIT_SDK_TOKEN can read SakiTomato822/am_atv-sdk.'; exit 1; }
+
       - name: Retrieve private build inputs
         env:
-          SDK_URL: ${{ secrets.MUSICKIT_SDK_DOWNLOAD_URL }}
           DEVELOPER_TOKEN: ${{ secrets.AM_DEVELOPER_TOKEN }}
           SIGNING_KEYSTORE: ${{ secrets.FLYME_SIGNING_KEYSTORE_BASE64 }}
         shell: bash
         run: |
           python3 - <<'PY'
-          import base64, hashlib, json, os, pathlib, time, urllib.request, zipfile
-          for name in ('SDK_URL', 'DEVELOPER_TOKEN', 'SIGNING_KEYSTORE'):
+          import base64, hashlib, json, os, pathlib, time, zipfile
+          for name in ('DEVELOPER_TOKEN', 'SIGNING_KEYSTORE'):
               if not os.environ.get(name):
                   raise SystemExit(f'Missing private build input: {name}')
           work = pathlib.Path('work/ci')
-          work.mkdir(parents=True, exist_ok=True)
           sdk = work / 'MusicKit.zip'
-          try:
-              with urllib.request.urlopen(os.environ['SDK_URL'], timeout=120) as r:
-                  with sdk.open('wb') as f:
-                      while chunk := r.read(1024 * 1024):
-                          f.write(chunk)
-          except Exception:
-              raise SystemExit('SDK download failed. Refresh the expiring MUSICKIT_SDK_DOWNLOAD_URL secret.') from None
           assert hashlib.sha256(sdk.read_bytes()).hexdigest() == '02b36be75a63e0c630fcb297b3367d8350a07bf37fc5e613ec26d24344e7f72b', 'Unexpected SDK archive'
           libs = pathlib.Path('app/libs')
           libs.mkdir(parents=True, exist_ok=True)

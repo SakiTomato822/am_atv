@@ -83,7 +83,7 @@ Windows 可以使用 `tools/build-flyme.ps1 -SigningKeystore C:\private\flyme.ke
 
 仓库 Actions Secrets：
 
-- `MUSICKIT_SDK_DOWNLOAD_URL`：维护者已下载的官方 SDK ZIP 的临时受控下载地址。地址过期后需刷新，工作流不会将 SDK AAR 作为发布附件。
+- `MUSICKIT_SDK_TOKEN`：只读私有仓库 `SakiTomato822/am_atv-sdk` 的 fine-grained token；官方 SDK ZIP 作为该仓库 `sdk-1.1.2` release 附件存放。SDK 不可再分发，工作流不会将 SDK AAR 作为发布附件。
 - `AM_DEVELOPER_TOKEN`：经许可使用的开发者 Token。编译后会内置进 APK，因此 APK 接收者能够提取它；Secrets 只保护源配置和日志，不能使 APK 内的 Token 保密。公开发布前需明确授权相应使用范围。
 - `FLYME_SIGNING_KEYSTORE_BASE64`：固定 keystore 的 Base64。CI 还原到 `work/ci/flyme-signing.keystore`，再通过 `FLYME_SIGNING_KEYSTORE_FILE` 明确传给 Gradle。使用 `androiddebugkey` 别名与 `android` 密码，发布前校验证书指纹；不要上传私钥到 Releases。
 
