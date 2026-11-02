@@ -65,6 +65,8 @@ class GeckoStationEngine(context: Context) : StationPlaybackEngine {
     private var lastTransition = ""
     /** Latest play/pause intent; a tap can arrive while the page is still booting. */
     private var desiredPlaying = false
+    /** The request whose broken media pipeline was already rebuilt once. */
+    private var mediaRestartGeneration = 0L
 
     override fun prepare(station: Track, developerToken: String, userToken: String, playWhenReady: Boolean): Long {
         val request = Request(station, generations.incrementAndGet(), playWhenReady)
@@ -279,6 +281,16 @@ class GeckoStationEngine(context: Context) : StationPlaybackEngine {
                 val request = active?.takeIf { it.generation == data.optLong("generation") } ?: return
                 val reason = data.optString("reason")
                 Log.w(TAG, "Station playback failed reason=${reason.takeIf { it.matches(SAFE_REASON) } ?: "Error"}")
+                // After a fatal decode error every later item fails in the same page.
+                // A fresh page (new media pipeline) recovers it; do that once per request.
+                val restartTokens = tokens
+                if (reason == "MEDIA_PLAYBACK" && restartTokens != null && mediaRestartGeneration != request.generation) {
+                    mediaRestartGeneration = request.generation
+                    Log.i(TAG, "Station media pipeline restarting")
+                    closeBrowser()
+                    start(request.copy(play = desiredPlaying), restartTokens)
+                    return
+                }
                 fail(request, webStationFailureKind(reason))
             }
             "fatal" -> {

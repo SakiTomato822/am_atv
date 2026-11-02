@@ -8,6 +8,22 @@ let radioLastState = "";
 // Without a Widevine CDM MusicKit JS silently falls back to 30-second previews,
 // which start mid-song. Report both so the app can say why.
 let radioDrm = true;
+// Gecko's decoder can fail fatally at a track change; MusicKit then stops the
+// whole station. Skip past the broken item a couple of times before giving up.
+let radioRecoveries = [];
+
+async function radioRecover(reason) {
+  const now = Date.now();
+  radioRecoveries = radioRecoveries.filter(at => now - at < 120000);
+  if (reason !== "MEDIA_PLAYBACK" || !radioPrepared || radioRecoveries.length >= 2) return false;
+  radioRecoveries.push(now);
+  radioSend("trace", { stage: "media_recovery_skip" });
+  try {
+    await radioMusic.skipToNextItem();
+    await radioMusic.play();
+    return true;
+  } catch (_) { return false; }
+}
 
 async function radioWidevine() {
   if (!navigator.requestMediaKeySystemAccess) return false;
@@ -164,8 +180,12 @@ document.addEventListener("musickitloaded", async () => {
     const on = (name, handler) => { if (events[name]) radioMusic.addEventListener(events[name], handler); };
     on("playbackStateDidChange", () => radioReport(true));
     on("nowPlayingItemDidChange", () => radioReport(true));
-    on("mediaPlaybackError", error => {
-      if (radioGeneration) radioSend("error", { generation: radioGeneration, reason: radioReason(error) });
+    on("mediaPlaybackError", async error => {
+      if (!radioGeneration) return;
+      const generation = radioGeneration;
+      const reason = radioReason(error);
+      if (await radioRecover(reason)) return;
+      if (generation === radioGeneration) radioSend("error", { generation, reason });
     });
     setInterval(() => radioReport(false), 1000);
     radioDrm = await radioWidevine();
