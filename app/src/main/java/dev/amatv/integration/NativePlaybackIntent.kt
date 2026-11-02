@@ -74,6 +74,15 @@ internal class NativePlaybackIntent {
         resetCompletionEvidence()
     }
 
+    /**
+     * The SDK moved on to the queued next song by itself (gapless). It is already loaded and
+     * playing from its start, so skip loading and the resume seek that would restart it.
+     */
+    fun adoptContinuation(catalogId: String?, nowMs: Long) {
+        begin(catalogId, 0L, wantsPlay, nowMs)
+        phase = Phase.Ready
+    }
+
     fun requestPlaying(value: Boolean) {
         wantsPlay = value
         playRecoveryAllowed = value

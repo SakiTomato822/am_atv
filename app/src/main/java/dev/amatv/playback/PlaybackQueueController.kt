@@ -265,6 +265,18 @@ class PlaybackQueueController(
         triggerRefillIfNeeded()
     }
 
+    /**
+     * The entry an automatic advance will play next, for gapless preloading. Null when that is
+     * not a plain next song (repeat one, a new repeat-all cycle, or waiting for recommendations).
+     */
+    fun peekAutoNext(): QueueEntry? {
+        val curr = _state.value
+        if (curr.repeat == PlaybackRepeatMode.One) return null
+        curr.upNext.firstOrNull { !isFailed(it.track) }?.let { return it }
+        if (curr.repeat == PlaybackRepeatMode.All) return null
+        return curr.autoplay.firstOrNull { !isFailed(it.track) }
+    }
+
     fun advanceNext(manual: Boolean = true): QueueEntry? {
         playbackSessionActive = true
         if (manual) resetFailureStreak()

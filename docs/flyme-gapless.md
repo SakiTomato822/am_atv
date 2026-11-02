@@ -59,6 +59,19 @@ This keeps every existing queue feature and limits the change to `MusicKitBridge
 - The x86 ARM-bridge emulator has already shown a native crash in `SVAudioDecoderJNI::run`; judge
   stability on real ARM hardware.
 
+## Implemented (Flyme.7)
+
+- `PlaybackQueueController.peekAutoNext()` names the entry an automatic advance would play.
+- `AtvApp` resolves it 1.5 s after the current song is ready and calls `MusicServices.setLookahead`.
+- `MusicKitBridge.syncLookahead` appends it with `addQueueItems(provider, INSERTION_TYPE_AT_END)`.
+  In 1.1.1 `getQueueItems()` returns an empty list, so the bridge relies on
+  `getPlaybackQueueIndex` / `getPlaybackQueueItemCount` and remembers what it queued; a stale item it
+  cannot remove disables the lookahead so the normal prepare path is used.
+- `onItemEnded` is not reported while the native queue continues; when `getCurrentItem` becomes the
+  queued song the bridge adopts it (`NativePlaybackIntent.adoptContinuation`, no resume seek) and the
+  snapshot carries `gaplessAdvanceCatalogId`. `AtvApp` then advances its queue without preparing.
+- Emulator check: the next song was playing at 125 ms, 0.18 s after the handover, with no prepare.
+
 ## Verdict
 
 Feasible with the public SDK API, as a contained change (one-item lookahead). Whether the result is truly

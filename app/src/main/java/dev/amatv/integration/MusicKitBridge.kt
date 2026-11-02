@@ -55,6 +55,8 @@ data class PlaybackSnapshot(
     val errorMessage: String? = null,
     /** A non-fatal explanation to show once, e.g. a station playing previews only. */
     val notice: String? = null,
+    /** Set once MusicKit continued into the app's queued next song without a new prepare. */
+    val gaplessAdvanceCatalogId: String? = null,
     val capturedAtElapsedRealtimeMs: Long = SystemClock.elapsedRealtime(),
     val isEnded: Boolean = false,
     val requestGeneration: Long = 0L,
@@ -99,6 +101,10 @@ class MusicKitBridge(private val context: Context) {
     @Volatile private var preparing = false
     @Volatile private var endedCatalogId: String? = null
     @Volatile private var preparedNativeQueueId: Long? = null
+    /** Gapless: the app's next song, appended after the current native item while it plays. */
+    @Volatile private var lookahead: Track? = null
+    @Volatile private var gaplessAdvanceCatalogId: String? = null
+    @Volatile private var queuedLookaheadCatalogId: String? = null
     private val snapshotPoll = object : Runnable {
         override fun run() {
             if (playbackListener == null) return
@@ -164,6 +170,9 @@ class MusicKitBridge(private val context: Context) {
         preparing = true
         endedCatalogId = null
         preparedNativeQueueId = null
+        lookahead = null
+        gaplessAdvanceCatalogId = null
+        queuedLookaheadCatalogId = null
         pendingPlaybackError = null
         pendingFailureKind = null
         desiredPlaying = playWhenReady
@@ -226,6 +235,59 @@ class MusicKitBridge(private val context: Context) {
             value.javaClass.getMethod("seekToPosition", Long::class.javaPrimitiveType).invoke(value, positionMs)
         }
     }
+    /**
+     * Queue (or clear) the song the app will play next, so MusicKit can preload it and move on
+     * without a new prepare. The app queue stays authoritative; only this one item is mirrored.
+     */
+    fun setLookahead(next: Track?) {
+        val generation = prepareGeneration.get()
+        playbackHandler?.post {
+            if (generation != prepareGeneration.get()) return@post
+            lookahead = next?.takeIf { it.catalogId != null && it.catalogKind == CatalogKind.Song }
+            syncLookahead()
+        }
+    }
+
+    /**
+     * Playback thread: leaves exactly the wanted song after the current native item. In 1.1.1
+     * getQueueItems() comes back empty, so the item count and the song we queued are tracked here.
+     */
+    private fun syncLookahead() {
+        val currentController = controller ?: return
+        if (preparing || requestedTrack?.catalogKind != CatalogKind.Song) return
+        val index = currentController.callOrNull("getPlaybackQueueIndex") as? Int ?: return
+        val count = currentController.callOrNull("getPlaybackQueueItemCount") as? Int ?: return
+        val following = count - index - 1
+        val wanted = lookahead
+        if (wanted != null && following == 1 && queuedLookaheadCatalogId == wanted.catalogId) return
+        if (following > 0) {
+            @Suppress("UNCHECKED_CAST")
+            val items = (currentController.callOrNull("getQueueItems") as? List<Any?>).orEmpty().filterNotNull()
+            val remove = currentController.javaClass.getMethod("removeQueueItemWithId", Long::class.javaPrimitiveType)
+            items.drop(index + 1).forEach { item ->
+                (item.callOrNull("getPlaybackQueueId") as? Long)?.let { runCatching { remove.invoke(currentController, it) } }
+            }
+            val left = (currentController.callOrNull("getPlaybackQueueItemCount") as? Int ?: count) - index - 1
+            if (left > 0) {
+                // A stale song we cannot address stays queued; report the real end so the app
+                // prepares its own next song instead of trusting the native continuation.
+                Log.i(TAG, "Gapless lookahead dropped: $left native item(s) after current")
+                lookahead = null
+                queuedLookaheadCatalogId = null
+                return
+            }
+        }
+        queuedLookaheadCatalogId = null
+        if (wanted == null || currentController.callOrNull("canAppendToPlaybackQueue") != true) return
+        runCatching {
+            val provider = createCatalogPlaybackQueueProvider(wanted, Class.forName(QUEUE_BUILDER))
+            currentController.javaClass.methods.first { it.name == "addQueueItems" && it.parameterTypes.size == 2 }
+                .invoke(currentController, provider, INSERTION_TYPE_AT_END)
+            queuedLookaheadCatalogId = wanted.catalogId
+            Log.i(TAG, "Gapless lookahead queued catalog=${wanted.catalogId}")
+        }.onFailure { Log.w(TAG, "Gapless lookahead failed: ${it.javaClass.simpleName}") }
+    }
+
     fun skipToNext() = invokeController("skipToNextItem")
     fun skipToPrevious() = invokeController("skipToPreviousItem")
     fun skipToQueueItem(queueId: Long) = invokeController("skipToQueueItemWithId", queueId)
@@ -414,7 +476,17 @@ class MusicKitBridge(private val context: Context) {
                         "onItemEnded" -> {
                             val endedTrack = args?.getOrNull(1)?.let(::trackFromQueueItem)
                             val endPosition = args?.getOrNull(2) as? Long ?: 0L
-                            if (isCompletedPlaybackItem(
+                            // With the next song queued natively, MusicKit continues by itself;
+                            // reporting the end would make the app prepare that song again.
+                            val continuesNatively = lookahead != null &&
+                                endedTrack?.catalogId == requestedTrack?.catalogId &&
+                                ((currentController.callOrNull("getPlaybackQueueIndex") as? Int ?: Int.MAX_VALUE) <
+                                    (currentController.callOrNull("getPlaybackQueueItemCount") as? Int ?: 0) - 1 ||
+                                    currentController.callOrNull("getCurrentItem")?.let(::trackFromQueueItem)
+                                        ?.catalogId == lookahead?.catalogId)
+                            if (continuesNatively) {
+                                Log.i(TAG, "Gapless item ended; continuing into catalog=${lookahead?.catalogId}")
+                            } else if (isCompletedPlaybackItem(
                                 eventGeneration = generation,
                                 requestGeneration = prepareGeneration.get(),
                                 prepared = !preparing,
@@ -474,6 +546,20 @@ class MusicKitBridge(private val context: Context) {
     private fun readSnapshot(currentController: Any, generation: Long): PlaybackSnapshot {
         val currentQueueItem = currentController.callOrNull("getCurrentItem")
         val currentTrack = currentQueueItem?.let(::trackFromQueueItem) ?: requestedTrack
+        val queued = lookahead
+        if (!preparing && queued != null && currentQueueItem != null &&
+            currentTrack?.catalogId == queued.catalogId && requestedTrack?.catalogId != queued.catalogId
+        ) {
+            // MusicKit continued into the queued song: adopt it as the request, no prepare.
+            Log.i(TAG, "Gapless advance generation=$generation catalog=${queued.catalogId}")
+            requestedTrack = queued
+            lookahead = null
+            queuedLookaheadCatalogId = null
+            endedCatalogId = null
+            preparedNativeQueueId = currentTrack?.playbackQueueId
+            gaplessAdvanceCatalogId = queued.catalogId
+            playbackIntent.adoptContinuation(queued.catalogId, SystemClock.elapsedRealtime())
+        }
         val liveStream = currentController.callOrNull("isLiveStream") as? Boolean ?: false
         val canSeek = currentController.callOrNull("canSeek") as? Boolean ?: !liveStream
         val currentStationContainer = isCurrentStationContainer(currentController, requestedTrack, liveStream)
@@ -533,10 +619,13 @@ class MusicKitBridge(private val context: Context) {
                 }
             }
         }
+        val becamePrepared = preparing && decision.prepared
         preparing = !decision.prepared
         if (decision.prepared && currentQueueItem != null && currentTrack?.catalogId == requestedTrack?.catalogId) {
             preparedNativeQueueId = currentTrack?.playbackQueueId
         }
+        // A lookahead requested while the song was still loading is queued once it is ready.
+        if (becamePrepared && lookahead != null) syncLookahead()
         val repeatMode = PlaybackRepeatMode.fromSdk(
             currentController.callOrNull("getRepeatMode") as? Int ?: 0,
         )
@@ -580,6 +669,7 @@ class MusicKitBridge(private val context: Context) {
             failureKind = pendingFailureKind,
             isLiveStream = liveStream,
             canSeek = canSeek,
+            gaplessAdvanceCatalogId = gaplessAdvanceCatalogId,
         )
     }
 
@@ -773,6 +863,8 @@ class MusicKitBridge(private val context: Context) {
             "com.apple.android.music.playback.queue.CatalogPlaybackQueueItemProvider\$Builder"
         const val MEDIA_CONTAINER_TYPE = "com.apple.android.music.playback.model.MediaContainerType"
         const val PLAYBACK_STATE_PLAYING = 1
+        // PlaybackQueueInsertionType.INSERTION_TYPE_AT_END in mediaplayback 1.1.1.
+        const val INSERTION_TYPE_AT_END = 2
         const val CONTINUOUS_PLAYBACK_ON = 2
         const val SNAPSHOT_DELAY_MS = 80L
         const val TAG = "AMATV-MusicKit"

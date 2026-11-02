@@ -207,6 +207,9 @@ fun AmAtvApp() {
     var connectionState by remember { mutableStateOf(services.connectionState) }
     var serviceMessage by remember { mutableStateOf<String?>(null) }
     var lastPlaybackNotice by remember { mutableStateOf<String?>(null) }
+    // Gapless: the queue entry preloaded into MusicKit, and the entry being adopted without a prepare.
+    var gaplessLookahead by remember { mutableStateOf<Pair<Long, Track>?>(null) }
+    var adoptingGaplessEntryId by remember { mutableStateOf<Long?>(null) }
     // An album or artist to open in the browse shell, requested from the player.
     var browseDetailRequest by remember { mutableStateOf<Track?>(null) }
     var reloadNonce by remember { mutableIntStateOf(0) }
@@ -657,7 +660,14 @@ fun AmAtvApp() {
         playbackMessage = null
         playbackPrepared = false
 
-        if (nextTrack.catalogId != null) {
+        val adopted = adoptingGaplessEntryId != null &&
+            adoptingGaplessEntryId == queueController.state.value.current?.entryId
+        if (adopted) {
+            // MusicKit already continued into this song: keep its generation, no pause or prepare.
+            isPlaying = playWhenReady
+            playbackPrepared = true
+            pendingRequestedSongCatalogId = null
+        } else if (nextTrack.catalogId != null) {
             // Stop the previous song while authorization/preparation is pending.
             services.pause()
             if (playWhenReady) {
@@ -692,6 +702,28 @@ fun AmAtvApp() {
     }
     val timelineTracks = remember(timelineEntries) { timelineEntries.map { it.track } }
     val timelineEntryIds = remember(timelineEntries) { timelineEntries.map { it.entryId } }
+
+    // Gapless (Flyme): once the current song is ready, mirror the app's next song into MusicKit so it
+    // can preload it and continue without a gap. Any change of current or next replaces it.
+    val gaplessNext = remember(queueState) { if (BuildConfig.FLYME_AUTO) queueController.peekAutoNext() else null }
+    LaunchedEffect(queueState.current?.entryId, gaplessNext?.entryId, gaplessNext?.track?.catalogId, playbackPrepared) {
+        if (!BuildConfig.FLYME_AUTO) return@LaunchedEffect
+        val next = gaplessNext
+        val current = queueState.current?.track
+        if (next == null || !playbackPrepared || isStationPlayback() || current?.catalogKind != CatalogKind.Song ||
+            next.track.catalogKind != CatalogKind.Song || next.track.catalogId == current.catalogId
+        ) {
+            if (gaplessLookahead != null) services.setLookahead(null)
+            gaplessLookahead = null
+            return@LaunchedEffect
+        }
+        // Let the current song settle before loading another stream.
+        delay(1_500L)
+        val resolved = cancellableResult { services.resolvePlayableTrack(next.track) }.getOrNull() ?: return@LaunchedEffect
+        if (resolved.catalogId != next.track.catalogId) queueController.updateCatalogIdentity(next.track, resolved)
+        gaplessLookahead = next.entryId to resolved
+        services.setLookahead(resolved)
+    }
 
     fun waitForNextQueueEntry(entryId: Long?) {
         if (entryId == null) return
@@ -1037,6 +1069,21 @@ fun AmAtvApp() {
             lastPlaybackNotice = snapshot.notice
         }
         if (!snapshot.isPrepared) return
+        val queued = gaplessLookahead
+        if (snapshot.gaplessAdvanceCatalogId != null && queued != null &&
+            queued.second.catalogId == snapshot.gaplessAdvanceCatalogId &&
+            snapshot.currentTrack?.catalogId == queued.second.catalogId &&
+            queueController.peekAutoNext()?.entryId == queued.first
+        ) {
+            gaplessLookahead = null
+            adoptingGaplessEntryId = queued.first
+            try {
+                queueController.advanceNext(manual = false)
+            } finally {
+                adoptingGaplessEntryId = null
+            }
+            return
+        }
         playbackPrepared = true
         pendingRequestedSongCatalogId = null
         pendingRestore = null

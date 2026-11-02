@@ -196,6 +196,21 @@ class PlaybackQueueControllerTest {
     }
 
     @Test
+    fun peekAutoNextMatchesTheAutomaticAdvanceWithoutMovingTheQueue() {
+        val controller = createController()
+        val tracks = (1..3).map { testTrack(it.toString(), "Track $it", "Artist") }
+        controller.playContext(tracks, startIndex = 0)
+
+        val peeked = controller.peekAutoNext()
+        assertEquals("Track 2", peeked?.track?.title)
+        assertEquals("Track 1", controller.state.value.current?.track?.title)
+        assertEquals(peeked?.entryId, controller.advanceNext(manual = false)?.entryId)
+
+        controller.setRepeat(PlaybackRepeatMode.One)
+        assertNull(controller.peekAutoNext())
+    }
+
+    @Test
     fun testRepeatOneReplaysCurrentTrack() {
         val controller = createController()
         val tracks = (1..3).map { testTrack(it.toString(), "Track $it", "Artist") }

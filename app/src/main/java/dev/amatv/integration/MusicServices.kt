@@ -296,6 +296,8 @@ class MusicServices(context: Context) : RecommendationProvider {
     fun skipToNext() { if (stationEngineActive) stationEngine?.skipToNext() else bridge.skipToNext() }
     fun skipToPrevious() { if (!stationEngineActive) bridge.skipToPrevious() }
     fun skipToQueueItem(queueId: Long) = bridge.skipToQueueItem(queueId)
+    /** Gapless preloading of the app's next song; stations manage their own queue. */
+    fun setLookahead(next: Track?) { if (!stationEngineActive) bridge.setLookahead(next) }
     // The app queue owns repeat, shuffle and autoplay. Each native queue contains
     // one selected track, so enabling a second queue engine would race the app.
     fun playbackSnapshot(): PlaybackSnapshot? =
