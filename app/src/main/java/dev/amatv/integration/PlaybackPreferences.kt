@@ -114,6 +114,13 @@ class PlaybackPreferences(context: Context) : QueuePreferences {
             preferences.edit().putString(KEY_AUTOPLAY_SOURCE, value.name).apply()
         }
 
+    /** The user's last explicit lyrics choice; a song without lyrics never changes it. */
+    var lyricsPreferred: Boolean
+        get() = preferences.getBoolean(KEY_LYRICS_PREFERRED, true)
+        set(value) {
+            preferences.edit().putBoolean(KEY_LYRICS_PREFERRED, value).apply()
+        }
+
     override var lowPerformanceMode: Boolean
         get() = preferences.getBoolean(KEY_LOW_PERFORMANCE_MODE, false)
         set(value) {
@@ -197,6 +204,7 @@ class PlaybackPreferences(context: Context) : QueuePreferences {
         const val KEY_LYRIC_TRANSLATION_LANGUAGE = "pref_lyric_translation_language"
         const val KEY_LYRIC_PRONUNCIATION_LANGUAGE = "pref_lyric_pronunciation_language"
         const val KEY_LOW_PERFORMANCE_MODE = "pref_playback_low_performance_mode"
+        const val KEY_LYRICS_PREFERRED = "pref_playback_lyrics_preferred"
         const val KEY_LYRIC_TEXT_SIZE = "pref_lyric_text_size"
     }
 }

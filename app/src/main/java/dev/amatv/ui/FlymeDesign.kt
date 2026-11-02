@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -41,6 +42,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ViewList
+import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Person
@@ -55,6 +58,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -78,7 +82,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -100,6 +106,13 @@ import java.util.Locale
  */
 
 internal val FlymeLiveRed = Color(0xFFFA233B)
+
+/** Text without font padding, its line box trimmed to the glyphs: for tight two-line stacks. */
+private val CompactLine = TextStyle(
+    platformStyle = PlatformTextStyle(includeFontPadding = false),
+    lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both),
+)
+
 private val FlymeOnLight = Color(0xFF17151C)
 
 /** Shrinks a fixed car layout to fit smaller windows (phones); never enlarges it. */
@@ -309,16 +322,36 @@ private fun FlymePillGroup(content: @Composable RowScope.() -> Unit) {
     )
 }
 
-internal enum class LibrarySort(val label: Int) {
-    Default(R.string.library_sort_default),
-    Name(R.string.library_sort_name),
-    Artist(R.string.library_sort_artist),
+internal enum class LibrarySort(val label: Int, val descendingFirst: Boolean) {
+    Default(R.string.library_sort_default, false),
+    DateAdded(R.string.library_sort_date_added, true),
+    Name(R.string.library_sort_name, false),
+    Artist(R.string.library_sort_artist, false),
+}
+
+internal fun LibraryCategory.sorts(): List<LibrarySort> = when (this) {
+    LibraryCategory.Albums, LibraryCategory.Songs ->
+        listOf(LibrarySort.DateAdded, LibrarySort.Name, LibrarySort.Artist)
+    else -> listOf(LibrarySort.Default, LibrarySort.Name)
+}
+
+/** The Apple Music API has no library sort parameter: any order but its own needs every page. */
+internal fun sortLibrary(items: List<Track>, sort: LibrarySort, descending: Boolean, collator: Collator): List<Track> {
+    val sorted = when (sort) {
+        LibrarySort.Default -> items
+        LibrarySort.DateAdded -> items.sortedBy { it.dateAddedMs ?: Long.MIN_VALUE }
+        LibrarySort.Name -> items.sortedWith(compareBy(collator) { it.title })
+        LibrarySort.Artist -> items.sortedWith(
+            compareBy<Track, String>(collator) { it.artist }.thenBy(collator) { it.title },
+        )
+    }
+    return if (descending) sorted.asReversed() else sorted
 }
 
 /**
  * Library as one page: category and sort controls above a vertically scrolling
  * grid (or list), instead of a single horizontal shelf per category.
- * Sorting applies to the pages loaded so far; the API order is "Default".
+ * Tapping the selected sort again reverses it.
  */
 @Composable
 internal fun FlymeLibrary(
@@ -332,13 +365,12 @@ internal fun FlymeLibrary(
     fallback: @Composable (LibraryCategory, FocusRequester) -> Unit,
 ) {
     var category by remember { mutableStateOf(LibraryCategory.Playlists) }
-    var sort by remember { mutableStateOf(LibrarySort.Default) }
+    // Each category keeps its own order; albums and songs open newest first, like Apple Music.
+    val sortState = remember { mutableStateMapOf<LibraryCategory, Pair<LibrarySort, Boolean>>() }
     var gridView by remember { mutableStateOf(true) }
     val contentFocus = remember { FocusRequester() }
-    val sorts = if (category == LibraryCategory.Artists || category == LibraryCategory.Playlists) {
-        listOf(LibrarySort.Default, LibrarySort.Name)
-    } else LibrarySort.entries
-    val effectiveSort = if (sort in sorts) sort else LibrarySort.Default
+    val sorts = category.sorts()
+    val (effectiveSort, descending) = sortState[category] ?: sorts.first().let { it to it.descendingFirst }
     val supportsViewToggle = category == LibraryCategory.Albums || category == LibraryCategory.Playlists
     val showList = category == LibraryCategory.Songs || (supportsViewToggle && !gridView)
 
@@ -374,13 +406,26 @@ internal fun FlymeLibrary(
                     color = Color.White.copy(alpha = 0.5f))
                 FlymePillGroup {
                     sorts.forEach { option ->
+                        val selected = option == effectiveSort
                         FlymePill(
-                            selected = option == effectiveSort,
-                            onClick = { sort = option },
+                            selected = selected,
+                            onClick = {
+                                sortState[category] = option to (if (selected) !descending else option.descendingFirst)
+                            },
                             small = true,
-                            modifier = Modifier.focusProperties { down = contentFocus },
+                            modifier = Modifier.automationId("library-sort-${option.name.lowercase()}")
+                                .focusProperties { down = contentFocus },
                         ) { color ->
-                            Text(stringResource(option.label), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = color)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(stringResource(option.label), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = color)
+                                if (selected) Icon(
+                                    if (descending) Icons.Rounded.ArrowDownward else Icons.Rounded.ArrowUpward,
+                                    contentDescription = stringResource(
+                                        if (descending) R.string.library_sort_descending else R.string.library_sort_ascending,
+                                    ),
+                                    tint = color, modifier = Modifier.padding(start = 3.dp).size(12.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -413,17 +458,16 @@ internal fun FlymeLibrary(
             }
             else -> {
                 val collator = remember { Collator.getInstance(Locale.getDefault()) }
-                val items = remember(shelf.items, effectiveSort) {
-                    when (effectiveSort) {
-                        LibrarySort.Default -> shelf.items
-                        LibrarySort.Name -> shelf.items.sortedWith(compareBy(collator) { it.title })
-                        LibrarySort.Artist -> shelf.items.sortedWith(
-                            compareBy<Track, String>(collator) { it.artist }.thenBy(collator) { it.title },
-                        )
-                    }
+                val items = remember(shelf.items, effectiveSort, descending) {
+                    sortLibrary(shelf.items, effectiveSort, descending, collator)
                 }
                 val requestMore = {
                     if (page != null && page.hasMore && !page.loading && !page.failed) onLoadMore(category.shelfId)
+                }
+                // A sorted view is only right once every page is here; keep fetching in the background.
+                val needsAllPages = effectiveSort != LibrarySort.Default || descending
+                LaunchedEffect(category, needsAllPages, page?.hasMore, page?.loading, page?.failed, shelf.items.size) {
+                    if (needsAllPages) requestMore()
                 }
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     if (showList) {
@@ -675,14 +719,14 @@ internal fun FlymeTopBar(
         Box(Modifier.width(sideWidth), contentAlignment = Alignment.CenterEnd) {
             if (hasCurrentTrack) {
                 Row(
-                    Modifier.fillMaxWidth().height(43.dp).clip(RoundedCornerShape(22.dp))
+                    Modifier.fillMaxWidth().height(46.dp).clip(RoundedCornerShape(23.dp))
                         .background(Color.White.copy(alpha = if (selected == Destination.NowPlaying) 0.18f else 0.09f))
-                        .padding(start = 5.dp, end = 3.dp),
+                        .padding(start = 6.dp, end = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     FocusSurface(
                         onClick = { onDestination(Destination.NowPlaying) },
-                        modifier = Modifier.weight(1f).height(37.dp)
+                        modifier = Modifier.weight(1f).fillMaxHeight().padding(vertical = 4.dp)
                             .automationId("nav-nowplaying")
                             .focusRequester(focusRequesters.getValue(Destination.NowPlaying))
                             .focusProperties { down = downFocus() },
@@ -693,11 +737,14 @@ internal fun FlymeTopBar(
                     ) {
                         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                            MotionArtwork(track = currentTrack, modifier = Modifier.size(32.dp), animate = false, cornerRadius = 6.dp)
-                            Column(Modifier.weight(1f)) {
-                                Text(currentTrack.title, fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.SemiBold,
+                            MotionArtwork(track = currentTrack, modifier = Modifier.size(34.dp), animate = false, cornerRadius = 7.dp)
+                            // CJK fonts carry tall ascents: trim line boxes so two lines fit the capsule, centered.
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(currentTrack.title, style = CompactLine, fontSize = 12.sp, lineHeight = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
                                     color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(nowPlayingSubtitle ?: currentTrack.artist, fontSize = 10.sp, lineHeight = 13.sp,
+                                Text(nowPlayingSubtitle ?: currentTrack.artist, style = CompactLine, fontSize = 10.sp,
+                                    lineHeight = 12.sp,
                                     color = Color.White.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }

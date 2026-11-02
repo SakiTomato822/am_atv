@@ -16,6 +16,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.amatv.BuildConfig
 import dev.amatv.R
 import dev.amatv.integration.MusicConnectionState
 import dev.amatv.model.ContentShelf
@@ -31,9 +32,11 @@ internal fun LibraryArtistScreen(
     onRetry: () -> Unit,
     onLoadMore: () -> Unit,
     onOpenAlbum: (Track) -> Unit,
+    onOpenTrack: (Track, List<Track>) -> Unit = { album, _ -> onOpenAlbum(album) },
 ) {
     val artist = state.artist ?: return
     val shelfId = "library-artist-albums"
+    val libraryTitle = stringResource(if (BuildConfig.FLYME_AUTO) R.string.artist_in_library else R.string.app_library_albums)
     Column(Modifier.fillMaxSize().padding(32.dp).automationId("library-artist-detail")) {
         FocusSurface(onClick = onBack,
             modifier = Modifier.height(56.dp).focusRequester(firstFocus),
@@ -42,14 +45,16 @@ internal fun LibraryArtistScreen(
         }
         Spacer(Modifier.height(16.dp))
         HomeScreen(destination = Destination.Browse, currentTrack = currentTrack,
-            homeShelves = listOf(ContentShelf(shelfId, stringResource(R.string.app_library_albums), state.albums)),
-            homeLoading = state.loading && state.albums.isEmpty(),
+            homeShelves = listOf(ContentShelf(shelfId, libraryTitle, state.albums)) + state.catalogShelves,
+            homeLoading = state.loading && state.albums.isEmpty() && state.catalogShelves.isEmpty(),
             homeShelfPagination = mapOf(shelfId to LibraryShelfPagination(
                 hasMore = state.nextPage != null, loading = state.loading, failed = state.failed)),
             onLoadMoreShelf = { if (state.failed) onRetry() else onLoadMore() },
             connectionState = MusicConnectionState.SignedIn,
             onRetry = onRetry,
-            onOpenTrack = { album, _ -> onOpenAlbum(album) },
+            onOpenTrack = { item, queue ->
+                if (item.catalogKind == dev.amatv.model.CatalogKind.Album) onOpenAlbum(item) else onOpenTrack(item, queue)
+            },
             navigationFocusRequester = firstFocus,
             modifier = Modifier.fillMaxSize())
     }

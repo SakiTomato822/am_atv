@@ -187,6 +187,8 @@ private val ArtworkDecelerateEasing = Easing { fraction ->
 @Composable
 fun PlayerScreen(
     track: Track,
+    lyricsPreferred: Boolean = true,
+    onLyricsPreferredChange: (Boolean) -> Unit = {},
     positionAnchorMs: Long,
     playStartedRealtimeMs: Long,
     isPlaying: Boolean,
@@ -251,7 +253,9 @@ fun PlayerScreen(
     val supportsLyrics = track.catalogKind == CatalogKind.Song ||
         track.lyrics.isNotEmpty() || track.hasLyricsAvailable
     var userToggledLyrics by remember(queueSessionId) { mutableStateOf(false) }
-    var showLyrics by remember(queueSessionId) { mutableStateOf(supportsLyrics && track.lyrics.isNotEmpty()) }
+    var showLyrics by remember(queueSessionId) {
+        mutableStateOf(lyricsPreferred && supportsLyrics && track.lyrics.isNotEmpty())
+    }
     var showQueue by remember(queueSessionId) { mutableStateOf(false) }
     var showLyricsSettings by remember(queueSessionId) { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
@@ -288,10 +292,10 @@ fun PlayerScreen(
             focusedControl = PlayerControl.PlayPause
         }
     }
-    LaunchedEffect(lyricsLookupFailed, track.lyrics.isEmpty(), userToggledLyrics) {
+    LaunchedEffect(lyricsLookupFailed, track.lyrics.isEmpty(), userToggledLyrics, lyricsPreferred) {
         if (lyricsLookupFailed && track.lyrics.isEmpty() && !userToggledLyrics) {
             showLyrics = false
-        } else if (track.lyrics.isNotEmpty() && !userToggledLyrics && !showQueue) {
+        } else if (track.lyrics.isNotEmpty() && !userToggledLyrics && !showQueue && lyricsPreferred) {
             showLyrics = true
         }
     }
@@ -375,6 +379,7 @@ fun PlayerScreen(
                     showLyrics = true
                     onRetryLyrics()
                 } else showLyrics = !showLyrics
+                onLyricsPreferredChange(showLyrics)
                 showQueue = false
                 navigationZone = PlayerNavigationZone.Controls
             }
@@ -780,7 +785,9 @@ fun PlayerScreen(
             visible = { it.controlsVisible && it.showQueue },
             enter = fadeIn(tween(280, easing = MotionTokens.KaraokeLineEasing)),
             exit = fadeOut(tween(360, easing = MotionTokens.KaraokeGradientExitEasing)),
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = 30.dp),
+            modifier = if (BuildConfig.FLYME_AUTO) {
+                Modifier.align(Alignment.TopStart).padding(start = FlymeQueueInset, top = 30.dp)
+            } else Modifier.align(Alignment.TopCenter).padding(top = 30.dp),
         ) {
             CompositionLocalProvider(LocalFocusFrameVisibility provides chromeFocusVisibility) {
                 QueueModeControls(
@@ -2154,17 +2161,18 @@ private fun ArtistWithAudioBands(
     bandsEnabled: Boolean,
     lineHeight: TextUnit = TextUnit.Unspecified,
     compact: Boolean = false,
+    alignStart: Boolean = false,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Center,
+        horizontalArrangement = if (alignStart) Arrangement.Start else Arrangement.Center,
     ) {
         Text(
             text = artist,
             fontSize = fontSize,
             lineHeight = lineHeight,
             color = color,
-            textAlign = TextAlign.Center,
+            textAlign = if (alignStart) TextAlign.Start else TextAlign.Center,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false).alignBy(LastBaseline),
@@ -4399,8 +4407,13 @@ private fun QueuePanel(
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().automationId("queue-panel")) {
+        // Flyme reads left to right like Apple Music: the playing song leads at the
+        // content edge, Up Next follows, and history sits off to the left.
+        val flyme = BuildConfig.FLYME_AUTO
         val cardWidth = 176.dp
-        val sideInset = ((maxWidth - cardWidth) / 2).coerceAtLeast(0.dp)
+        val currentWidth = if (flyme) 204.dp else cardWidth
+        val startInset = if (flyme) FlymeQueueInset else ((maxWidth - cardWidth) / 2).coerceAtLeast(0.dp)
+        val endInset = if (flyme) (maxWidth - FlymeQueueInset - currentWidth).coerceAtLeast(0.dp) else startInset
 
         Column(
             modifier = Modifier
@@ -4414,9 +4427,9 @@ private fun QueuePanel(
             LazyRow(
                 state = listState,
                 modifier = Modifier.fillMaxWidth().weight(1f),
-                contentPadding = PaddingValues(horizontal = sideInset, vertical = 28.dp),
+                contentPadding = PaddingValues(start = startInset, end = endInset, top = 28.dp, bottom = 28.dp),
                 horizontalArrangement = Arrangement.spacedBy(28.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment = if (flyme) Alignment.Top else Alignment.CenterVertically,
             ) {
                 itemsIndexed(
                     items = queue,
@@ -4432,16 +4445,32 @@ private fun QueuePanel(
                         ),
                         label = "queue-focus-scale",
                     )
+                    val width = if (isCurrent) currentWidth else cardWidth
                     Box(
                         modifier = Modifier
-                            .width(cardWidth)
+                            .width(width)
                             .clickable(enabled = interactive) { onSelectTrack(index) },
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Column(horizontalAlignment = if (flyme) Alignment.Start else Alignment.CenterHorizontally) {
+                            if (flyme) {
+                                val label = when (index) {
+                                    currentIndex -> R.string.queue_now_playing
+                                    currentIndex + 1 -> R.string.queue_up_next
+                                    else -> null
+                                }
+                                Text(
+                                    text = label?.let { stringResource(it) }.orEmpty(),
+                                    fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold,
+                                    color = Color.White.copy(alpha = if (isCurrent) 0.9f else 0.55f),
+                                    maxLines = 1,
+                                    modifier = Modifier.height(16.dp),
+                                )
+                                Spacer(Modifier.height(10.dp))
+                            }
                             MotionArtwork(
                                 track = item,
                                 modifier = Modifier
-                                    .size(176.dp)
+                                    .size(width)
                                     .focusFrameTarget(
                                         selected = focused,
                                         key = "player-queue:${queueKeys.getOrNull(index) ?: index}",
@@ -4464,13 +4493,14 @@ private fun QueuePanel(
                                 color = Color.White.copy(
                                     alpha = if (focused || isCurrent) 1f else 0.72f,
                                 ),
-                                textAlign = TextAlign.Center,
+                                textAlign = if (flyme) TextAlign.Start else TextAlign.Center,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             ArtistWithAudioBands(
                                 artist = item.artist,
+                                alignStart = flyme,
                                 fontSize = 12.sp,
                                 color = Color.White.copy(
                                     alpha = if (focused || isCurrent) 0.68f else 0.46f,
@@ -4488,6 +4518,9 @@ private fun QueuePanel(
         }
     }
 }
+
+/** Left edge shared by the Flyme player column, queue cards and queue mode buttons. */
+private val FlymeQueueInset = 100.dp
 
 @Composable
 private fun QueueModeControls(

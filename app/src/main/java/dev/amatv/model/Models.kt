@@ -48,6 +48,8 @@ data class Track(
     /** Original API identity; library containers can also have a separate catalog ID. */
     val resourceId: String? = null,
     val resourceType: String? = null,
+    /** When a library item was saved; library sorting only. */
+    val dateAddedMs: Long? = null,
 )
 
 /**

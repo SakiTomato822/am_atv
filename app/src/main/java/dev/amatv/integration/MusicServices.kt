@@ -227,6 +227,8 @@ class MusicServices(context: Context) : RecommendationProvider {
         api.stationNextTracks(stationId)
     suspend fun collectionTracks(collection: Track): List<Track> = api.collectionTracks(collection)
 
+    suspend fun catalogArtistShelves(artist: Track): List<ContentShelf> = api.catalogArtistShelves(artist)
+
     suspend fun lyricsFor(
         track: Track,
         localization: LyricsLocalizationRequest = LyricsLocalizationRequest.Disabled,

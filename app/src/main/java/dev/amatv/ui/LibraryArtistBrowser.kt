@@ -2,6 +2,7 @@ package dev.amatv.ui
 
 import dev.amatv.integration.LibraryPage
 import dev.amatv.integration.mergeLibraryPage
+import dev.amatv.model.ContentShelf
 import dev.amatv.model.CatalogOpenAction
 import dev.amatv.model.Track
 import dev.amatv.model.openAction
@@ -18,24 +19,43 @@ internal data class LibraryArtistState(
     val nextPage: String? = null,
     val loading: Boolean = false,
     val failed: Boolean = false,
+    /** Apple Music's own artist page below the saved albums; empty if the artist has no catalog match. */
+    val catalogShelves: List<ContentShelf> = emptyList(),
+    val catalogLoading: Boolean = false,
 )
 
 /** A late artist request may not reopen a dismissed page or replace a different artist. */
 internal class LibraryArtistBrowser(
     private val scope: CoroutineScope,
+    private val loadCatalog: suspend (Track) -> List<ContentShelf> = { emptyList() },
     private val load: suspend (Track, String?) -> LibraryPage,
 ) {
     private val mutableState = MutableStateFlow(LibraryArtistState())
     val state = mutableState.asStateFlow()
     private var job: Job? = null
+    private var catalogJob: Job? = null
     private var generation = 0L
     private val visited = mutableSetOf<String>()
 
     fun open(artist: Track) {
         require(artist.openAction == CatalogOpenAction.OpenArtist)
         close()
-        mutableState.value = LibraryArtistState(artist = artist)
+        mutableState.value = LibraryArtistState(artist = artist, catalogLoading = true)
         request(null)
+        val requestGeneration = generation
+        catalogJob = scope.launch {
+            val shelves = try {
+                loadCatalog(artist)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // The saved albums still work; the catalog part simply stays absent.
+                emptyList()
+            }
+            if (requestGeneration == generation) {
+                mutableState.value = mutableState.value.copy(catalogShelves = shelves, catalogLoading = false)
+            }
+        }
     }
 
     fun loadMore() {
@@ -62,12 +82,15 @@ internal class LibraryArtistBrowser(
                     check(it !in visited && it != page.requestedPage) { "Repeated artist albums continuation" }
                 }
                 visited += page.requestedPage
-                mutableState.value = LibraryArtistState(artist,
-                    mergeLibraryPage(before.albums, page.items), page.nextPage)
+                mutableState.value = mutableState.value.copy(
+                    albums = mergeLibraryPage(before.albums, page.items), nextPage = page.nextPage,
+                    loading = false, failed = false)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                if (requestGeneration == generation) mutableState.value = before.copy(failed = true)
+                if (requestGeneration == generation) {
+                    mutableState.value = mutableState.value.copy(loading = false, failed = true)
+                }
             }
         }
     }
@@ -75,6 +98,7 @@ internal class LibraryArtistBrowser(
     fun close() {
         generation++
         job?.cancel()
+        catalogJob?.cancel()
         visited.clear()
         mutableState.value = LibraryArtistState()
     }

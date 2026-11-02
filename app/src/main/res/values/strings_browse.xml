@@ -94,4 +94,15 @@
     <string name="library_tab_playlists">Playlists</string>
     <string name="library_tab_albums">Albums</string>
     <string name="library_tab_songs">Songs</string>
+    <string name="library_sort_date_added">Date Added</string>
+    <string name="library_sort_ascending">Ascending</string>
+    <string name="library_sort_descending">Descending</string>
+    <string name="album_show_complete">Show Complete Album</string>
+    <string name="album_show_library">Show Only Songs in Library</string>
+    <string name="artist_in_library">In My Library</string>
+    <string name="artist_top_songs">Top Songs</string>
+    <string name="artist_albums">Albums</string>
+    <string name="artist_singles">Singles &amp; EPs</string>
+    <string name="queue_now_playing">Now Playing</string>
+    <string name="queue_up_next">Up Next</string>
 </resources>

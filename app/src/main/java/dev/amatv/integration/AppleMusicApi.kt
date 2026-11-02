@@ -285,6 +285,45 @@ class AppleMusicApi(
         LibraryPage(items = mergeLibraryPage(emptyList(), tracks), nextPage = next, requestedPage = path)
     }
 
+    /**
+     * The catalog side of a saved artist: top songs, albums and singles, so the
+     * artist page is not limited to what the user happened to save.
+     */
+    suspend fun catalogArtistShelves(artist: Track): List<ContentShelf> {
+        val libraryId = checkNotNull(artist.resourceId) { "Library artist ID is missing" }
+        require(libraryId.matches(Regex("[A-Za-z0-9._-]+"))) { "Library artist ID is invalid" }
+        val linked = requestRoot("/v1/me/library/artists/$libraryId/catalog", needsUserToken = true)
+        val catalogId = linked.optJSONArray("data")?.optJSONObject(0)?.optString("id")
+            ?.takeIf { it.matches(Regex("[0-9]+")) } ?: return emptyList()
+        val storefront = effectiveStorefront()
+        val root = requestRoot(
+            "/v1/catalog/$storefront/artists/$catalogId?views=top-songs,full-albums,singles&limit[views]=20",
+            needsUserToken = false,
+        )
+        return withContext(parseDispatcher) { parseArtistViews(root, catalogId) }
+    }
+
+    internal fun parseArtistViews(root: JSONObject, catalogId: String): List<ContentShelf> {
+        val views = root.optJSONArray("data")?.optJSONObject(0)?.optJSONObject("views") ?: return emptyList()
+        return listOf(
+            "top-songs" to R.string.artist_top_songs,
+            "full-albums" to R.string.artist_albums,
+            "singles" to R.string.artist_singles,
+        ).mapNotNull { (view, title) ->
+            val data = views.optJSONObject(view)?.optJSONArray("data") ?: return@mapNotNull null
+            val items = buildList {
+                for (index in 0 until data.length()) {
+                    val item = data.optJSONObject(index) ?: continue
+                    val type = item.optString("type")
+                    val kind = catalogKind(type) ?: continue
+                    val attributes = item.optJSONObject("attributes") ?: continue
+                    attributes.toTrack(item.getString("id"), kind, resourceType = type)?.let(::add)
+                }
+            }
+            items.takeIf { it.isNotEmpty() }?.let { ContentShelf("artist-$catalogId-$view", AppText.text(title), it) }
+        }
+    }
+
     suspend fun resolveCatalogSongId(id: String): String = catalogSongResolver.resolve(id)
 
     private suspend fun libraryCatalogSongId(id: String): String {
@@ -660,6 +699,8 @@ class AppleMusicApi(
             hasLyricsAvailable = hasLyrics,
             resourceId = id,
             resourceType = resourceType,
+            dateAddedMs = optString("dateAdded").takeIf { it.isNotBlank() }
+                ?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() },
         )
     }
 

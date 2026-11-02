@@ -21,9 +21,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import dev.amatv.BuildConfig
 import dev.amatv.integration.AudioSpectrum
 import kotlin.math.abs
 import kotlin.math.exp
+import kotlin.math.sin
 
 /** A compact, bottom-anchored view of the playing song's measured low/mid/high bands. */
 @Composable
@@ -32,6 +34,8 @@ internal fun AudioBandIndicator(
     audioSpectrum: () -> AudioSpectrum,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    /** Without a capture (no permission, a station, an unsupported head unit) pulse instead of lying flat. */
+    decorativeFallback: Boolean = BuildConfig.FLYME_AUTO,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var started by remember(lifecycle) {
@@ -60,7 +64,10 @@ internal fun AudioBandIndicator(
                 val elapsedMs = if (previousFrame == 0L) 16.667f else (now - previousFrame) / 1_000_000f
                 previousFrame = now
                 val sample = if (isPlaying) latestSpectrum() else SilentAudioBands
-                if (envelope.advance(sample, isPlaying, elapsedMs)) redraw.intValue++
+                val changed = if (isPlaying && decorativeFallback && !sample.available) {
+                    envelope.pulse(now / 1_000_000_000.0, elapsedMs)
+                } else envelope.advance(sample, isPlaying, elapsedMs)
+                if (changed) redraw.intValue++
             }
         }
     }
@@ -93,7 +100,10 @@ internal fun AudioBandIndicator(
 
 private val SilentAudioBands = AudioSpectrum()
 
-/** Allocation-free visual envelope; silence never supplies synthetic movement. */
+/**
+ * Allocation-free visual envelope. Measured silence never supplies synthetic movement;
+ * only [pulse] does, and only when there is no measurement at all.
+ */
 internal class AudioBandEnvelope {
     private val averageEnergy = FloatArray(3)
     private val initialized = BooleanArray(3)
@@ -112,6 +122,25 @@ internal class AudioBandEnvelope {
         bass = 0f
         mid = 0f
         treble = 0f
+        return changed
+    }
+
+    /** A steady decorative beat: three bands drifting out of phase, not tied to the audio. */
+    fun pulse(timeSeconds: Double, elapsedMs: Float): Boolean {
+        val dt = elapsedMs.takeIf(Float::isFinite)?.coerceIn(0f, 50f) ?: 0f
+        if (dt <= 0f) return false
+        initialized.fill(false)
+        averageEnergy.fill(0f)
+        val ease = 1f - exp(-dt / 70f)
+        fun wave(a: Double, b: Double, phase: Double): Float =
+            (.45 + .3 * sin(timeSeconds * a + phase) + .2 * sin(timeSeconds * b + phase * 1.7)).toFloat().coerceIn(.08f, 1f)
+        val low = bass + (wave(4.1, 9.7, 0.0) - bass) * ease
+        val middle = mid + (wave(5.3, 12.1, 2.1) - mid) * ease
+        val high = treble + (wave(6.7, 14.3, 4.2) - treble) * ease
+        val changed = low != bass || middle != mid || high != treble
+        bass = low
+        mid = middle
+        treble = high
         return changed
     }
 

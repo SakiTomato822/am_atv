@@ -93,4 +93,15 @@
     <string name="library_tab_playlists">播放列表</string>
     <string name="library_tab_albums">专辑</string>
     <string name="library_tab_songs">歌曲</string>
+    <string name="library_sort_date_added">添加时间</string>
+    <string name="library_sort_ascending">正序</string>
+    <string name="library_sort_descending">倒序</string>
+    <string name="album_show_complete">显示完整专辑</string>
+    <string name="album_show_library">只显示资料库中的歌曲</string>
+    <string name="artist_in_library">资料库中</string>
+    <string name="artist_top_songs">热门歌曲</string>
+    <string name="artist_albums">专辑</string>
+    <string name="artist_singles">单曲与 EP</string>
+    <string name="queue_now_playing">正在播放</string>
+    <string name="queue_up_next">接下来</string>
 </resources>

@@ -45,6 +45,7 @@ internal fun CollectionScreen(
     onRetry: () -> Unit,
     onPlay: (index: Int, shuffle: Boolean) -> Unit,
     onBack: () -> Unit = {},
+    onFullAlbum: (Boolean) -> Unit = {},
 ) {
     val collection = state.collection ?: return
     val listState = rememberLazyListState()
@@ -247,6 +248,15 @@ internal fun CollectionScreen(
                             }
                             HorizontalDivider(Modifier.padding(start = 42.dp, end = 12.dp),
                                 color = Color.White.copy(alpha = 0.07f))
+                        }
+                        if (state.canShowFullAlbum) item(key = "full-album", contentType = "full-album") {
+                            CollectionAction(
+                                stringResource(if (state.fullAlbum) R.string.album_show_library else R.string.album_show_complete),
+                                null, { onFullAlbum(!state.fullAlbum) },
+                                modifier = Modifier.automationId("collection-full-album")
+                                    .padding(start = 12.dp, top = 18.dp).height(42.dp).width(260.dp)
+                                    .focusProperties { right = FocusRequester.Cancel },
+                            )
                         }
                     }
                 }

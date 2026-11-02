@@ -154,6 +154,7 @@ fun AmAtvApp() {
     val services = remember(context) { MusicServices(context) }
     val cacheSettings by services.contentCache.settings.collectAsState()
     val playbackPrefs = remember(context) { PlaybackPreferences(context) }
+    var lyricsPreferred by remember(playbackPrefs) { mutableStateOf(playbackPrefs.lyricsPreferred) }
     val startupCheckpoint = remember(playbackPrefs) {
         playbackPrefs.restoreCheckpointSession()?.copy(wasPlaying = false)
     }
@@ -1701,7 +1702,8 @@ fun AmAtvApp() {
 
     val stationQueueContext = queueState.current?.track?.catalogKind == CatalogKind.Station
     val activePlaybackSnapshot = currentPlaybackSnapshot()
-    val isLiveStream = activePlaybackSnapshot?.isLiveStream == true
+    // The native SDK briefly reports live while a song loads; only a station item can be a live stream.
+    val isLiveStream = activePlaybackSnapshot?.isLiveStream == true && stationQueueContext
     val canSeekPlayback = !isLiveStream && activePlaybackSnapshot?.canSeek != false &&
         (!stationQueueContext || activePlaybackSnapshot?.isPrepared == true)
     val canSkipPrevious = if (stationQueueContext) {
@@ -1726,7 +1728,8 @@ fun AmAtvApp() {
 
     val isNowPlaying = destination == Destination.NowPlaying
     LaunchedEffect(isNowPlaying, isPlaying, spectrumPermissionGranted) {
-        if (!BuildConfig.FLYME_AUTO && isNowPlaying && isPlaying && !spectrumPermissionGranted && !spectrumPermissionAsked) {
+        // Flyme asks too: a granted capture drives real bands, otherwise the queue pulses decoratively.
+        if (isNowPlaying && isPlaying && !spectrumPermissionGranted && !spectrumPermissionAsked) {
             spectrumPermissionAsked = true
             spectrumPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
@@ -1922,6 +1925,7 @@ fun AmAtvApp() {
                         onOpenTrack = { item, q -> playTrack(item, contextQueue = q) },
                         loadCollection = services::collectionTracks,
                         loadArtistAlbums = services::libraryArtistAlbumsPage,
+                        loadArtistCatalog = services::catalogArtistShelves,
                         onPlayCollection = ::playCollection,
                         lyricOffsetMs = lyricOffsetMs,
                         onLyricOffsetChange = { offset: Long ->
@@ -1954,6 +1958,11 @@ fun AmAtvApp() {
                     ) {
                     PlayerScreen(
                         track = track.copy(lyrics = currentLyricsLines),
+                        lyricsPreferred = lyricsPreferred,
+                        onLyricsPreferredChange = {
+                            lyricsPreferred = it
+                            playbackPrefs.lyricsPreferred = it
+                        },
                         positionAnchorMs = positionAnchorMs,
                         playStartedRealtimeMs = playStartedRealtimeMs,
                         isPlaying = isPlaying,
@@ -2094,6 +2103,7 @@ private fun BrowseShell(
     onOpenTrack: (Track, List<Track>) -> Unit,
     loadCollection: suspend (Track) -> List<Track>,
     loadArtistAlbums: suspend (Track, String?) -> LibraryPage,
+    loadArtistCatalog: suspend (Track) -> List<ContentShelf> = { emptyList() },
     onPlayCollection: (Track, List<Track>, Int, Boolean) -> Unit,
     lyricOffsetMs: Long = 0L,
     onLyricOffsetChange: (Long) -> Unit = {},
@@ -2122,7 +2132,10 @@ private fun BrowseShell(
     val collectionState by browser.state.collectAsState()
     val collection = collectionState.collection
     val currentArtistLoader by rememberUpdatedState(loadArtistAlbums)
-    val artistBrowser = remember(destination) { LibraryArtistBrowser(scope) { item, next -> currentArtistLoader(item, next) } }
+    val currentArtistCatalogLoader by rememberUpdatedState(loadArtistCatalog)
+    val artistBrowser = remember(destination) {
+        LibraryArtistBrowser(scope, { currentArtistCatalogLoader(it) }) { item, next -> currentArtistLoader(item, next) }
+    }
     val artistState by artistBrowser.state.collectAsState()
     val artist = artistState.artist
     val artistFirstFocus = remember(destination) { FocusRequester() }
@@ -2165,6 +2178,17 @@ private fun BrowseShell(
                 ),
             ),
     ) {
+        if (BuildConfig.FLYME_AUTO && hasCurrentTrack) {
+            // Ambient colour from the playing artwork, like Apple TV: brightest at the top,
+            // fading into the page so content stays readable. Still in low-performance mode.
+            PlayerBackdrop(currentTrack, animate = isBrowseVisible && !lowPerformanceMode,
+                modifier = Modifier.fillMaxSize())
+            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
+                0f to Color(0xFF0B0A0E).copy(alpha = 0.42f),
+                0.45f to Color(0xFF0B0A0E).copy(alpha = 0.78f),
+                1f to Color(0xFF0B0A0E).copy(alpha = 0.92f),
+            )))
+        }
         CompositionLocalProvider(
             LocalFocusFrameEnabled provides (!detailVisible && isBrowseVisible),
             LocalFocusTargetsEnabled provides (!detailVisible && isBrowseVisible),
@@ -2265,7 +2289,17 @@ private fun BrowseShell(
                 LibraryArtistScreen(state = artistState, currentTrack = currentTrack,
                     firstFocus = artistFirstFocus, onBack = ::closeArtist,
                     onRetry = artistBrowser::retry, onLoadMore = artistBrowser::loadMore,
-                    onOpenAlbum = browser::open)
+                    onOpenAlbum = browser::open,
+                    onOpenTrack = { item, queue ->
+                        when (item.openAction) {
+                            CatalogOpenAction.Collection -> browser.open(item)
+                            CatalogOpenAction.Station -> onOpenTrack(item, listOf(item))
+                            CatalogOpenAction.Play -> onOpenTrack(item, queue.filter {
+                                it.openAction == CatalogOpenAction.Play
+                            })
+                            CatalogOpenAction.OpenArtist -> Unit
+                        }
+                    })
             }
         }
         if (collection != null) {
@@ -2289,10 +2323,12 @@ private fun BrowseShell(
                             currentTrack = currentTrack,
                             isPlaying = isPlaying,
                             firstFocus = detailFirstFocus,
-                            onRetry = { browser.open(collection) },
+                            onRetry = browser::retry,
                             onPlay = { index, shuffle ->
-                                onPlayCollection(collection, collectionState.tracks, index, shuffle)
+                                onPlayCollection(collectionState.playbackCollection ?: collection,
+                                    collectionState.tracks, index, shuffle)
                             },
+                            onFullAlbum = browser::setFullAlbum,
                         )
                     }
                 }
