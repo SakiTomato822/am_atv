@@ -25,6 +25,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -42,6 +43,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -73,9 +75,12 @@ internal fun FlymeSearchScreen(
     onOpenTrack: (Track, List<Track>) -> Unit,
     firstFocus: FocusRequester?,
 ) {
-    val mandopopTerm = stringResource(R.string.browse_quick_mandopop)
-    val quickTerms = remember(mandopopTerm) {
-        listOf(mandopopTerm, "Doja Cat", "Ado", "YOASOBI", "周杰倫", "BLACKPINK", "Laufey", "Taylor Swift")
+    val context = LocalContext.current
+    val historyStore = remember(context) { SearchHistoryStore(context) }
+    var history by remember { mutableStateOf(historyStore.load()) }
+    fun saveSearch(term: String) {
+        history = pushSearchHistory(history, term)
+        historyStore.save(history)
     }
     var query by rememberSaveable { mutableStateOf("") }
     var lastExecutedQuery by rememberSaveable { mutableStateOf("") }
@@ -91,6 +96,7 @@ internal fun FlymeSearchScreen(
             keyboard?.hide()
             focusManager.clearFocus()
         }
+        if (closeKeyboard && trimmed.isNotEmpty()) saveSearch(trimmed)
         if (trimmed.isNotEmpty() && trimmed != lastExecutedQuery) {
             lastExecutedQuery = trimmed
             onSearch(trimmed)
@@ -106,6 +112,8 @@ internal fun FlymeSearchScreen(
 
     val results = if (lastExecutedQuery.isNotBlank()) tracks else emptyList()
     val open: (Track) -> Unit = { item ->
+        // Opening a result is what makes a typed query worth keeping.
+        if (lastExecutedQuery.isNotBlank()) saveSearch(lastExecutedQuery)
         keyboard?.hide()
         focusManager.clearFocus()
         onOpenTrack(item, results.ifEmpty { recentTracks })
@@ -122,10 +130,18 @@ internal fun FlymeSearchScreen(
         Spacer(Modifier.height(14.dp))
         when {
             lastExecutedQuery.isBlank() -> FlymeSearchStart(
-                quickTerms = quickTerms,
+                history = history,
                 recentTracks = recentTracks,
                 compact = typing,
                 onTerm = { term -> query = term; submit(term, closeKeyboard = true) },
+                onRemove = { term ->
+                    history = history - term
+                    historyStore.save(history)
+                },
+                onClearHistory = {
+                    history = emptyList()
+                    historyStore.save(history)
+                },
                 onOpen = open,
             )
             results.isEmpty() -> Box(Modifier.fillMaxWidth().padding(top = 40.dp), Alignment.TopCenter) {
@@ -194,32 +210,54 @@ private fun FlymeSearchBar(
     )
 }
 
-/** Before a search: suggested terms, then recently played (hidden while the keyboard is up). */
+/** Before a search: the user's recent searches, then recently played (hidden while the keyboard is up). */
 @Composable
 private fun FlymeSearchStart(
-    quickTerms: List<String>,
+    history: List<String>,
     recentTracks: List<Track>,
     compact: Boolean,
     onTerm: (String) -> Unit,
+    onRemove: (String) -> Unit,
+    onClearHistory: () -> Unit,
     onOpen: (Track) -> Unit,
 ) {
     Column {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            itemsIndexed(quickTerms, key = { _, term -> term }) { index, term ->
-                FocusSurface(
-                    onClick = { onTerm(term) },
-                    modifier = Modifier.height(36.dp).automationId("search-term-$index"),
-                    cornerRadius = 18.dp,
-                    padding = PaddingValues(horizontal = 16.dp),
-                    background = Color.White.copy(alpha = 0.10f),
-                ) {
-                    Text(term, color = Color.White.copy(alpha = 0.88f), fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Center))
+        if (history.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                FlymeSearchHeading(stringResource(R.string.browse_search_history), Modifier.weight(1f))
+                Text(stringResource(R.string.browse_search_history_clear), color = FlymeLiveRed, fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(bottom = 10.dp).clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onClearHistory).padding(horizontal = 8.dp, vertical = 4.dp)
+                        .automationId("search-history-clear"))
+            }
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                itemsIndexed(history, key = { _, term -> term }) { index, term ->
+                    FocusSurface(
+                        onClick = { onTerm(term) },
+                        modifier = Modifier.height(36.dp).automationId("search-term-$index"),
+                        cornerRadius = 18.dp,
+                        padding = PaddingValues(start = 14.dp, end = 4.dp),
+                        background = Color.White.copy(alpha = 0.10f),
+                    ) {
+                        Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.History, null, tint = Color.White.copy(alpha = 0.5f),
+                                modifier = Modifier.size(16.dp))
+                            Text(term, color = Color.White.copy(alpha = 0.88f), fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 6.dp))
+                            Box(Modifier.size(28.dp).clip(CircleShape).clickable { onRemove(term) },
+                                contentAlignment = Alignment.Center) {
+                                Icon(Icons.Rounded.Close, null, tint = Color.White.copy(alpha = 0.45f),
+                                    modifier = Modifier.size(14.dp))
+                            }
+                        }
+                    }
                 }
             }
         }
         if (!compact && recentTracks.isNotEmpty()) {
-            FlymeSearchHeading(stringResource(R.string.browse_recently_played), Modifier.padding(top = 22.dp))
+            FlymeSearchHeading(stringResource(R.string.browse_recently_played),
+                Modifier.padding(top = if (history.isEmpty()) 0.dp else 22.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 items(recentTracks, key = { it.id }) { item -> FlymeSearchCard(item, onOpen) }
             }
@@ -376,4 +414,27 @@ private fun Track.kindLine(): String {
     })
     return listOf(kind, artist.takeIf { catalogKind != CatalogKind.Artist }.orEmpty())
         .filter { it.isNotBlank() }.joinToString(" · ")
+}
+
+/** Most recent first, case-insensitive duplicates collapse into the newest spelling. */
+internal fun pushSearchHistory(history: List<String>, term: String, max: Int = 12): List<String> {
+    val trimmed = term.trim()
+    if (trimmed.isEmpty()) return history
+    return (listOf(trimmed) + history.filterNot { it.equals(trimmed, ignoreCase = true) }).take(max)
+}
+
+/** Search history stays on the head unit; it is never sent anywhere. */
+private class SearchHistoryStore(context: android.content.Context) {
+    private val prefs = context.getSharedPreferences("am_atv_search_history", android.content.Context.MODE_PRIVATE)
+
+    fun load(): List<String> = runCatching {
+        val array = org.json.JSONArray(prefs.getString(KEY, "[]"))
+        List(array.length()) { array.optString(it) }.filter { it.isNotBlank() }
+    }.getOrDefault(emptyList())
+
+    fun save(history: List<String>) {
+        prefs.edit().putString(KEY, org.json.JSONArray(history).toString()).apply()
+    }
+
+    private companion object { const val KEY = "terms" }
 }

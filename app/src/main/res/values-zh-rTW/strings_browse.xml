@@ -111,4 +111,6 @@
     <string name="browse_search_playlists">播放列表</string>
     <string name="browse_search_stations">電台</string>
     <string name="browse_search_clear">清除</string>
+    <string name="browse_search_history">最近搜尋</string>
+    <string name="browse_search_history_clear">清除</string>
 </resources>
