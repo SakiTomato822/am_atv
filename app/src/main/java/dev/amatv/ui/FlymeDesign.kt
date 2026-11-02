@@ -41,6 +41,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ViewList
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
@@ -80,6 +81,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -117,6 +119,33 @@ private val CompactLine = TextStyle(
 )
 
 private val FlymeOnLight = Color(0xFF17151C)
+
+/** The one back control on every Flyme page: a translucent circle with an arrow. */
+@Composable
+internal fun FlymeBackButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    var focused by remember { mutableStateOf(false) }
+    val keyFocused = focused && LocalInputModeManager.current.inputMode == InputMode.Keyboard
+    val scale by animateFloatAsState(if (pressed) 0.9f else 1f,
+        spring(dampingRatio = 0.7f, stiffness = 600f), label = "flyme-back-scale")
+    Box(
+        modifier
+            .size(44.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = if (keyFocused || pressed) 0.24f else 0.12f))
+            .then(if (keyFocused) Modifier.border(2.dp, Color.White, CircleShape) else Modifier)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(enabled = LocalFocusTargetsEnabled.current, interactionSource = interaction,
+                indication = null, role = Role.Button, onClick = onClick)
+            .automationId("flyme-back"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.browse_back), tint = Color.White,
+            modifier = Modifier.size(24.dp))
+    }
+}
 
 /** Apple Music's E badge for explicit tracks, sized to the text beside it. */
 @Composable

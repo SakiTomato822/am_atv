@@ -757,7 +757,7 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxSize(),
         )
         if (BuildConfig.FLYME_AUTO && isActiveScreen) {
-            FocusSurface(
+            FlymeBackButton(
                 onClick = {
                     // The queue covers the controls column, so back closes it first.
                     if (showQueue) {
@@ -765,13 +765,9 @@ fun PlayerScreen(
                         navigationZone = PlayerNavigationZone.Controls
                     } else onBack()
                 },
-                modifier = Modifier.align(Alignment.TopStart).padding(16.dp).size(56.dp)
+                modifier = Modifier.align(Alignment.TopStart).padding(start = 24.dp, top = 22.dp)
                     .automationId("player-back"),
-            ) {
-                Icon(Icons.AutoMirrored.Rounded.ArrowBack,
-                    contentDescription = stringResource(R.string.browse_back),
-                    modifier = Modifier.align(Alignment.Center).size(28.dp))
-            }
+            )
         }
         if (statusMessage != null) {
             Text(

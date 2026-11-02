@@ -78,8 +78,7 @@ internal fun CollectionScreen(
 
     Column(Modifier.fillMaxSize().automationId("collection-screen").padding(bottom = 20.dp)) {
         if (BuildConfig.FLYME_AUTO) {
-            CollectionAction(stringResource(R.string.browse_back), null, onBack,
-                modifier = Modifier.width(112.dp).height(56.dp).padding(bottom = 8.dp))
+            FlymeBackButton(onBack, Modifier.padding(bottom = 12.dp))
         }
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(36.dp)) {
             Column(

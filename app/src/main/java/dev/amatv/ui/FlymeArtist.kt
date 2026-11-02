@@ -67,9 +67,7 @@ internal fun FlymeArtistScreen(
     FitDesign(Modifier.fillMaxSize().automationId("library-artist-detail")) {
         Row(Modifier.fillMaxSize().padding(start = 40.dp, top = 18.dp)) {
             Column(Modifier.width(330.dp)) {
-                FlymeGlyphButton(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.browse_back),
-                    onClick = onBack, size = 40.dp, iconSize = 24.dp,
-                    modifier = Modifier.focusRequester(firstFocus).automationId("artist-back"))
+                FlymeBackButton(onBack, Modifier.focusRequester(firstFocus))
                 Spacer(Modifier.height(10.dp))
                 MotionArtwork(track = hero, modifier = Modifier.size(300.dp)
                     .border(0.75.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(16.dp)),
