@@ -87,4 +87,8 @@
     <string name="services_auth_renderer_stopped">載入 Apple 登入時，系統網頁元件已停止運作（%1$s）。請回到 App 後重試。</string>
     <string name="services_playback_channel_name">媒體播放</string>
     <string name="services_playback_channel_desc">背景媒體播放通知</string>
+    <string name="services_pick_made_for_you">專屬推薦</string>
+    <string name="services_pick_new_release">最新發行</string>
+    <string name="services_pick_for_you">為你推薦</string>
+    <string name="services_pick_station">為你推薦的電台</string>
 </resources>

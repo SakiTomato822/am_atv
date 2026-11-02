@@ -15,6 +15,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -258,8 +261,15 @@ private fun FlymeSearchStart(
         if (!compact && recentTracks.isNotEmpty()) {
             FlymeSearchHeading(stringResource(R.string.browse_recently_played),
                 Modifier.padding(top = if (history.isEmpty()) 0.dp else 22.dp))
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                items(recentTracks, key = { it.id }) { item -> FlymeSearchCard(item, onOpen) }
+            // Scrolls up and down, like the rest of the car pages.
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(140.dp),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 40.dp),
+                horizontalArrangement = Arrangement.spacedBy(18.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                gridItems(recentTracks, key = { it.id }) { item -> FlymeSearchCard(item, onOpen) }
             }
         }
     }

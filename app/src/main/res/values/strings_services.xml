@@ -87,4 +87,8 @@
     <string name="services_auth_renderer_stopped">The system web component stopped while loading Apple sign-in (%1$s). Return to the app and try again.</string>
     <string name="services_playback_channel_name">Media Playback</string>
     <string name="services_playback_channel_desc">Background media playback notification</string>
+    <string name="services_pick_made_for_you">Made for You</string>
+    <string name="services_pick_new_release">New Release</string>
+    <string name="services_pick_for_you">For You</string>
+    <string name="services_pick_station">Station for You</string>
 </resources>

@@ -52,6 +52,8 @@ data class Track(
     val dateAddedMs: Long? = null,
     /** Apple's contentRating "explicit": shown as the E badge. */
     val isExplicit: Boolean = false,
+    /** Why a Top Picks card is there ("Made for You", "New Release"...). */
+    val pickReason: String? = null,
 )
 
 /**

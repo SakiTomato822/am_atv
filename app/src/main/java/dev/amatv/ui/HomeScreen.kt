@@ -1737,7 +1737,7 @@ private fun firstRowFocusModifier(
 }
 
 @Composable
-private fun Track.eyebrow(): String = when (catalogKind) {
+private fun Track.eyebrow(): String = pickReason ?: when (catalogKind) {
     CatalogKind.Song -> album.takeIf { it.isNotBlank() && it != "Song" } ?: stringResource(R.string.browse_kind_song)
     CatalogKind.Artist -> stringResource(R.string.browse_kind_artist)
     CatalogKind.Album -> stringResource(R.string.browse_kind_album)

@@ -143,7 +143,9 @@ class AppleMusicApi(
 
     suspend fun recommendationShelves(): List<ContentShelf> {
         val root = requestRoot(
-            path = "/v1/me/recommendations?limit=10&extend=editorialArtwork,editorialVideo",
+            // The web home shows about twenty groups; ten cut off genres, stations and artists.
+            path = "/v1/me/recommendations?limit=${if (BuildConfig.FLYME_AUTO) 20 else 10}" +
+                "&extend=editorialArtwork,editorialVideo",
             needsUserToken = true,
         )
         return withContext(parseDispatcher) {
@@ -165,11 +167,14 @@ class AppleMusicApi(
                             id = "recommendation:${recommendation.optString("id", index.toString())}",
                             title = title,
                             items = tracks,
-                            featured = isEmpty(),
+                            featured = isEmpty() && !BuildConfig.FLYME_AUTO,
                         ),
                     )
                 }
             }
+        }.let { groups ->
+            if (!BuildConfig.FLYME_AUTO) groups
+            else listOfNotNull(topPicks(recommendations, groups)) + groups
         }
         val motionCount = shelves.sumOf { shelf ->
             shelf.items.count { it.motionArtworkUrl != null }
@@ -180,6 +185,32 @@ class AppleMusicApi(
         if (fallback.isEmpty()) emptyList() else listOf(
             ContentShelf("recommendations", AppText.text(R.string.services_top_picks_for_you), fallback, featured = true),
         )
+        }
+    }
+
+    /**
+     * Apple Music Web's "Top Picks for You" is assembled by Apple's own web service. Rebuild it
+     * from the public groups: the lead item of each, labelled with why it is there.
+     */
+    private fun topPicks(recommendations: JSONArray, groups: List<ContentShelf>): ContentShelf? {
+        var newReleaseSeen = false
+        val picks = groups.mapIndexedNotNull { index, group ->
+            val kind = recommendations.optJSONObject(index)?.optJSONObject("attributes")?.optString("kind")
+            if (kind == "recently-played") return@mapIndexedNotNull null
+            val item = group.items.firstOrNull() ?: return@mapIndexedNotNull null
+            val reason = when {
+                index == 0 -> R.string.services_pick_made_for_you
+                group.items.all { it.catalogKind == CatalogKind.Station } -> R.string.services_pick_station
+                !newReleaseSeen && group.items.all { it.catalogKind == CatalogKind.Album } -> {
+                    newReleaseSeen = true
+                    R.string.services_pick_new_release
+                }
+                else -> R.string.services_pick_for_you
+            }
+            item.copy(pickReason = AppText.text(reason))
+        }.distinctBy { it.id }.take(8)
+        return picks.takeIf { it.size >= 3 }?.let {
+            ContentShelf("top-picks", AppText.text(R.string.services_top_picks_for_you), it, featured = true)
         }
     }
 
