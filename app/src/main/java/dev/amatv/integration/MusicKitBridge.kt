@@ -750,7 +750,10 @@ class MusicKitBridge(private val context: Context) {
         PlaybackFailureKind.Authorization -> AppText.text(R.string.services_playback_auth_required)
         PlaybackFailureKind.Network -> AppText.text(R.string.services_apple_connection_failed)
         PlaybackFailureKind.PositionRestore -> AppText.text(R.string.services_playback_restore_failed)
-        PlaybackFailureKind.Unexpected -> AppText.text(R.string.services_playback_failed)
+        PlaybackFailureKind.Unexpected -> if (isContentRestrictedFailure(
+                runCatching { error?.javaClass?.getMethod("getErrorCode")?.invoke(error) as? Int }.getOrNull())
+        ) AppText.text(R.string.services_playback_content_restricted)
+        else AppText.text(R.string.services_playback_failed)
     }
 
     private fun classExists(name: String): Boolean = runCatching {

@@ -289,20 +289,29 @@ class AppleMusicApi(
      * The catalog side of a saved artist: top songs, albums and singles, so the
      * artist page is not limited to what the user happened to save.
      */
-    suspend fun catalogArtistShelves(artist: Track): List<ContentShelf> {
+    suspend fun catalogArtistPage(artist: Track): CatalogArtistPage {
         val catalogId = if (artist.resourceType == LibraryCollection.Artists.resourceType) {
             val libraryId = checkNotNull(artist.resourceId) { "Library artist ID is missing" }
             require(libraryId.matches(Regex("[A-Za-z0-9._-]+"))) { "Library artist ID is invalid" }
             val linked = requestRoot("/v1/me/library/artists/$libraryId/catalog", needsUserToken = true)
             linked.optJSONArray("data")?.optJSONObject(0)?.optString("id")
         } else artist.catalogId
-        if (catalogId == null || !catalogId.matches(Regex("[0-9]+"))) return emptyList()
+        if (catalogId == null || !catalogId.matches(Regex("[0-9]+"))) return CatalogArtistPage()
         val storefront = effectiveStorefront()
         val root = requestRoot(
             "/v1/catalog/$storefront/artists/$catalogId?views=top-songs,full-albums,singles&limit[views]=20",
             needsUserToken = false,
         )
-        return withContext(parseDispatcher) { parseArtistViews(root, catalogId) }
+        return withContext(parseDispatcher) { parseArtistPage(root, catalogId) }
+    }
+
+    internal fun parseArtistPage(root: JSONObject, catalogId: String): CatalogArtistPage {
+        val resource = root.optJSONArray("data")?.optJSONObject(0) ?: return CatalogArtistPage()
+        val hero = (resource.optJSONObject("attributes") ?: JSONObject())
+            .toTrack(resource.optString("id", catalogId), CatalogKind.Artist, resourceType = "artists")
+        val shelves = parseArtistViews(root, catalogId)
+        val topSongs = shelves.firstOrNull { it.id.endsWith("-top-songs") }?.items.orEmpty()
+        return CatalogArtistPage(hero, topSongs, shelves.filterNot { it.id.endsWith("-top-songs") })
     }
 
     /** The catalog artist of a song or album, so the player and album pages can open it. */
@@ -407,10 +416,38 @@ class AppleMusicApi(
         if (term.isBlank()) return emptyList()
         val sf = effectiveStorefront()
         val encoded = URLEncoder.encode(term.trim(), Charsets.UTF_8.name())
+        if (BuildConfig.FLYME_AUTO) {
+            // The car page groups results like Apple Music: top results, songs, artists, albums...
+            val root = requestRoot(
+                "/v1/catalog/$sf/search?term=$encoded&types=songs,artists,albums,playlists,stations" +
+                    "&limit=15&with=topResults",
+                needsUserToken = false,
+            )
+            return withContext(parseDispatcher) { parseGroupedSearch(root) }
+        }
         return request(
             path = "/v1/catalog/$sf/search?term=$encoded&types=songs,albums,playlists,music-videos,stations&limit=15",
             needsUserToken = false,
         )
+    }
+
+    /** Top results first, then each type in Apple Music's order; an item appears once. */
+    internal fun parseGroupedSearch(root: JSONObject): List<Track> {
+        val results = root.optJSONObject("results") ?: return emptyList()
+        val output = LinkedHashMap<String, Track>()
+        for (key in listOf("top", "songs", "artists", "albums", "playlists", "stations")) {
+            val data = results.optJSONObject(key)?.optJSONArray("data") ?: continue
+            for (index in 0 until data.length()) {
+                val item = data.optJSONObject(index) ?: continue
+                val type = item.optString("type")
+                val kind = (if (type == "artists") CatalogKind.Artist else catalogKind(type)) ?: continue
+                val attributes = item.optJSONObject("attributes") ?: continue
+                val id = item.optString("id").takeIf { it.isNotBlank() } ?: continue
+                val track = attributes.toTrack(id, kind, resourceType = type) ?: continue
+                output.putIfAbsent(track.id, track)
+            }
+        }
+        return output.values.toList()
     }
 
     /** Search only playable songs for cross-catalog resolution. */
@@ -828,6 +865,13 @@ class AppleMusicApi(
         const val TAG = "AmAtvAppleMusic"
     }
 }
+
+/** Apple Music's own artist page: the artist (for its artwork), top songs and release shelves. */
+data class CatalogArtistPage(
+    val artist: Track? = null,
+    val topSongs: List<Track> = emptyList(),
+    val shelves: List<ContentShelf> = emptyList(),
+)
 
 internal fun parseUserStorefrontId(root: JSONObject): String? = root.optJSONArray("data")
     ?.optJSONObject(0)

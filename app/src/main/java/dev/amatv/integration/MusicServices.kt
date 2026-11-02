@@ -227,7 +227,7 @@ class MusicServices(context: Context) : RecommendationProvider {
         api.stationNextTracks(stationId)
     suspend fun collectionTracks(collection: Track): List<Track> = api.collectionTracks(collection)
 
-    suspend fun catalogArtistShelves(artist: Track): List<ContentShelf> = api.catalogArtistShelves(artist)
+    suspend fun catalogArtistPage(artist: Track): CatalogArtistPage = api.catalogArtistPage(artist)
 
     suspend fun catalogArtistOf(item: Track): Track? = api.catalogArtistOf(item)
 

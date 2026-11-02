@@ -263,6 +263,12 @@ internal fun classifyPlaybackFailure(type: Int?, code: Int?, componentCode: Int?
     return PlaybackFailureKind.Unexpected
 }
 
+/**
+ * Apple's webPlayback answers 3082 for an explicit track while the Apple ID restricts content
+ * (music.apple.com shows "Content Restricted" for the same song); the official app is not affected.
+ */
+internal fun isContentRestrictedFailure(code: Int?): Boolean = code == 3082
+
 /** The callback's end position is authoritative even if the stopped controller has reset to zero. */
 internal fun isCompletedPlaybackItem(
     eventGeneration: Long,

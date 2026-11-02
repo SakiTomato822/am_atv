@@ -1944,7 +1944,7 @@ fun AmAtvApp() {
                         onOpenTrack = { item, q -> playTrack(item, contextQueue = q) },
                         loadCollection = services::collectionTracks,
                         loadArtistAlbums = services::libraryArtistAlbumsPage,
-                        loadArtistCatalog = services::catalogArtistShelves,
+                        loadArtistCatalog = services::catalogArtistPage,
                         onPlayCollection = ::playCollection,
                         lyricOffsetMs = lyricOffsetMs,
                         onLyricOffsetChange = { offset: Long ->
@@ -2124,7 +2124,7 @@ private fun BrowseShell(
     onOpenTrack: (Track, List<Track>) -> Unit,
     loadCollection: suspend (Track) -> List<Track>,
     loadArtistAlbums: suspend (Track, String?) -> LibraryPage,
-    loadArtistCatalog: suspend (Track) -> List<ContentShelf> = { emptyList() },
+    loadArtistCatalog: suspend (Track) -> dev.amatv.integration.CatalogArtistPage = { dev.amatv.integration.CatalogArtistPage() },
     onPlayCollection: (Track, List<Track>, Int, Boolean) -> Unit,
     detailRequest: Track? = null,
     onDetailRequestHandled: () -> Unit = {},

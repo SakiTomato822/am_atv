@@ -1939,13 +1939,13 @@ private fun FlymePlayerStage(
                     val album = track.album.takeIf { it.isNotBlank() && it != track.artist }
                     if (track.artist.isNotBlank()) {
                         Text(track.artist, style = linkStyle, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false).automationId("player-artist")
+                            modifier = Modifier.weight(1f, fill = false).alignByBaseline().automationId("player-artist")
                                 .then(onOpenArtist?.let { Modifier.clickable(onClick = it) } ?: Modifier))
                     }
                     if (album != null) {
-                        if (track.artist.isNotBlank()) Text(" · ", style = linkStyle, maxLines = 1)
+                        if (track.artist.isNotBlank()) Text(" · ", style = linkStyle, maxLines = 1, modifier = Modifier.alignByBaseline())
                         Text(album, style = linkStyle, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false).automationId("player-album")
+                            modifier = Modifier.weight(1f, fill = false).alignByBaseline().automationId("player-album")
                                 .then(onOpenAlbum?.let { Modifier.clickable(onClick = it) } ?: Modifier))
                     }
                 }

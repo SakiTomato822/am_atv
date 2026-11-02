@@ -104,4 +104,11 @@
     <string name="artist_singles">单曲与 EP</string>
     <string name="queue_now_playing">正在播放</string>
     <string name="queue_up_next">接下来</string>
+    <string name="browse_search_top">最佳结果</string>
+    <string name="browse_search_songs">歌曲</string>
+    <string name="browse_search_artists">艺人</string>
+    <string name="browse_search_albums">专辑</string>
+    <string name="browse_search_playlists">播放列表</string>
+    <string name="browse_search_stations">电台</string>
+    <string name="browse_search_clear">清除</string>
 </resources>

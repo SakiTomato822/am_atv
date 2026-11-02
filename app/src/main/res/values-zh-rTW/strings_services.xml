@@ -41,6 +41,7 @@
     <string name="services_playback_auth_required">Apple Music 授權需要更新，請重新登入。</string>
     <string name="services_apple_connection_failed">暫時無法連線至 Apple Music，請重試。</string>
     <string name="services_playback_failed">無法完成播放，請重試。</string>
+    <string name="services_playback_content_restricted">內容受限制：你的 Apple 帳號不允許在第三方播放器播放露骨內容。請檢查網頁版 Apple Music 的「分級保護控制」、帳號年齡或「螢幕使用時間」。</string>
     <string name="services_sdk_unavailable">此版本無法使用 Apple Music 播放功能。</string>
     <string name="services_auth_failed">Apple Music 登入失敗：%1$s</string>
     <string name="services_catalog_id_missing">這首歌曲沒有 Apple Music 目錄識別碼。</string>

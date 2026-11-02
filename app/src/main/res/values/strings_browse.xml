@@ -105,4 +105,11 @@
     <string name="artist_singles">Singles &amp; EPs</string>
     <string name="queue_now_playing">Now Playing</string>
     <string name="queue_up_next">Up Next</string>
+    <string name="browse_search_top">Top Result</string>
+    <string name="browse_search_songs">Songs</string>
+    <string name="browse_search_artists">Artists</string>
+    <string name="browse_search_albums">Albums</string>
+    <string name="browse_search_playlists">Playlists</string>
+    <string name="browse_search_stations">Stations</string>
+    <string name="browse_search_clear">Clear</string>
 </resources>

@@ -2,6 +2,7 @@ package dev.amatv.ui
 
 import dev.amatv.integration.LibraryPage
 import dev.amatv.integration.mergeLibraryPage
+import dev.amatv.integration.CatalogArtistPage
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.CatalogOpenAction
 import dev.amatv.model.Track
@@ -23,15 +24,17 @@ internal data class LibraryArtistState(
     val nextPage: String? = null,
     val loading: Boolean = false,
     val failed: Boolean = false,
-    /** Apple Music's own artist page below the saved albums; empty if the artist has no catalog match. */
-    val catalogShelves: List<ContentShelf> = emptyList(),
+    /** Apple Music's own artist page; empty if the artist has no catalog match. */
+    val catalog: CatalogArtistPage = CatalogArtistPage(),
     val catalogLoading: Boolean = false,
-)
+) {
+    val catalogShelves: List<ContentShelf> get() = catalog.shelves
+}
 
 /** A late artist request may not reopen a dismissed page or replace a different artist. */
 internal class LibraryArtistBrowser(
     private val scope: CoroutineScope,
-    private val loadCatalog: suspend (Track) -> List<ContentShelf> = { emptyList() },
+    private val loadCatalog: suspend (Track) -> CatalogArtistPage = { CatalogArtistPage() },
     private val load: suspend (Track, String?) -> LibraryPage,
 ) {
     private val mutableState = MutableStateFlow(LibraryArtistState())
@@ -48,16 +51,16 @@ internal class LibraryArtistBrowser(
         if (artist.isLibraryArtist) request(null)
         val requestGeneration = generation
         catalogJob = scope.launch {
-            val shelves = try {
+            val page = try {
                 loadCatalog(artist)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 // The saved albums still work; the catalog part simply stays absent.
-                emptyList()
+                CatalogArtistPage()
             }
             if (requestGeneration == generation) {
-                mutableState.value = mutableState.value.copy(catalogShelves = shelves, catalogLoading = false)
+                mutableState.value = mutableState.value.copy(catalog = page, catalogLoading = false)
             }
         }
     }

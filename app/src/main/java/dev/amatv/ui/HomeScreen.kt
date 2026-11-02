@@ -222,7 +222,17 @@ fun HomeScreen(
                 }
             }
 
-            Destination.Search -> {
+            Destination.Search -> if (dev.amatv.BuildConfig.FLYME_AUTO) {
+                FlymeSearchScreen(
+                    tracks = tracks,
+                    recentTracks = recentTracks,
+                    loading = searchLoading,
+                    setupMessage = setupMessage,
+                    onSearch = onSearch,
+                    onOpenTrack = onOpenTrack,
+                    firstFocus = firstContentFocusRequester,
+                )
+            } else {
                 SearchScreen(
                     tracks = tracks,
                     recentTracks = recentTracks,

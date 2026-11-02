@@ -1,5 +1,6 @@
 package dev.amatv.ui
 
+import dev.amatv.integration.CatalogArtistPage
 import dev.amatv.integration.LibraryPage
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.ContentShelf
@@ -57,7 +58,10 @@ class LibraryArtistBrowserTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         var pageCalls = 0
         val shelf = ContentShelf("artist-1-top-songs", "Top Songs", listOf(album("song")))
-        val browser = LibraryArtistBrowser(scope, { listOf(shelf) }) { _, _ -> pageCalls++; error("no library pages") }
+        val browser = LibraryArtistBrowser(scope, { CatalogArtistPage(shelves = listOf(shelf)) }) { _, _ ->
+            pageCalls++
+            error("no library pages")
+        }
         browser.open(artist("1").copy(resourceId = null, resourceType = "artists", catalogId = "1"))
         assertEquals(0, pageCalls)
         assertFalse(browser.state.value.failed)
