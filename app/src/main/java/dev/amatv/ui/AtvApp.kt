@@ -206,6 +206,7 @@ fun AmAtvApp() {
     var networkRetryCount by remember(track.id) { mutableIntStateOf(0) }
     var connectionState by remember { mutableStateOf(services.connectionState) }
     var serviceMessage by remember { mutableStateOf<String?>(null) }
+    var lastPlaybackNotice by remember { mutableStateOf<String?>(null) }
     // An album or artist to open in the browse shell, requested from the player.
     var browseDetailRequest by remember { mutableStateOf<Track?>(null) }
     var reloadNonce by remember { mutableIntStateOf(0) }
@@ -1031,6 +1032,10 @@ fun AmAtvApp() {
             (!snapshot.hasPlayerCurrentTrack || snapshot.currentTrack?.catalogId != pendingCatalogId)
         ) return
         publishSystemSnapshot(snapshot)
+        if (snapshot.notice != lastPlaybackNotice) {
+            snapshot.notice?.let { serviceMessage = it }
+            lastPlaybackNotice = snapshot.notice
+        }
         if (!snapshot.isPrepared) return
         playbackPrepared = true
         pendingRequestedSongCatalogId = null

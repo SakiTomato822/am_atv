@@ -73,4 +73,16 @@ class WebStationSnapshotTest {
         assertEquals(PlaybackFailureKind.TrackUnavailable, webStationFailureKind("GEO_BLOCK"))
         assertEquals(PlaybackFailureKind.Unexpected, webStationFailureKind("MEDIA_LICENSE"))
     }
+
+    @Test fun previewPlaybackCarriesANoticeButNoError() {
+        val json = JSONObject("""{"state":"playing","playing":true,"preview":true,"drm":false,
+            "item":{"type":"song","id":"1","catalogId":"1","title":"Song","durationMs":200000}}""")
+        val result = webStationSnapshot(json, station, generation = WEB_STATION_GENERATION_BASE + 3,
+            prepared = true, failure = null, failureMessage = { "failed:$it" }, nowElapsedMs = 0L,
+            previewNotice = { "preview-only" })
+        assertEquals("preview-only", result.notice)
+        assertNull(result.errorMessage)
+        assertEquals(false, result.drmPlaybackSupported)
+        assertNull(snapshot("""{"state":"playing","playing":true}""").notice)
+    }
 }

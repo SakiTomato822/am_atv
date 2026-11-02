@@ -258,7 +258,8 @@ class GeckoStationEngine(context: Context) : StationPlaybackEngine {
             "ready" -> {
                 pageReady = true
                 val authorized = data.optBoolean("authorized")
-                Log.i(TAG, "Station player ready authorized=$authorized nativeHlsHidden=${data.optBoolean("nativeHls")}")
+                Log.i(TAG, "Station player ready authorized=$authorized nativeHlsHidden=${data.optBoolean("nativeHls")} " +
+                    "widevine=${data.optBoolean("drm", true)} previewOnly=${data.optBoolean("previewOnly")}")
                 val request = pending ?: return
                 pending = null
                 if (authorized) sendPrepare(request) else fail(request, PlaybackFailureKind.Authorization)
@@ -269,7 +270,8 @@ class GeckoStationEngine(context: Context) : StationPlaybackEngine {
                 val snapshot = emit(request, data, data.optBoolean("prepared"))
                 if (snapshot.isPlaying) requestFocus()
                 val transition = "${data.optString("state")} prepared=${snapshot.isPrepared} " +
-                    "playing=${snapshot.isPlaying} live=${snapshot.isLiveStream} item=${snapshot.hasPlayerCurrentTrack}"
+                    "playing=${snapshot.isPlaying} live=${snapshot.isLiveStream} item=${snapshot.hasPlayerCurrentTrack} " +
+                    "preview=${data.optBoolean("preview")} widevine=${data.optBoolean("drm", true)}"
                 if (transition != lastTransition) Log.i(TAG, "Station state $transition")
                 lastTransition = transition
             }

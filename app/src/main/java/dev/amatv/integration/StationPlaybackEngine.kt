@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.SystemClock
 import android.util.Log
 import dev.amatv.BuildConfig
+import dev.amatv.R
+import dev.amatv.i18n.AppText
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
 import org.json.JSONObject
@@ -55,6 +57,7 @@ internal fun webStationSnapshot(
     failure: PlaybackFailureKind?,
     failureMessage: (PlaybackFailureKind) -> String,
     nowElapsedMs: Long = SystemClock.elapsedRealtime(),
+    previewNotice: () -> String = { AppText.text(R.string.services_station_preview_only) },
 ): PlaybackSnapshot {
     val item = state.optJSONObject("item")
     val live = state.optBoolean("live") || item?.optBoolean("live") == true
@@ -81,6 +84,7 @@ internal fun webStationSnapshot(
         canSetAutoplay = false,
         drmPlaybackSupported = state.optBoolean("drm", true),
         errorMessage = failure?.let(failureMessage),
+        notice = if (failure == null && state.optBoolean("preview")) previewNotice() else null,
         capturedAtElapsedRealtimeMs = nowElapsedMs,
         isEnded = stateName == "completed" || stateName == "ended",
         requestGeneration = generation,

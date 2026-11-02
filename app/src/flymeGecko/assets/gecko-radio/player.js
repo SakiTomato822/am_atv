@@ -5,6 +5,28 @@ let radioMusic = null;
 let radioGeneration = 0;
 let radioPrepared = false;
 let radioLastState = "";
+// Without a Widevine CDM MusicKit JS silently falls back to 30-second previews,
+// which start mid-song. Report both so the app can say why.
+let radioDrm = true;
+
+async function radioWidevine() {
+  if (!navigator.requestMediaKeySystemAccess) return false;
+  try {
+    const access = await navigator.requestMediaKeySystemAccess("com.widevine.alpha", [{
+      initDataTypes: ["cenc"],
+      audioCapabilities: [{ contentType: 'audio/mp4; codecs="mp4a.40.2"' }],
+    }]);
+    await access.createMediaKeys();
+    return true;
+  } catch (_) { return false; }
+}
+
+function radioPreview(item) {
+  if (radioMusic.previewOnly === true) return true;
+  if (!item || item.live || item.type !== "song") return false;
+  const actual = Number(radioMusic.currentPlaybackDuration) || 0;
+  return item.durationMs > 60000 && actual > 0 && actual <= 35;
+}
 
 // GeckoView on Android plays HLS natively through its bundled ExoPlayer, which
 // has no EME. MusicKit then picks <audio src=m3u8> for live radio and stalls.
@@ -78,6 +100,7 @@ function radioReport(force) {
     generation: radioGeneration, prepared: radioPrepared, state: radioStateName(),
     playing: radioMusic.isPlaying === true, live: !!(item && item.live), item,
     positionMs: Math.round((Number(radioMusic.currentPlaybackTime) || 0) * 1000),
+    drm: radioDrm, preview: radioPreview(item),
   };
   const key = JSON.stringify({ ...state, positionMs: Math.floor(state.positionMs / 1000) });
   if (!force && key === radioLastState) return;
@@ -145,7 +168,11 @@ document.addEventListener("musickitloaded", async () => {
       if (radioGeneration) radioSend("error", { generation: radioGeneration, reason: radioReason(error) });
     });
     setInterval(() => radioReport(false), 1000);
-    radioSend("ready", { authorized: radioMusic.isAuthorized === true, nativeHls: radioNativeHls });
+    radioDrm = await radioWidevine();
+    radioSend("ready", {
+      authorized: radioMusic.isAuthorized === true, nativeHls: radioNativeHls,
+      drm: radioDrm, previewOnly: radioMusic.previewOnly === true,
+    });
   } catch (error) {
     radioSend("fatal", { reason: radioReason(error) });
   } finally {

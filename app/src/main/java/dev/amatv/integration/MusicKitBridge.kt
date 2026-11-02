@@ -53,6 +53,8 @@ data class PlaybackSnapshot(
     /** Null when the backing player does not expose its DRM capability. */
     val drmPlaybackSupported: Boolean? = null,
     val errorMessage: String? = null,
+    /** A non-fatal explanation to show once, e.g. a station playing previews only. */
+    val notice: String? = null,
     val capturedAtElapsedRealtimeMs: Long = SystemClock.elapsedRealtime(),
     val isEnded: Boolean = false,
     val requestGeneration: Long = 0L,
