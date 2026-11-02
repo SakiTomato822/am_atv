@@ -51,4 +51,5 @@
     <string name="player_artwork_loaded">Loaded</string>
     <string name="player_loading">Loading</string>
     <string name="player_artwork_description">%1$s artwork</string>
+    <string name="player_open_unavailable">Couldn\u2019t open this page.</string>
 </resources>

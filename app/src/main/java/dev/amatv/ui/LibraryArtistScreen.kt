@@ -45,8 +45,11 @@ internal fun LibraryArtistScreen(
         }
         Spacer(Modifier.height(16.dp))
         HomeScreen(destination = Destination.Browse, currentTrack = currentTrack,
-            homeShelves = listOf(ContentShelf(shelfId, libraryTitle, state.albums)) + state.catalogShelves,
-            homeLoading = state.loading && state.albums.isEmpty() && state.catalogShelves.isEmpty(),
+            homeShelves = if (artist.isLibraryArtist) {
+                listOf(ContentShelf(shelfId, libraryTitle, state.albums)) + state.catalogShelves
+            } else state.catalogShelves,
+            homeLoading = state.catalogShelves.isEmpty() &&
+                (if (artist.isLibraryArtist) state.loading && state.albums.isEmpty() else state.catalogLoading),
             homeShelfPagination = mapOf(shelfId to LibraryShelfPagination(
                 hasMore = state.nextPage != null, loading = state.loading, failed = state.failed)),
             onLoadMoreShelf = { if (state.failed) onRetry() else onLoadMore() },

@@ -1,5 +1,6 @@
 package dev.amatv.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -46,6 +47,7 @@ internal fun CollectionScreen(
     onPlay: (index: Int, shuffle: Boolean) -> Unit,
     onBack: () -> Unit = {},
     onFullAlbum: (Boolean) -> Unit = {},
+    onOpenArtist: (() -> Unit)? = null,
 ) {
     val collection = state.collection ?: return
     val listState = rememberLazyListState()
@@ -100,7 +102,11 @@ internal fun CollectionScreen(
                 Text(
                     collection.artist, color = Color(0xFFFF788B), fontSize = 16.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                        .automationId("collection-artist")
+                        .then(if (onOpenArtist != null && collection.catalogKind == CatalogKind.Album) {
+                            Modifier.clickable(onClick = onOpenArtist)
+                        } else Modifier),
                 )
                 Text(
                     when {

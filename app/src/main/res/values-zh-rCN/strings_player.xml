@@ -49,4 +49,5 @@
     <string name="player_artwork_loaded">已加载</string>
     <string name="player_loading">加载中</string>
     <string name="player_artwork_description">%1$s 封面</string>
+    <string name="player_open_unavailable">无法打开此页面。</string>
 </resources>

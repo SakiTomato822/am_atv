@@ -290,17 +290,41 @@ class AppleMusicApi(
      * artist page is not limited to what the user happened to save.
      */
     suspend fun catalogArtistShelves(artist: Track): List<ContentShelf> {
-        val libraryId = checkNotNull(artist.resourceId) { "Library artist ID is missing" }
-        require(libraryId.matches(Regex("[A-Za-z0-9._-]+"))) { "Library artist ID is invalid" }
-        val linked = requestRoot("/v1/me/library/artists/$libraryId/catalog", needsUserToken = true)
-        val catalogId = linked.optJSONArray("data")?.optJSONObject(0)?.optString("id")
-            ?.takeIf { it.matches(Regex("[0-9]+")) } ?: return emptyList()
+        val catalogId = if (artist.resourceType == LibraryCollection.Artists.resourceType) {
+            val libraryId = checkNotNull(artist.resourceId) { "Library artist ID is missing" }
+            require(libraryId.matches(Regex("[A-Za-z0-9._-]+"))) { "Library artist ID is invalid" }
+            val linked = requestRoot("/v1/me/library/artists/$libraryId/catalog", needsUserToken = true)
+            linked.optJSONArray("data")?.optJSONObject(0)?.optString("id")
+        } else artist.catalogId
+        if (catalogId == null || !catalogId.matches(Regex("[0-9]+"))) return emptyList()
         val storefront = effectiveStorefront()
         val root = requestRoot(
             "/v1/catalog/$storefront/artists/$catalogId?views=top-songs,full-albums,singles&limit[views]=20",
             needsUserToken = false,
         )
         return withContext(parseDispatcher) { parseArtistViews(root, catalogId) }
+    }
+
+    /** The catalog artist of a song or album, so the player and album pages can open it. */
+    suspend fun catalogArtistOf(item: Track): Track? = catalogRelation(item, "artists", CatalogKind.Artist)
+
+    /** The catalog album a song belongs to. */
+    suspend fun catalogAlbumOf(song: Track): Track? =
+        if (song.catalogKind == CatalogKind.Song) catalogRelation(song, "albums", CatalogKind.Album) else null
+
+    private suspend fun catalogRelation(item: Track, relation: String, kind: CatalogKind): Track? {
+        val type = when (item.catalogKind) {
+            CatalogKind.Song -> "songs"
+            CatalogKind.Album -> "albums"
+            else -> return null
+        }
+        val id = item.catalogId?.takeIf { it.matches(Regex("[0-9]+")) } ?: return null
+        val root = requestRoot("/v1/catalog/${effectiveStorefront()}/$type/$id/$relation", needsUserToken = false)
+        return withContext(parseDispatcher) {
+            val resource = root.optJSONArray("data")?.optJSONObject(0) ?: return@withContext null
+            (resource.optJSONObject("attributes") ?: JSONObject())
+                .toTrack(resource.getString("id"), kind, resourceType = relation)
+        }
     }
 
     internal fun parseArtistViews(root: JSONObject, catalogId: String): List<ContentShelf> {

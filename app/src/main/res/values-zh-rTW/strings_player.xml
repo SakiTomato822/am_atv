@@ -49,4 +49,5 @@
     <string name="player_artwork_loaded">已載入</string>
     <string name="player_loading">載入中</string>
     <string name="player_artwork_description">%1$s 封面</string>
+    <string name="player_open_unavailable">無法開啟此頁面。</string>
 </resources>

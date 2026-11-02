@@ -229,6 +229,10 @@ class MusicServices(context: Context) : RecommendationProvider {
 
     suspend fun catalogArtistShelves(artist: Track): List<ContentShelf> = api.catalogArtistShelves(artist)
 
+    suspend fun catalogArtistOf(item: Track): Track? = api.catalogArtistOf(item)
+
+    suspend fun catalogAlbumOf(song: Track): Track? = api.catalogAlbumOf(song)
+
     suspend fun lyricsFor(
         track: Track,
         localization: LyricsLocalizationRequest = LyricsLocalizationRequest.Disabled,

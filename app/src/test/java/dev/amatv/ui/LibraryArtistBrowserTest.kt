@@ -2,13 +2,15 @@ package dev.amatv.ui
 
 import dev.amatv.integration.LibraryPage
 import dev.amatv.model.CatalogKind
+import dev.amatv.model.ContentShelf
 import dev.amatv.model.Track
 import kotlinx.coroutines.*
 import org.junit.Assert.*
 import org.junit.Test
 
 class LibraryArtistBrowserTest {
-    private fun artist(id: String) = Track(id, id, "", "", 0, emptyList(), emptyList(), catalogKind = CatalogKind.Artist)
+    private fun artist(id: String) = Track(id, id, "", "", 0, emptyList(), emptyList(), catalogKind = CatalogKind.Artist,
+        resourceId = id, resourceType = "library-artists")
     private fun album(id: String) = artist(id).copy(catalogKind = CatalogKind.Album, resourceId = id, resourceType = "library-albums")
 
     @Test fun staleArtistResultsCannotReplaceNewSelectionOrReopenClosedDetail() = runBlocking {
@@ -48,6 +50,19 @@ class LibraryArtistBrowserTest {
         assertFalse(browser.state.value.failed)
         assertEquals(listOf("one", "two"), browser.state.value.albums.map { it.id })
         assertNull(browser.state.value.nextPage)
+        scope.cancel()
+    }
+
+    @Test fun catalogArtistShowsOnlyAppleMusicShelves() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        var pageCalls = 0
+        val shelf = ContentShelf("artist-1-top-songs", "Top Songs", listOf(album("song")))
+        val browser = LibraryArtistBrowser(scope, { listOf(shelf) }) { _, _ -> pageCalls++; error("no library pages") }
+        browser.open(artist("1").copy(resourceId = null, resourceType = "artists", catalogId = "1"))
+        assertEquals(0, pageCalls)
+        assertFalse(browser.state.value.failed)
+        assertEquals(listOf(shelf), browser.state.value.catalogShelves)
+        assertFalse(browser.state.value.catalogLoading)
         scope.cancel()
     }
 }

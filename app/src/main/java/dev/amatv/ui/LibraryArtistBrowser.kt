@@ -13,6 +13,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+/** Saved artists also list the albums in the library; catalog artists show Apple Music's page only. */
+internal val Track.isLibraryArtist: Boolean
+    get() = resourceType == dev.amatv.integration.LibraryCollection.Artists.resourceType
+
 internal data class LibraryArtistState(
     val artist: Track? = null,
     val albums: List<Track> = emptyList(),
@@ -41,7 +45,7 @@ internal class LibraryArtistBrowser(
         require(artist.openAction == CatalogOpenAction.OpenArtist)
         close()
         mutableState.value = LibraryArtistState(artist = artist, catalogLoading = true)
-        request(null)
+        if (artist.isLibraryArtist) request(null)
         val requestGeneration = generation
         catalogJob = scope.launch {
             val shelves = try {

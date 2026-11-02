@@ -242,6 +242,8 @@ fun PlayerScreen(
     onLyricTranslationLanguageChange: (String) -> Unit = {},
     onLyricPronunciationLanguageChange: (String) -> Unit = {},
     onBack: () -> Unit = {},
+    onOpenArtist: (() -> Unit)? = null,
+    onOpenAlbum: (() -> Unit)? = null,
     lyricTextSize: LyricTextSize = LyricTextSize.Standard,
     onLyricTextSizeChange: (LyricTextSize) -> Unit = {},
 ) {
@@ -689,6 +691,8 @@ fun PlayerScreen(
                 activateControl(control)
             },
             onSeekTo = { target -> if (isActiveScreen) onSeekBy(target - playbackPosition.value) },
+            onOpenArtist = onOpenArtist?.takeIf { isActiveScreen && track.catalogKind == CatalogKind.Song },
+            onOpenAlbum = onOpenAlbum?.takeIf { isActiveScreen && track.catalogKind == CatalogKind.Song },
             queueContent = {
                 CompositionLocalProvider(LocalFocusFrameVisibility provides chromeFocusVisibility) {
                     QueuePanel(
@@ -1821,6 +1825,8 @@ private fun FlymePlayerStage(
     onControl: (PlayerControl) -> Unit,
     onSeekTo: (Long) -> Unit,
     queueContent: @Composable () -> Unit,
+    onOpenArtist: (() -> Unit)? = null,
+    onOpenAlbum: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val artScale = animateFloatAsState(
@@ -1926,10 +1932,23 @@ private fun FlymePlayerStage(
                     Text(title, fontSize = 23.sp, lineHeight = 29.sp, fontWeight = FontWeight.SemiBold,
                         color = Color.White.copy(alpha = 0.96f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                Text(listOf(track.artist, track.album).filter { it.isNotBlank() }.distinct().joinToString(" · "),
-                    fontSize = 16.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium,
-                    color = Color.White.copy(alpha = 0.62f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 2.dp))
+                // Artist and album are links to their pages, as in Apple Music.
+                Row(Modifier.padding(top = 2.dp)) {
+                    val linkStyle = TextStyle(fontSize = 16.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.62f))
+                    val album = track.album.takeIf { it.isNotBlank() && it != track.artist }
+                    if (track.artist.isNotBlank()) {
+                        Text(track.artist, style = linkStyle, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false).automationId("player-artist")
+                                .then(onOpenArtist?.let { Modifier.clickable(onClick = it) } ?: Modifier))
+                    }
+                    if (album != null) {
+                        if (track.artist.isNotBlank()) Text(" · ", style = linkStyle, maxLines = 1)
+                        Text(album, style = linkStyle, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false).automationId("player-album")
+                                .then(onOpenAlbum?.let { Modifier.clickable(onClick = it) } ?: Modifier))
+                    }
+                }
                 Spacer(Modifier.height(18.dp))
                 FlymeSeekBar(
                     positionState = positionState,

@@ -206,6 +206,8 @@ fun AmAtvApp() {
     var networkRetryCount by remember(track.id) { mutableIntStateOf(0) }
     var connectionState by remember { mutableStateOf(services.connectionState) }
     var serviceMessage by remember { mutableStateOf<String?>(null) }
+    // An album or artist to open in the browse shell, requested from the player.
+    var browseDetailRequest by remember { mutableStateOf<Track?>(null) }
     var reloadNonce by remember { mutableIntStateOf(0) }
     var shelvesLanguageTag by remember { mutableStateOf(contentLanguageTag) }
     var shelvesByDestination by remember {
@@ -838,6 +840,20 @@ fun AmAtvApp() {
             ),
         )
         destination = Destination.NowPlaying
+    }
+
+    /** Leaves Now Playing for the song's artist or album page once Apple Music names it. */
+    fun openFromPlayer(lookup: suspend (Track) -> Track?) {
+        val song = track
+        scope.launch {
+            val target = cancellableResult { lookup(song) }.getOrNull()
+            if (target == null) {
+                serviceMessage = AppText.text(R.string.player_open_unavailable)
+                return@launch
+            }
+            browseDetailRequest = target
+            destination = previousDestination
+        }
     }
 
     fun playCollection(collection: Track, tracks: List<Track>, index: Int, shuffle: Boolean) {
@@ -1832,6 +1848,9 @@ fun AmAtvApp() {
                         LocalFocusFrameVisibility provides browseVisibility,
                     ) {
                     BrowseShell(
+                        detailRequest = browseDetailRequest,
+                        onDetailRequestHandled = { browseDetailRequest = null },
+                        loadArtistOf = services::catalogArtistOf,
                         destination = activeBrowseDestination,
                         isBrowseVisible = !isNowPlaying,
                         currentTrack = track,
@@ -2012,6 +2031,8 @@ fun AmAtvApp() {
                         stationName = stationName.takeIf { !isLiveStream && track.catalogKind != CatalogKind.Station },
                         onSelectTrack = (::selectQueueTrack),
                         onBack = { destination = previousDestination },
+                        onOpenArtist = { openFromPlayer(services::catalogArtistOf) },
+                        onOpenAlbum = { openFromPlayer(services::catalogAlbumOf) },
                         lyricTextSize = lyricTextSize,
                         onLyricTextSizeChange = {
                             lyricTextSize = it
@@ -2105,6 +2126,9 @@ private fun BrowseShell(
     loadArtistAlbums: suspend (Track, String?) -> LibraryPage,
     loadArtistCatalog: suspend (Track) -> List<ContentShelf> = { emptyList() },
     onPlayCollection: (Track, List<Track>, Int, Boolean) -> Unit,
+    detailRequest: Track? = null,
+    onDetailRequestHandled: () -> Unit = {},
+    loadArtistOf: suspend (Track) -> Track? = { null },
     lyricOffsetMs: Long = 0L,
     onLyricOffsetChange: (Long) -> Unit = {},
     autoplaySource: AutoplaySource = AutoplaySource.AppleMusic,
@@ -2144,6 +2168,23 @@ private fun BrowseShell(
     val detailFocus = remember(destination) { ContentFocusEntry() }
     val detailFirstFocus = remember(destination) { FocusRequester() }
     DisposableEffect(browser) { onDispose { browser.close() } }
+    LaunchedEffect(detailRequest, browser, artistBrowser) {
+        val request = detailRequest ?: return@LaunchedEffect
+        when (request.openAction) {
+            CatalogOpenAction.OpenArtist -> { browser.close(); artistBrowser.open(request) }
+            CatalogOpenAction.Collection -> browser.open(request)
+            else -> Unit
+        }
+        onDetailRequestHandled()
+    }
+    val currentArtistOf by rememberUpdatedState(loadArtistOf)
+    fun openArtistOf(album: Track) {
+        scope.launch {
+            val artist = runCatching { currentArtistOf(album) }.getOrNull() ?: return@launch
+            browser.close()
+            artistBrowser.open(artist)
+        }
+    }
     DisposableEffect(artistBrowser) { onDispose { artistBrowser.close() } }
     val firstContentFocus = remember(destination) { FocusRequester() }
     val contentFocusEntry = remember(destination) { ContentFocusEntry() }
@@ -2329,6 +2370,7 @@ private fun BrowseShell(
                                     collectionState.tracks, index, shuffle)
                             },
                             onFullAlbum = browser::setFullAlbum,
+                            onOpenArtist = { openArtistOf(collection) },
                         )
                     }
                 }
