@@ -113,4 +113,13 @@
     <string name="browse_search_clear">清除</string>
     <string name="browse_search_history">最近搜索</string>
     <string name="browse_search_history_clear">清除</string>
+    <string name="artist_latest_release">最新发行</string>
+    <string name="artist_playlists">艺人歌单</string>
+    <string name="artist_live_albums">现场专辑</string>
+    <string name="artist_compilations">合辑</string>
+    <string name="artist_appears_on">参与作品</string>
+    <string name="artist_similar">相似艺人</string>
+    <string name="player_favorite_add">添加到喜好歌曲</string>
+    <string name="player_favorite_remove">从喜好歌曲中移除</string>
+    <string name="player_favorite_failed">无法更新喜好歌曲。</string>
 </resources>

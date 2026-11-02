@@ -62,6 +62,8 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Translate
@@ -244,6 +246,9 @@ fun PlayerScreen(
     onBack: () -> Unit = {},
     onOpenArtist: (() -> Unit)? = null,
     onOpenAlbum: (() -> Unit)? = null,
+    /** Favorite Songs state of the current song; null hides the star. */
+    isFavorite: Boolean? = null,
+    onToggleFavorite: () -> Unit = {},
     lyricTextSize: LyricTextSize = LyricTextSize.Standard,
     onLyricTextSizeChange: (LyricTextSize) -> Unit = {},
 ) {
@@ -693,6 +698,8 @@ fun PlayerScreen(
             onSeekTo = { target -> if (isActiveScreen) onSeekBy(target - playbackPosition.value) },
             onOpenArtist = onOpenArtist?.takeIf { isActiveScreen && track.catalogKind == CatalogKind.Song },
             onOpenAlbum = onOpenAlbum?.takeIf { isActiveScreen && track.catalogKind == CatalogKind.Song },
+            isFavorite = isFavorite.takeIf { track.catalogKind == CatalogKind.Song },
+            onToggleFavorite = onToggleFavorite.takeIf { isActiveScreen },
             queueContent = {
                 CompositionLocalProvider(LocalFocusFrameVisibility provides chromeFocusVisibility) {
                     QueuePanel(
@@ -1823,6 +1830,8 @@ private fun FlymePlayerStage(
     queueContent: @Composable () -> Unit,
     onOpenArtist: (() -> Unit)? = null,
     onOpenAlbum: (() -> Unit)? = null,
+    isFavorite: Boolean? = null,
+    onToggleFavorite: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val artScale = animateFloatAsState(
@@ -1929,8 +1938,20 @@ private fun FlymePlayerStage(
                 Spacer(Modifier.height(22.dp))
                 Crossfade(targetState = track.title to track.isExplicit, animationSpec = tween(220),
                     label = "flyme-title") { (title, explicit) ->
-                    ExplicitTitle(title, explicit, TextStyle(fontSize = 23.sp, lineHeight = 29.sp,
-                        fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, color = Color.White), badgeSize = 18.dp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ExplicitTitle(title, explicit, TextStyle(fontSize = 23.sp, lineHeight = 29.sp,
+                            fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, color = Color.White),
+                            badgeSize = 18.dp, marquee = true, modifier = Modifier.weight(1f))
+                        if (isFavorite != null && onToggleFavorite != null) {
+                            FlymeGlyphButton(
+                                if (isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                                stringResource(if (isFavorite) R.string.player_favorite_remove else R.string.player_favorite_add),
+                                onClick = onToggleFavorite, size = 36.dp, iconSize = 22.dp,
+                                tint = if (isFavorite) FlymeLiveRed else Color.White.copy(alpha = 0.72f),
+                                modifier = Modifier.automationId("player-favorite"),
+                            )
+                        }
+                    }
                 }
                 // Artist and album are links to their pages, as in Apple Music.
                 Row(Modifier.padding(top = 2.dp)) {
@@ -1938,14 +1959,16 @@ private fun FlymePlayerStage(
                         letterSpacing = (-0.1).sp, color = Color.White.copy(alpha = 0.52f))
                     val album = track.album.takeIf { it.isNotBlank() && it != track.artist }
                     if (track.artist.isNotBlank()) {
-                        Text(track.artist, style = linkStyle, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false).alignByBaseline().automationId("player-artist")
+                        Text(track.artist, style = linkStyle, maxLines = 1, overflow = TextOverflow.Clip,
+                            modifier = Modifier.weight(1f, fill = false).alignByBaseline().flymeMarquee()
+                                .automationId("player-artist")
                                 .then(onOpenArtist?.let { Modifier.clickable(onClick = it) } ?: Modifier))
                     }
                     if (album != null) {
                         if (track.artist.isNotBlank()) Text(" — ", style = linkStyle, maxLines = 1, modifier = Modifier.alignByBaseline())
-                        Text(album, style = linkStyle, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false).alignByBaseline().automationId("player-album")
+                        Text(album, style = linkStyle, maxLines = 1, overflow = TextOverflow.Clip,
+                            modifier = Modifier.weight(1f, fill = false).alignByBaseline().flymeMarquee()
+                                .automationId("player-album")
                                 .then(onOpenAlbum?.let { Modifier.clickable(onClick = it) } ?: Modifier))
                     }
                 }

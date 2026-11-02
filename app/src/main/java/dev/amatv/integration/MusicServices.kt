@@ -231,6 +231,10 @@ class MusicServices(context: Context) : RecommendationProvider {
 
     suspend fun catalogArtistOf(item: Track): Track? = api.catalogArtistOf(item)
 
+    suspend fun isFavorite(catalogSongId: String): Boolean? = api.isFavorite(catalogSongId)
+
+    suspend fun setFavorite(catalogSongId: String, favorite: Boolean) = api.setFavorite(catalogSongId, favorite)
+
     suspend fun catalogAlbumOf(song: Track): Track? = api.catalogAlbumOf(song)
 
     suspend fun lyricsFor(

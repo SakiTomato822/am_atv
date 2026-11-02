@@ -114,4 +114,13 @@
     <string name="browse_search_clear">Clear</string>
     <string name="browse_search_history">Recent Searches</string>
     <string name="browse_search_history_clear">Clear</string>
+    <string name="artist_latest_release">Latest Release</string>
+    <string name="artist_playlists">Artist Playlists</string>
+    <string name="artist_live_albums">Live Albums</string>
+    <string name="artist_compilations">Compilations</string>
+    <string name="artist_appears_on">Appears On</string>
+    <string name="artist_similar">Similar Artists</string>
+    <string name="player_favorite_add">Add to Favorite Songs</string>
+    <string name="player_favorite_remove">Remove from Favorite Songs</string>
+    <string name="player_favorite_failed">Couldn\u2019t update Favorite Songs.</string>
 </resources>

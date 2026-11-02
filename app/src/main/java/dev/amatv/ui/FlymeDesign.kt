@@ -8,6 +8,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -162,6 +163,10 @@ internal fun ExplicitBadge(size: Dp = 14.dp, color: Color = Color.White.copy(alp
     }
 }
 
+/** Apple-style marquee: waits, scrolls once through, pauses, repeats. Text that fits stays still. */
+internal fun Modifier.flymeMarquee(): Modifier =
+    basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 2_500, repeatDelayMillis = 3_000)
+
 /** One-line title that keeps the E badge visible when the title is truncated. */
 @Composable
 internal fun ExplicitTitle(
@@ -170,10 +175,14 @@ internal fun ExplicitTitle(
     style: TextStyle,
     modifier: Modifier = Modifier,
     badgeSize: Dp = 14.dp,
+    /** Scroll a title that does not fit, instead of cutting it off. */
+    marquee: Boolean = false,
 ) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        Text(text, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false))
+        Text(text, style = style, maxLines = 1,
+            overflow = if (marquee) TextOverflow.Clip else TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false)
+                .then(if (marquee) Modifier.flymeMarquee() else Modifier))
         if (explicit) {
             Spacer(Modifier.width(badgeSize * 0.4f))
             ExplicitBadge(badgeSize)

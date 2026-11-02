@@ -210,6 +210,9 @@ fun AmAtvApp() {
     var connectionState by remember { mutableStateOf(services.connectionState) }
     var serviceMessage by remember { mutableStateOf<String?>(null) }
     var lastPlaybackNotice by remember { mutableStateOf<String?>(null) }
+    // Favorite Songs (Apple's "love" rating) for the songs seen on Now Playing.
+    var favoriteState by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
+    var favoriteCatalogId by remember { mutableStateOf<String?>(null) }
     // Gapless: the queue entry preloaded into MusicKit, and the entry being adopted without a prepare.
     var gaplessLookahead by remember { mutableStateOf<Pair<Long, Track>?>(null) }
     var adoptingGaplessEntryId by remember { mutableStateOf<Long?>(null) }
@@ -708,6 +711,18 @@ fun AmAtvApp() {
 
     // Gapless (Flyme): once the current song is ready, mirror the app's next song into MusicKit so it
     // can preload it and continue without a gap. Any change of current or next replaces it.
+    // Load the Favorite Songs state of each song shown on Now Playing (Flyme star button).
+    LaunchedEffect(track.catalogId, connectionState) {
+        val catalogId = track.catalogId?.takeIf { it.matches(Regex("[0-9]+")) }
+        favoriteCatalogId = catalogId
+        if (!BuildConfig.FLYME_AUTO || catalogId == null || track.catalogKind != CatalogKind.Song ||
+            connectionState != MusicConnectionState.SignedIn || catalogId in favoriteState
+        ) return@LaunchedEffect
+        cancellableResult { services.isFavorite(catalogId) }.getOrNull()?.let {
+            favoriteState = favoriteState + (catalogId to it)
+        }
+    }
+
     val gaplessNext = remember(queueState) { if (BuildConfig.FLYME_AUTO) queueController.peekAutoNext() else null }
     LaunchedEffect(queueState.current?.entryId, gaplessNext?.entryId, gaplessNext?.track?.catalogId, playbackPrepared) {
         if (!BuildConfig.FLYME_AUTO) return@LaunchedEffect
@@ -889,6 +904,19 @@ fun AmAtvApp() {
             }
             browseDetailRequest = target
             destination = previousDestination
+        }
+    }
+
+    /** The star on Now Playing: optimistic, reverted with a message if Apple refuses. */
+    fun toggleFavorite() {
+        val catalogId = track.catalogId?.takeIf { it.matches(Regex("[0-9]+")) } ?: return
+        val target = favoriteState[catalogId] != true
+        favoriteState = favoriteState + (catalogId to target)
+        scope.launch {
+            cancellableResult { services.setFavorite(catalogId, target) }.onFailure {
+                favoriteState = favoriteState + (catalogId to !target)
+                serviceMessage = AppText.text(R.string.player_favorite_failed)
+            }
         }
     }
 
@@ -2092,6 +2120,9 @@ fun AmAtvApp() {
                         onSelectTrack = (::selectQueueTrack),
                         onBack = { destination = previousDestination },
                         onOpenArtist = { openFromPlayer(services::catalogArtistOf) },
+                        isFavorite = favoriteState.takeIf { BuildConfig.FLYME_AUTO }?.get(track.catalogId)
+                            ?.takeIf { favoriteCatalogId == track.catalogId },
+                        onToggleFavorite = ::toggleFavorite,
                         onOpenAlbum = { openFromPlayer(services::catalogAlbumOf) },
                         lyricTextSize = lyricTextSize,
                         onLyricTextSizeChange = {
@@ -2411,7 +2442,8 @@ private fun BrowseShell(
                         CatalogOpenAction.Play -> onOpenTrack(item, queue.filter {
                             it.openAction == CatalogOpenAction.Play
                         })
-                        CatalogOpenAction.OpenArtist -> Unit
+                        // Similar artists open their own page.
+                        CatalogOpenAction.OpenArtist -> artistBrowser.open(item)
                     }
                 }
                 if (BuildConfig.FLYME_AUTO) FlymeArtistScreen(

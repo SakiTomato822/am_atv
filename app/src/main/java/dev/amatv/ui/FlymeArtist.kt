@@ -64,11 +64,12 @@ internal fun FlymeArtistScreen(
     val open: (Track, List<Track>) -> Unit = { item, queue ->
         if (item.catalogKind == CatalogKind.Album) onOpenAlbum(item) else onOpenTrack(item, queue)
     }
-    FitDesign(Modifier.fillMaxSize().automationId("library-artist-detail")) {
+    Box(Modifier.fillMaxSize().automationId("library-artist-detail")) {
+    FitDesign(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxSize().padding(start = 40.dp, top = 18.dp)) {
             Column(Modifier.width(330.dp)) {
-                FlymeBackButton(onBack, Modifier.focusRequester(firstFocus))
-                Spacer(Modifier.height(10.dp))
+                // The back button sits outside FitDesign (below) so it matches every other page.
+                Spacer(Modifier.height(54.dp))
                 MotionArtwork(track = hero, modifier = Modifier.size(300.dp)
                     .border(0.75.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(16.dp)),
                     animate = false, cornerRadius = 16.dp)
@@ -89,6 +90,8 @@ internal fun FlymeArtistScreen(
             }
             FlymeArtistShelves(state, topSongs, onLoadMoreLibrary, open, Modifier.weight(1f))
         }
+    }
+        FlymeBackButton(onBack, Modifier.padding(start = 24.dp, top = 22.dp).focusRequester(firstFocus))
     }
 }
 
@@ -113,7 +116,7 @@ private fun FlymeArtistShelves(
         if (topSongs.isNotEmpty()) {
             item(key = "top-songs") {
                 ArtistHeading(stringResource(R.string.artist_top_songs))
-                topSongs.take(10).chunked(2).forEach { pair ->
+                topSongs.take(20).chunked(2).forEach { pair ->
                     Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                         pair.forEach { song ->
                             ArtistSongRow(song, Modifier.weight(1f)) { open(song, topSongs) }
@@ -190,7 +193,8 @@ private fun ArtistCardRow(items: List<Track>, onNearEnd: () -> Unit = {}, onOpen
                 focusedBackground = Color.Transparent,
             ) {
                 Column {
-                    MotionArtwork(track = item, modifier = Modifier.size(150.dp), animate = false, cornerRadius = 9.dp)
+                    MotionArtwork(track = item, modifier = Modifier.size(150.dp), animate = false,
+                        cornerRadius = if (item.catalogKind == CatalogKind.Artist) 75.dp else 9.dp)
                     ExplicitTitle(item.title, item.isExplicit,
                         TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
                         modifier = Modifier.padding(top = 8.dp), badgeSize = 12.dp)

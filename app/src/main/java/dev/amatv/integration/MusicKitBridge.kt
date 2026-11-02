@@ -105,6 +105,8 @@ class MusicKitBridge(private val context: Context) {
     @Volatile private var lookahead: Track? = null
     @Volatile private var gaplessAdvanceCatalogId: String? = null
     @Volatile private var queuedLookaheadCatalogId: String? = null
+    /** Set once addQueueItems touched the current controller's queue. */
+    @Volatile private var nativeQueueEdited = false
     private val snapshotPoll = object : Runnable {
         override fun run() {
             if (playbackListener == null) return
@@ -161,9 +163,15 @@ class MusicKitBridge(private val context: Context) {
         positionMs: Long = 0L,
         playWhenReady: Boolean = true,
     ): Long {
-        if (controller != null && (playbackDeveloperToken != developerToken || playbackUserToken != userToken)) {
+        // A native queue we appended to (gapless) makes the next fresh prepare fail with
+        // TYPE_PLAYBACK_QUEUE; start that request on a new controller instead.
+        if (controller != null && (playbackDeveloperToken != developerToken || playbackUserToken != userToken ||
+                nativeQueueEdited)
+        ) {
+            if (nativeQueueEdited) Log.i(TAG, "Rebuilding controller after a gapless queue edit")
             release()
         }
+        nativeQueueEdited = false
         val generation = prepareGeneration.incrementAndGet()
         ensurePlaybackRuntime()
         requestedTrack = track
@@ -284,6 +292,7 @@ class MusicKitBridge(private val context: Context) {
             currentController.javaClass.methods.first { it.name == "addQueueItems" && it.parameterTypes.size == 2 }
                 .invoke(currentController, provider, INSERTION_TYPE_AT_END)
             queuedLookaheadCatalogId = wanted.catalogId
+            nativeQueueEdited = true
             Log.i(TAG, "Gapless lookahead queued catalog=${wanted.catalogId}")
         }.onFailure { Log.w(TAG, "Gapless lookahead failed: ${it.javaClass.simpleName}") }
     }

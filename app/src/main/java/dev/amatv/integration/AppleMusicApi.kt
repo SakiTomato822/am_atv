@@ -330,10 +330,47 @@ class AppleMusicApi(
         if (catalogId == null || !catalogId.matches(Regex("[0-9]+"))) return CatalogArtistPage()
         val storefront = effectiveStorefront()
         val root = requestRoot(
-            "/v1/catalog/$storefront/artists/$catalogId?views=top-songs,full-albums,singles&limit[views]=20",
+            "/v1/catalog/$storefront/artists/$catalogId?views=${ARTIST_VIEWS.joinToString(",") { it.first }}" +
+                "&limit[views]=20",
             needsUserToken = false,
         )
-        return withContext(parseDispatcher) { parseArtistPage(root, catalogId) }
+        val page = withContext(parseDispatcher) { parseArtistPage(root, catalogId) }
+        // Top songs come ten at a time; Apple Music Web lists far more.
+        var next = root.optJSONArray("data")?.optJSONObject(0)?.optJSONObject("views")
+            ?.optJSONObject("top-songs")?.optString("next")?.takeIf { it.startsWith("/v1/") }
+        val more = mutableListOf<Track>()
+        repeat(2) {
+            val href = next ?: return@repeat
+            val pageRoot = runCatching { requestRoot(href, needsUserToken = false) }.getOrNull() ?: return@repeat
+            more += withContext(parseDispatcher) { parseResources(pageRoot) }
+            next = pageRoot.optString("next").takeIf { it.startsWith("/v1/") }
+        }
+        return if (more.isEmpty()) page
+        else page.copy(topSongs = (page.topSongs + more).distinctBy { it.id })
+    }
+
+    /** Whether a catalog song is in Favorite Songs (Apple's "love" rating); null when unknown. */
+    suspend fun isFavorite(catalogSongId: String): Boolean? {
+        require(catalogSongId.matches(Regex("[0-9]+"))) { "Catalog song ID is invalid" }
+        return try {
+            val root = requestRoot("/v1/me/ratings/songs/$catalogSongId", needsUserToken = true)
+            root.optJSONArray("data")?.optJSONObject(0)?.optJSONObject("attributes")?.optInt("value") == 1
+        } catch (error: CatalogRequestException) {
+            if (error.httpStatus == 404) false else null
+        }
+    }
+
+    /** Adds the song to (or removes it from) Favorite Songs, as the star in Apple Music does. */
+    suspend fun setFavorite(catalogSongId: String, favorite: Boolean) {
+        require(catalogSongId.matches(Regex("[0-9]+"))) { "Catalog song ID is invalid" }
+        val path = "/v1/me/ratings/songs/$catalogSongId"
+        if (favorite) {
+            requestRoot(path, needsUserToken = true, method = "PUT",
+                postBody = JSONObject().put("type", "rating")
+                    .put("attributes", JSONObject().put("value", 1)).toString())
+        } else {
+            requestRoot(path, needsUserToken = true, method = "DELETE")
+        }
     }
 
     internal fun parseArtistPage(root: JSONObject, catalogId: String): CatalogArtistPage {
@@ -369,22 +406,22 @@ class AppleMusicApi(
 
     internal fun parseArtistViews(root: JSONObject, catalogId: String): List<ContentShelf> {
         val views = root.optJSONArray("data")?.optJSONObject(0)?.optJSONObject("views") ?: return emptyList()
-        return listOf(
-            "top-songs" to R.string.artist_top_songs,
-            "full-albums" to R.string.artist_albums,
-            "singles" to R.string.artist_singles,
-        ).mapNotNull { (view, title) ->
-            val data = views.optJSONObject(view)?.optJSONArray("data") ?: return@mapNotNull null
+        return ARTIST_VIEWS.mapNotNull { (view, fallbackTitle) ->
+            val viewObject = views.optJSONObject(view) ?: return@mapNotNull null
+            val data = viewObject.optJSONArray("data") ?: return@mapNotNull null
             val items = buildList {
                 for (index in 0 until data.length()) {
                     val item = data.optJSONObject(index) ?: continue
                     val type = item.optString("type")
-                    val kind = catalogKind(type) ?: continue
+                    val kind = (if (type == "artists") CatalogKind.Artist else catalogKind(type)) ?: continue
                     val attributes = item.optJSONObject("attributes") ?: continue
                     attributes.toTrack(item.getString("id"), kind, resourceType = type)?.let(::add)
                 }
             }
-            items.takeIf { it.isNotEmpty() }?.let { ContentShelf("artist-$catalogId-$view", AppText.text(title), it) }
+            // Apple names each view in the storefront's language (e.g. 參與作品, 相似藝人).
+            val title = viewObject.optJSONObject("attributes")?.optString("title")?.takeIf { it.isNotBlank() }
+                ?: AppText.text(fallbackTitle)
+            items.takeIf { it.isNotEmpty() }?.let { ContentShelf("artist-$catalogId-$view", title, it) }
         }
     }
 
@@ -632,7 +669,8 @@ class AppleMusicApi(
             }
             throw CatalogRequestException(catalogHttpFailure(status), message, status)
         }
-        JSONObject(body)
+        // PUT/DELETE (ratings) answer 204 with no body.
+        if (body.isBlank()) JSONObject() else JSONObject(body)
     }
 
     private fun parseAllTracks(root: JSONObject, songsOnly: Boolean = false): List<Track> {
@@ -904,6 +942,19 @@ data class CatalogArtistPage(
     val artist: Track? = null,
     val topSongs: List<Track> = emptyList(),
     val shelves: List<ContentShelf> = emptyList(),
+)
+
+/** Apple Music Web's artist page sections, in its order. Music videos are left out: the SDK plays audio. */
+private val ARTIST_VIEWS = listOf(
+    "top-songs" to R.string.artist_top_songs,
+    "latest-release" to R.string.artist_latest_release,
+    "full-albums" to R.string.artist_albums,
+    "singles" to R.string.artist_singles,
+    "featured-playlists" to R.string.artist_playlists,
+    "live-albums" to R.string.artist_live_albums,
+    "compilation-albums" to R.string.artist_compilations,
+    "appears-on-albums" to R.string.artist_appears_on,
+    "similar-artists" to R.string.artist_similar,
 )
 
 internal fun parseUserStorefrontId(root: JSONObject): String? = root.optJSONArray("data")
