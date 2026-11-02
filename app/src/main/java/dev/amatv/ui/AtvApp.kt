@@ -1823,7 +1823,7 @@ fun AmAtvApp() {
         targetValue = if (isNowPlaying) 1f else 0f,
         // Flyme: Now Playing grows out of the mini player and shrinks back into it.
         animationSpec = if (BuildConfig.FLYME_AUTO) {
-            tween(durationMillis = 460, easing = CubicBezierEasing(0.2f, 0.9f, 0.22f, 1f))
+            tween(durationMillis = 340, easing = CubicBezierEasing(0.2f, 0.9f, 0.22f, 1f))
         } else tween(
             durationMillis = 320,
             easing = MotionTokens.KaraokeLineEasing,
@@ -2143,13 +2143,13 @@ fun AmAtvApp() {
                                     transformOrigin = if (center != null && size.width > 0f && size.height > 0f) {
                                         TransformOrigin(center.x / size.width, center.y / size.height)
                                     } else TransformOrigin(0.86f, 0.06f)
-                                    val scale = 0.14f + 0.86f * t
+                                    // A gentle zoom toward the capsule, not a full morph.
+                                    val scale = 0.92f + 0.08f * t
                                     scaleX = scale
                                     scaleY = scale
-                                    // Capsule corners open into the full screen; content fades in early.
-                                    shape = RoundedCornerShape((1f - t) * 240.dp.toPx())
-                                    clip = true
-                                    alpha = (t * 2.2f).coerceIn(0f, 1f)
+                                    shape = RoundedCornerShape((1f - t) * 28.dp.toPx())
+                                    clip = t < 1f
+                                    alpha = t
                                 } else {
                                     alpha = t
                                     val scale = 0.97f + 0.03f * t
