@@ -1715,6 +1715,15 @@ fun AmAtvApp() {
         queueState.canSkipNext
     }
 
+    // The station the current song came from; a live stream reports the station itself.
+    val stationName = queueState.current?.track?.takeIf { it.catalogKind == CatalogKind.Station }?.title
+    val liveLabel = stringResource(R.string.player_live_stream)
+    val nowPlayingSubtitle = when {
+        isLiveStream -> liveLabel
+        stationName != null && track.catalogKind != CatalogKind.Station -> stationName
+        else -> null
+    }
+
     val isNowPlaying = destination == Destination.NowPlaying
     LaunchedEffect(isNowPlaying, isPlaying, spectrumPermissionGranted) {
         if (!BuildConfig.FLYME_AUTO && isNowPlaying && isPlaying && !spectrumPermissionGranted && !spectrumPermissionAsked) {
@@ -1825,6 +1834,9 @@ fun AmAtvApp() {
                         currentTrack = track,
                         hasCurrentTrack = hasCurrentTrack,
                         isPlaying = isPlaying,
+                        playWhenReady = playWhenReady,
+                        nowPlayingSubtitle = nowPlayingSubtitle,
+                        onTogglePlayback = ::togglePlayback,
                         searchTracks = searchResults,
                         searchLoading = searchLoading,
                         recentTracks = recentTracks,
@@ -1988,6 +2000,7 @@ fun AmAtvApp() {
                         onSeekBy = ::seekPlaybackBy,
                         canSeek = canSeekPlayback,
                         isLiveStream = isLiveStream,
+                        stationName = stationName.takeIf { !isLiveStream && track.catalogKind != CatalogKind.Station },
                         onSelectTrack = (::selectQueueTrack),
                         onBack = { destination = previousDestination },
                         lyricTextSize = lyricTextSize,
@@ -2056,6 +2069,9 @@ private fun BrowseShell(
     currentTrack: Track,
     hasCurrentTrack: Boolean,
     isPlaying: Boolean,
+    playWhenReady: Boolean = isPlaying,
+    nowPlayingSubtitle: String? = null,
+    onTogglePlayback: () -> Unit = {},
     searchTracks: List<Track>,
     searchLoading: Boolean,
     recentTracks: List<Track>,
@@ -2141,7 +2157,8 @@ private fun BrowseShell(
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    listOf(
+                    if (BuildConfig.FLYME_AUTO) listOf(Color(0xFF15111D), Color(0xFF0B0A0E))
+                    else listOf(
                         Color(0xFF19241E),
                         Color(0xFF0B1411),
                     ),
@@ -2158,7 +2175,19 @@ private fun BrowseShell(
                 .then(if (detailVisible) Modifier.clearAndSetSemantics {} else Modifier)
                 .graphicsLayer { alpha = if (detailVisible) 0f else 1f },
         ) {
-            TopNavigation(
+            if (BuildConfig.FLYME_AUTO) {
+                FlymeTopBar(
+                    selected = destination,
+                    hasCurrentTrack = hasCurrentTrack,
+                    currentTrack = currentTrack,
+                    nowPlayingSubtitle = nowPlayingSubtitle,
+                    isPlaying = playWhenReady,
+                    onTogglePlayback = onTogglePlayback,
+                    onDestination = onDestination,
+                    focusRequesters = navigationFocus,
+                    downFocus = { contentFocusEntry.requester ?: firstContentFocus },
+                )
+            } else TopNavigation(
                 selected = destination,
                 hasCurrentTrack = hasCurrentTrack,
                 connectionState = connectionState,

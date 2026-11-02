@@ -79,4 +79,18 @@
     <plurals name="browse_song_count">
         <item quantity="other">%1$d 首歌曲</item>
     </plurals>
+    <string name="library_sort">排序</string>
+    <string name="library_sort_default">默认</string>
+    <string name="library_sort_name">名称</string>
+    <string name="library_sort_artist">艺人</string>
+    <string name="library_view_grid">网格</string>
+    <string name="library_view_list">列表</string>
+    <string name="library_column_title">标题</string>
+    <string name="library_column_artist">艺人</string>
+    <string name="library_column_album">专辑</string>
+    <string name="library_column_time">时长</string>
+    <string name="library_empty">这里还没有内容。</string>
+    <string name="library_tab_playlists">播放列表</string>
+    <string name="library_tab_albums">专辑</string>
+    <string name="library_tab_songs">歌曲</string>
 </resources>

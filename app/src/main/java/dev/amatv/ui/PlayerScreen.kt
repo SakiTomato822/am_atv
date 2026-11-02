@@ -12,6 +12,9 @@ import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -52,6 +55,8 @@ import androidx.compose.material.icons.rounded.AllInclusive
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ClearAll
 import androidx.compose.material.icons.rounded.Lyrics
+import androidx.compose.material.icons.rounded.FastForward
+import androidx.compose.material.icons.rounded.FastRewind
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
@@ -216,6 +221,7 @@ fun PlayerScreen(
     playWhenReady: Boolean = isPlaying,
     canSeek: Boolean = true,
     isLiveStream: Boolean = false,
+    stationName: String? = null,
     queueEntryIds: List<Long> = emptyList(),
     queueCurrentIndex: Int = -1,
     queueSessionId: Long = 0L,
@@ -249,6 +255,8 @@ fun PlayerScreen(
     var showQueue by remember(queueSessionId) { mutableStateOf(false) }
     var showLyricsSettings by remember(queueSessionId) { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
+    // Touch is the car's primary input: draw control focus only after a key press.
+    var keyNavigation by remember { mutableStateOf(!BuildConfig.FLYME_AUTO) }
     var controlsActivity by remember { mutableIntStateOf(0) }
     var navigationZone by remember(queueSessionId) {
         mutableStateOf(PlayerNavigationZone.Controls)
@@ -429,6 +437,7 @@ fun PlayerScreen(
                 if (!isActiveScreen || event.nativeKeyEvent.action != KeyEvent.ACTION_DOWN) {
                     return@onPreviewKeyEvent false
                 }
+                keyNavigation = true
                 if (showLyricsSettings) {
                     return@onPreviewKeyEvent if (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_BACK) {
                         showLyricsSettings = false
@@ -640,7 +649,67 @@ fun PlayerScreen(
             audioSpectrum = audioSpectrum,
             modifier = Modifier.fillMaxSize(),
         )
-        PlayerStage(
+        if (BuildConfig.FLYME_AUTO) FlymePlayerStage(
+            track = displayedTrack,
+            presentation = presentation,
+            supportsLyrics = supportsLyrics,
+            isVisibleOnScreen = isVisibleOnScreen,
+            artworkPlaying = (isPlaying || playWhenReady) && isVisibleOnScreen,
+            playWhenReady = playWhenReady,
+            positionState = playbackPosition,
+            lyricOffsetMs = lyricOffsetMs,
+            lyricsLoading = lyricsLoading,
+            lyricsLookupFailed = lyricsLookupFailed,
+            lyricsTransientFailure = lyricsTransientFailure,
+            selectedLyricIndex = if (navigationZone == PlayerNavigationZone.Lyrics) selectedLyricIndex else null,
+            manualScrollTrigger = lyricsScrollTrigger,
+            manualScrollDelta = lyricsScrollDelta,
+            lyricTextSize = lyricTextSize,
+            lowPerformanceMode = lowPerformanceMode,
+            isLiveStream = isLiveStream,
+            stationName = stationName,
+            canSeek = isActiveScreen && canSeek && !isLiveStream,
+            canSkipPrevious = canSkipPrevious,
+            canSkipNext = canSkipNext,
+            showLyrics = showLyrics,
+            showQueue = showQueue,
+            lyricDisplayActive = lyricTranslationEnabled || lyricPronunciationEnabled,
+            autoplayEnabled = autoplayEnabled,
+            canSetAutoplay = canSetAutoplay,
+            focusedControl = focusedControl.takeIf { keyNavigation && navigationZone == PlayerNavigationZone.Controls },
+            progressFocused = keyNavigation && navigationZone == PlayerNavigationZone.ProgressBar,
+            scrubPositionMs = if (isScrubbing) scrubPositionMs else null,
+            onControl = { control ->
+                keyNavigation = false
+                activateControl(control)
+            },
+            onSeekTo = { target -> if (isActiveScreen) onSeekBy(target - playbackPosition.value) },
+            queueContent = {
+                CompositionLocalProvider(LocalFocusFrameVisibility provides chromeFocusVisibility) {
+                    QueuePanel(
+                        queue = displayQueue,
+                        queueKeys = displayQueueKeys,
+                        currentIndex = currentQueueIndex,
+                        sessionId = queueSessionId,
+                        controlsVisible = true,
+                        selectedIndex = focusedQueueIndex,
+                        selectionVisible = keyNavigation && navigationZone == PlayerNavigationZone.QueueItems,
+                        isPlaying = isPlaying && isVisibleOnScreen,
+                        audioSpectrum = audioSpectrum,
+                        bandsEnabled = isVisibleOnScreen && presentation == PlayerPresentation.Queue,
+                        onSelectTrack = { index ->
+                            if (isActiveScreen && showQueue) {
+                                controlsActivity++
+                                focusQueueIndex(index)
+                                onSelectTrack(index)
+                            }
+                        },
+                        interactive = presentation == PlayerPresentation.Queue && LocalFocusTargetsEnabled.current,
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        ) else PlayerStage(
             track = displayedTrack,
             presentation = presentation,
             supportsLyrics = supportsLyrics,
@@ -680,7 +749,13 @@ fun PlayerScreen(
         )
         if (BuildConfig.FLYME_AUTO && isActiveScreen) {
             FocusSurface(
-                onClick = onBack,
+                onClick = {
+                    // The queue covers the controls column, so back closes it first.
+                    if (showQueue) {
+                        showQueue = false
+                        navigationZone = PlayerNavigationZone.Controls
+                    } else onBack()
+                },
                 modifier = Modifier.align(Alignment.TopStart).padding(16.dp).size(56.dp)
                     .automationId("player-back"),
             ) {
@@ -717,7 +792,7 @@ fun PlayerScreen(
             }
         }
         chromeTransition.AnimatedVisibility(
-            visible = { it.controlsVisible },
+            visible = { it.controlsVisible && !BuildConfig.FLYME_AUTO },
             enter = fadeIn(
                 tween(280, easing = MotionTokens.KaraokeLineEasing),
             ) + slideInVertically(
@@ -1696,6 +1771,306 @@ private fun PlayerStage(
                 )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Flyme Auto Now Playing in the Apple TV / Cider direction: artwork, identity
+ * and plain-glyph controls in a left column, lyrics on the right. A live
+ * station gets its own layout without seek or skip.
+ */
+@Composable
+private fun FlymePlayerStage(
+    track: Track,
+    presentation: PlayerPresentation,
+    supportsLyrics: Boolean,
+    isVisibleOnScreen: Boolean,
+    artworkPlaying: Boolean,
+    playWhenReady: Boolean,
+    positionState: State<Long>,
+    lyricOffsetMs: Long,
+    lyricsLoading: Boolean,
+    lyricsLookupFailed: Boolean,
+    lyricsTransientFailure: Boolean,
+    selectedLyricIndex: Int?,
+    manualScrollTrigger: Int,
+    manualScrollDelta: Float,
+    lyricTextSize: LyricTextSize,
+    lowPerformanceMode: Boolean,
+    isLiveStream: Boolean,
+    stationName: String?,
+    canSeek: Boolean,
+    canSkipPrevious: Boolean,
+    canSkipNext: Boolean,
+    showLyrics: Boolean,
+    showQueue: Boolean,
+    lyricDisplayActive: Boolean,
+    autoplayEnabled: Boolean,
+    canSetAutoplay: Boolean,
+    focusedControl: PlayerControl?,
+    progressFocused: Boolean,
+    scrubPositionMs: Long?,
+    onControl: (PlayerControl) -> Unit,
+    onSeekTo: (Long) -> Unit,
+    queueContent: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val artScale = animateFloatAsState(
+        targetValue = if (artworkPlaying) 1f else 0.9f,
+        animationSpec = tween(500, easing = ArtworkDecelerateEasing),
+        label = "flyme-artwork-scale",
+    )
+    val splitFraction = animateFloatAsState(
+        targetValue = if (presentation == PlayerPresentation.Lyrics) 1f else 0f,
+        animationSpec = tween(380, easing = MotionTokens.KaraokeLineEasing),
+        label = "flyme-split-fraction",
+    )
+    val queueAlpha = animateFloatAsState(
+        targetValue = if (presentation == PlayerPresentation.Queue) 1f else 0f,
+        animationSpec = tween(280, easing = MotionTokens.KaraokeLineEasing),
+        label = "flyme-queue-alpha",
+    )
+    val noOffset = remember { mutableFloatStateOf(0f) }
+    FitDesign(modifier.fillMaxSize()) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            // Darken the artwork-colored backdrop so white text keeps its contrast.
+            Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(
+                Color(0xA006030E), Color(0x4806030E), Color(0x8006030E),
+            ))))
+            // A station item (live, or not yet started) has no song to scrub or skip within.
+            if (isLiveStream || track.catalogKind == CatalogKind.Station) {
+                FlymeLiveLayout(track, artScale, artworkPlaying, playWhenReady, lowPerformanceMode, live = isLiveStream,
+                    focused = focusedControl == PlayerControl.PlayPause,
+                    onPlayPause = { onControl(PlayerControl.PlayPause) })
+                return@BoxWithConstraints
+            }
+            val columnWidth = 333.dp
+            val columnStart = 100.dp
+            val centeredStart = (maxWidth - columnWidth) / 2
+            val glidePx = with(LocalDensity.current) { (centeredStart - columnStart).toPx() }
+
+            if (supportsLyrics) {
+                Box(
+                    Modifier.fillMaxSize()
+                        .padding(start = columnStart + columnWidth + 114.dp, end = 60.dp, top = 16.dp)
+                        .graphicsLayer {
+                            alpha = splitFraction.value
+                            translationX = (1f - splitFraction.value) * 26.dp.toPx()
+                        },
+                ) {
+                    if (track.lyrics.isNotEmpty()) {
+                        val lyricScale = lyricTextSize.scale
+                        val current = LocalDensity.current
+                        CompositionLocalProvider(LocalDensity provides Density(current.density, current.fontScale * lyricScale)) {
+                            key(lyricScale) {
+                                LyricsPanel(
+                                    lines = track.lyrics,
+                                    isVisible = isVisibleOnScreen && presentation == PlayerPresentation.Lyrics,
+                                    positionState = positionState,
+                                    lyricOffsetMs = lyricOffsetMs,
+                                    controlsVisible = true,
+                                    stageOffsetPx = noOffset,
+                                    selectedLyricIndex = selectedLyricIndex,
+                                    manualScrollTrigger = manualScrollTrigger,
+                                    manualScrollDelta = manualScrollDelta,
+                                )
+                            }
+                        }
+                    } else if (presentation == PlayerPresentation.Lyrics) {
+                        LyricsUnavailablePanel(lyricsLoading, lyricsLookupFailed, lyricsTransientFailure, noOffset)
+                    }
+                }
+            }
+
+            Column(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = columnStart)
+                    .width(columnWidth)
+                    .graphicsLayer {
+                        translationX = glidePx * (1f - splitFraction.value)
+                        alpha = 1f - queueAlpha.value
+                    },
+            ) {
+                if (stationName != null) {
+                    Row(
+                        Modifier.clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.14f))
+                            .padding(start = 7.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(Icons.Rounded.AllInclusive, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(15.dp))
+                        Text(stationName, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold,
+                            color = Color.White.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
+                MotionArtwork(
+                    track = track,
+                    modifier = Modifier.size(if (stationName != null) 307.dp else columnWidth)
+                        .graphicsLayer { scaleX = artScale.value; scaleY = artScale.value },
+                    animate = artworkPlaying && !lowPerformanceMode,
+                    cornerRadius = 10.dp,
+                    crossfadeTrackChanges = true,
+                )
+                Spacer(Modifier.height(22.dp))
+                Crossfade(targetState = track.title, animationSpec = tween(220), label = "flyme-title") { title ->
+                    Text(title, fontSize = 23.sp, lineHeight = 29.sp, fontWeight = FontWeight.SemiBold,
+                        color = Color.White.copy(alpha = 0.96f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Text(listOf(track.artist, track.album).filter { it.isNotBlank() }.distinct().joinToString(" · "),
+                    fontSize = 16.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium,
+                    color = Color.White.copy(alpha = 0.62f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp))
+                Spacer(Modifier.height(18.dp))
+                FlymeSeekBar(
+                    positionState = positionState,
+                    durationMs = track.durationMs,
+                    enabled = canSeek,
+                    onSeekTo = onSeekTo,
+                    focused = progressFocused,
+                    scrubPositionMs = scrubPositionMs,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(37.dp, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    FlymeGlyphButton(Icons.Rounded.FastRewind, stringResource(R.string.player_previous_track),
+                        onClick = { onControl(PlayerControl.Previous) }, size = 48.dp, iconSize = 32.dp,
+                        enabled = canSkipPrevious, focused = focusedControl == PlayerControl.Previous,
+                        modifier = Modifier.automationId("player-previous"))
+                    FlymeGlyphButton(if (playWhenReady) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        stringResource(if (playWhenReady) R.string.player_pause else R.string.player_play),
+                        onClick = { onControl(PlayerControl.PlayPause) }, size = 64.dp, iconSize = 46.dp,
+                        focused = focusedControl == PlayerControl.PlayPause,
+                        modifier = Modifier.automationId("player-play-pause"))
+                    FlymeGlyphButton(Icons.Rounded.FastForward, stringResource(R.string.player_next_track),
+                        onClick = { onControl(PlayerControl.Next) }, size = 48.dp, iconSize = 32.dp,
+                        enabled = canSkipNext, focused = focusedControl == PlayerControl.Next,
+                        modifier = Modifier.automationId("player-next"))
+                }
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(22.dp, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    val secondary = Color.White.copy(alpha = 0.72f)
+                    if (supportsLyrics) {
+                        FlymeGlyphButton(Icons.Rounded.Translate, stringResource(R.string.player_lyrics_display_settings),
+                            onClick = { onControl(PlayerControl.LyricsDisplay) }, size = 36.dp, iconSize = 19.dp,
+                            selected = lyricDisplayActive, focused = focusedControl == PlayerControl.LyricsDisplay, tint = secondary,
+                            modifier = Modifier.automationId("player-lyrics-display"))
+                        FlymeGlyphButton(Icons.Rounded.Lyrics, stringResource(R.string.player_lyrics),
+                            onClick = { onControl(PlayerControl.Lyrics) }, size = 36.dp, iconSize = 19.dp,
+                            selected = showLyrics, focused = focusedControl == PlayerControl.Lyrics, tint = secondary,
+                            modifier = Modifier.automationId("player-lyrics"))
+                    }
+                    FlymeGlyphButton(Icons.AutoMirrored.Rounded.QueueMusic, stringResource(R.string.player_queue),
+                        onClick = { onControl(PlayerControl.Queue) }, size = 36.dp, iconSize = 19.dp,
+                        selected = showQueue, focused = focusedControl == PlayerControl.Queue, tint = secondary,
+                        modifier = Modifier.automationId("player-queue"))
+                    if (canSetAutoplay) {
+                        FlymeGlyphButton(Icons.Rounded.AllInclusive, stringResource(R.string.player_radio),
+                            onClick = { onControl(PlayerControl.Radio) }, size = 36.dp, iconSize = 20.dp,
+                            selected = autoplayEnabled, focused = focusedControl == PlayerControl.Radio, tint = secondary,
+                            modifier = Modifier.automationId("player-radio"))
+                    }
+                }
+            }
+
+            if (queueAlpha.value > 0.001f) {
+                Box(Modifier.fillMaxSize().graphicsLayer {
+                    alpha = queueAlpha.value
+                    translationY = (1f - queueAlpha.value) * 16.dp.toPx()
+                }) { queueContent() }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FlymeLiveLayout(
+    track: Track,
+    artScale: State<Float>,
+    artworkPlaying: Boolean,
+    playWhenReady: Boolean,
+    lowPerformanceMode: Boolean,
+    live: Boolean,
+    focused: Boolean,
+    onPlayPause: () -> Unit,
+) {
+    val pulse = rememberInfiniteTransition(label = "flyme-live-pulse")
+    val dotAlpha = pulse.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.35f,
+        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+        label = "flyme-live-dot",
+    )
+    Box(Modifier.fillMaxSize().automationId("player-live-status")) {
+        Row(
+            Modifier.fillMaxSize().padding(start = 120.dp, end = 107.dp, bottom = 70.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(53.dp),
+        ) {
+            MotionArtwork(
+                track = track,
+                modifier = Modifier.size(313.dp).graphicsLayer { scaleX = artScale.value; scaleY = artScale.value },
+                animate = artworkPlaying && !lowPerformanceMode,
+                cornerRadius = 10.dp,
+                crossfadeTrackChanges = true,
+            )
+            Column(Modifier.weight(1f)) {
+                Row(
+                    Modifier.clip(RoundedCornerShape(14.dp))
+                        .background(if (live && playWhenReady) FlymeLiveRed else Color.White.copy(alpha = 0.2f))
+                        .padding(start = 10.dp, end = 13.dp, top = 5.dp, bottom = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    Box(Modifier.size(7.dp).graphicsLayer { alpha = if (live && playWhenReady) dotAlpha.value else 1f }
+                        .background(Color.White, CircleShape))
+                    Text(stringResource(when {
+                        !live -> R.string.browse_kind_station
+                        playWhenReady -> R.string.player_live_stream
+                        else -> R.string.player_state_paused
+                    }),
+                        fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White, letterSpacing = 0.5.sp)
+                }
+                Spacer(Modifier.height(15.dp))
+                Text(track.title, fontSize = 51.sp, lineHeight = 55.sp, fontWeight = FontWeight.Bold,
+                    color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (track.artist.isNotBlank()) {
+                    Text(track.artist, fontSize = 21.sp, lineHeight = 27.sp, fontWeight = FontWeight.SemiBold,
+                        color = Color.White.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 10.dp))
+                }
+                Spacer(Modifier.height(34.dp))
+                val interaction = remember { MutableInteractionSource() }
+                val pressed by interaction.collectIsPressedAsState()
+                val pressScale by animateFloatAsState(if (pressed) 0.92f else 1f,
+                    spring(dampingRatio = 0.7f, stiffness = 600f), label = "flyme-live-play")
+                val playLabel = stringResource(if (playWhenReady) R.string.player_pause else R.string.player_play)
+                Box(
+                    Modifier.size(69.dp)
+                        .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
+                        .clip(CircleShape)
+                        .background(Color.White)
+                        .then(if (focused) Modifier.border(3.dp, Color.White.copy(alpha = 0.5f), CircleShape) else Modifier)
+                        .clickable(interactionSource = interaction, indication = null, onClick = onPlayPause)
+                        .automationId("player-play-pause")
+                        .semantics { contentDescription = playLabel },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(if (playWhenReady) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null,
+                        tint = Color(0xFF1A0A10), modifier = Modifier.size(32.dp))
+                }
+            }
+        }
+        if (live) Box(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .padding(start = 120.dp, end = 107.dp, bottom = 51.dp).height(10.dp),
+            contentAlignment = Alignment.CenterEnd,
+        ) {
+            Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.82f)))
+            Box(Modifier.size(10.dp).background(FlymeLiveRed, CircleShape))
         }
     }
 }

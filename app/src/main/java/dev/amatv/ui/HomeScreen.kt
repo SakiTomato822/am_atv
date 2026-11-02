@@ -168,6 +168,30 @@ fun HomeScreen(
                         navigationFocusRequester = navigationFocusRequester,
                         headingOverride = stringResource(R.string.browse_library_sign_in),
                     )
+                } else if (dev.amatv.BuildConfig.FLYME_AUTO) {
+                    FlymeLibrary(
+                        shelves = homeShelves,
+                        loading = homeLoading,
+                        pagination = homeShelfPagination,
+                        onLoadMore = onLoadMoreShelf,
+                        onOpenTrack = onOpenTrack,
+                        firstFocus = firstContentFocusRequester,
+                        navigationFocus = navigationFocusRequester,
+                    ) { category, contentFocus ->
+                        HomeShelves(
+                            shelves = homeShelves.filter { it.id == category.shelfId },
+                            loading = homeLoading,
+                            connectionState = connectionState,
+                            setupMessage = setupMessage,
+                            onSignIn = onSignIn,
+                            onRetry = onRetry,
+                            onOpenTrack = onOpenTrack,
+                            pagination = homeShelfPagination,
+                            onLoadMoreShelf = onLoadMoreShelf,
+                            firstContentFocusRequester = contentFocus,
+                            navigationFocusRequester = firstContentFocusRequester,
+                        )
+                    }
                 } else {
                     var libraryCategory by remember { mutableStateOf(LibraryCategory.Playlists) }
                     val libraryContentFocus = remember { FocusRequester() }
