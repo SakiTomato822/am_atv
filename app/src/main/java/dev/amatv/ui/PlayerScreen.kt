@@ -2865,16 +2865,38 @@ private fun LyricsLineRow(
             )
         }
     }
-    KaraokeLyricLine(
-        line = item.line,
-        isActive = isActive,
-        retainedPresence = retainedPresence,
-        retainedBackgroundPresence = retainedBackgroundPresence,
-        isFocused = isFocused,
-        isStaticMode = isStaticMode,
-        isUserScrolling = isUserScrolling,
-        positionState = positionState,
-    )
+    // Flyme.7: rows away from the sung line soften with distance, as in Apple Music.
+    val softFocusRadius by remember(item.lineIndex, snapshotState, retainedPresence,
+        retainedBackgroundPresence, isFocused, isStaticMode, isUserScrolling) {
+        derivedStateOf {
+            val snapshot = snapshotState.value
+            if (!BuildConfig.FLYME_AUTO || isStaticMode || isFocused || isUserScrolling ||
+                item.lineIndex in snapshot.activeLineIndices ||
+                retainedPresence.value > 0f || retainedBackgroundPresence.value > 0f) 0.dp
+            else when (kotlin.math.abs(item.lineIndex - snapshot.scrollAnchorLineIndex)) {
+                0 -> 0.dp
+                1 -> 1.5.dp
+                2 -> 2.5.dp
+                else -> 3.5.dp
+            }
+        }
+    }
+    CarLyricSoftFocus(
+        radius = softFocusRadius,
+        contentKey = listOf(item.line, isStaticMode, isFocused, isUserScrolling,
+            isActive, LyricPrimaryWeight),
+    ) {
+        KaraokeLyricLine(
+            line = item.line,
+            isActive = isActive,
+            retainedPresence = retainedPresence,
+            retainedBackgroundPresence = retainedBackgroundPresence,
+            isFocused = isFocused,
+            isStaticMode = isStaticMode,
+            isUserScrolling = isUserScrolling,
+            positionState = positionState,
+        )
+    }
 }
 
 /**
