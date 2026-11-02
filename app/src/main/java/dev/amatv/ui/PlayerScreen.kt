@@ -1849,7 +1849,7 @@ private fun FlymePlayerStage(
         BoxWithConstraints(Modifier.fillMaxSize()) {
             // Darken the artwork-colored backdrop so white text keeps its contrast.
             Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(
-                Color(0xA006030E), Color(0x4806030E), Color(0x8006030E),
+                Color(0xC406030E), Color(0x8206030E), Color(0xA806030E),
             ))))
             // A station item (live, or not yet started) has no song to scrub or skip within.
             if (isLiveStream || track.catalogKind == CatalogKind.Station) {
@@ -1924,7 +1924,8 @@ private fun FlymePlayerStage(
                 MotionArtwork(
                     track = track,
                     modifier = Modifier.size(if (stationName != null) 307.dp else columnWidth)
-                        .graphicsLayer { scaleX = artScale.value; scaleY = artScale.value },
+                        .graphicsLayer { scaleX = artScale.value; scaleY = artScale.value }
+                        .border(0.75.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(10.dp)),
                     animate = artworkPlaying && !lowPerformanceMode,
                     cornerRadius = 10.dp,
                     crossfadeTrackChanges = true,
@@ -1933,12 +1934,12 @@ private fun FlymePlayerStage(
                 Crossfade(targetState = track.title to track.isExplicit, animationSpec = tween(220),
                     label = "flyme-title") { (title, explicit) ->
                     ExplicitTitle(title, explicit, TextStyle(fontSize = 23.sp, lineHeight = 29.sp,
-                        fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.96f)), badgeSize = 18.dp)
+                        fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, color = Color.White), badgeSize = 18.dp)
                 }
                 // Artist and album are links to their pages, as in Apple Music.
                 Row(Modifier.padding(top = 2.dp)) {
-                    val linkStyle = TextStyle(fontSize = 16.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium,
-                        color = Color.White.copy(alpha = 0.62f))
+                    val linkStyle = TextStyle(fontSize = 16.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold,
+                        letterSpacing = (-0.1).sp, color = Color.White.copy(alpha = 0.52f))
                     val album = track.album.takeIf { it.isNotBlank() && it != track.artist }
                     if (track.artist.isNotBlank()) {
                         Text(track.artist, style = linkStyle, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -1946,7 +1947,7 @@ private fun FlymePlayerStage(
                                 .then(onOpenArtist?.let { Modifier.clickable(onClick = it) } ?: Modifier))
                     }
                     if (album != null) {
-                        if (track.artist.isNotBlank()) Text(" · ", style = linkStyle, maxLines = 1, modifier = Modifier.alignByBaseline())
+                        if (track.artist.isNotBlank()) Text(" — ", style = linkStyle, maxLines = 1, modifier = Modifier.alignByBaseline())
                         Text(album, style = linkStyle, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false).alignByBaseline().automationId("player-album")
                                 .then(onOpenAlbum?.let { Modifier.clickable(onClick = it) } ?: Modifier))
@@ -1964,17 +1965,17 @@ private fun FlymePlayerStage(
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(37.dp, Alignment.CenterHorizontally),
                     verticalAlignment = Alignment.CenterVertically) {
-                    FlymeGlyphButton(Icons.Rounded.FastRewind, stringResource(R.string.player_previous_track),
-                        onClick = { onControl(PlayerControl.Previous) }, size = 48.dp, iconSize = 32.dp,
+                    FlymeGlyphButton(FlymeGlyphs.Backward, stringResource(R.string.player_previous_track),
+                        onClick = { onControl(PlayerControl.Previous) }, size = 52.dp, iconSize = 38.dp,
                         enabled = canSkipPrevious, focused = focusedControl == PlayerControl.Previous,
                         modifier = Modifier.automationId("player-previous"))
-                    FlymeGlyphButton(if (playWhenReady) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    FlymeGlyphButton(if (playWhenReady) FlymeGlyphs.Pause else FlymeGlyphs.Play,
                         stringResource(if (playWhenReady) R.string.player_pause else R.string.player_play),
-                        onClick = { onControl(PlayerControl.PlayPause) }, size = 64.dp, iconSize = 46.dp,
+                        onClick = { onControl(PlayerControl.PlayPause) }, size = 64.dp, iconSize = 48.dp,
                         focused = focusedControl == PlayerControl.PlayPause,
                         modifier = Modifier.automationId("player-play-pause"))
-                    FlymeGlyphButton(Icons.Rounded.FastForward, stringResource(R.string.player_next_track),
-                        onClick = { onControl(PlayerControl.Next) }, size = 48.dp, iconSize = 32.dp,
+                    FlymeGlyphButton(FlymeGlyphs.Forward, stringResource(R.string.player_next_track),
+                        onClick = { onControl(PlayerControl.Next) }, size = 52.dp, iconSize = 38.dp,
                         enabled = canSkipNext, focused = focusedControl == PlayerControl.Next,
                         modifier = Modifier.automationId("player-next"))
                 }

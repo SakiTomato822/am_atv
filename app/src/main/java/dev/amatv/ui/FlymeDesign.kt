@@ -67,6 +67,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -181,6 +184,7 @@ internal fun FlymeGlyphButton(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    val keyFocused = focused && LocalInputModeManager.current.inputMode == InputMode.Keyboard
     val scale by animateFloatAsState(
         targetValue = if (pressed && enabled) 0.88f else 1f,
         animationSpec = spring(dampingRatio = 0.7f, stiffness = 600f),
@@ -188,8 +192,8 @@ internal fun FlymeGlyphButton(
     )
     val background by animateColorAsState(
         targetValue = when {
-            selected -> Color.White.copy(alpha = 0.9f)
-            focused -> Color.White.copy(alpha = 0.22f)
+            selected -> Color.White.copy(alpha = 0.16f)
+            keyFocused -> Color.White.copy(alpha = 0.22f)
             pressed && enabled -> Color.White.copy(alpha = 0.12f)
             else -> Color.Transparent
         },
@@ -202,7 +206,7 @@ internal fun FlymeGlyphButton(
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(CircleShape)
             .background(background)
-            .then(if (focused) Modifier.border(2.dp, Color.White, CircleShape) else Modifier)
+            .then(if (keyFocused) Modifier.border(2.dp, Color.White, CircleShape) else Modifier)
             .clickable(
                 enabled = enabled && LocalFocusTargetsEnabled.current,
                 interactionSource = interaction,
@@ -222,7 +226,7 @@ internal fun FlymeGlyphButton(
                 contentDescription = null,
                 tint = when {
                     !enabled -> tint.copy(alpha = 0.3f)
-                    selected -> FlymeOnLight
+                    selected -> Color.White
                     else -> tint
                 },
                 modifier = Modifier.size(iconSize),
@@ -246,7 +250,7 @@ internal fun FlymeSeekBar(
     var dragFraction by remember(duration) { mutableStateOf<Float?>(null) }
     val latestSeek by rememberUpdatedState(onSeekTo)
     val thickness by animateDpAsState(
-        targetValue = if (dragFraction != null || focused || scrubPositionMs != null) 7.dp else 4.dp,
+        targetValue = if (dragFraction != null || focused || scrubPositionMs != null) 7.dp else 5.dp,
         animationSpec = tween(180),
         label = "flyme-seek-thickness",
     )
@@ -284,6 +288,10 @@ internal fun FlymeSeekBar(
                 },
             contentAlignment = Alignment.CenterStart,
         ) {
+            val thumbRadius by animateDpAsState(
+                targetValue = if (dragFraction != null) 9.dp else 6.dp, animationSpec = tween(160),
+                label = "flyme-seek-thumb",
+            )
             Canvas(Modifier.fillMaxWidth().height(thickness)) {
                 val fraction = dragFraction
                     ?: ((scrubPositionMs ?: positionState.value).toFloat() / duration).coerceIn(0f, 1f)
@@ -295,6 +303,11 @@ internal fun FlymeSeekBar(
                         size = Size(size.width * fraction, size.height),
                         cornerRadius = corner,
                     )
+                }
+                if (enabled) {
+                    val r = thumbRadius.toPx()
+                    drawCircle(Color.White, radius = r,
+                        center = Offset((size.width * fraction).coerceIn(r, size.width - r), size.height / 2f))
                 }
             }
         }
