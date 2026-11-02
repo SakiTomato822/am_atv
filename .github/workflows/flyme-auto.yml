@@ -24,7 +24,8 @@ jobs:
       # read with a fine-grained token limited to that repo.
       - name: Retrieve MusicKit SDK
         env:
-          GH_TOKEN: ${{ secrets.MUSICKIT_SDK_TOKEN }}
+          # The token was first stored under the old secret name; accept either.
+          GH_TOKEN: ${{ secrets.MUSICKIT_SDK_TOKEN || secrets.MUSICKIT_SDK_DOWNLOAD_URL }}
         shell: bash
         run: |
           if [ -z "$GH_TOKEN" ]; then echo 'Missing private build input: MUSICKIT_SDK_TOKEN'; exit 1; fi
