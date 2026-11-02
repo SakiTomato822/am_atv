@@ -762,6 +762,8 @@ class AppleMusicApi(
             resourceType = resourceType,
             dateAddedMs = optString("dateAdded").takeIf { it.isNotBlank() }
                 ?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() },
+            isExplicit = optString("contentRating") == "explicit" ||
+                catalogAttrs?.optString("contentRating") == "explicit",
         )
     }
 

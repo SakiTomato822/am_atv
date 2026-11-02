@@ -50,6 +50,8 @@ data class Track(
     val resourceType: String? = null,
     /** When a library item was saved; library sorting only. */
     val dateAddedMs: Long? = null,
+    /** Apple's contentRating "explicit": shown as the E badge. */
+    val isExplicit: Boolean = false,
 )
 
 /**

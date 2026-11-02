@@ -241,9 +241,9 @@ internal fun CollectionScreen(
                                         Spacer(Modifier.width(12.dp))
                                     }
                                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                        Text(song.title, fontSize = 16.sp, fontWeight = FontWeight.Medium,
-                                            color = if (selected) Color(0xFFFF91A0) else Color.White,
-                                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        ExplicitTitle(song.title, song.isExplicit, androidx.compose.ui.text.TextStyle(
+                                            fontSize = 16.sp, fontWeight = FontWeight.Medium,
+                                            color = if (selected) Color(0xFFFF91A0) else Color.White))
                                         Text(song.artist, fontSize = 12.sp,
                                             color = Color.White.copy(alpha = if (focused) 0.72f else 0.48f),
                                             maxLines = 1, overflow = TextOverflow.Ellipsis)

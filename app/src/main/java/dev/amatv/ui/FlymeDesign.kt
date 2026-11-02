@@ -115,6 +115,38 @@ private val CompactLine = TextStyle(
 
 private val FlymeOnLight = Color(0xFF17151C)
 
+/** Apple Music's E badge for explicit tracks, sized to the text beside it. */
+@Composable
+internal fun ExplicitBadge(size: Dp = 14.dp, color: Color = Color.White.copy(alpha = 0.55f)) {
+    Box(
+        Modifier.size(size).clip(RoundedCornerShape(size * 0.2f)).background(color)
+            .semantics { contentDescription = "Explicit" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("E", fontSize = (size.value * 0.72f).sp, lineHeight = (size.value * 0.72f).sp,
+            fontWeight = FontWeight.Bold, color = Color(0xFF111113), style = CompactLine)
+    }
+}
+
+/** One-line title that keeps the E badge visible when the title is truncated. */
+@Composable
+internal fun ExplicitTitle(
+    text: String,
+    explicit: Boolean,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    badgeSize: Dp = 14.dp,
+) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        Text(text, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false))
+        if (explicit) {
+            Spacer(Modifier.width(badgeSize * 0.4f))
+            ExplicitBadge(badgeSize)
+        }
+    }
+}
+
 /** Shrinks a fixed car layout to fit smaller windows (phones); never enlarges it. */
 @Composable
 internal fun FitDesign(
@@ -610,8 +642,9 @@ private fun FlymeLibraryList(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     MotionArtwork(track = item, modifier = Modifier.size(37.dp), animate = false, cornerRadius = 5.dp)
-                    Text(item.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1.4f))
+                    ExplicitTitle(item.title, item.isExplicit,
+                        TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White),
+                        modifier = Modifier.weight(1.4f), badgeSize = 13.dp)
                     Text(item.artist, fontSize = 12.7.sp, color = dim, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f))
                     if (songs) {

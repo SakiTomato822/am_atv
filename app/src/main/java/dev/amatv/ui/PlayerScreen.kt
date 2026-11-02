@@ -1930,9 +1930,10 @@ private fun FlymePlayerStage(
                     crossfadeTrackChanges = true,
                 )
                 Spacer(Modifier.height(22.dp))
-                Crossfade(targetState = track.title, animationSpec = tween(220), label = "flyme-title") { title ->
-                    Text(title, fontSize = 23.sp, lineHeight = 29.sp, fontWeight = FontWeight.SemiBold,
-                        color = Color.White.copy(alpha = 0.96f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Crossfade(targetState = track.title to track.isExplicit, animationSpec = tween(220),
+                    label = "flyme-title") { (title, explicit) ->
+                    ExplicitTitle(title, explicit, TextStyle(fontSize = 23.sp, lineHeight = 29.sp,
+                        fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.96f)), badgeSize = 18.dp)
                 }
                 // Artist and album are links to their pages, as in Apple Music.
                 Row(Modifier.padding(top = 2.dp)) {

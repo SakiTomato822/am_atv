@@ -186,6 +186,7 @@ internal fun Track.toSessionJson() = JSONObject()
     .put("hasLyricsAvailable", hasLyricsAvailable)
     .put("recommendedByYtm", recommendedByYtm)
     .put("ytmVideoId", ytmVideoId)
+    .put("explicit", isExplicit)
 
 internal fun JSONObject.toSessionTrack(): Track {
     val colors = optJSONArray("palette")
@@ -211,5 +212,6 @@ internal fun JSONObject.toSessionTrack(): Track {
         playbackQueueId = null,
         recommendedByYtm = optBoolean("recommendedByYtm"),
         ytmVideoId = optionalString("ytmVideoId"),
+        isExplicit = optBoolean("explicit"),
     )
 }

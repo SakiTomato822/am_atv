@@ -341,8 +341,8 @@ private fun FlymeTopResult(item: Track, onOpen: (Track) -> Unit) {
             MotionArtwork(track = item, modifier = Modifier.size(104.dp), animate = false,
                 cornerRadius = if (circular) 52.dp else 10.dp)
             Spacer(Modifier.weight(1f))
-            Text(item.title, color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            ExplicitTitle(item.title, item.isExplicit,
+                TextStyle(color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold), badgeSize = 17.dp)
             Text(item.kindLine(), color = Color.White.copy(alpha = 0.58f), fontSize = 14.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
         }
@@ -365,8 +365,8 @@ private fun FlymeResultRow(item: Track, showKind: Boolean, onOpen: (Track) -> Un
             MotionArtwork(track = item, modifier = Modifier.size(40.dp), animate = false,
                 cornerRadius = if (circular) 20.dp else 5.dp)
             Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                Text(item.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                ExplicitTitle(item.title, item.isExplicit,
+                    TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold), badgeSize = 13.dp)
                 val subtitle = if (showKind) item.kindLine() else item.artist
                 if (subtitle.isNotBlank()) {
                     Text(subtitle, color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp,
