@@ -45,6 +45,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -1818,12 +1821,16 @@ fun AmAtvApp() {
     val activeBrowseDestination = if (isNowPlaying) previousDestination else destination
     val nowPlayingAlpha = animateFloatAsState(
         targetValue = if (isNowPlaying) 1f else 0f,
-        animationSpec = tween(
+        // Flyme: Now Playing grows out of the mini player and shrinks back into it.
+        animationSpec = if (BuildConfig.FLYME_AUTO) {
+            tween(durationMillis = 460, easing = CubicBezierEasing(0.2f, 0.9f, 0.22f, 1f))
+        } else tween(
             durationMillis = 320,
             easing = MotionTokens.KaraokeLineEasing,
         ),
         label = "now-playing-screen-transition",
     )
+    var miniPlayerCenter by remember { mutableStateOf<Offset?>(null) }
 
     val playerTransitionVisible by remember(nowPlayingAlpha) {
         derivedStateOf { nowPlayingAlpha.value > 0.001f }
@@ -1900,6 +1907,7 @@ fun AmAtvApp() {
                         LocalFocusFrameVisibility provides browseVisibility,
                     ) {
                     BrowseShell(
+                        onMiniPlayerPlaced = { miniPlayerCenter = it },
                         detailRequest = browseDetailRequest,
                         onDetailRequestHandled = { browseDetailRequest = null },
                         loadArtistOf = services::catalogArtistOf,
@@ -2129,10 +2137,25 @@ fun AmAtvApp() {
                             .fillMaxSize()
                             .focusProperties { canFocus = isNowPlaying }
                             .graphicsLayer {
-                                alpha = nowPlayingAlpha.value
-                                val scale = 0.97f + 0.03f * nowPlayingAlpha.value
-                                scaleX = scale
-                                scaleY = scale
+                                val t = nowPlayingAlpha.value
+                                if (BuildConfig.FLYME_AUTO) {
+                                    val center = miniPlayerCenter
+                                    transformOrigin = if (center != null && size.width > 0f && size.height > 0f) {
+                                        TransformOrigin(center.x / size.width, center.y / size.height)
+                                    } else TransformOrigin(0.86f, 0.06f)
+                                    val scale = 0.14f + 0.86f * t
+                                    scaleX = scale
+                                    scaleY = scale
+                                    // Capsule corners open into the full screen; content fades in early.
+                                    shape = RoundedCornerShape((1f - t) * 240.dp.toPx())
+                                    clip = true
+                                    alpha = (t * 2.2f).coerceIn(0f, 1f)
+                                } else {
+                                    alpha = t
+                                    val scale = 0.97f + 0.03f * t
+                                    scaleX = scale
+                                    scaleY = scale
+                                }
                             },
                     )
                     }
@@ -2146,6 +2169,7 @@ fun AmAtvApp() {
 
 @Composable
 private fun BrowseShell(
+    onMiniPlayerPlaced: (Offset) -> Unit = {},
     destination: Destination,
     isBrowseVisible: Boolean,
     currentTrack: Track,
@@ -2303,6 +2327,7 @@ private fun BrowseShell(
                     onDestination = onDestination,
                     focusRequesters = navigationFocus,
                     downFocus = { contentFocusEntry.requester ?: firstContentFocus },
+                    onMiniPlayerPlaced = onMiniPlayerPlaced,
                 )
             } else TopNavigation(
                 selected = destination,

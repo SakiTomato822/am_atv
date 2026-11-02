@@ -69,6 +69,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.focus.FocusRequester
@@ -733,6 +735,8 @@ internal fun FlymeTopBar(
     focusRequesters: Map<Destination, FocusRequester>,
     downFocus: () -> FocusRequester,
     modifier: Modifier = Modifier,
+    /** The mini player's centre in window pixels, so Now Playing can grow out of it. */
+    onMiniPlayerPlaced: (Offset) -> Unit = {},
 ) {
     val sideWidth = 267.dp
     val accountLabel = destinationLabel(Destination.Account)
@@ -794,7 +798,9 @@ internal fun FlymeTopBar(
         Box(Modifier.width(sideWidth), contentAlignment = Alignment.CenterEnd) {
             if (hasCurrentTrack) {
                 Row(
-                    Modifier.fillMaxWidth().height(46.dp).clip(RoundedCornerShape(23.dp))
+                    Modifier.fillMaxWidth().height(46.dp)
+                        .onGloballyPositioned { onMiniPlayerPlaced(it.boundsInWindow().center) }
+                        .clip(RoundedCornerShape(23.dp))
                         .background(Color.White.copy(alpha = if (selected == Destination.NowPlaying) 0.18f else 0.09f))
                         .padding(start = 6.dp, end = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
