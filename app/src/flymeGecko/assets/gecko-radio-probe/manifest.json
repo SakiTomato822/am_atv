@@ -1,0 +1,8 @@
+{
+  "manifest_version": 2,
+  "name": "AM ATV local radio probe",
+  "version": "1.0",
+  "browser_specific_settings": {"gecko": {"id": "amatv-radio-probe@dev.amatv"}},
+  "permissions": ["nativeMessaging", "nativeMessagingFromContent", "geckoViewAddons"],
+  "content_scripts": [{"matches": ["http://127.0.0.1/*"], "js": ["bridge.js"], "run_at": "document_start"}]
+}

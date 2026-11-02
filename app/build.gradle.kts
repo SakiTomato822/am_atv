@@ -49,6 +49,7 @@ android {
 
         buildConfigField("String", "AUTH_BROWSER_ACTIVITY", "\"dev.amatv.integration.MusicKitWebAuthActivity\"")
         buildConfigField("boolean", "AUTH_BROWSER_IS_GECKO", "false")
+        buildConfigField("String", "STATION_ENGINE_CLASS", "\"\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
@@ -128,9 +129,13 @@ android {
             applicationIdSuffix = ".flyme"
             versionNameSuffix = "-flyme.4"
             manifestPlaceholders["flymeApplicationLabel"] = "@string/flyme_app_name"
+            manifestPlaceholders["flymeRadioProbeEnabled"] = "false"
             matchingFallbacks += listOf("standaloneGecko", "standalone", "release")
             buildConfigField("boolean", "FLYME_AUTO", "true")
             buildConfigField("boolean", "FLYME_NATIVE_MEDIA", localSetting("flyme.nativeMedia", "true"))
+            // Stations play through MusicKit JS in GeckoView; songs stay on the native SDK.
+            buildConfigField("String", "STATION_ENGINE_CLASS",
+                if (localSetting("flyme.geckoStations", "true").toBoolean()) "\"dev.amatv.integration.GeckoStationEngine\"" else "\"\"")
             // Keep the configurable token endpoint in this variant. SDK-free
             // builds can exercise the UI; real playback still needs MusicKit.
             buildConfigField("String", "MUSICKIT_TOKEN_ENDPOINT", quotedBuildConfig(localSetting("AM_TOKEN_ENDPOINT")))
@@ -144,6 +149,7 @@ android {
                 applicationIdSuffix = ".flyme.preview"
                 versionNameSuffix = "-flyme-preview"
                 manifestPlaceholders["flymeApplicationLabel"] = "@string/flyme_preview_name"
+                manifestPlaceholders["flymeRadioProbeEnabled"] = "true"
                 buildConfigField("boolean", "FLYME_UI_PREVIEW", "true")
                 val previewAbi = localSetting("flyme.previewAbi", "x86_64")
                 require(previewAbi in listOf("arm64-v8a", "x86_64")) { "Unsupported preview ABI" }

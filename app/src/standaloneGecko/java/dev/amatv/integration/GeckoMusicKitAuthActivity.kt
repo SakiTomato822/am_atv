@@ -404,7 +404,7 @@ class GeckoMusicKitAuthActivity : Activity() {
     }
 }
 
-private object GeckoAuthRuntime {
+internal object GeckoAuthRuntime {
     private var instance: GeckoRuntime? = null
 
     fun get(context: Context): GeckoRuntime = instance ?: GeckoRuntime.create(

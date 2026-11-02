@@ -1,0 +1,16 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{background:#17171b;color:white;font:22px sans-serif;margin:24px}h1{font-size:30px}
+button{font:20px sans-serif;padding:15px;margin:5px;border:0;border-radius:14px;background:#eee;color:#111}
+button:disabled{opacity:.4}pre{font:16px monospace;white-space:pre-wrap;line-height:1.5}p{color:#ccc}
+</style>
+<h1>Gecko 电台独立验证</h1><p>独立测试页，不修改资料库。保留原生播放器登录；日志不记录授权值或个人电台 ID。</p>
+<button id="drm">检查 DRM</button><button id="auth" disabled>网页授权（仅必要时）</button>
+<button id="personal" disabled>播放个人电台</button><button id="live" disabled>播放 Apple Music 1</button>
+<button id="stop" disabled>停止</button><pre id="output"></pre>
+<script>const probeConfig=__CONFIG__;
+__SCRIPT__
+</script>
+<script src="https://js-cdn.music.apple.com/musickit/v3/musickit.js" onerror="probeEvent('script_failed')"></script>
+</html>

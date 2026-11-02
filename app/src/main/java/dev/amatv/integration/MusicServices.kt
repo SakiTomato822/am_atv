@@ -47,6 +47,9 @@ class MusicServices(context: Context) : RecommendationProvider {
         bundledToken = BuildConfig.MUSICKIT_DEVELOPER_TOKEN,
     )
     private val bridge = MusicKitBridge(appContext)
+    // Stations the native SDK cannot queue; null in variants without a second engine.
+    private val stationEngine = StationPlaybackEngine.create(appContext)
+    @Volatile private var stationEngineActive = false
     private val songSpectrum = SongAudioSpectrum(appContext, bridge::audioSessionId)
     private val mediaSession = PlaybackMediaSession(appContext)
     private val flymeMediaSource = if (BuildConfig.FLYME_NATIVE_MEDIA) FlymeMediaSource(appContext) else null
@@ -185,6 +188,7 @@ class MusicServices(context: Context) : RecommendationProvider {
         mediaSession.clear()
         flymeMediaSource?.clear()
         bridge.release()
+        releaseStationEngine()
         return userToken
     }
 
@@ -194,6 +198,7 @@ class MusicServices(context: Context) : RecommendationProvider {
         mediaSession.clear()
         flymeMediaSource?.clear()
         bridge.release()
+        releaseStationEngine()
         tokenStore.clear()
     }
 
@@ -252,7 +257,17 @@ class MusicServices(context: Context) : RecommendationProvider {
                     mediaSession.playbackRequested()
                     flymeMediaSource?.playbackRequested()
                 }
-                bridge.preparePlayback(track, developerToken, userToken, positionMs, playWhenReady)
+                val station = stationEngine?.takeIf { track.catalogKind == dev.amatv.model.CatalogKind.Station }
+                if (station != null) {
+                    // One audible engine at a time: silence the native queue before the web one starts.
+                    if (!stationEngineActive) bridge.pause()
+                    stationEngineActive = true
+                    station.prepare(track, developerToken, userToken, playWhenReady)
+                } else {
+                    if (stationEngineActive) stationEngine?.stop()
+                    stationEngineActive = false
+                    bridge.preparePlayback(track, developerToken, userToken, positionMs, playWhenReady)
+                }
             }
         }
     }
@@ -263,22 +278,27 @@ class MusicServices(context: Context) : RecommendationProvider {
     fun play() {
         mediaSession.playbackRequested()
         flymeMediaSource?.playbackRequested()
-        bridge.play()
+        if (stationEngineActive) stationEngine?.play() else bridge.play()
     }
     fun pause() {
         mediaSession.playbackPaused()
         flymeMediaSource?.playbackPaused()
-        bridge.pause()
+        if (stationEngineActive) stationEngine?.pause() else bridge.pause()
     }
-    fun seekTo(positionMs: Long) = bridge.seekTo(positionMs)
-    fun skipToNext() = bridge.skipToNext()
-    fun skipToPrevious() = bridge.skipToPrevious()
+    // Station streams are never seekable; MusicKitBridge also ignores live seeks.
+    fun seekTo(positionMs: Long) { if (!stationEngineActive) bridge.seekTo(positionMs) }
+    fun skipToNext() { if (stationEngineActive) stationEngine?.skipToNext() else bridge.skipToNext() }
+    fun skipToPrevious() { if (!stationEngineActive) bridge.skipToPrevious() }
     fun skipToQueueItem(queueId: Long) = bridge.skipToQueueItem(queueId)
     // The app queue owns repeat, shuffle and autoplay. Each native queue contains
     // one selected track, so enabling a second queue engine would race the app.
-    fun playbackSnapshot(): PlaybackSnapshot? = bridge.playbackSnapshot()
-    fun setPlaybackListener(listener: ((PlaybackSnapshot) -> Unit)?) =
+    fun playbackSnapshot(): PlaybackSnapshot? =
+        if (stationEngineActive) stationEngine?.playbackSnapshot() else bridge.playbackSnapshot()
+    // Both engines report to the same listener; the app drops stale generations.
+    fun setPlaybackListener(listener: ((PlaybackSnapshot) -> Unit)?) {
         bridge.setPlaybackListener(listener)
+        stationEngine?.setPlaybackListener(listener)
+    }
     fun setSystemPlaybackCallbacks(callbacks: PlaybackMediaSession.Callbacks?) {
         mediaSession.setCallbacks(callbacks)
         flymeMediaSource?.setCallbacks(callbacks)
@@ -292,5 +312,11 @@ class MusicServices(context: Context) : RecommendationProvider {
         mediaSession.release()
         flymeMediaSource?.release()
         bridge.release()
+        releaseStationEngine()
+    }
+
+    private fun releaseStationEngine() {
+        stationEngineActive = false
+        stationEngine?.release()
     }
 }

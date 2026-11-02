@@ -18,5 +18,11 @@
             android:exported="false" android:process=":gecko_auth"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
             android:theme="@style/Theme.AmAtv" />
+        <activity android:name=".integration.GeckoRadioProbeActivity"
+            android:enabled="${flymeRadioProbeEnabled}"
+            android:exported="true" android:permission="android.permission.DUMP"
+            android:process=":gecko_auth"
+            android:screenOrientation="userLandscape"
+            android:theme="@style/Theme.AmAtv" />
     </application>
 </manifest>
