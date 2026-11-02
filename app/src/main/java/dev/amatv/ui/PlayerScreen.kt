@@ -24,6 +24,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -1894,6 +1896,7 @@ private fun FlymePlayerStage(
                                     manualScrollDelta = manualScrollDelta,
                                     onLineClick = { startMs: Long -> onSeekTo((startMs - lyricOffsetMs).coerceAtLeast(0L)) }
                                         .takeIf { canSeek && !isLiveStream },
+                                    touchScroll = true,
                                 )
                             }
                         }
@@ -2377,7 +2380,27 @@ private fun LyricsPanel(
     manualScrollDelta: Float = 0f,
     /** Touch: tapping a timed line seeks to its start (lyric time, before the offset). */
     onLineClick: ((Long) -> Unit)? = null,
+    /** Touch: the lyrics can be dragged up and down, like the remote's manual scroll. */
+    touchScroll: Boolean = false,
 ) {
+    // Remote steps and finger drags feed the same manual-scroll path below.
+    var combinedScrollTrigger by remember(lines) { mutableIntStateOf(0) }
+    var combinedScrollDelta by remember(lines) { mutableFloatStateOf(0f) }
+    LaunchedEffect(manualScrollTrigger) {
+        if (manualScrollTrigger > 0) {
+            combinedScrollDelta = manualScrollDelta
+            combinedScrollTrigger++
+        }
+    }
+    val touchScrollModifier = if (!touchScroll) Modifier else Modifier.pointerInput(lines) {
+        detectVerticalDragGestures { change, dragAmount ->
+            change.consume()
+            combinedScrollDelta = -dragAmount
+            combinedScrollTrigger++
+        }
+    }
+    @Suppress("NAME_SHADOWING") val manualScrollTrigger = combinedScrollTrigger
+    @Suppress("NAME_SHADOWING") val manualScrollDelta = combinedScrollDelta
     val isStaticMode = remember(lines) { lines.all { it.isStatic } }
     val effectiveLyricPositionState = remember(positionState, lyricOffsetMs) {
         derivedStateOf {
@@ -2493,6 +2516,7 @@ private fun LyricsPanel(
         modifier = Modifier
             .automationId("lyrics-panel")
             .fillMaxSize()
+            .then(touchScrollModifier)
             .graphicsLayer {
                 compositingStrategy = CompositingStrategy.Offscreen
             }

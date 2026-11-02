@@ -746,6 +746,8 @@ internal fun FlymeTopBar(
     modifier: Modifier = Modifier,
     /** The mini player's centre in window pixels, so Now Playing can grow out of it. */
     onMiniPlayerPlaced: (Offset) -> Unit = {},
+    /** Only the mini player, for pages that cover the top bar. */
+    capsuleOnly: Boolean = false,
 ) {
     val sideWidth = 267.dp
     val accountLabel = destinationLabel(Destination.Account)
@@ -753,7 +755,7 @@ internal fun FlymeTopBar(
         modifier.fillMaxWidth().padding(start = 40.dp, end = 40.dp, top = 17.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.width(sideWidth)) {
+        if (capsuleOnly) Spacer(Modifier.weight(1f)) else Box(Modifier.width(sideWidth)) {
             FocusSurface(
                 onClick = { onDestination(Destination.Account) },
                 modifier = Modifier.size(37.dp)
@@ -770,7 +772,7 @@ internal fun FlymeTopBar(
                     tint = if (selected == Destination.Account) FlymeOnLight else Color.White)
             }
         }
-        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+        if (!capsuleOnly) Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             Row(
                 Modifier.clip(RoundedCornerShape(22.dp)).background(Color.White.copy(alpha = 0.09f)).padding(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),

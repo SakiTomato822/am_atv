@@ -2493,6 +2493,23 @@ private fun BrowseShell(
                 }
             }
         }
+        // Album and artist pages cover the top bar; keep the mini player where it always is.
+        if (BuildConfig.FLYME_AUTO && detailVisible && hasCurrentTrack && isBrowseVisible) {
+            val capsuleFocus = remember { Destination.entries.associateWith { FocusRequester() } }
+            FlymeTopBar(
+                selected = destination,
+                hasCurrentTrack = true,
+                currentTrack = currentTrack,
+                nowPlayingSubtitle = nowPlayingSubtitle,
+                isPlaying = playWhenReady,
+                onTogglePlayback = onTogglePlayback,
+                onDestination = onDestination,
+                focusRequesters = capsuleFocus,
+                downFocus = { firstContentFocus },
+                onMiniPlayerPlaced = onMiniPlayerPlaced,
+                capsuleOnly = true,
+            )
+        }
     }
 }
 

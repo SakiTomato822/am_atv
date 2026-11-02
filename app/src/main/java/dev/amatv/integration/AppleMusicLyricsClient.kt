@@ -163,7 +163,7 @@ class AppleMusicLyricsClient(
             pronunciationLocale = localization.pronunciationLocale,
             includeTranslations = localization.includeTranslations,
             includePronunciations = localization.includePronunciations,
-        )
+        ).withoutChineseToChineseTranslations(localization.locale)
     }
 
     /** The base document always owns timing, agents and background-vocal structure. */
@@ -1337,3 +1337,34 @@ internal object AppleTtmlParser {
         return (seconds * 1_000.0).toLong()
     }
 }
+
+/**
+ * Apple "translates" Chinese lyrics into the other Chinese script (Traditional into Simplified
+ * and back). A Chinese reader gains nothing from that line, so drop it for Chinese lines.
+ * Japanese lines (kanji with kana) and other languages keep their translation.
+ */
+internal fun List<LyricLine>.withoutChineseToChineseTranslations(translationLocale: Locale): List<LyricLine> {
+    if (translationLocale.language != "zh") return this
+    return map { line ->
+        val main = line.translation?.takeUnless { isChineseLyric(line.text) }
+        val background = line.backgroundTranslation?.takeUnless { isChineseLyric(line.backgroundText) }
+        if (main == line.translation && background == line.backgroundTranslation) line
+        else line.copy(translation = main, backgroundTranslation = background)
+    }
+}
+
+/** Mostly Han characters, and no kana or hangul (those would make it Japanese or Korean). */
+internal fun isChineseLyric(text: String): Boolean {
+    var han = 0
+    var letters = 0
+    for (char in text) {
+        when (Character.UnicodeScript.of(char.code)) {
+            Character.UnicodeScript.HAN -> { han++; letters++ }
+            Character.UnicodeScript.HIRAGANA, Character.UnicodeScript.KATAKANA,
+            Character.UnicodeScript.HANGUL -> return false
+            else -> if (char.isLetter()) letters++
+        }
+    }
+    return han > 0 && han * 2 >= letters
+}
+
