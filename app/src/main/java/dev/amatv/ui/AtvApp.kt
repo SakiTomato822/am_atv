@@ -2332,20 +2332,28 @@ private fun BrowseShell(
                 LocalFocusFrameEnabled provides isBrowseVisible,
                 LocalFocusTargetsEnabled provides isBrowseVisible,
             ) {
-                LibraryArtistScreen(state = artistState, currentTrack = currentTrack,
+                val openArtistItem: (Track, List<Track>) -> Unit = { item, queue ->
+                    when (item.openAction) {
+                        CatalogOpenAction.Collection -> browser.open(item)
+                        CatalogOpenAction.Station -> onOpenTrack(item, listOf(item))
+                        CatalogOpenAction.Play -> onOpenTrack(item, queue.filter {
+                            it.openAction == CatalogOpenAction.Play
+                        })
+                        CatalogOpenAction.OpenArtist -> Unit
+                    }
+                }
+                if (BuildConfig.FLYME_AUTO) FlymeArtistScreen(
+                    state = artistState,
+                    firstFocus = artistFirstFocus,
+                    onBack = ::closeArtist,
+                    onLoadMoreLibrary = artistBrowser::loadMore,
+                    onOpenAlbum = browser::open,
+                    onOpenTrack = openArtistItem,
+                ) else LibraryArtistScreen(state = artistState, currentTrack = currentTrack,
                     firstFocus = artistFirstFocus, onBack = ::closeArtist,
                     onRetry = artistBrowser::retry, onLoadMore = artistBrowser::loadMore,
                     onOpenAlbum = browser::open,
-                    onOpenTrack = { item, queue ->
-                        when (item.openAction) {
-                            CatalogOpenAction.Collection -> browser.open(item)
-                            CatalogOpenAction.Station -> onOpenTrack(item, listOf(item))
-                            CatalogOpenAction.Play -> onOpenTrack(item, queue.filter {
-                                it.openAction == CatalogOpenAction.Play
-                            })
-                            CatalogOpenAction.OpenArtist -> Unit
-                        }
-                    })
+                    onOpenTrack = openArtistItem)
             }
         }
         if (collection != null) {
