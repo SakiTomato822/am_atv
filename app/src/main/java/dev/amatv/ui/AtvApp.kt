@@ -1827,7 +1827,8 @@ fun AmAtvApp() {
 
     val isNowPlaying = destination == Destination.NowPlaying
     LaunchedEffect(isNowPlaying, isPlaying, spectrumPermissionGranted) {
-        // Flyme asks too: a granted capture drives real bands, otherwise the queue pulses decoratively.
+        // Flyme has no spectrum display, so it never asks for the microphone.
+        if (BuildConfig.FLYME_AUTO) return@LaunchedEffect
         if (isNowPlaying && isPlaying && !spectrumPermissionGranted && !spectrumPermissionAsked) {
             spectrumPermissionAsked = true
             spectrumPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -1835,7 +1836,7 @@ fun AmAtvApp() {
     }
     DisposableEffect(lifecycleOwner, isNowPlaying, isPlaying, spectrumPermissionGranted) {
         fun updateCapture() {
-            services.setSpectrumActive(isNowPlaying && isPlaying && spectrumPermissionGranted &&
+            services.setSpectrumActive(!BuildConfig.FLYME_AUTO && isNowPlaying && isPlaying && spectrumPermissionGranted &&
                 lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
         }
         val observer = LifecycleEventObserver { _, _ -> updateCapture() }

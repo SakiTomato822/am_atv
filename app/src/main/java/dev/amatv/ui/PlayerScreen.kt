@@ -2222,7 +2222,8 @@ private fun ArtistWithAudioBands(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false).alignBy(LastBaseline),
         )
-        if (showBands) {
+        // The Flyme build has no spectrum display.
+        if (showBands && !BuildConfig.FLYME_AUTO) {
             Spacer(Modifier.width(if (compact) 6.dp else 7.dp))
             AudioBandIndicator(
                 isPlaying = isPlaying,
