@@ -104,6 +104,8 @@ import dev.amatv.playback.EntryOrigin
 import dev.amatv.playback.PlaybackContext
 import dev.amatv.playback.PlaybackQueueController
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -156,6 +158,7 @@ fun AmAtvApp() {
     val contentLanguageTag = LocalConfiguration.current.locales.toLanguageTags()
     val lyricsLanguageTag = LocalConfiguration.current.locales[0].toLanguageTag()
     val scope = rememberCoroutineScope()
+    val shelfLoads = remember(scope) { ShelfLoads(scope) }
     val services = remember(context) { MusicServices(context) }
     val cacheSettings by services.contentCache.settings.collectAsState()
     val playbackPrefs = remember(context) { PlaybackPreferences(context) }
@@ -240,6 +243,8 @@ fun AmAtvApp() {
             },
         )
     }
+    // Destinations showing shelves saved by an earlier launch, still to be refreshed.
+    var savedShelfDestinations by remember { mutableStateOf(emptySet<Destination>()) }
     var loadingDestinations by remember {
         mutableStateOf(
             if (services.isCatalogConfigured) setOf(Destination.Home) else emptySet(),
@@ -994,6 +999,16 @@ fun AmAtvApp() {
             if (relative > 0) services.skipToNext() else services.skipToPrevious()
             return
         }
+        // Next onto the gapless lookahead: MusicKit already buffered it, so no new prepare.
+        val queued = gaplessLookahead
+        val lookaheadId = queued?.second?.catalogId
+        if (relative > 0 && lookaheadId != null && playbackPrepared && isPlaying &&
+            queueController.peekAutoNext()?.entryId == queued.first &&
+            services.skipToQueuedLookahead(lookaheadId)
+        ) {
+            playWhenReady = true
+            return
+        }
         dispatchQueueAction(if (relative > 0) StartupQueueAction.Next else StartupQueueAction.Previous)
     }
 
@@ -1536,15 +1551,29 @@ fun AmAtvApp() {
         ) {
             return@LaunchedEffect
         }
-        if (shelvesByDestination[target]?.isNotEmpty() == true) return@LaunchedEffect
+        if (shelvesByDestination[target]?.isNotEmpty() == true && target !in savedShelfDestinations) return@LaunchedEffect
         if (target == Destination.Library && connectionState != MusicConnectionState.SignedIn) {
             loadingDestinations = loadingDestinations - target
             return@LaunchedEffect
         }
 
         loadingDestinations = loadingDestinations + target
+        // Show the last session's shelves at once; the network load below replaces them.
+        val snapshotName = target.name.takeIf { target == Destination.Home || target == Destination.Browse }
+        if (snapshotName != null && shelvesByDestination[target].isNullOrEmpty() &&
+            connectionState == MusicConnectionState.SignedIn
+        ) {
+            cancellableResult { services.savedShelves(snapshotName, contentLanguageTag) }.getOrNull()
+                ?.takeIf { it.isNotEmpty() && shelvesByDestination[target].isNullOrEmpty() }
+                ?.let { saved ->
+                    shelvesByDestination = shelvesByDestination + (target to saved)
+                    savedShelfDestinations = savedShelfDestinations + target
+                }
+        }
+        val shelfKey = listOf(target, connectionState, reloadNonce, contentLanguageTag, queueState.source)
+        val (loadedShelves, errors) = shelfLoads.load(shelfKey) {
         val errors = mutableListOf<Throwable>()
-        val loadedShelves = coroutineScope {
+        coroutineScope {
             when (target) {
                 Destination.Home -> {
                     val recommendations = async {
@@ -1798,10 +1827,18 @@ fun AmAtvApp() {
                 Destination.Search,
                 -> emptyList()
             }
+        } to errors
         }
-        shelvesByDestination = shelvesByDestination + (target to loadedShelves)
+        val keepSaved = loadedShelves.isEmpty() && target in savedShelfDestinations
+        if (!keepSaved) {
+            shelvesByDestination = shelvesByDestination + (target to loadedShelves)
+            savedShelfDestinations = savedShelfDestinations - target
+            if (snapshotName != null && loadedShelves.isNotEmpty() && connectionState == MusicConnectionState.SignedIn) {
+                scope.launch { cancellableResult { services.saveShelves(snapshotName, contentLanguageTag, loadedShelves) } }
+            }
+        }
         loadingDestinations = loadingDestinations - target
-        serviceMessage = if (loadedShelves.isEmpty()) {
+        serviceMessage = if (loadedShelves.isEmpty() && !keepSaved) {
             errors.firstOrNull()?.message
         } else {
             null
@@ -2809,3 +2846,26 @@ private fun saveStationHistory(context: android.content.Context, songs: List<Tra
         .edit().putString("songs", array.toString()).apply()
 }
 
+/**
+ * One shelf load per destination and inputs. Startup recomposition can restart the loading effect
+ * with unchanged inputs; the restarted effect awaits the running load instead of requesting every
+ * Apple Music endpoint again. A load for the same destination with other inputs is superseded.
+ */
+private class ShelfLoads(private val scope: CoroutineScope) {
+    private val running = mutableMapOf<List<Any?>, Deferred<Pair<List<ContentShelf>, List<Throwable>>>>()
+
+    suspend fun load(
+        key: List<Any?>,
+        block: suspend () -> Pair<List<ContentShelf>, List<Throwable>>,
+    ): Pair<List<ContentShelf>, List<Throwable>> {
+        val deferred = running[key]?.takeIf { it.isActive } ?: run {
+            running.keys.filter { it.first() == key.first() && it != key }.forEach { running.remove(it)?.cancel() }
+            scope.async { block() }.also { running[key] = it }
+        }
+        return try {
+            deferred.await()
+        } finally {
+            if (!deferred.isActive && running[key] === deferred) running.remove(key)
+        }
+    }
+}

@@ -55,10 +55,12 @@ class MusicServices(context: Context) : RecommendationProvider {
     private val flymeMediaSource = if (BuildConfig.FLYME_NATIVE_MEDIA) FlymeMediaSource(appContext) else null
     val nativeMediaStatus get() = flymeMediaSource?.status
     private val playbackPreparation = Mutex()
+    private val shelfSnapshots = ShelfSnapshots(appContext)
     private val api = AppleMusicApi(
         storefront = BuildConfig.APPLE_MUSIC_STOREFRONT,
         developerTokens = developerTokens,
         userToken = tokenStore::readUserToken,
+        storefrontPreferences = appContext.getSharedPreferences("am_atv_storefront", android.content.Context.MODE_PRIVATE),
     )
     private val appleLyrics = AppleMusicLyricsClient(
         storefront = BuildConfig.APPLE_MUSIC_STOREFRONT,
@@ -192,7 +194,19 @@ class MusicServices(context: Context) : RecommendationProvider {
         return userToken
     }
 
+    /** Last saved shelves of a destination for this account and language, or null. */
+    suspend fun savedShelves(name: String, languageTag: String): List<ContentShelf>? {
+        val userToken = tokenStore.readUserToken()?.takeIf(String::isNotBlank) ?: return null
+        return shelfSnapshots.read(name, userToken, languageTag)
+    }
+
+    suspend fun saveShelves(name: String, languageTag: String, shelves: List<ContentShelf>) {
+        val userToken = tokenStore.readUserToken()?.takeIf(String::isNotBlank) ?: return
+        shelfSnapshots.write(name, userToken, languageTag, shelves)
+    }
+
     fun signOut() {
+        shelfSnapshots.clear()
         webAuthenticationSession.markLocalWebSessionForReset()
         songSpectrum.setActive(false)
         mediaSession.clear()
@@ -302,6 +316,7 @@ class MusicServices(context: Context) : RecommendationProvider {
     fun skipToQueueItem(queueId: Long) = bridge.skipToQueueItem(queueId)
     /** Gapless preloading of the app's next song; stations manage their own queue. */
     fun setLookahead(next: Track?) { if (!stationEngineActive) bridge.setLookahead(next) }
+    fun skipToQueuedLookahead(catalogId: String): Boolean = !stationEngineActive && bridge.skipToQueuedLookahead(catalogId)
     // The app queue owns repeat, shuffle and autoplay. Each native queue contains
     // one selected track, so enabling a second queue engine would race the app.
     fun playbackSnapshot(): PlaybackSnapshot? =

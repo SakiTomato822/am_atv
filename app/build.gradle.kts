@@ -143,9 +143,11 @@ android {
             ndk.abiFilters += "arm64-v8a"
             if (localSetting("flyme.uiVerification", "false").toBoolean()) {
                 // Instrumentation on the existing x86_64 Android 11 emulator.
-                isMinifyEnabled = false
-                isShrinkResources = false
-                isDebuggable = true
+                // -Pflyme.previewRelease=true: minified and non-debuggable like the release APK,
+                // for performance measurements (a debuggable build runs far slower).
+                isMinifyEnabled = localSetting("flyme.previewRelease", "false").toBoolean()
+                isShrinkResources = isMinifyEnabled
+                isDebuggable = !isMinifyEnabled
                 applicationIdSuffix = ".flyme.preview"
                 versionNameSuffix = "-flyme-preview"
                 manifestPlaceholders["flymeApplicationLabel"] = "@string/flyme_preview_name"

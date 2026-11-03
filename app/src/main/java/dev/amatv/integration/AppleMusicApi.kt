@@ -97,6 +97,8 @@ class DeveloperTokenClient(
 class AppleMusicApi(
     private val storefront: String,
     private val developerTokens: DeveloperTokenClient,
+    /** Keeps the account storefront across launches, so cold-start catalog requests need not wait for it. */
+    private val storefrontPreferences: android.content.SharedPreferences? = null,
     private val userToken: () -> String?,
 ) {
     private data class UserStorefrontCache(val userToken: String, val storefront: String)
@@ -121,14 +123,28 @@ class AppleMusicApi(
         userStorefrontCache?.takeIf { it.userToken == currentUserToken }?.let { return it.storefront }
         return userStorefrontMutex.withLock {
             userStorefrontCache?.takeIf { it.userToken == currentUserToken }?.let { return@withLock it.storefront }
+            // The token is stored only as a digest; a new sign-in therefore asks Apple again.
+            val tokenDigest = storefrontTokenDigest(currentUserToken)
+            storefrontPreferences?.takeIf { it.getString(KEY_STOREFRONT_TOKEN, null) == tokenDigest }
+                ?.getString(KEY_STOREFRONT, null)?.takeIf { it.matches(Regex("[a-z]{2}")) }
+                ?.let { saved ->
+                    userStorefrontCache = UserStorefrontCache(currentUserToken, saved)
+                    return@withLock saved
+                }
             val root = requestRoot(path = "/v1/me/storefront", needsUserToken = true)
             val resolved = parseUserStorefrontId(root)
                 ?: error(AppText.text(R.string.services_user_storefront_missing))
             userStorefrontCache = UserStorefrontCache(currentUserToken, resolved)
+            storefrontPreferences?.edit()?.putString(KEY_STOREFRONT_TOKEN, tokenDigest)
+                ?.putString(KEY_STOREFRONT, resolved)?.apply()
             Log.i(TAG, "Apple user storefront=$resolved")
             resolved
         }
     }
+
+    private fun storefrontTokenDigest(token: String): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
 
     suspend fun effectiveStorefront(): String {
         val currentUserToken = userToken()?.takeIf(String::isNotBlank)
@@ -935,6 +951,8 @@ class AppleMusicApi(
 
     private companion object {
         const val TAG = "AmAtvAppleMusic"
+        private const val KEY_STOREFRONT_TOKEN = "user_storefront_token_sha256"
+        private const val KEY_STOREFRONT = "user_storefront"
     }
 }
 

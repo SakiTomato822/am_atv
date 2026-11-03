@@ -298,6 +298,16 @@ class MusicKitBridge(private val context: Context) {
     }
 
     fun skipToNext() = invokeController("skipToNextItem")
+
+    /**
+     * Manual Next onto the song already queued natively: MusicKit has it buffered, so skip there
+     * instead of preparing it again. readSnapshot then adopts it like a gapless advance.
+     */
+    fun skipToQueuedLookahead(catalogId: String): Boolean {
+        if (preparing || controller == null || queuedLookaheadCatalogId != catalogId) return false
+        skipToNext()
+        return true
+    }
     fun skipToPrevious() = invokeController("skipToPreviousItem")
     fun skipToQueueItem(queueId: Long) = invokeController("skipToQueueItemWithId", queueId)
     fun setRepeatMode(mode: PlaybackRepeatMode) =
@@ -384,10 +394,12 @@ class MusicKitBridge(private val context: Context) {
         val createdController = runCatching {
             // Apple's bundled SDK test app creates its controller on a
             // dedicated HandlerThread. Keep callbacks and the legacy native
-            // player off Compose's main thread as the reference app does.
+            // player off Compose's main thread as the reference app does. Default priority:
+            // prepare, skip and the queue edits wait on this thread, and a background-class
+            // thread loses the CPU to the UI on slower car head units.
             val worker = HandlerThread(
                 "AMATV:MusicKit",
-                Process.THREAD_PRIORITY_BACKGROUND,
+                Process.THREAD_PRIORITY_DEFAULT,
             ).also {
                 it.start()
                 playbackThread = it

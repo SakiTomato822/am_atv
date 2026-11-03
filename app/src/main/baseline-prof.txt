@@ -17,3 +17,16 @@ HPLdev/amatv/ui/ArtworkCachePolicy*;->**(**)**
 HPLdev/amatv/ui/PlayerScreenKt*;->**(**)**
 HPLdev/amatv/ui/LyricViewportKt*;->**(**)**
 HPLdev/amatv/ui/rendering/TextureAlphaMask*;->**(**)**
+Ldev/amatv/ui/CarLayoutKt;
+HSPLdev/amatv/ui/CarLayoutKt*;->**(**)**
+HSPLdev/amatv/ui/Flyme*;->**(**)**
+HPLdev/amatv/ui/Lava*;->**(**)**
+HPLdev/amatv/ui/PlayerBackdrop*;->**(**)**
+HPLdev/amatv/ui/ShelfLoads;->**(**)**
+HPLdev/amatv/integration/AppleMusicApi*;->**(**)**
+HPLdev/amatv/integration/MusicServices*;->**(**)**
+HPLdev/amatv/integration/MusicKitBridge*;->**(**)**
+HPLdev/amatv/integration/NativePlaybackIntent*;->**(**)**
+HPLdev/amatv/integration/PlaybackSessionCodec*;->**(**)**
+HPLdev/amatv/integration/ShelfSnapshots*;->**(**)**
+HPLdev/amatv/playback/**;->**(**)**
