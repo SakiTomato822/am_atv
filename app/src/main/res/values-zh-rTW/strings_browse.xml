@@ -122,4 +122,5 @@
     <string name="player_favorite_add">加入喜好歌曲</string>
     <string name="player_favorite_remove">從喜好歌曲移除</string>
     <string name="player_favorite_failed">無法更新喜好歌曲。</string>
+    <string name="player_favorite_remove_unsupported">只能在 Apple Music App 中取消喜好。</string>
 </resources>

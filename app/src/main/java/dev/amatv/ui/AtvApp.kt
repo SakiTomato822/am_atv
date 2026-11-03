@@ -68,6 +68,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.amatv.R
 import dev.amatv.BuildConfig
+import dev.amatv.integration.toSessionTrack
+import dev.amatv.integration.toSessionJson
 import dev.amatv.data.MockCatalog
 import dev.amatv.i18n.AppText
 import dev.amatv.i18n.destinationLabel
@@ -210,9 +212,18 @@ fun AmAtvApp() {
     var connectionState by remember { mutableStateOf(services.connectionState) }
     var serviceMessage by remember { mutableStateOf<String?>(null) }
     var lastPlaybackNotice by remember { mutableStateOf<String?>(null) }
+    var stationHistory by remember { mutableStateOf(loadStationHistory(context)) }
     // Favorite Songs (Apple's "love" rating) for the songs seen on Now Playing.
     var favoriteState by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
     var favoriteCatalogId by remember { mutableStateOf<String?>(null) }
+    // A short Now Playing notice (favorites); playback snapshots clear playbackMessage too often.
+    var playerNotice by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(playerNotice) {
+        if (playerNotice != null) {
+            delay(3_000L)
+            playerNotice = null
+        }
+    }
     // Gapless: the queue entry preloaded into MusicKit, and the entry being adopted without a prepare.
     var gaplessLookahead by remember { mutableStateOf<Pair<Long, Track>?>(null) }
     var adoptingGaplessEntryId by remember { mutableStateOf<Long?>(null) }
@@ -907,15 +918,23 @@ fun AmAtvApp() {
         }
     }
 
-    /** The star on Now Playing: optimistic, reverted with a message if Apple refuses. */
+    /**
+     * The star on Now Playing adds to Favorite Songs (optimistic, reverted if Apple refuses).
+     * Apple lets only its own apps remove a favorite, so a filled star explains that instead.
+     */
     fun toggleFavorite() {
         val catalogId = track.catalogId?.takeIf { it.matches(Regex("[0-9]+")) } ?: return
-        val target = favoriteState[catalogId] != true
-        favoriteState = favoriteState + (catalogId to target)
+        if (favoriteState[catalogId] == true) {
+            playerNotice = AppText.text(R.string.player_favorite_remove_unsupported)
+            return
+        }
+        favoriteState = favoriteState + (catalogId to true)
         scope.launch {
-            cancellableResult { services.setFavorite(catalogId, target) }.onFailure {
-                favoriteState = favoriteState + (catalogId to !target)
-                serviceMessage = AppText.text(R.string.player_favorite_failed)
+            cancellableResult { services.addFavorite(catalogId) }.onFailure {
+                android.util.Log.w("AMATV-Favorite", "Favorite add failed: ${it.javaClass.simpleName} " +
+                    "status=${(it as? dev.amatv.integration.CatalogRequestException)?.httpStatus}")
+                favoriteState = favoriteState + (catalogId to false)
+                playerNotice = AppText.text(R.string.player_favorite_failed)
             }
         }
     }
@@ -1800,6 +1819,19 @@ fun AmAtvApp() {
     }
 
     val stationQueueContext = queueState.current?.track?.catalogKind == CatalogKind.Station
+    // Station history (Flyme): the songs a station played, kept across launches, like Apple Music's
+    // played list. The queue view shows them before the current song while a station plays.
+    LaunchedEffect(track.catalogId, stationQueueContext) {
+        if (!BuildConfig.FLYME_AUTO || !stationQueueContext) return@LaunchedEffect
+        val song = track.takeIf { it.catalogKind == CatalogKind.Song && it.catalogId != null } ?: return@LaunchedEffect
+        if (stationHistory.lastOrNull()?.catalogId == song.catalogId) return@LaunchedEffect
+        stationHistory = (stationHistory.filter { it.catalogId != song.catalogId } + song.copy(lyrics = emptyList()))
+            .takeLast(STATION_HISTORY_LIMIT)
+        saveStationHistory(context, stationHistory)
+    }
+    val stationTimeline = if (BuildConfig.FLYME_AUTO && stationQueueContext) {
+        if (stationHistory.lastOrNull()?.catalogId == track.catalogId) stationHistory else stationHistory + track
+    } else emptyList()
     val activePlaybackSnapshot = currentPlaybackSnapshot()
     // The native SDK briefly reports live while a song loads; only a station item can be a live stream.
     val isLiveStream = activePlaybackSnapshot?.isLiveStream == true && stationQueueContext
@@ -2078,9 +2110,12 @@ fun AmAtvApp() {
                         audioSpectrum = services::audioSpectrum,
                         isActiveScreen = isNowPlaying,
                         isVisibleOnScreen = isPlayerVisible,
-                        queue = timelineTracks,
-                        queueEntryIds = timelineEntryIds,
-                        queueCurrentIndex = queueState.currentTimelineIndex,
+                        queue = stationTimeline.ifEmpty { timelineTracks },
+                        queueEntryIds = if (stationTimeline.isNotEmpty()) {
+                            stationTimeline.indices.map { -1_000L - it }
+                        } else timelineEntryIds,
+                        queueCurrentIndex = if (stationTimeline.isNotEmpty()) stationTimeline.lastIndex
+                            else queueState.currentTimelineIndex,
                         queueSessionId = queueState.sessionId,
                         canClearQueue = !stationQueueContext &&
                             (queueState.upNext.isNotEmpty() || queueState.autoplay.isNotEmpty()),
@@ -2108,7 +2143,7 @@ fun AmAtvApp() {
                             activeLyrics.phase == LyricsLoadPhase.Failed,
                         onRetryLyrics = ::retryCurrentLyrics,
                         lyricOffsetMs = lyricOffsetMs,
-                        statusMessage = playbackMessage ?: if (queueState.awaitingNext) {
+                        statusMessage = playerNotice ?: playbackMessage ?: if (queueState.awaitingNext) {
                             (queueState.autoplayStatus as? dev.amatv.playback.AutoplayStatus.Error)?.message
                         } else null,
                         onTogglePlayback = (::togglePlayback),
@@ -2118,7 +2153,13 @@ fun AmAtvApp() {
                         canSeek = canSeekPlayback,
                         isLiveStream = isLiveStream,
                         stationName = stationName.takeIf { !isLiveStream && track.catalogKind != CatalogKind.Station },
-                        onSelectTrack = (::selectQueueTrack),
+                        onSelectTrack = { index ->
+                            // A station's played song plays on its own, leaving the station.
+                            if (stationTimeline.isNotEmpty()) {
+                                stationTimeline.getOrNull(index)?.takeIf { index != stationTimeline.lastIndex }
+                                    ?.let { song -> playWhenReady = true; playTrack(song, listOf(song)) }
+                            } else selectQueueTrack(index)
+                        },
                         onBack = { destination = previousDestination },
                         onOpenArtist = { openFromPlayer(services::catalogArtistOf) },
                         isFavorite = favoriteState.takeIf { BuildConfig.FLYME_AUTO }?.get(track.catalogId)
@@ -2751,3 +2792,20 @@ private fun TopNavigation(
         }
     }
 }
+
+private const val STATION_HISTORY_LIMIT = 50
+
+/** Station history stays on the head unit. */
+private fun loadStationHistory(context: android.content.Context): List<Track> = runCatching {
+    val raw = context.getSharedPreferences("am_atv_station_history", android.content.Context.MODE_PRIVATE)
+        .getString("songs", null) ?: return emptyList()
+    val array = org.json.JSONArray(raw)
+    List(array.length()) { array.getJSONObject(it).toSessionTrack() }
+}.getOrDefault(emptyList())
+
+private fun saveStationHistory(context: android.content.Context, songs: List<Track>) {
+    val array = org.json.JSONArray().apply { songs.forEach { put(it.toSessionJson()) } }
+    context.getSharedPreferences("am_atv_station_history", android.content.Context.MODE_PRIVATE)
+        .edit().putString("songs", array.toString()).apply()
+}
+

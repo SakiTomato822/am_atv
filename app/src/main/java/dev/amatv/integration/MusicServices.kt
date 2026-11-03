@@ -233,7 +233,7 @@ class MusicServices(context: Context) : RecommendationProvider {
 
     suspend fun isFavorite(catalogSongId: String): Boolean? = api.isFavorite(catalogSongId)
 
-    suspend fun setFavorite(catalogSongId: String, favorite: Boolean) = api.setFavorite(catalogSongId, favorite)
+    suspend fun addFavorite(catalogSongId: String) = api.addFavorite(catalogSongId)
 
     suspend fun catalogAlbumOf(song: Track): Track? = api.catalogAlbumOf(song)
 

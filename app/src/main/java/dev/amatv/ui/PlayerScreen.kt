@@ -24,6 +24,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.animation.core.Animatable
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.focusable
@@ -664,6 +667,7 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxSize(),
         )
         if (BuildConfig.FLYME_AUTO) FlymePlayerStage(
+            onSwipeBack = { if (isActiveScreen) onBack() },
             track = displayedTrack,
             presentation = presentation,
             supportsLyrics = supportsLyrics,
@@ -1798,6 +1802,8 @@ private fun PlayerStage(
  */
 @Composable
 private fun FlymePlayerStage(
+    /** Swiping the cover up closes Now Playing, into the mini player it grew out of. */
+    onSwipeBack: () -> Unit = {},
     track: Track,
     presentation: PlayerPresentation,
     supportsLyrics: Boolean,
@@ -1929,10 +1935,38 @@ private fun FlymePlayerStage(
                     }
                     Spacer(Modifier.height(10.dp))
                 }
+                val swipeScope = rememberCoroutineScope()
+                val coverDrag = remember { Animatable(0f) }
+                val closeDistance = with(LocalDensity.current) { 90.dp.toPx() }
                 MotionArtwork(
                     track = track,
                     modifier = Modifier.size(if (stationName != null) 307.dp else columnWidth)
-                        .graphicsLayer { scaleX = artScale.value; scaleY = artScale.value }
+                        .graphicsLayer {
+                            // The cover follows an upward drag and eases smaller, hinting where it goes.
+                            val pull = (-coverDrag.value / closeDistance).coerceIn(0f, 1.5f)
+                            translationY = coverDrag.value
+                            scaleX = artScale.value * (1f - 0.08f * pull)
+                            scaleY = artScale.value * (1f - 0.08f * pull)
+                        }
+                        .pointerInput(onSwipeBack) {
+                            detectVerticalDragGestures(
+                                onDragEnd = {
+                                    val close = coverDrag.value < -closeDistance
+                                    swipeScope.launch {
+                                        if (close) onSwipeBack()
+                                        coverDrag.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 400f))
+                                    }
+                                },
+                                onDragCancel = { swipeScope.launch { coverDrag.animateTo(0f) } },
+                            ) { change, dragAmount ->
+                                change.consume()
+                                swipeScope.launch {
+                                    // Up only; a downward pull meets growing resistance.
+                                    val next = coverDrag.value + dragAmount
+                                    coverDrag.snapTo(if (next > 0f) next * 0.25f else next)
+                                }
+                            }
+                        }
                         .border(0.75.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(10.dp)),
                     animate = artworkPlaying && !lowPerformanceMode,
                     cornerRadius = 10.dp,

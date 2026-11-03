@@ -349,28 +349,29 @@ class AppleMusicApi(
         else page.copy(topSongs = (page.topSongs + more).distinctBy { it.id })
     }
 
-    /** Whether a catalog song is in Favorite Songs (Apple's "love" rating); null when unknown. */
+    /**
+     * Whether a catalog song is in Favorite Songs; null when unknown. Favorites are their own list
+     * since iOS 17.1 (not the old "love" rating), read through the song's inFavorites attribute.
+     */
     suspend fun isFavorite(catalogSongId: String): Boolean? {
         require(catalogSongId.matches(Regex("[0-9]+"))) { "Catalog song ID is invalid" }
-        return try {
-            val root = requestRoot("/v1/me/ratings/songs/$catalogSongId", needsUserToken = true)
-            root.optJSONArray("data")?.optJSONObject(0)?.optJSONObject("attributes")?.optInt("value") == 1
-        } catch (error: CatalogRequestException) {
-            if (error.httpStatus == 404) false else null
-        }
+        val root = runCatching {
+            requestRoot("/v1/catalog/${effectiveStorefront()}/songs/$catalogSongId?extend=inFavorites",
+                needsUserToken = true)
+        }.getOrNull() ?: return null
+        val attributes = root.optJSONArray("data")?.optJSONObject(0)?.optJSONObject("attributes") ?: return null
+        return if (attributes.has("inFavorites")) attributes.optBoolean("inFavorites") else null
     }
 
-    /** Adds the song to (or removes it from) Favorite Songs, as the star in Apple Music does. */
-    suspend fun setFavorite(catalogSongId: String, favorite: Boolean) {
+    /**
+     * Adds the song to Favorite Songs, as the star in Apple Music does. Removing is not offered:
+     * the public API answers DELETE /v1/me/favorites with 40012 "Insufficient Permissions"
+     * ('Favorites:DELETE:IdsQuery'); only Apple's own apps may unfavorite.
+     */
+    suspend fun addFavorite(catalogSongId: String) {
         require(catalogSongId.matches(Regex("[0-9]+"))) { "Catalog song ID is invalid" }
-        val path = "/v1/me/ratings/songs/$catalogSongId"
-        if (favorite) {
-            requestRoot(path, needsUserToken = true, method = "PUT",
-                postBody = JSONObject().put("type", "rating")
-                    .put("attributes", JSONObject().put("value", 1)).toString())
-        } else {
-            requestRoot(path, needsUserToken = true, method = "DELETE")
-        }
+        requestRoot("/v1/me/favorites?ids%5Bsongs%5D=$catalogSongId", needsUserToken = true,
+            method = "POST", postBody = "")
     }
 
     internal fun parseArtistPage(root: JSONObject, catalogId: String): CatalogArtistPage {

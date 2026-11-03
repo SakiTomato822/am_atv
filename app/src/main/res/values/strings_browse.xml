@@ -123,4 +123,5 @@
     <string name="player_favorite_add">Add to Favorite Songs</string>
     <string name="player_favorite_remove">Remove from Favorite Songs</string>
     <string name="player_favorite_failed">Couldn\u2019t update Favorite Songs.</string>
+    <string name="player_favorite_remove_unsupported">Only Apple Music can remove a song from Favorite Songs.</string>
 </resources>

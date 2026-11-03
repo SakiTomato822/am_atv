@@ -119,16 +119,11 @@ jobs:
           cat > dist/release-notes.md <<'EOF'
           Flyme Auto 非官方适配测试版（ARM64，Android 9+）。
 
-          本版为 Flyme.9（versionCode 23），包含 Flyme.8 的全部内容。与此前测试版使用同一固定签名，可覆盖安装并保留应用数据。
+          本版为 Flyme.9.5（versionCode 24），包含 Flyme.9 的全部内容。与此前测试版使用同一固定签名，可覆盖安装并保留应用数据。
 
-          - 修复：先播放任意歌曲后，再从歌手页 / 完整专辑页播放会「无法完成播放」。原因是无缝播放预先加入队列后，SDK 无法再建立新队列；现在会先重建播放器（实测不增加等待时间）。
-          - 歌手页补齐 Apple Music 网页版的区块：最新发行、艺人歌单、现场专辑、合辑、参与作品、相似艺人；热门歌曲最多 30 首；相似艺人可直接打开。返回键与其他页面一致。
-          - 播放页新增星星按钮，可加入 / 移出「喜好歌曲」。
-          - 歌名、歌手与专辑过长时以跑马灯滚动显示。
-          - 专辑页、歌手页也会显示右上角的胶囊播放器。
-          - 歌词可以用手指上下拖动查看，停手后回到正在唱的那一行。
-          - 翻译语言为中文时，中文歌词不再多出一行简繁互转的「翻译」；日文、韩文、英文照常翻译。
-          - 移除频谱显示，不再请求录音权限。
+          - 修复：播放页星星现在会真正加入「喜好歌曲」（改用 Apple 的 Favorites 接口）。Apple 只允许它自己的 App 取消喜好，因此已是喜好的歌曲再点星星会提示到 Apple Music 中取消。
+          - 在播放页按住封面往上滑即可返回，与收回到胶囊播放器的动画衔接。
+          - 电台历史：电台播放过的歌曲会被记录（最多 50 首，重启后保留），在播放队列中向右滑即可查看，点击可直接播放该曲。
 
           本版沿用上游 APK 的内置开发者 Token，有效期字段为 2027-04-22；不包含签名私钥或任何用户登录凭证。
 
@@ -141,7 +136,7 @@ jobs:
         run: |
           tag="flyme-auto-test-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           # Name the release by the app's own version (e.g. Flyme.6), not the workflow run count.
-          version=$(sed -n 's/.*versionNameSuffix = "-flyme\.\([0-9][0-9]*\)".*/\1/p' app/build.gradle.kts | head -n 1)
+          version=$(sed -n 's/.*versionNameSuffix = "-flyme\.\([0-9][0-9.]*\)".*/\1/p' app/build.gradle.kts | head -n 1)
           test -n "$version"
           gh release create "$tag" dist/AMATV-FlymeAuto-Gecko-arm64.apk dist/SHA256SUMS.txt --target "$(git rev-parse HEAD)" --prerelease --latest=false --title "Flyme Auto 测试版 · Flyme.${version}" --notes-file dist/release-notes.md
 
