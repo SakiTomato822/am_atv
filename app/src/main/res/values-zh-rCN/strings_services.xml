@@ -42,7 +42,7 @@
     <string name="services_apple_connection_failed">暂时无法连接到 Apple Music，请重试。</string>
     <string name="services_playback_failed">无法完成播放，请重试。</string>
     <string name="services_playback_content_restricted">内容受限制：你的 Apple 账户不允许在第三方播放器播放露骨内容。请检查网页版 Apple Music 的“分级保护控制”、账户年龄或“屏幕使用时间”。</string>
-    <string name="services_station_preview_only">电台目前只能播放 30 秒试听：车机未能加载 Apple Music 所需的 Widevine DRM 组件。请连接一次能访问 Google 的网络，然后重新打开 App。</string>
+    <string name="services_station_preview_only">电台目前只能播放 30 秒试听：Apple Music 需要系统的 Widevine DRM，而这台车机的无法使用。原因可在「设置 › 播放诊断」查看。</string>
     <string name="services_sdk_unavailable">此版本无法使用 Apple Music 播放功能。</string>
     <string name="services_auth_failed">Apple Music 登录失败：%1$s</string>
     <string name="services_catalog_id_missing">这首歌曲没有 Apple Music 目录标识符。</string>

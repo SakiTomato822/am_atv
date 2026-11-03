@@ -18,4 +18,10 @@
     <string name="diagnostics_exporting">正在导出…</string>
     <string name="diagnostics_exported">已保存到 %1$s，把这个文件发给开发者即可。</string>
     <string name="diagnostics_export_failed">导出日志失败：%1$s</string>
+    <string name="diagnostics_widevine">Widevine（电台用的系统 DRM）：%1$s</string>
+    <string name="widevine_unsupported">这个系统没有 Widevine</string>
+    <string name="widevine_ready">可用 · %1$s · %2$s %3$s</string>
+    <string name="widevine_not_provisioned">有，但没有完成初始化（%1$s），系统没能激活它</string>
+    <string name="widevine_error">有，但无法使用：%1$s</string>
+    <string name="widevine_checking">检测中…</string>
 </resources>

@@ -49,6 +49,11 @@ internal fun FlymePlaybackDiagnostics(diagnostics: PlaybackDiagnostics) {
     Text(stringResource(R.string.diagnostics_title), color = Color.White,
         fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
     Text(stringResource(R.string.diagnostics_summary), color = Color.White.copy(alpha = 0.6f), fontSize = 14.sp)
+    val widevine by androidx.compose.runtime.produceState<String?>(null) {
+        value = withContext(Dispatchers.IO) { dev.amatv.integration.widevineStatus() }
+    }
+    Text(stringResource(R.string.diagnostics_widevine, widevine ?: stringResource(R.string.widevine_checking)),
+        color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
     Spacer(Modifier.height(6.dp))
     if (entries.isEmpty()) {
         Text(stringResource(R.string.diagnostics_empty), color = Color.White.copy(alpha = 0.8f), fontSize = 15.sp)

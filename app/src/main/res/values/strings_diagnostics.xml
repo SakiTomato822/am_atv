@@ -18,4 +18,10 @@
     <string name="diagnostics_exporting">Exporting…</string>
     <string name="diagnostics_exported">Saved to %1$s. Send this file to the developer.</string>
     <string name="diagnostics_export_failed">Could not export the log: %1$s</string>
+    <string name="diagnostics_widevine">Widevine (system DRM for stations): %1$s</string>
+    <string name="widevine_unsupported">not available on this system</string>
+    <string name="widevine_ready">ready · %1$s · %2$s %3$s</string>
+    <string name="widevine_not_provisioned">present but not provisioned (%1$s); the system could not activate it</string>
+    <string name="widevine_error">present but unusable: %1$s</string>
+    <string name="widevine_checking">checking…</string>
 </resources>

@@ -42,7 +42,7 @@
     <string name="services_apple_connection_failed">Unable to connect to Apple Music. Please try again.</string>
     <string name="services_playback_failed">Unable to complete playback. Please try again.</string>
     <string name="services_playback_content_restricted">Content restricted: your Apple Account blocks explicit songs in third-party players. Check Parental Controls in Apple Music on the web, your account\u2019s age, or Screen Time.</string>
-    <string name="services_station_preview_only">Stations are playing 30-second previews only: this head unit could not load the Widevine DRM component Apple Music needs. Connect once to a network that can reach Google, then restart the app.</string>
+    <string name="services_station_preview_only">Stations are playing 30-second previews only: Apple Music needs the system Widevine DRM, and this head unit cannot use it. Settings › Playback diagnostics shows why.</string>
     <string name="services_sdk_unavailable">Apple Music playback is unavailable in this version.</string>
     <string name="services_auth_failed">Apple Music sign-in failed: %1$s</string>
     <string name="services_catalog_id_missing">This track has no Apple Music catalog ID.</string>
