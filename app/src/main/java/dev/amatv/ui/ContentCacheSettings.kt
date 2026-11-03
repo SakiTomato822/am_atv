@@ -82,7 +82,7 @@ internal fun ContentCacheSettings(cache: ContentCache) {
 }
 
 @Composable
-private fun CacheButton(label: String, onClick: () -> Unit, modifier: Modifier) {
+internal fun CacheButton(label: String, onClick: () -> Unit, modifier: Modifier) {
     FocusSurface(
         onClick = onClick, modifier = modifier.height(46.dp), cornerRadius = 23.dp,
         background = Color.White.copy(alpha = 0.12f), focusedBackground = Color.White.copy(alpha = 0.28f),

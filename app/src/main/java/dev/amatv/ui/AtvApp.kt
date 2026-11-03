@@ -2119,6 +2119,7 @@ fun AmAtvApp() {
                         cacheSettingsContent = {
                             LanguageSettings()
                             FlymeMediaSettings(services)
+                            if (BuildConfig.FLYME_AUTO) FlymePlaybackDiagnostics(services.playbackDiagnostics)
                             ContentCacheSettings(services.contentCache)
                         },
                     )

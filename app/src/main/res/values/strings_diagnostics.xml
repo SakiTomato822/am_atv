@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="diagnostics_title">Playback diagnostics</string>
+    <string name="diagnostics_summary">Recent song changes. If a change is slow, take a screenshot of this list for the developer.</string>
+    <string name="diagnostics_empty">No song changes recorded yet.</string>
+    <string name="diagnostics_clear">Clear</string>
+    <string name="diagnostics_gapless">Gapless into “%1$s”: sound after %2$d ms</string>
+    <string name="diagnostics_prepare_after_end">Prepared “%1$s” again after the previous song ended: sound after %2$.1f s</string>
+    <string name="diagnostics_prepare">Prepared “%1$s” (chosen or skipped to): sound after %2$.1f s</string>
+    <string name="diagnostics_end_no_lookahead">“%1$s” ended with no next song queued</string>
+    <string name="diagnostics_end_not_queued">“%1$s” ended; next song “%2$s” was not in the native queue</string>
+    <string name="diagnostics_end_not_continued">“%1$s” ended; “%2$s” was queued but did not continue</string>
+    <string name="diagnostics_end_inferred">MusicKit did not report the end; the app inferred it</string>
+    <string name="diagnostics_lookahead_failed">Could not queue “%1$s”: %2$s</string>
+    <string name="diagnostics_lookahead_dropped">Dropped the queued next song: %1$d native item(s) could not be removed</string>
+</resources>

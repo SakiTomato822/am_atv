@@ -39,6 +39,7 @@ interface RecommendationProvider {
 class MusicServices(context: Context) : RecommendationProvider {
     private val appContext = context.applicationContext
     val contentCache = ContentCache.get(appContext)
+    val playbackDiagnostics = PlaybackDiagnostics.get(appContext)
     private val tokenStore = SecureTokenStore(appContext)
     private val webAuthenticationSession = WebAuthenticationSession(appContext)
     private val developerTokens = DeveloperTokenClient(

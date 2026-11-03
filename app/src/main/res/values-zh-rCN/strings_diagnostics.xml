@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="diagnostics_title">播放诊断</string>
+    <string name="diagnostics_summary">最近的切歌记录。切歌变慢时，截图这份列表发给开发者。</string>
+    <string name="diagnostics_empty">还没有切歌记录。</string>
+    <string name="diagnostics_clear">清除</string>
+    <string name="diagnostics_gapless">无缝接上「%1$s」：%2$d 毫秒出声</string>
+    <string name="diagnostics_prepare_after_end">上一首播完后重新准备「%1$s」：%2$.1f 秒出声</string>
+    <string name="diagnostics_prepare">点歌或手动切到「%1$s」：%2$.1f 秒出声</string>
+    <string name="diagnostics_end_no_lookahead">「%1$s」播完时，下一首还没排好</string>
+    <string name="diagnostics_end_not_queued">「%1$s」播完时，下一首「%2$s」不在原生队列里</string>
+    <string name="diagnostics_end_not_continued">「%1$s」播完，「%2$s」已排进队列但没有接上</string>
+    <string name="diagnostics_end_inferred">MusicKit 没有通知播完，由 App 判定结束</string>
+    <string name="diagnostics_lookahead_failed">「%1$s」排入队列失败：%2$s</string>
+    <string name="diagnostics_lookahead_dropped">放弃了排好的下一首：原生队列里有 %1$d 首无法移除</string>
+</resources>

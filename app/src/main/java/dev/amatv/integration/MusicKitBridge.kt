@@ -107,6 +107,12 @@ class MusicKitBridge(private val context: Context) {
     @Volatile private var queuedLookaheadCatalogId: String? = null
     /** Set once addQueueItems touched the current controller's queue. */
     @Volatile private var nativeQueueEdited = false
+    private val diagnostics = PlaybackDiagnostics.get(context)
+    /** Diagnostics: a song change still waiting for its first audible position. */
+    private class PendingSound(val catalogId: String?, val title: String, val startedMs: Long, val gapless: Boolean, val afterEnd: Boolean)
+    @Volatile private var pendingSound: PendingSound? = null
+    @Volatile private var lastEndedAtMs = 0L
+    private var reportedEndGeneration = 0L
     private val snapshotPoll = object : Runnable {
         override fun run() {
             if (playbackListener == null) return
@@ -173,6 +179,11 @@ class MusicKitBridge(private val context: Context) {
         }
         nativeQueueEdited = false
         val generation = prepareGeneration.incrementAndGet()
+        val now = SystemClock.elapsedRealtime()
+        pendingSound = if (playWhenReady && track.catalogKind == CatalogKind.Song) {
+            PendingSound(track.catalogId, track.title, now, gapless = false,
+                afterEnd = lastEndedAtMs != 0L && now - lastEndedAtMs < AFTER_END_WINDOW_MS)
+        } else null
         ensurePlaybackRuntime()
         requestedTrack = track
         preparing = true
@@ -280,6 +291,7 @@ class MusicKitBridge(private val context: Context) {
                 // A stale song we cannot address stays queued; report the real end so the app
                 // prepares its own next song instead of trusting the native continuation.
                 Log.i(TAG, "Gapless lookahead dropped: $left native item(s) after current")
+                diagnostics.record(AppText.text(R.string.diagnostics_lookahead_dropped, left))
                 lookahead = null
                 queuedLookaheadCatalogId = null
                 return
@@ -294,10 +306,23 @@ class MusicKitBridge(private val context: Context) {
             queuedLookaheadCatalogId = wanted.catalogId
             nativeQueueEdited = true
             Log.i(TAG, "Gapless lookahead queued catalog=${wanted.catalogId}")
-        }.onFailure { Log.w(TAG, "Gapless lookahead failed: ${it.javaClass.simpleName}") }
+        }.onFailure {
+            Log.w(TAG, "Gapless lookahead failed: ${it.javaClass.simpleName}")
+            diagnostics.record(AppText.text(R.string.diagnostics_lookahead_failed, wanted.title, it.javaClass.simpleName))
+        }
     }
 
     fun skipToNext() = invokeController("skipToNextItem")
+
+    /** Diagnostics: why a song that just ended did not continue into a queued next song. */
+    private fun recordEndWithoutContinuation(title: String) {
+        val wanted = lookahead
+        diagnostics.record(when {
+            wanted == null -> AppText.text(R.string.diagnostics_end_no_lookahead, title)
+            queuedLookaheadCatalogId != wanted.catalogId -> AppText.text(R.string.diagnostics_end_not_queued, title, wanted.title)
+            else -> AppText.text(R.string.diagnostics_end_not_continued, title, wanted.title)
+        })
+    }
 
     /**
      * Manual Next onto the song already queued natively: MusicKit has it buffered, so skip there
@@ -505,8 +530,12 @@ class MusicKitBridge(private val context: Context) {
                                     (currentController.callOrNull("getPlaybackQueueItemCount") as? Int ?: 0) - 1 ||
                                     currentController.callOrNull("getCurrentItem")?.let(::trackFromQueueItem)
                                         ?.catalogId == lookahead?.catalogId)
+                            lastEndedAtMs = SystemClock.elapsedRealtime()
                             if (continuesNatively) {
                                 Log.i(TAG, "Gapless item ended; continuing into catalog=${lookahead?.catalogId}")
+                                lookahead?.let {
+                                    pendingSound = PendingSound(it.catalogId, it.title, lastEndedAtMs, gapless = true, afterEnd = true)
+                                }
                             } else if (isCompletedPlaybackItem(
                                 eventGeneration = generation,
                                 requestGeneration = prepareGeneration.get(),
@@ -517,7 +546,11 @@ class MusicKitBridge(private val context: Context) {
                                 endedNativeQueueId = endedTrack?.playbackQueueId,
                                 endPositionMs = endPosition,
                                 durationMs = endedTrack?.durationMs ?: 0L,
-                            )) endedCatalogId = endedTrack?.catalogId
+                            )) {
+                                endedCatalogId = endedTrack?.catalogId
+                                reportedEndGeneration = generation
+                                recordEndWithoutContinuation(endedTrack?.title ?: requestedTrack?.title.orEmpty())
+                            }
                             dispatchSnapshot()
                         }
                         else -> if (method.name.startsWith("on")) {
@@ -579,6 +612,7 @@ class MusicKitBridge(private val context: Context) {
             endedCatalogId = null
             preparedNativeQueueId = currentTrack?.playbackQueueId
             gaplessAdvanceCatalogId = queued.catalogId
+            reportedEndGeneration = 0L
             playbackIntent.adoptContinuation(queued.catalogId, SystemClock.elapsedRealtime())
         }
         val liveStream = currentController.callOrNull("isLiveStream") as? Boolean ?: false
@@ -638,6 +672,24 @@ class MusicKitBridge(private val context: Context) {
                     PlaybackFailureKind.PositionRestore -> AppText.text(R.string.services_playback_restore_failed)
                     else -> AppText.text(R.string.services_song_connection_failed)
                 }
+            }
+        }
+        // The SDK sometimes never reports the end; the intent machine then decides it ended.
+        if (decision.ended && reportedEndGeneration != generation) {
+            reportedEndGeneration = generation
+            lastEndedAtMs = SystemClock.elapsedRealtime()
+            diagnostics.record(AppText.text(R.string.diagnostics_end_inferred))
+            recordEndWithoutContinuation(requestedTrack?.title.orEmpty())
+        }
+        pendingSound?.let { pending ->
+            if (playbackState == PLAYBACK_STATE_PLAYING && position > 0L && currentTrack?.catalogId == pending.catalogId) {
+                pendingSound = null
+                val waitedMs = SystemClock.elapsedRealtime() - pending.startedMs
+                diagnostics.record(when {
+                    pending.gapless -> AppText.text(R.string.diagnostics_gapless, pending.title, waitedMs)
+                    pending.afterEnd -> AppText.text(R.string.diagnostics_prepare_after_end, pending.title, waitedMs / 1000.0)
+                    else -> AppText.text(R.string.diagnostics_prepare, pending.title, waitedMs / 1000.0)
+                })
             }
         }
         val becamePrepared = preparing && decision.prepared
@@ -884,6 +936,8 @@ class MusicKitBridge(private val context: Context) {
             "com.apple.android.music.playback.queue.CatalogPlaybackQueueItemProvider\$Builder"
         const val MEDIA_CONTAINER_TYPE = "com.apple.android.music.playback.model.MediaContainerType"
         const val PLAYBACK_STATE_PLAYING = 1
+        /** A prepare this soon after a song ended is the app moving on, not a user choice. */
+        const val AFTER_END_WINDOW_MS = 15_000L
         // PlaybackQueueInsertionType.INSERTION_TYPE_AT_END in mediaplayback 1.1.1.
         const val INSERTION_TYPE_AT_END = 2
         const val CONTINUOUS_PLAYBACK_ON = 2
