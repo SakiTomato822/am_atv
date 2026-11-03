@@ -14,4 +14,8 @@
     <string name="diagnostics_lookahead_failed">「%1$s」排入队列失败：%2$s</string>
     <string name="diagnostics_lookahead_dropped">放弃了排好的下一首：原生队列里有 %1$d 首无法移除</string>
     <string name="diagnostics_skip_lookahead">手动切到已排好的「%1$s」：%2$d 毫秒出声</string>
+    <string name="diagnostics_export_log">导出完整日志</string>
+    <string name="diagnostics_exporting">正在导出…</string>
+    <string name="diagnostics_exported">已保存到 %1$s，把这个文件发给开发者即可。</string>
+    <string name="diagnostics_export_failed">导出日志失败：%1$s</string>
 </resources>

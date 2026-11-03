@@ -14,4 +14,8 @@
     <string name="diagnostics_lookahead_failed">Could not queue “%1$s”: %2$s</string>
     <string name="diagnostics_lookahead_dropped">Dropped the queued next song: %1$d native item(s) could not be removed</string>
     <string name="diagnostics_skip_lookahead">Next onto the queued “%1$s”: sound after %2$d ms</string>
+    <string name="diagnostics_export_log">Export full log</string>
+    <string name="diagnostics_exporting">Exporting…</string>
+    <string name="diagnostics_exported">Saved to %1$s. Send this file to the developer.</string>
+    <string name="diagnostics_export_failed">Could not export the log: %1$s</string>
 </resources>

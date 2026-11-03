@@ -15,6 +15,16 @@ import androidx.compose.ui.unit.sp
 import dev.amatv.R
 import dev.amatv.integration.MusicServices
 import dev.amatv.integration.PlaybackDiagnostics
+import dev.amatv.integration.LogRecorder
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.layout.Arrangement
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -50,8 +60,28 @@ internal fun FlymePlaybackDiagnostics(diagnostics: PlaybackDiagnostics) {
                 Text(entry.text, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
             }
         }
-        Spacer(Modifier.height(8.dp))
-        CacheButton(stringResource(R.string.diagnostics_clear), onClick = diagnostics::clear,
-            modifier = Modifier.width(140.dp))
     }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var exportResult by remember { mutableStateOf<String?>(null) }
+    var exporting by remember { mutableStateOf(false) }
+    Spacer(Modifier.height(8.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        CacheButton(stringResource(if (exporting) R.string.diagnostics_exporting else R.string.diagnostics_export_log),
+            onClick = {
+                if (!exporting) scope.launch {
+                    exporting = true
+                    exportResult = runCatching { withContext(Dispatchers.IO) { LogRecorder.export(context) } }
+                        .fold({ context.getString(R.string.diagnostics_exported, it) },
+                            { context.getString(R.string.diagnostics_export_failed, it.message ?: it.javaClass.simpleName) })
+                    exporting = false
+                }
+            },
+            modifier = Modifier.width(220.dp))
+        if (entries.isNotEmpty()) {
+            CacheButton(stringResource(R.string.diagnostics_clear), onClick = diagnostics::clear,
+                modifier = Modifier.width(140.dp))
+        }
+    }
+    exportResult?.let { Text(it, color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp) }
 }
