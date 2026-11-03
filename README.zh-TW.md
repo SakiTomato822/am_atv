@@ -8,6 +8,19 @@
 
 > 非官方專案，與 Apple、吉利、領克、ECARX、魅族無關。需要 Apple Music 訂閱。實車行為以車主自測為準。
 
+<p align="center"><img src="docs/assets/flyme/player-open-close.gif" width="720" alt="播放頁從膠囊播放器展開，在封面上往上滑即可關閉"></p>
+
+## 截圖
+
+| | |
+| --- | --- |
+| ![播放頁與逐字歌詞](docs/assets/flyme/player.jpg) | ![播放佇列](docs/assets/flyme/queue.jpg) |
+| 播放頁與逐字歌詞 | 播放佇列 |
+| ![首頁：為你精選](docs/assets/flyme/home.jpg) | ![最新發行](docs/assets/flyme/browse.jpg) |
+| 首頁：為你精選 | 最新發行 |
+| ![歌手頁](docs/assets/flyme/artist.jpg) | ![搜尋](docs/assets/flyme/search.jpg) |
+| 歌手頁 | 搜尋 |
+
 ## 下載
 
 到 [Releases](https://github.com/SakiTomato822/am_atv/releases) 下載最新的 **Flyme Auto 測試版**，檔案為 `AMATV-FlymeAuto-Gecko-arm64.apk`。

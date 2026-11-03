@@ -8,6 +8,19 @@ English · [繁體中文](README.zh-TW.md) · [简体中文](README.zh-CN.md)
 
 > Unofficial project, not affiliated with Apple, Geely, Lynk & Co, ECARX or Meizu. Requires an Apple Music subscription. In-car behaviour is verified by owners, not guaranteed.
 
+<p align="center"><img src="docs/assets/flyme/player-open-close.gif" width="720" alt="Now Playing opens from the mini player; swipe up on the artwork to close it"></p>
+
+## Screenshots
+
+| | |
+| --- | --- |
+| ![Player with word-by-word lyrics](docs/assets/flyme/player.jpg) | ![Queue](docs/assets/flyme/queue.jpg) |
+| Player with word-by-word lyrics | Queue |
+| ![Home: Top Picks for You](docs/assets/flyme/home.jpg) | ![New releases](docs/assets/flyme/browse.jpg) |
+| Home: Top Picks for You | New releases |
+| ![Artist page](docs/assets/flyme/artist.jpg) | ![Search](docs/assets/flyme/search.jpg) |
+| Artist page | Search |
+
 ## Download
 
 Get the latest **Flyme Auto test build** from [Releases](https://github.com/SakiTomato822/am_atv/releases): `AMATV-FlymeAuto-Gecko-arm64.apk`.
