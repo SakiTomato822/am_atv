@@ -37,6 +37,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -1990,14 +1991,18 @@ private fun FlymePlayerStage(
                         }
                     }
                 }
-                // Artist and album are links to their pages, as in Apple Music.
-                Row(Modifier.padding(top = 2.dp)) {
+                // Artist and album are links to their pages, as in Apple Music. The artist takes at most
+                // half the line; the album gets the rest instead of an equal half it may not need.
+                BoxWithConstraints(Modifier.padding(top = 2.dp)) {
+                val artistMaxWidth = maxWidth / 2
+                Row {
                     val linkStyle = TextStyle(fontSize = 16.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold,
                         letterSpacing = (-0.1).sp, color = Color.White.copy(alpha = 0.52f))
                     val album = track.album.takeIf { it.isNotBlank() && it != track.artist }
                     if (track.artist.isNotBlank()) {
                         Text(track.artist, style = linkStyle, maxLines = 1, overflow = TextOverflow.Clip,
-                            modifier = Modifier.weight(1f, fill = false).alignByBaseline().flymeMarquee()
+                            modifier = Modifier.widthIn(max = if (album != null) artistMaxWidth else maxWidth)
+                                .alignByBaseline().flymeMarquee()
                                 .automationId("player-artist")
                                 .then(onOpenArtist?.let { Modifier.clickable(onClick = it) } ?: Modifier))
                     }
@@ -2008,6 +2013,7 @@ private fun FlymePlayerStage(
                                 .automationId("player-album")
                                 .then(onOpenAlbum?.let { Modifier.clickable(onClick = it) } ?: Modifier))
                     }
+                }
                 }
                 Spacer(Modifier.height(18.dp))
                 FlymeSeekBar(

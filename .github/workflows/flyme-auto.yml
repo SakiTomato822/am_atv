@@ -2,12 +2,17 @@ name: Flyme Auto ARM64 test release
 
 on:
   workflow_dispatch:
+    inputs:
+      preview:
+        description: Build the minified UI preview APK (dev.amatv.flyme.preview) as a workflow artifact, no release
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 concurrency:
-  group: flyme-auto-release
+  group: ${{ inputs.preview && format('flyme-auto-preview-{0}', github.ref_name) || 'flyme-auto-release' }}
   cancel-in-progress: false
 
 jobs:
@@ -17,7 +22,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: flyme-auto
+          # Releases always come from flyme-auto; a preview builds the branch it was started on.
+          ref: ${{ inputs.preview && github.ref || 'flyme-auto' }}
           persist-credentials: false
 
       # The SDK is not redistributable: it lives as a release asset of a private repo,
@@ -85,11 +91,32 @@ jobs:
         run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
 
       - name: Build and run unit tests
+        env:
+          PREVIEW_FLAGS: ${{ inputs.preview && '-Pflyme.uiVerification=true -Pflyme.previewRelease=true -Pflyme.previewAbi=arm64-v8a' || '' }}
         run: |
           chmod +x gradlew
-          ./gradlew '-PAM_DEVELOPER_TOKEN_FILE=../work/ci/developer-token.jwt' '-PFLYME_SIGNING_KEYSTORE_FILE=work/ci/flyme-signing.keystore' '-Pamatv.testBuildType=flymeGecko' :app:assembleFlymeGecko :app:testFlymeGeckoUnitTest --console=plain --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8'
+          ./gradlew '-PAM_DEVELOPER_TOKEN_FILE=../work/ci/developer-token.jwt' '-PFLYME_SIGNING_KEYSTORE_FILE=work/ci/flyme-signing.keystore' '-Pamatv.testBuildType=flymeGecko' $PREVIEW_FLAGS :app:assembleFlymeGecko :app:testFlymeGeckoUnitTest --console=plain --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8'
+
+      # Same fixed signing key as releases, so it installs over a local preview and keeps its sign-in.
+      - name: Verify and upload preview APK
+        if: inputs.preview
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/flymeGecko/app-flymeGecko.apk dist/AMATV-FlymeAuto-Preview-arm64.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs dist/AMATV-FlymeAuto-Preview-arm64.apk | tee work/ci/signer.txt
+          grep -qi 'certificate SHA-256 digest: 91f7b9d6496414a0fab0a87c8fcc60f929df0dd9fa4d4a9a52215869178bab8d' work/ci/signer.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging dist/AMATV-FlymeAuto-Preview-arm64.apk | grep "package: name='dev.amatv.flyme.preview'"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: inputs.preview
+        with:
+          name: flyme-preview-apk
+          path: dist/AMATV-FlymeAuto-Preview-arm64.apk
+          retention-days: 3
 
       - name: Verify APK and prepare release
+        if: ${{ !inputs.preview }}
         shell: bash
         run: |
           mkdir -p dist
@@ -131,6 +158,7 @@ jobs:
           EOF
 
       - name: Publish prerelease APK
+        if: ${{ !inputs.preview }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
