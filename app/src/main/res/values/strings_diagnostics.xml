@@ -24,4 +24,15 @@
     <string name="widevine_not_provisioned">present but not provisioned (%1$s); the system could not activate it</string>
     <string name="widevine_error">present but unusable: %1$s</string>
     <string name="widevine_checking">checking…</string>
+    <string name="playback_option_on">on</string>
+    <string name="playback_option_off">off</string>
+    <string name="playback_fade_title">Fade between songs</string>
+    <string name="playback_fade_summary">At a gapless change, the song fades out over its last 3 seconds and the next fades in over 2. Choose where.</string>
+    <string name="playback_fade_albums">Albums: %1$s</string>
+    <string name="playback_fade_stations">Stations: %1$s</string>
+    <string name="playback_fade_playlists">Playlists: %1$s</string>
+    <string name="playback_station_mode_title">How stations play</string>
+    <string name="playback_station_mode_summary">Many cars and TVs have no Widevine; song by song plays a station on the native player without it. Live radio always needs Widevine.</string>
+    <string name="playback_station_mode_auto">Automatic (web player when Widevine works)</string>
+    <string name="playback_station_mode_songs">Always song by song (no Widevine needed)</string>
 </resources>

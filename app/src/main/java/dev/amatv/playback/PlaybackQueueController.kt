@@ -74,6 +74,8 @@ data class QueueState(
     val source: AutoplaySource = AutoplaySource.AppleMusic,
     val autoplayStatus: AutoplayStatus = AutoplayStatus.Idle,
     val amStationId: String? = null,
+    /** A station played song by song (no Widevine): it keeps supplying the songs, whatever autoplay says. */
+    val stationFeed: String? = null,
     val ytmContinuation: String? = null,
     val ytmSeedVideoId: String? = null,
     val awaitingNext: Boolean = false,
@@ -197,6 +199,7 @@ class PlaybackQueueController(
                 context = context,
                 autoplayStatus = AutoplayStatus.Idle,
                 amStationId = null,
+                stationFeed = null,
                 ytmContinuation = null,
                 ytmSeedVideoId = null,
                 awaitingNext = false,
@@ -211,6 +214,14 @@ class PlaybackQueueController(
         }
 
         onPlayTrack(currentEntry.track)
+        triggerRefillIfNeeded()
+    }
+
+    /** Plays a station as its songs on the native player; [stationId] supplies more as they run out. */
+    fun playStationSongs(stationId: String, songs: List<Track>, context: PlaybackContext) {
+        if (songs.isEmpty()) return
+        playContext(songs, 0, context)
+        _state.update { it.copy(stationFeed = stationId) }
         triggerRefillIfNeeded()
     }
 
@@ -653,7 +664,9 @@ class PlaybackQueueController(
 
     private fun refillIfNeeded(pagesRemaining: Int) {
         val s = _state.value
-        if (!playbackSessionActive || !s.infinite || s.repeat != PlaybackRepeatMode.Off || s.failureLimitReached) return
+        if (!playbackSessionActive || (!s.infinite && s.stationFeed == null) || s.repeat != PlaybackRepeatMode.Off ||
+            s.failureLimitReached
+        ) return
         if (s.upNext.count { !isFailed(it.track) } >= REFILL_THRESHOLD ||
             s.autoplay.count { !isFailed(it.track) } >= AUTOPLAY_RESERVE) return
         if (s.autoplayStatus is AutoplayStatus.Loading) return
@@ -669,7 +682,12 @@ class PlaybackQueueController(
                 var nextAmStationId = s.amStationId
                 var nextYtmContinuation = s.ytmContinuation
                 var nextYtmSeedVideoId = s.ytmSeedVideoId
-                when (s.source) {
+                val stationFeed = s.stationFeed
+                if (stationFeed != null) {
+                    fetchedTracks = withContext(recommendationDispatcher) {
+                        withTimeout(AM_NETWORK_TIMEOUT_MS) { services.amStationNextTracks(stationFeed) }
+                    }
+                } else when (s.source) {
                     AutoplaySource.AppleMusic -> {
                         val station = withContext(recommendationDispatcher) {
                             withTimeout(AM_NETWORK_TIMEOUT_MS) {

@@ -16,6 +16,7 @@ import dev.amatv.R
 import dev.amatv.integration.MusicServices
 import dev.amatv.integration.PlaybackDiagnostics
 import dev.amatv.integration.LogRecorder
+import dev.amatv.integration.FlymePlaybackOptions
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -89,4 +90,30 @@ internal fun FlymePlaybackDiagnostics(diagnostics: PlaybackDiagnostics) {
         }
     }
     exportResult?.let { Text(it, color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp) }
+}
+
+/** Fade per kind of queue, and how stations play (web player with Widevine, or song by song). */
+@Composable
+internal fun FlymePlaybackOptionsSettings(options: FlymePlaybackOptions) {
+    val settings by options.settings.collectAsState()
+    val on = stringResource(R.string.playback_option_on)
+    val off = stringResource(R.string.playback_option_off)
+    Spacer(Modifier.height(16.dp))
+    Text(stringResource(R.string.playback_fade_title), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+    Text(stringResource(R.string.playback_fade_summary), color = Color.White.copy(alpha = 0.6f), fontSize = 14.sp)
+    Spacer(Modifier.height(6.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        CacheButton(stringResource(R.string.playback_fade_albums, if (settings.fadeAlbums) on else off),
+            onClick = { options.update { it.copy(fadeAlbums = !it.fadeAlbums) } }, modifier = Modifier.width(200.dp))
+        CacheButton(stringResource(R.string.playback_fade_stations, if (settings.fadeStations) on else off),
+            onClick = { options.update { it.copy(fadeStations = !it.fadeStations) } }, modifier = Modifier.width(200.dp))
+        CacheButton(stringResource(R.string.playback_fade_playlists, if (settings.fadePlaylists) on else off),
+            onClick = { options.update { it.copy(fadePlaylists = !it.fadePlaylists) } }, modifier = Modifier.width(220.dp))
+    }
+    Spacer(Modifier.height(16.dp))
+    Text(stringResource(R.string.playback_station_mode_title), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+    Text(stringResource(R.string.playback_station_mode_summary), color = Color.White.copy(alpha = 0.6f), fontSize = 14.sp)
+    Spacer(Modifier.height(6.dp))
+    CacheButton(stringResource(if (settings.stationsAsSongs) R.string.playback_station_mode_songs else R.string.playback_station_mode_auto),
+        onClick = { options.update { it.copy(stationsAsSongs = !it.stationsAsSongs) } }, modifier = Modifier.width(420.dp))
 }

@@ -51,7 +51,10 @@ class PlaybackQueueControllerTest {
             return Pair("fake-station-$songId", amStationTracks)
         }
 
+        val stationRequests = mutableListOf<String>()
+
         override suspend fun amStationNextTracks(stationId: String): List<Track> {
+            stationRequests += stationId
             return amStationTracks
         }
 
@@ -312,6 +315,25 @@ class PlaybackQueueControllerTest {
         assertEquals(1, controller.state.value.history.size)
         assertTrue(controller.state.value.history.single().entryId != controller.state.value.current?.entryId)
         assertEquals("2", controller.advanceNext()?.track?.id)
+    }
+
+    @Test
+    fun stationPlayedAsSongsKeepsItsOwnSongsComingWithAutoplayOff() {
+        prefs.autoplayEnabled = false
+        fakeRecommendations.amStationTracks = listOf(testTrack("s2", "Station song 2", "Other"))
+        val controller = createController()
+        controller.playStationSongs(
+            "ra.u-personal",
+            listOf(testTrack("s1", "Station song 1", "Artist")),
+            PlaybackContext(kind = ContextKind.SongList, id = "ra.u-personal", title = "Station"),
+        )
+        assertEquals("ra.u-personal", controller.state.value.stationFeed)
+        assertEquals(listOf("ra.u-personal"), fakeRecommendations.stationRequests)
+        assertTrue(fakeRecommendations.seeds.isEmpty())
+        assertEquals(listOf("s2"), controller.state.value.autoplay.map { it.track.id })
+
+        controller.playContext(listOf(testTrack("3", "Other", "Artist")), 0)
+        assertEquals(null, controller.state.value.stationFeed)
     }
 
     @Test

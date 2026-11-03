@@ -739,6 +739,17 @@ fun AmAtvApp() {
         }
     }
 
+    // Fade at gapless song changes, chosen per kind of queue in Settings.
+    val playbackOptionSettings by services.playbackOptions.settings.collectAsState()
+    LaunchedEffect(queueState.context?.kind, queueState.stationFeed, playbackOptionSettings) {
+        if (!BuildConfig.FLYME_AUTO) return@LaunchedEffect
+        services.setFadeEnabled(when {
+            queueState.stationFeed != null -> playbackOptionSettings.fadeStations
+            queueState.context?.kind == ContextKind.Album -> playbackOptionSettings.fadeAlbums
+            else -> playbackOptionSettings.fadePlaylists
+        })
+    }
+
     val gaplessNext = remember(queueState) { if (BuildConfig.FLYME_AUTO) queueController.peekAutoNext() else null }
     LaunchedEffect(queueState.current?.entryId, gaplessNext?.entryId, gaplessNext?.track?.catalogId, playbackPrepared) {
         if (!BuildConfig.FLYME_AUTO) return@LaunchedEffect
@@ -872,12 +883,41 @@ fun AmAtvApp() {
         if (hasUserPlaybackRequest) queueController.activatePlaybackSession()
     }
 
-    fun playTrack(nextTrack: Track, contextQueue: List<Track> = emptyList()) {
+    fun playStationAsSongs(station: Track, stationId: String, songs: List<Track>) {
+        supersedeStartupQueueWithNewContext()
+        ++selectionGeneration
+        if (destination != Destination.NowPlaying) previousDestination = destination
+        pendingRestore = null
+        playWhenReady = true
+        queueController.playStationSongs(
+            stationId = stationId,
+            songs = songs.map(::withCachedLyrics),
+            context = PlaybackContext(kind = ContextKind.SongList, id = stationId, title = station.title),
+        )
+        destination = Destination.NowPlaying
+    }
+
+    fun playTrack(nextTrack: Track, contextQueue: List<Track> = emptyList(), webStation: Boolean = false) {
         val isStation = nextTrack.catalogKind == CatalogKind.Station
         if (nextTrack.openAction != CatalogOpenAction.Play && !isStation) return
         if (nextTrack.catalogId != null && connectionState != MusicConnectionState.SignedIn) {
             serviceMessage = AppText.text(R.string.app_apple_sign_in_required)
             startSignIn()
+            return
+        }
+        // Without a usable system Widevine the web player only gets 30-second previews: play the
+        // station's songs on the native player instead. Live radio has no songs and stays on the web.
+        val stationId = nextTrack.catalogId
+        if (isStation && BuildConfig.FLYME_AUTO && !webStation && stationId != null) {
+            scope.launch {
+                val asSongs = services.playbackOptions.settings.value.stationsAsSongs ||
+                    !kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { services.widevineReady }
+                val songs = if (asSongs) {
+                    cancellableResult { services.stationSongs(stationId) }.getOrNull().orEmpty()
+                } else emptyList()
+                if (songs.isNotEmpty()) playStationAsSongs(nextTrack, stationId, songs)
+                else playTrack(nextTrack, contextQueue, webStation = true)
+            }
             return
         }
         supersedeStartupQueueWithNewContext()
@@ -2119,6 +2159,7 @@ fun AmAtvApp() {
                         cacheSettingsContent = {
                             LanguageSettings()
                             FlymeMediaSettings(services)
+                            if (BuildConfig.FLYME_AUTO) FlymePlaybackOptionsSettings(services.playbackOptions)
                             if (BuildConfig.FLYME_AUTO) FlymePlaybackDiagnostics(services.playbackDiagnostics)
                             ContentCacheSettings(services.contentCache)
                         },

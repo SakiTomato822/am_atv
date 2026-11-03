@@ -24,4 +24,15 @@
     <string name="widevine_not_provisioned">有，但沒有完成初始化（%1$s），系統沒能啟用它</string>
     <string name="widevine_error">有，但無法使用：%1$s</string>
     <string name="widevine_checking">檢測中…</string>
+    <string name="playback_option_on">開</string>
+    <string name="playback_option_off">關</string>
+    <string name="playback_fade_title">歌曲間淡入淡出</string>
+    <string name="playback_fade_summary">無縫切歌時，前一首最後 3 秒淡出、下一首開頭 2 秒淡入。選擇要在哪裡使用。</string>
+    <string name="playback_fade_albums">專輯：%1$s</string>
+    <string name="playback_fade_stations">電台：%1$s</string>
+    <string name="playback_fade_playlists">播放列表：%1$s</string>
+    <string name="playback_station_mode_title">電台播放方式</string>
+    <string name="playback_station_mode_summary">很多車機和電視沒有 Widevine；逐首播放會用原生播放器播電台裡的歌，不需要 Widevine。直播電台仍需要 Widevine。</string>
+    <string name="playback_station_mode_auto">自動（Widevine 可用時用網頁播放器）</string>
+    <string name="playback_station_mode_songs">始終逐首播放（不需要 Widevine）</string>
 </resources>

@@ -40,6 +40,9 @@ class MusicServices(context: Context) : RecommendationProvider {
     private val appContext = context.applicationContext
     val contentCache = ContentCache.get(appContext)
     val playbackDiagnostics = PlaybackDiagnostics.get(appContext)
+    val playbackOptions = FlymePlaybackOptions(appContext)
+    /** Call off the main thread: whether the system Widevine lets the web player play stations. */
+    val widevineReady: Boolean by lazy { checkWidevine().first }
     private val tokenStore = SecureTokenStore(appContext)
     private val webAuthenticationSession = WebAuthenticationSession(appContext)
     private val developerTokens = DeveloperTokenClient(
@@ -317,6 +320,9 @@ class MusicServices(context: Context) : RecommendationProvider {
     fun skipToQueueItem(queueId: Long) = bridge.skipToQueueItem(queueId)
     /** Gapless preloading of the app's next song; stations manage their own queue. */
     fun setLookahead(next: Track?) { if (!stationEngineActive) bridge.setLookahead(next) }
+    fun setFadeEnabled(enabled: Boolean) { bridge.fadeEnabled = enabled }
+    /** A station's next songs, to play it on the native player without Widevine. */
+    suspend fun stationSongs(stationId: String): List<Track> = api.stationNextTracks(stationId)
     fun skipToQueuedLookahead(catalogId: String): Boolean = !stationEngineActive && bridge.skipToQueuedLookahead(catalogId)
     // The app queue owns repeat, shuffle and autoplay. Each native queue contains
     // one selected track, so enabling a second queue engine would race the app.

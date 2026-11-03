@@ -114,6 +114,18 @@ class MusicKitBridge(private val context: Context) {
         val gapless: Boolean, val afterEnd: Boolean, val manual: Boolean = false,
     )
     @Volatile private var manualSkipAtMs = 0L
+    /** Fade at gapless song changes for the current queue; the app sets it per kind of queue. */
+    @Volatile var fadeEnabled = false
+    private val fade = GaplessFade()
+    /** The song a gapless change moved into, faded in over its first seconds. */
+    @Volatile private var fadeInCatalogId: String? = null
+    private val fadeTick = object : Runnable {
+        override fun run() {
+            val handler = playbackHandler ?: return
+            tickFade()
+            handler.postDelayed(this, FADE_TICK_MS)
+        }
+    }
     @Volatile private var pendingSound: PendingSound? = null
     @Volatile private var lastEndedAtMs = 0L
     private var reportedEndGeneration = 0L
@@ -203,6 +215,12 @@ class MusicKitBridge(private val context: Context) {
         playbackUserToken = userToken
         val currentController = controller ?: createController(developerToken, userToken)
             .also { controller = it }
+        fadeInCatalogId = null
+        playbackHandler?.let { handler ->
+            handler.removeCallbacks(fadeTick)
+            handler.post { fade.reset() }
+            handler.post(fadeTick)
+        }
         val storeId = checkNotNull(track.catalogId) { AppText.text(R.string.services_catalog_id_missing) }
         val requestedPosition = if (track.catalogKind == CatalogKind.Station) 0L else positionMs
         if (playbackListener != null) {
@@ -318,6 +336,34 @@ class MusicKitBridge(private val context: Context) {
 
     fun skipToNext() = invokeController("skipToNextItem")
 
+    /**
+     * Playback thread, every [FADE_TICK_MS]: fade out over the last seconds of a song that will
+     * continue gaplessly into the queued one, and fade that song in. Anything else plays at full level.
+     */
+    private fun tickFade() {
+        val current = controller ?: return
+        if (!fadeEnabled) {
+            fade.reset()
+            return
+        }
+        if ((current.callOrNull("getPlaybackState") as? Int) != PLAYBACK_STATE_PLAYING) return
+        val position = current.callOrNull("getCurrentPosition") as? Long ?: return
+        val duration = (current.callOrNull("getDuration") as? Long)?.takeIf { it > 0L } ?: return
+        val currentId = current.callOrNull("getCurrentItem")?.let(::trackFromQueueItem)?.catalogId
+        val remaining = duration - position
+        val fadeOut = if (queuedLookaheadCatalogId != null && remaining in 0L until FADE_OUT_MS) {
+            remaining.toFloat() / FADE_OUT_MS
+        } else 1f
+        val fadingIn = fadeInCatalogId
+        val fadeIn = if (fadingIn != null && currentId == fadingIn && position < FADE_IN_MS) {
+            position.toFloat() / FADE_IN_MS
+        } else {
+            if (fadingIn != null && currentId == fadingIn) fadeInCatalogId = null
+            1f
+        }
+        fade.apply(MusicKitAudioSession.currentId(), minOf(fadeOut, fadeIn))
+    }
+
     /** Diagnostics: why a song that just ended did not continue into a queued next song. */
     private fun recordEndWithoutContinuation(title: String) {
         val wanted = lookahead
@@ -395,6 +441,7 @@ class MusicKitBridge(private val context: Context) {
                 }
             }
             runCatching { currentController?.callVoid("release") }
+            fade.release()
             oldThread?.quitSafely()
             Unit
         }
@@ -539,8 +586,10 @@ class MusicKitBridge(private val context: Context) {
                             if (continuesNatively) {
                                 Log.i(TAG, "Gapless item ended; continuing into catalog=${lookahead?.catalogId}")
                                 lookahead?.let {
+                                    val manual = lastEndedAtMs - manualSkipAtMs < MANUAL_SKIP_WINDOW_MS
                                     pendingSound = PendingSound(it.catalogId, it.title, lastEndedAtMs, gapless = true, afterEnd = true,
-                                        manual = lastEndedAtMs - manualSkipAtMs < MANUAL_SKIP_WINDOW_MS)
+                                        manual = manual)
+                                    fadeInCatalogId = if (manual) null else it.catalogId
                                 }
                             } else if (isCompletedPlaybackItem(
                                 eventGeneration = generation,
@@ -946,6 +995,9 @@ class MusicKitBridge(private val context: Context) {
         /** A prepare this soon after a song ended is the app moving on, not a user choice. */
         const val AFTER_END_WINDOW_MS = 15_000L
         const val MANUAL_SKIP_WINDOW_MS = 2_000L
+        const val FADE_TICK_MS = 50L
+        const val FADE_OUT_MS = 3_000L
+        const val FADE_IN_MS = 2_000L
         // PlaybackQueueInsertionType.INSERTION_TYPE_AT_END in mediaplayback 1.1.1.
         const val INSERTION_TYPE_AT_END = 2
         const val CONTINUOUS_PLAYBACK_ON = 2
