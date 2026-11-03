@@ -109,7 +109,11 @@ class MusicKitBridge(private val context: Context) {
     @Volatile private var nativeQueueEdited = false
     private val diagnostics = PlaybackDiagnostics.get(context)
     /** Diagnostics: a song change still waiting for its first audible position. */
-    private class PendingSound(val catalogId: String?, val title: String, val startedMs: Long, val gapless: Boolean, val afterEnd: Boolean)
+    private class PendingSound(
+        val catalogId: String?, val title: String, val startedMs: Long,
+        val gapless: Boolean, val afterEnd: Boolean, val manual: Boolean = false,
+    )
+    @Volatile private var manualSkipAtMs = 0L
     @Volatile private var pendingSound: PendingSound? = null
     @Volatile private var lastEndedAtMs = 0L
     private var reportedEndGeneration = 0L
@@ -330,6 +334,7 @@ class MusicKitBridge(private val context: Context) {
      */
     fun skipToQueuedLookahead(catalogId: String): Boolean {
         if (preparing || controller == null || queuedLookaheadCatalogId != catalogId) return false
+        manualSkipAtMs = SystemClock.elapsedRealtime()
         skipToNext()
         return true
     }
@@ -534,7 +539,8 @@ class MusicKitBridge(private val context: Context) {
                             if (continuesNatively) {
                                 Log.i(TAG, "Gapless item ended; continuing into catalog=${lookahead?.catalogId}")
                                 lookahead?.let {
-                                    pendingSound = PendingSound(it.catalogId, it.title, lastEndedAtMs, gapless = true, afterEnd = true)
+                                    pendingSound = PendingSound(it.catalogId, it.title, lastEndedAtMs, gapless = true, afterEnd = true,
+                                        manual = lastEndedAtMs - manualSkipAtMs < MANUAL_SKIP_WINDOW_MS)
                                 }
                             } else if (isCompletedPlaybackItem(
                                 eventGeneration = generation,
@@ -686,6 +692,7 @@ class MusicKitBridge(private val context: Context) {
                 pendingSound = null
                 val waitedMs = SystemClock.elapsedRealtime() - pending.startedMs
                 diagnostics.record(when {
+                    pending.manual -> AppText.text(R.string.diagnostics_skip_lookahead, pending.title, waitedMs)
                     pending.gapless -> AppText.text(R.string.diagnostics_gapless, pending.title, waitedMs)
                     pending.afterEnd -> AppText.text(R.string.diagnostics_prepare_after_end, pending.title, waitedMs / 1000.0)
                     else -> AppText.text(R.string.diagnostics_prepare, pending.title, waitedMs / 1000.0)
@@ -938,6 +945,7 @@ class MusicKitBridge(private val context: Context) {
         const val PLAYBACK_STATE_PLAYING = 1
         /** A prepare this soon after a song ended is the app moving on, not a user choice. */
         const val AFTER_END_WINDOW_MS = 15_000L
+        const val MANUAL_SKIP_WINDOW_MS = 2_000L
         // PlaybackQueueInsertionType.INSERTION_TYPE_AT_END in mediaplayback 1.1.1.
         const val INSERTION_TYPE_AT_END = 2
         const val CONTINUOUS_PLAYBACK_ON = 2

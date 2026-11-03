@@ -13,4 +13,5 @@
     <string name="diagnostics_end_inferred">MusicKit did not report the end; the app inferred it</string>
     <string name="diagnostics_lookahead_failed">Could not queue “%1$s”: %2$s</string>
     <string name="diagnostics_lookahead_dropped">Dropped the queued next song: %1$d native item(s) could not be removed</string>
+    <string name="diagnostics_skip_lookahead">Next onto the queued “%1$s”: sound after %2$d ms</string>
 </resources>
