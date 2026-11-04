@@ -125,6 +125,9 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
@@ -2002,22 +2005,28 @@ private fun FlymePlayerStage(
                 // Artist and album are links to their pages, as in Apple Music. One line that scrolls
                 // as a whole when too long, instead of two halves scrolling on their own.
                 val album = track.album.takeIf { it.isNotBlank() && it != track.artist }
-                val artistLine = remember(track.artist, album, onOpenArtist, onOpenAlbum) {
+                // Plain secondary text, as before: no link color or underline; a press brightens it.
+                val lineColor = FlymeInk.copy(alpha = 0.52f)
+                val linkStyles = TextLinkStyles(
+                    style = SpanStyle(color = lineColor, textDecoration = TextDecoration.None),
+                    pressedStyle = SpanStyle(color = FlymeInk.copy(alpha = 0.85f), textDecoration = TextDecoration.None),
+                )
+                val artistLine = remember(track.artist, album, onOpenArtist, onOpenAlbum, linkStyles) {
                     buildAnnotatedString {
                         if (track.artist.isNotBlank()) {
-                            val link = onOpenArtist?.let { open -> LinkAnnotation.Clickable("artist") { open() } }
+                            val link = onOpenArtist?.let { open -> LinkAnnotation.Clickable("artist", linkStyles) { open() } }
                             if (link != null) withLink(link) { append(track.artist) } else append(track.artist)
                         }
                         if (album != null) {
                             if (track.artist.isNotBlank()) append(" — ")
-                            val link = onOpenAlbum?.let { open -> LinkAnnotation.Clickable("album") { open() } }
+                            val link = onOpenAlbum?.let { open -> LinkAnnotation.Clickable("album", linkStyles) { open() } }
                             if (link != null) withLink(link) { append(album) } else append(album)
                         }
                     }
                 }
                 Text(artistLine, maxLines = 1, overflow = TextOverflow.Clip,
                     style = TextStyle(fontSize = 16.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold,
-                        letterSpacing = (-0.1).sp, color = FlymeInk.copy(alpha = 0.52f)),
+                        letterSpacing = (-0.1).sp, color = lineColor),
                     modifier = Modifier.padding(top = 2.dp).flymeMarquee().automationId("player-artist-album"))
                 Spacer(Modifier.height(18.dp))
                 FlymeSeekBar(
