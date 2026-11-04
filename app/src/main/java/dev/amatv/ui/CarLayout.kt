@@ -54,15 +54,17 @@ fun CarLayout(content: @Composable () -> Unit) {
             // Preview the car viewport on a high-density Xiaomi phone as well.
             (1.5f * minOf(maxWidth.value / 1920f, fullHeight.value / 968f)).coerceIn(0.4f, 1.5f)
         } else carContentScale(maxWidth.value, fullHeight.value)
-        CompositionLocalProvider(
-            LocalFlymePalette provides if (rememberFlymeLight()) LightFlymePalette else DarkFlymePalette,
-            LocalDensity provides Density(systemDensity.density * scale, systemDensity.fontScale),
-            LocalCarKeyboardOverlap provides (fullHeight - maxHeight) / scale,
-        ) {
-            Box(
-                Modifier.fillMaxWidth().wrapContentHeight(Alignment.Top, unbounded = true)
-                    .requiredHeight(fullHeight / scale),
-            ) { content() }
+        FlymeThemeFlip(rememberFlymeLight()) { light ->
+            CompositionLocalProvider(
+                LocalFlymePalette provides if (light) LightFlymePalette else DarkFlymePalette,
+                LocalDensity provides Density(systemDensity.density * scale, systemDensity.fontScale),
+                LocalCarKeyboardOverlap provides (fullHeight - maxHeight) / scale,
+            ) {
+                Box(
+                    Modifier.fillMaxWidth().wrapContentHeight(Alignment.Top, unbounded = true)
+                        .requiredHeight(fullHeight / scale),
+                ) { content() }
+            }
         }
     }
 }
@@ -98,17 +100,7 @@ private fun rememberFlymeLight(): Boolean {
             delay(30_000L)
         }
     }
-    val light = settings.isLight(systemDark, minuteOfDay)
-    // Dark status and navigation bar icons on the light UI.
-    val view = LocalView.current
-    SideEffect {
-        val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
-        WindowCompat.getInsetsController(window, view).apply {
-            isAppearanceLightStatusBars = light
-            isAppearanceLightNavigationBars = light
-        }
-    }
-    return light
+    return settings.isLight(systemDark, minuteOfDay)
 }
 
 private fun currentMinuteOfDay(): Int = java.util.Calendar.getInstance().let {

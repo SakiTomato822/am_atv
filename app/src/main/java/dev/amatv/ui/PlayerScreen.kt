@@ -2520,6 +2520,8 @@ private fun LyricsPanel(
     var previousAnchorDisplayIndex by remember(lines, isVisible) { mutableIntStateOf(-1) }
     var previousAnchorLineIndex by remember(lines, isVisible) { mutableIntStateOf(-1) }
     var isUserScrolling by remember(lines) { mutableStateOf(false) }
+    // A tapped line: the seek that follows scrolls there quickly instead of snapping.
+    var lineTapRealtimeMs by remember(lines) { mutableLongStateOf(0L) }
     var userScrollOffset by remember(lines) { mutableFloatStateOf(0f) }
     val frameRealtimeMs = remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
 
@@ -2660,7 +2662,10 @@ private fun LyricsPanel(
                 rowIndex = currentTransition.anchorItemIndex,
                 nowRealtimeMs = now,
             )
-            val durationMs = if (selectedLyricIndex != null) {
+            val fromLineTap = now - lineTapRealtimeMs < LINE_TAP_SCROLL_WINDOW_MS
+            val durationMs = if (fromLineTap) {
+                LINE_TAP_SCROLL_MS
+            } else if (selectedLyricIndex != null) {
                 240
             } else if (
                 previousAnchorLineIndex >= 0 &&
@@ -2674,7 +2679,7 @@ private fun LyricsPanel(
                 MotionTokens.KaraokeItemChangeMillis
             }
 
-            if (snapToAnchor) {
+            if (snapToAnchor && !fromLineTap) {
                 transitionState.value = StaggerScrollTransition(
                     fromScroll = target,
                     toScroll = target,
@@ -2794,7 +2799,12 @@ private fun LyricsPanel(
                 selectedLyricIndex = selectedLyricIndex,
                 isStaticMode = isStaticMode,
                 isUserScrolling = isUserScrolling,
-                onLineClick = onLineClick.takeIf { !isStaticMode },
+                onLineClick = onLineClick?.takeIf { !isStaticMode }?.let { click ->
+                    { startMs: Long ->
+                        lineTapRealtimeMs = SystemClock.elapsedRealtime()
+                        click(startMs)
+                    }
+                },
             )
             if (currentGap != null) {
                 key("instrumental-slot-${currentGap.beforeLineIndex}-${currentGap.startMs}") {
@@ -4817,3 +4827,7 @@ private fun formatTime(ms: Long): String {
     val totalSeconds = ms.coerceAtLeast(0L) / 1_000L
     return "%d:%02d".format(totalSeconds / 60, totalSeconds % 60)
 }
+
+/** A tapped lyric line scrolls into place this fast; a plain seek still snaps. */
+private const val LINE_TAP_SCROLL_MS = 420
+private const val LINE_TAP_SCROLL_WINDOW_MS = 2_500L
