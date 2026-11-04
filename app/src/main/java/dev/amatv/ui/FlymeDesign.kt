@@ -55,6 +55,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
@@ -115,13 +117,41 @@ import java.util.Locale
 
 internal val FlymeLiveRed = Color(0xFFFA233B)
 
+/**
+ * The car UI follows the system day/night setting. [ink] is the foreground (text, icons, the
+ * translucent fills made from it); [page] and [pageTop] are the page background, [scrim] the veil
+ * over the artwork-colored backdrop. The TV build never provides a palette and stays dark.
+ */
+internal data class FlymePalette(
+    val light: Boolean,
+    val ink: Color,
+    val page: Color,
+    val pageTop: Color,
+    val scrim: Color,
+)
+
+internal val DarkFlymePalette = FlymePalette(
+    light = false, ink = Color.White, page = Color(0xFF0B0A0E), pageTop = Color(0xFF15111D), scrim = Color(0xFF0B0A0E),
+)
+internal val LightFlymePalette = FlymePalette(
+    light = true, ink = Color(0xFF1C1C1E), page = Color(0xFFF2F2F5), pageTop = Color(0xFFFFFFFF), scrim = Color(0xFFF7F7F9),
+)
+internal val LocalFlymePalette = staticCompositionLocalOf { DarkFlymePalette }
+
+/** Foreground color of the current palette: white in the dark theme, near-black in light mode. */
+internal val FlymeInk: Color
+    @Composable @ReadOnlyComposable get() = LocalFlymePalette.current.ink
+
+/** Content on a surface filled with [FlymeInk] (a selected pill, the play button): its opposite. */
+internal val FlymeOnInk: Color
+    @Composable @ReadOnlyComposable get() = if (LocalFlymePalette.current.light) Color.White else Color(0xFF17151C)
+
 /** Text without font padding, its line box trimmed to the glyphs: for tight two-line stacks. */
 private val CompactLine = TextStyle(
     platformStyle = PlatformTextStyle(includeFontPadding = false),
     lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both),
 )
 
-private val FlymeOnLight = Color(0xFF17151C)
 
 /** The one back control on every Flyme page: a translucent circle with an arrow. */
 @Composable
@@ -137,29 +167,29 @@ internal fun FlymeBackButton(onClick: () -> Unit, modifier: Modifier = Modifier)
             .size(44.dp)
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(CircleShape)
-            .background(Color.White.copy(alpha = if (keyFocused || pressed) 0.24f else 0.12f))
-            .then(if (keyFocused) Modifier.border(2.dp, Color.White, CircleShape) else Modifier)
+            .background(FlymeInk.copy(alpha = if (keyFocused || pressed) 0.24f else 0.12f))
+            .then(if (keyFocused) Modifier.border(2.dp, FlymeInk, CircleShape) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clickable(enabled = LocalFocusTargetsEnabled.current, interactionSource = interaction,
                 indication = null, role = Role.Button, onClick = onClick)
             .automationId("flyme-back"),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.browse_back), tint = Color.White,
+        Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.browse_back), tint = FlymeInk,
             modifier = Modifier.size(24.dp))
     }
 }
 
 /** Apple Music's E badge for explicit tracks, sized to the text beside it. */
 @Composable
-internal fun ExplicitBadge(size: Dp = 14.dp, color: Color = Color.White.copy(alpha = 0.55f)) {
+internal fun ExplicitBadge(size: Dp = 14.dp, color: Color = FlymeInk.copy(alpha = 0.55f)) {
     Box(
         Modifier.size(size).clip(RoundedCornerShape(size * 0.2f)).background(color)
             .semantics { contentDescription = "Explicit" },
         contentAlignment = Alignment.Center,
     ) {
         Text("E", fontSize = (size.value * 0.72f).sp, lineHeight = (size.value * 0.72f).sp,
-            fontWeight = FontWeight.Bold, color = Color(0xFF111113), style = CompactLine)
+            fontWeight = FontWeight.Bold, color = FlymeOnInk, style = CompactLine)
     }
 }
 
@@ -220,7 +250,7 @@ internal fun FlymeGlyphButton(
     enabled: Boolean = true,
     selected: Boolean = false,
     focused: Boolean = false,
-    tint: Color = Color.White,
+    tint: Color = FlymeInk,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -232,9 +262,9 @@ internal fun FlymeGlyphButton(
     )
     val background by animateColorAsState(
         targetValue = when {
-            selected -> Color.White.copy(alpha = 0.16f)
-            keyFocused -> Color.White.copy(alpha = 0.22f)
-            pressed && enabled -> Color.White.copy(alpha = 0.12f)
+            selected -> FlymeInk.copy(alpha = 0.16f)
+            keyFocused -> FlymeInk.copy(alpha = 0.22f)
+            pressed && enabled -> FlymeInk.copy(alpha = 0.12f)
             else -> Color.Transparent
         },
         animationSpec = tween(160),
@@ -246,7 +276,7 @@ internal fun FlymeGlyphButton(
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(CircleShape)
             .background(background)
-            .then(if (keyFocused) Modifier.border(2.dp, Color.White, CircleShape) else Modifier)
+            .then(if (keyFocused) Modifier.border(2.dp, FlymeInk, CircleShape) else Modifier)
             .clickable(
                 enabled = enabled && LocalFocusTargetsEnabled.current,
                 interactionSource = interaction,
@@ -266,7 +296,7 @@ internal fun FlymeGlyphButton(
                 contentDescription = null,
                 tint = when {
                     !enabled -> tint.copy(alpha = 0.3f)
-                    selected -> Color.White
+                    selected -> FlymeInk
                     else -> tint
                 },
                 modifier = Modifier.size(iconSize),
@@ -332,21 +362,22 @@ internal fun FlymeSeekBar(
                 targetValue = if (dragFraction != null) 9.dp else 6.dp, animationSpec = tween(160),
                 label = "flyme-seek-thumb",
             )
+            val ink = FlymeInk
             Canvas(Modifier.fillMaxWidth().height(thickness)) {
                 val fraction = dragFraction
                     ?: ((scrubPositionMs ?: positionState.value).toFloat() / duration).coerceIn(0f, 1f)
                 val corner = CornerRadius(size.height / 2f, size.height / 2f)
-                drawRoundRect(Color.White.copy(alpha = 0.22f), cornerRadius = corner)
+                drawRoundRect(ink.copy(alpha = 0.22f), cornerRadius = corner)
                 if (fraction > 0f) {
                     drawRoundRect(
-                        Color.White.copy(alpha = 0.9f),
+                        ink.copy(alpha = 0.9f),
                         size = Size(size.width * fraction, size.height),
                         cornerRadius = corner,
                     )
                 }
                 if (enabled) {
                     val r = thumbRadius.toPx()
-                    drawCircle(Color.White, radius = r,
+                    drawCircle(ink, radius = r,
                         center = Offset((size.width * fraction).coerceIn(r, size.width - r), size.height / 2f))
                 }
             }
@@ -354,9 +385,9 @@ internal fun FlymeSeekBar(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             val shownMs = shownSecond * 1_000L
             Text(flymeTime(shownMs), fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                color = Color.White.copy(alpha = 0.55f), style = TabularNumbers())
+                color = FlymeInk.copy(alpha = 0.55f), style = TabularNumbers())
             Text("−${flymeTime((durationMs - shownMs).coerceAtLeast(0L))}", fontSize = 11.sp,
-                fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.55f), style = TabularNumbers())
+                fontWeight = FontWeight.Medium, color = FlymeInk.copy(alpha = 0.55f), style = TabularNumbers())
         }
     }
 }
@@ -388,11 +419,11 @@ private fun FlymePill(
         cornerRadius = 16.dp,
         focusedScale = 1.03f,
         padding = PaddingValues(horizontal = if (small) 11.dp else 15.dp),
-        background = if (selected) Color.White else Color.Transparent,
-        focusedBackground = if (selected) Color.White else Color.White.copy(alpha = 0.16f),
+        background = if (selected) FlymeInk else Color.Transparent,
+        focusedBackground = if (selected) FlymeInk else FlymeInk.copy(alpha = 0.16f),
     ) {
         Box(Modifier.align(Alignment.Center)) {
-            content(if (selected) FlymeOnLight else Color.White.copy(alpha = 0.74f))
+            content(if (selected) FlymeOnInk else FlymeInk.copy(alpha = 0.74f))
         }
     }
 }
@@ -400,7 +431,7 @@ private fun FlymePill(
 @Composable
 private fun FlymePillGroup(content: @Composable RowScope.() -> Unit) {
     Row(
-        Modifier.clip(RoundedCornerShape(19.dp)).background(Color.White.copy(alpha = 0.08f)).padding(3.dp),
+        Modifier.clip(RoundedCornerShape(19.dp)).background(FlymeInk.copy(alpha = 0.08f)).padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(3.dp),
         verticalAlignment = Alignment.CenterVertically,
         content = content,
@@ -467,7 +498,7 @@ internal fun FlymeLibrary(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(destinationLabel(Destination.Library), fontSize = 31.sp, fontWeight = FontWeight.Bold,
-                    color = Color.White, lineHeight = 34.sp)
+                    color = FlymeInk, lineHeight = 34.sp)
                 FlymePillGroup {
                     LibraryCategory.entries.forEach { entry ->
                         FlymePill(
@@ -488,7 +519,7 @@ internal fun FlymeLibrary(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.library_sort), fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-                    color = Color.White.copy(alpha = 0.5f))
+                    color = FlymeInk.copy(alpha = 0.5f))
                 FlymePillGroup {
                     sorts.forEach { option ->
                         val selected = option == effectiveSort
@@ -539,7 +570,7 @@ internal fun FlymeLibrary(
             }
             shelf == null -> Box(Modifier.weight(1f).fillMaxWidth()) { fallback(category, contentFocus) }
             shelf.items.isEmpty() -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text(stringResource(R.string.library_empty), fontSize = 16.sp, color = Color.White.copy(alpha = 0.6f))
+                Text(stringResource(R.string.library_empty), fontSize = 16.sp, color = FlymeInk.copy(alpha = 0.6f))
             }
             else -> {
                 val collator = remember { Collator.getInstance(Locale.getDefault()) }
@@ -617,13 +648,13 @@ private fun FlymeLibraryGrid(
                         animate = false,
                         cornerRadius = if (circular) 200.dp else 9.dp,
                     )
-                    Text(item.title, fontSize = 12.7.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+                    Text(item.title, fontSize = 12.7.sp, fontWeight = FontWeight.SemiBold, color = FlymeInk,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                         textAlign = if (circular) TextAlign.Center else TextAlign.Start,
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
                     if (!circular && item.artist.isNotBlank()) {
                         Text(item.artist, fontSize = 10.7.sp, fontWeight = FontWeight.Medium,
-                            color = Color.White.copy(alpha = 0.55f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            color = FlymeInk.copy(alpha = 0.55f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(top = 2.dp))
                     }
                 }
@@ -651,7 +682,7 @@ private fun FlymeLibraryList(
         snapshotFlow { (state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= items.size - 8 }
             .collect { if (it) latestNearEnd() }
     }
-    val dim = Color.White.copy(alpha = 0.6f)
+    val dim = FlymeInk.copy(alpha = 0.6f)
     LazyColumn(
         state = state,
         modifier = Modifier.fillMaxSize(),
@@ -663,7 +694,7 @@ private fun FlymeLibraryList(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                val header = Color.White.copy(alpha = 0.42f)
+                val header = FlymeInk.copy(alpha = 0.42f)
                 Spacer(Modifier.width(37.dp))
                 Text(stringResource(R.string.library_column_title), fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
                     color = header, modifier = Modifier.weight(1.4f))
@@ -676,7 +707,7 @@ private fun FlymeLibraryList(
                         color = header, textAlign = TextAlign.End, modifier = Modifier.width(44.dp))
                 }
             }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(FlymeInk.copy(alpha = 0.08f)))
         }
         itemsIndexed(items, key = { index, item -> "${item.id}#$index" }) { index, item ->
             FocusSurface(
@@ -687,7 +718,7 @@ private fun FlymeLibraryList(
                 focusedScale = 1.01f,
                 padding = PaddingValues(horizontal = 11.dp),
                 background = Color.Transparent,
-                focusedBackground = Color.White.copy(alpha = 0.08f),
+                focusedBackground = FlymeInk.copy(alpha = 0.08f),
             ) {
                 Row(
                     Modifier.fillMaxSize(),
@@ -696,7 +727,7 @@ private fun FlymeLibraryList(
                 ) {
                     MotionArtwork(track = item, modifier = Modifier.size(37.dp), animate = false, cornerRadius = 5.dp)
                     ExplicitTitle(item.title, item.isExplicit,
-                        TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White),
+                        TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = FlymeInk),
                         modifier = Modifier.weight(1.4f), badgeSize = 13.dp)
                     Text(item.artist, fontSize = 12.7.sp, color = dim, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f))
@@ -704,7 +735,7 @@ private fun FlymeLibraryList(
                         Text(item.album, fontSize = 12.7.sp, color = dim, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f))
                         Text(if (item.durationMs > 1_000L) flymeTime(item.durationMs) else "", fontSize = 12.sp,
-                            color = Color.White.copy(alpha = 0.5f), textAlign = TextAlign.End,
+                            color = FlymeInk.copy(alpha = 0.5f), textAlign = TextAlign.End,
                             style = TabularNumbers(), modifier = Modifier.width(44.dp))
                     }
                 }
@@ -723,7 +754,7 @@ private fun FlymeLoadMoreFooter(page: LibraryShelfPagination, onRetry: () -> Uni
         else FocusSurface(onClick = onRetry, cornerRadius = 16.dp, padding = PaddingValues(horizontal = 18.dp),
             modifier = Modifier.height(36.dp)) {
             Text(stringResource(R.string.browse_load_more_retry), fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                color = Color.White, modifier = Modifier.align(Alignment.Center))
+                color = FlymeInk, modifier = Modifier.align(Alignment.Center))
         }
     }
 }
@@ -765,16 +796,16 @@ internal fun FlymeTopBar(
                     .semantics { contentDescription = accountLabel },
                 cornerRadius = 19.dp,
                 focusedScale = 1.06f,
-                background = if (selected == Destination.Account) Color.White else Color.White.copy(alpha = 0.12f),
-                focusedBackground = Color.White.copy(alpha = 0.24f),
+                background = if (selected == Destination.Account) FlymeInk else FlymeInk.copy(alpha = 0.12f),
+                focusedBackground = FlymeInk.copy(alpha = 0.24f),
             ) {
                 Icon(Icons.Rounded.Person, null, modifier = Modifier.align(Alignment.Center).size(18.dp),
-                    tint = if (selected == Destination.Account) FlymeOnLight else Color.White)
+                    tint = if (selected == Destination.Account) FlymeOnInk else FlymeInk)
             }
         }
         if (!capsuleOnly) Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             Row(
-                Modifier.clip(RoundedCornerShape(22.dp)).background(Color.White.copy(alpha = 0.09f)).padding(4.dp),
+                Modifier.clip(RoundedCornerShape(22.dp)).background(FlymeInk.copy(alpha = 0.09f)).padding(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -790,10 +821,10 @@ internal fun FlymeTopBar(
                         cornerRadius = 18.dp,
                         focusedScale = 1.03f,
                         padding = PaddingValues(horizontal = if (destination == Destination.Search) 9.dp else 17.dp),
-                        background = if (isSelected) Color.White else Color.Transparent,
-                        focusedBackground = if (isSelected) Color.White else Color.White.copy(alpha = 0.14f),
+                        background = if (isSelected) FlymeInk else Color.Transparent,
+                        focusedBackground = if (isSelected) FlymeInk else FlymeInk.copy(alpha = 0.14f),
                     ) {
-                        val tint = if (isSelected) FlymeOnLight else Color.White.copy(alpha = 0.78f)
+                        val tint = if (isSelected) FlymeOnInk else FlymeInk.copy(alpha = 0.78f)
                         Box(Modifier.align(Alignment.Center)) {
                             if (destination == Destination.Search) {
                                 Icon(Icons.Rounded.Search, destinationLabel(destination), tint = tint, modifier = Modifier.size(18.dp))
@@ -812,7 +843,7 @@ internal fun FlymeTopBar(
                     Modifier.fillMaxWidth().height(46.dp)
                         .onGloballyPositioned { onMiniPlayerPlaced(it.boundsInWindow().center) }
                         .clip(RoundedCornerShape(23.dp))
-                        .background(Color.White.copy(alpha = if (selected == Destination.NowPlaying) 0.18f else 0.09f))
+                        .background(FlymeInk.copy(alpha = if (selected == Destination.NowPlaying) 0.18f else 0.09f))
                         .padding(start = 6.dp, end = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -825,7 +856,7 @@ internal fun FlymeTopBar(
                         cornerRadius = 18.dp,
                         focusedScale = 1.02f,
                         background = Color.Transparent,
-                        focusedBackground = Color.White.copy(alpha = 0.1f),
+                        focusedBackground = FlymeInk.copy(alpha = 0.1f),
                     ) {
                         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -834,10 +865,10 @@ internal fun FlymeTopBar(
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(currentTrack.title, style = CompactLine, fontSize = 12.sp, lineHeight = 14.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    color = FlymeInk, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(nowPlayingSubtitle ?: currentTrack.artist, style = CompactLine, fontSize = 10.sp,
                                     lineHeight = 12.sp,
-                                    color = Color.White.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    color = FlymeInk.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }

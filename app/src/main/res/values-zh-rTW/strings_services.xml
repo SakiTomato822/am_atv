@@ -91,4 +91,8 @@
     <string name="services_pick_new_release">最新發行</string>
     <string name="services_pick_for_you">為你推薦</string>
     <string name="services_pick_station">為你推薦的電台</string>
+    <string name="services_media_previous">上一首</string>
+    <string name="services_media_play">播放</string>
+    <string name="services_media_pause">暫停</string>
+    <string name="services_media_next">下一首</string>
 </resources>

@@ -117,7 +117,7 @@ internal fun CollectionScreen(
                             collectionDuration(duration),
                         )
                     },
-                    color = Color.White.copy(alpha = 0.48f), fontSize = 12.sp,
+                    color = FlymeInk.copy(alpha = 0.48f), fontSize = 12.sp,
                     modifier = Modifier.fillMaxWidth().padding(top = 5.dp, bottom = 12.dp),
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -169,15 +169,15 @@ internal fun CollectionScreen(
                         Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
-                        CircularProgressIndicator(color = Color.White.copy(alpha = 0.8f), strokeWidth = 2.dp,
+                        CircularProgressIndicator(color = FlymeInk.copy(alpha = 0.8f), strokeWidth = 2.dp,
                             modifier = Modifier.size(26.dp))
-                        Text(stringResource(R.string.browse_tracks_loading), color = Color.White.copy(alpha = 0.6f), fontSize = 15.sp)
+                        Text(stringResource(R.string.browse_tracks_loading), color = FlymeInk.copy(alpha = 0.6f), fontSize = 15.sp)
                     }
                     state.error != null -> Column(
                         Modifier.align(Alignment.Center).padding(20.dp),
                         verticalArrangement = Arrangement.spacedBy(18.dp),
                     ) {
-                        Text(stringResource(state.error), color = Color.White.copy(alpha = 0.7f), fontSize = 16.sp)
+                        Text(stringResource(state.error), color = FlymeInk.copy(alpha = 0.7f), fontSize = 16.sp)
                         CollectionAction(stringResource(R.string.browse_reload), null, onRetry, modifier = Modifier.width(150.dp).height(42.dp).focusRequester(retryFocus)
                             .focusProperties {
                                 left = playFocus
@@ -188,7 +188,7 @@ internal fun CollectionScreen(
                     }
                     state.tracks.isEmpty() -> Text(
                         stringResource(R.string.browse_tracks_empty), modifier = Modifier.align(Alignment.Center),
-                        color = Color.White.copy(alpha = 0.6f), fontSize = 17.sp,
+                        color = FlymeInk.copy(alpha = 0.6f), fontSize = 17.sp,
                     )
                     else -> LazyColumn(
                         state = listState,
@@ -226,13 +226,13 @@ internal fun CollectionScreen(
                                     },
                                 cornerRadius = 8.dp, focusedScale = 1f,
                                 background = Color.Transparent,
-                                focusedBackground = Color.White.copy(alpha = 0.12f),
+                                focusedBackground = FlymeInk.copy(alpha = 0.12f),
                                 padding = PaddingValues(horizontal = 12.dp),
                             ) { focused ->
                                 Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         if (selected && isPlaying) "♫" else stringResource(R.string.browse_track_index, index + 1),
-                                        color = if (selected) Color(0xFFFF788B) else Color.White.copy(alpha = 0.4f),
+                                        color = if (selected) Color(0xFFFF788B) else FlymeInk.copy(alpha = 0.4f),
                                         fontSize = 13.sp, modifier = Modifier.width(30.dp),
                                     )
                                     if (collection.catalogKind == CatalogKind.Playlist) {
@@ -242,17 +242,17 @@ internal fun CollectionScreen(
                                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                         ExplicitTitle(song.title, song.isExplicit, androidx.compose.ui.text.TextStyle(
                                             fontSize = 16.sp, fontWeight = FontWeight.Medium,
-                                            color = if (selected) Color(0xFFFF91A0) else Color.White))
+                                            color = if (selected) Color(0xFFFF91A0) else FlymeInk))
                                         Text(song.artist, fontSize = 12.sp,
-                                            color = Color.White.copy(alpha = if (focused) 0.72f else 0.48f),
+                                            color = FlymeInk.copy(alpha = if (focused) 0.72f else 0.48f),
                                             maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                     Text(songDuration(song.durationMs), fontSize = 12.sp,
-                                        color = Color.White.copy(alpha = 0.45f), modifier = Modifier.padding(start = 16.dp))
+                                        color = FlymeInk.copy(alpha = 0.45f), modifier = Modifier.padding(start = 16.dp))
                                 }
                             }
                             HorizontalDivider(Modifier.padding(start = 42.dp, end = 12.dp),
-                                color = Color.White.copy(alpha = 0.07f))
+                                color = FlymeInk.copy(alpha = 0.07f))
                         }
                         if (state.canShowFullAlbum) item(key = "full-album", contentType = "full-album") {
                             CollectionAction(
@@ -282,12 +282,12 @@ private fun CollectionAction(
     FocusSurface(
         onClick = { if (enabled) onClick() }, enabled = enabled || retainFocus, modifier = modifier,
         cornerRadius = 8.dp, focusedScale = 1.025f,
-        background = Color.White.copy(alpha = if (enabled) 0.12f else 0.04f),
-        focusedBackground = Color.White.copy(alpha = 0.24f),
+        background = FlymeInk.copy(alpha = if (enabled) 0.12f else 0.04f),
+        focusedBackground = FlymeInk.copy(alpha = 0.24f),
     ) { _ ->
         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically) {
-            val color = Color.White.copy(alpha = if (enabled) 0.95f else 0.35f)
+            val color = FlymeInk.copy(alpha = if (enabled) 0.95f else 0.35f)
             if (icon != null) {
                 Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(5.dp))
@@ -310,9 +310,9 @@ internal fun StationUnavailableDialog(station: Track, onDismiss: () -> Unit) {
                 CollectionAction(stringResource(R.string.browse_back), null, onDismiss,
                     modifier = Modifier.width(110.dp).height(42.dp).focusRequester(focus))
             },
-            containerColor = Color(0xFF252529),
-            titleContentColor = Color.White,
-            textContentColor = Color.White.copy(alpha = 0.7f),
+            containerColor = if (LocalFlymePalette.current.light) Color.White else Color(0xFF252529),
+            titleContentColor = FlymeInk,
+            textContentColor = FlymeInk.copy(alpha = 0.7f),
         )
     }
 }

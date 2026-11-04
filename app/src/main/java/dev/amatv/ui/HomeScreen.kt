@@ -299,7 +299,7 @@ private fun AccountScreen(
         Text(
             text = headingOverride
                 ?: if (connected) stringResource(R.string.browse_apple_connected) else stringResource(R.string.browse_apple_sign_in),
-            color = Color.White,
+            color = FlymeInk,
             fontSize = 32.sp,
             fontWeight = FontWeight.Bold,
         )
@@ -308,12 +308,12 @@ private fun AccountScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
-                    .background(Color.White.copy(alpha = 0.07f))
+                    .background(FlymeInk.copy(alpha = 0.07f))
                     .padding(horizontal = 18.dp, vertical = 14.dp),
             ) {
                 Text(
                     text = setupMessage,
-                    color = Color.White.copy(alpha = 0.82f),
+                    color = FlymeInk.copy(alpha = 0.82f),
                     fontSize = 15.sp,
                     lineHeight = 22.sp,
                 )
@@ -337,8 +337,8 @@ private fun AccountScreen(
                         },
                     cornerRadius = 27.dp,
                     focusedScale = 1.03f,
-                    background = Color.White.copy(alpha = 0.9f),
-                    focusedBackground = Color.White,
+                    background = FlymeInk.copy(alpha = 0.9f),
+                    focusedBackground = FlymeInk,
                     padding = PaddingValues(horizontal = 20.dp),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -362,14 +362,14 @@ private fun AccountScreen(
                         },
                     cornerRadius = 27.dp,
                     focusedScale = 1.03f,
-                    background = Color.White.copy(alpha = 0.14f),
-                    focusedBackground = Color.White.copy(alpha = 0.26f),
+                    background = FlymeInk.copy(alpha = 0.14f),
+                    focusedBackground = FlymeInk.copy(alpha = 0.26f),
                     padding = PaddingValues(horizontal = 20.dp),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             text = if (connected) stringResource(R.string.browse_sign_out_tv) else stringResource(R.string.browse_retry_connection),
-                            color = Color.White,
+                            color = FlymeInk,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -381,7 +381,7 @@ private fun AccountScreen(
             if (ytmPairingConfigured) {
             Text(
                 text = if (ytmSignedIn) stringResource(R.string.browse_ytm_connected) else stringResource(R.string.browse_ytm_recommendations),
-                color = Color.White,
+                color = FlymeInk,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -392,7 +392,7 @@ private fun AccountScreen(
                     ytmSignedIn -> stringResource(R.string.browse_personalized_enabled)
                     else -> stringResource(R.string.browse_pairing_hint)
                 },
-                color = Color.White.copy(alpha = 0.72f),
+                color = FlymeInk.copy(alpha = 0.72f),
                 fontSize = 16.sp,
             )
             if (ytmPairingConfigured) {
@@ -400,13 +400,13 @@ private fun AccountScreen(
                     onClick = if (ytmSignedIn) onYtmSignOut else onYtmSignIn,
                     modifier = Modifier.width(280.dp).height(50.dp),
                     cornerRadius = 25.dp,
-                    background = Color.White.copy(alpha = 0.14f),
-                    focusedBackground = Color.White.copy(alpha = 0.27f),
+                    background = FlymeInk.copy(alpha = 0.14f),
+                    focusedBackground = FlymeInk.copy(alpha = 0.27f),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             if (ytmSignedIn) stringResource(R.string.browse_ytm_sign_out) else stringResource(R.string.browse_ytm_pair),
-                            color = Color.White,
+                            color = FlymeInk,
                             fontSize = 16.sp,
                         )
                     }
@@ -417,13 +417,13 @@ private fun AccountScreen(
             Spacer(Modifier.height(8.dp))
             Text(
                 text = stringResource(R.string.browse_lyrics_sync),
-                color = Color.White,
+                color = FlymeInk,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
                 text = stringResource(R.string.browse_lyrics_sync_hint),
-                color = Color.White.copy(alpha = 0.72f),
+                color = FlymeInk.copy(alpha = 0.72f),
                 fontSize = 16.sp,
             )
             Row(
@@ -434,29 +434,29 @@ private fun AccountScreen(
                     onClick = { onLyricOffsetChange((lyricOffsetMs - 100L).coerceAtLeast(-3000L)) },
                     modifier = Modifier.width(96.dp).height(46.dp),
                     cornerRadius = 23.dp,
-                    background = Color.White.copy(alpha = 0.14f),
-                    focusedBackground = Color.White.copy(alpha = 0.28f),
+                    background = FlymeInk.copy(alpha = 0.14f),
+                    focusedBackground = FlymeInk.copy(alpha = 0.28f),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(stringResource(R.string.browse_offset_value, -100), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.browse_offset_value, -100), color = FlymeInk, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                     }
                 }
                 FocusSurface(
                     onClick = { onLyricOffsetChange((lyricOffsetMs - 50L).coerceAtLeast(-3000L)) },
                     modifier = Modifier.width(90.dp).height(46.dp),
                     cornerRadius = 23.dp,
-                    background = Color.White.copy(alpha = 0.14f),
-                    focusedBackground = Color.White.copy(alpha = 0.28f),
+                    background = FlymeInk.copy(alpha = 0.14f),
+                    focusedBackground = FlymeInk.copy(alpha = 0.28f),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(stringResource(R.string.browse_offset_value, -50), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.browse_offset_value, -50), color = FlymeInk, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                     }
                 }
                 Box(
                     modifier = Modifier
                         .height(46.dp)
                         .clip(RoundedCornerShape(23.dp))
-                        .background(Color.White.copy(alpha = 0.22f))
+                        .background(FlymeInk.copy(alpha = 0.22f))
                         .padding(horizontal = 20.dp),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -466,7 +466,7 @@ private fun AccountScreen(
                             lyricOffsetMs < 0L -> stringResource(R.string.browse_offset_value, lyricOffsetMs)
                             else -> stringResource(R.string.browse_offset_default)
                         },
-                        color = Color.White,
+                        color = FlymeInk,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                     )
@@ -475,22 +475,22 @@ private fun AccountScreen(
                     onClick = { onLyricOffsetChange((lyricOffsetMs + 50L).coerceAtMost(3000L)) },
                     modifier = Modifier.width(90.dp).height(46.dp),
                     cornerRadius = 23.dp,
-                    background = Color.White.copy(alpha = 0.14f),
-                    focusedBackground = Color.White.copy(alpha = 0.28f),
+                    background = FlymeInk.copy(alpha = 0.14f),
+                    focusedBackground = FlymeInk.copy(alpha = 0.28f),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(stringResource(R.string.browse_offset_value, 50), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.browse_offset_value, 50), color = FlymeInk, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                     }
                 }
                 FocusSurface(
                     onClick = { onLyricOffsetChange((lyricOffsetMs + 100L).coerceAtMost(3000L)) },
                     modifier = Modifier.width(96.dp).height(46.dp),
                     cornerRadius = 23.dp,
-                    background = Color.White.copy(alpha = 0.14f),
-                    focusedBackground = Color.White.copy(alpha = 0.28f),
+                    background = FlymeInk.copy(alpha = 0.14f),
+                    focusedBackground = FlymeInk.copy(alpha = 0.28f),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(stringResource(R.string.browse_offset_value, 100), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.browse_offset_value, 100), color = FlymeInk, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                     }
                 }
                 if (lyricOffsetMs != 0L) {
@@ -498,12 +498,12 @@ private fun AccountScreen(
                         onClick = { onLyricOffsetChange(0L) },
                         modifier = Modifier.height(46.dp),
                         cornerRadius = 23.dp,
-                        background = Color.White.copy(alpha = 0.10f),
-                        focusedBackground = Color.White.copy(alpha = 0.25f),
+                        background = FlymeInk.copy(alpha = 0.10f),
+                        focusedBackground = FlymeInk.copy(alpha = 0.25f),
                         padding = PaddingValues(horizontal = 16.dp),
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(stringResource(R.string.browse_reset), color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
+                            Text(stringResource(R.string.browse_reset), color = FlymeInk.copy(alpha = 0.85f), fontSize = 14.sp)
                         }
                     }
                 }
@@ -511,7 +511,7 @@ private fun AccountScreen(
             Spacer(Modifier.height(18.dp))
             Text(
                 text = stringResource(R.string.browse_autoplay_source),
-                color = Color.White,
+                color = FlymeInk,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -524,13 +524,13 @@ private fun AccountScreen(
                     onClick = { onAutoplaySourceChange(dev.amatv.integration.AutoplaySource.YouTubeMusic) },
                     modifier = Modifier.width(220.dp).height(46.dp),
                     cornerRadius = 23.dp,
-                    background = if (isYtm) Color.White.copy(alpha = 0.26f) else Color.White.copy(alpha = 0.12f),
-                    focusedBackground = Color.White.copy(alpha = 0.38f),
+                    background = if (isYtm) FlymeInk.copy(alpha = 0.26f) else FlymeInk.copy(alpha = 0.12f),
+                    focusedBackground = FlymeInk.copy(alpha = 0.38f),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             text = if (isYtm) stringResource(R.string.browse_selected_source, stringResource(R.string.browse_ytm_name)) else stringResource(R.string.browse_ytm_name),
-                            color = Color.White,
+                            color = FlymeInk,
                             fontSize = 15.sp,
                             fontWeight = if (isYtm) FontWeight.Bold else FontWeight.Medium,
                         )
@@ -541,13 +541,13 @@ private fun AccountScreen(
                     onClick = { onAutoplaySourceChange(dev.amatv.integration.AutoplaySource.AppleMusic) },
                     modifier = Modifier.width(220.dp).height(46.dp),
                     cornerRadius = 23.dp,
-                    background = if (isAm) Color.White.copy(alpha = 0.26f) else Color.White.copy(alpha = 0.12f),
-                    focusedBackground = Color.White.copy(alpha = 0.38f),
+                    background = if (isAm) FlymeInk.copy(alpha = 0.26f) else FlymeInk.copy(alpha = 0.12f),
+                    focusedBackground = FlymeInk.copy(alpha = 0.38f),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             text = if (isAm) stringResource(R.string.browse_selected_source, stringResource(R.string.browse_apple_name)) else stringResource(R.string.browse_apple_name),
-                            color = Color.White,
+                            color = FlymeInk,
                             fontSize = 15.sp,
                             fontWeight = if (isAm) FontWeight.Bold else FontWeight.Medium,
                         )
@@ -557,13 +557,13 @@ private fun AccountScreen(
             Spacer(Modifier.height(18.dp))
             Text(
                 text = stringResource(R.string.browse_performance_mode),
-                color = Color.White,
+                color = FlymeInk,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
                 text = stringResource(R.string.browse_performance_mode_hint),
-                color = Color.White.copy(alpha = 0.72f),
+                color = FlymeInk.copy(alpha = 0.72f),
                 fontSize = 16.sp,
             )
             Row(
@@ -574,13 +574,13 @@ private fun AccountScreen(
                     onClick = { onLowPerformanceModeChange(false) },
                     modifier = Modifier.width(220.dp).height(46.dp),
                     cornerRadius = 23.dp,
-                    background = if (!lowPerformanceMode) Color.White.copy(alpha = 0.26f) else Color.White.copy(alpha = 0.12f),
-                    focusedBackground = Color.White.copy(alpha = 0.38f),
+                    background = if (!lowPerformanceMode) FlymeInk.copy(alpha = 0.26f) else FlymeInk.copy(alpha = 0.12f),
+                    focusedBackground = FlymeInk.copy(alpha = 0.38f),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             text = if (!lowPerformanceMode) stringResource(R.string.browse_selected_source, stringResource(R.string.browse_performance_standard)) else stringResource(R.string.browse_performance_standard),
-                            color = Color.White,
+                            color = FlymeInk,
                             fontSize = 15.sp,
                             fontWeight = if (!lowPerformanceMode) FontWeight.Bold else FontWeight.Medium,
                         )
@@ -590,13 +590,13 @@ private fun AccountScreen(
                     onClick = { onLowPerformanceModeChange(true) },
                     modifier = Modifier.width(220.dp).height(46.dp),
                     cornerRadius = 23.dp,
-                    background = if (lowPerformanceMode) Color.White.copy(alpha = 0.26f) else Color.White.copy(alpha = 0.12f),
-                    focusedBackground = Color.White.copy(alpha = 0.38f),
+                    background = if (lowPerformanceMode) FlymeInk.copy(alpha = 0.26f) else FlymeInk.copy(alpha = 0.12f),
+                    focusedBackground = FlymeInk.copy(alpha = 0.38f),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             text = if (lowPerformanceMode) stringResource(R.string.browse_selected_source, stringResource(R.string.browse_performance_low)) else stringResource(R.string.browse_performance_low),
-                            color = Color.White,
+                            color = FlymeInk,
                             fontSize = 15.sp,
                             fontWeight = if (lowPerformanceMode) FontWeight.Bold else FontWeight.Medium,
                         )
@@ -690,13 +690,13 @@ private fun SearchScreen(
                     cornerRadius = 19.dp,
                     focusedScale = 1.04f,
                     padding = PaddingValues(horizontal = 16.dp),
-                    background = Color.White.copy(alpha = 0.10f),
-                    focusedBackground = Color.White.copy(alpha = 0.92f),
+                    background = FlymeInk.copy(alpha = 0.10f),
+                    focusedBackground = FlymeInk.copy(alpha = 0.92f),
                 ) { focused ->
                     Box(Modifier.height(38.dp), contentAlignment = Alignment.Center) {
                         Text(
                             text = term,
-                            color = if (focused) Color(0xFF111713) else Color.White.copy(alpha = 0.88f),
+                            color = if (focused) Color(0xFF111713) else FlymeInk.copy(alpha = 0.88f),
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -793,14 +793,14 @@ private fun SearchScreen(
                 }
             ),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedBorderColor = if (isInputActive) Color.White else Color.White.copy(alpha = 0.82f),
-                unfocusedBorderColor = Color.White.copy(alpha = 0.22f),
-                focusedContainerColor = if (isInputActive) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.08f),
-                unfocusedContainerColor = Color.White.copy(alpha = 0.05f),
-                focusedPlaceholderColor = Color.White.copy(alpha = 0.52f),
-                unfocusedPlaceholderColor = Color.White.copy(alpha = 0.38f),
+                focusedTextColor = FlymeInk,
+                unfocusedTextColor = FlymeInk,
+                focusedBorderColor = if (isInputActive) FlymeInk else FlymeInk.copy(alpha = 0.82f),
+                unfocusedBorderColor = FlymeInk.copy(alpha = 0.22f),
+                focusedContainerColor = if (isInputActive) FlymeInk.copy(alpha = 0.14f) else FlymeInk.copy(alpha = 0.08f),
+                unfocusedContainerColor = FlymeInk.copy(alpha = 0.05f),
+                focusedPlaceholderColor = FlymeInk.copy(alpha = 0.52f),
+                unfocusedPlaceholderColor = FlymeInk.copy(alpha = 0.38f),
             ),
         )
         Spacer(Modifier.height(18.dp))
@@ -820,7 +820,7 @@ private fun SearchScreen(
             } else {
                 Text(
                     stringResource(if (setupMessage.isNullOrBlank()) R.string.browse_search_empty else R.string.browse_search_error),
-                    color = Color.White.copy(alpha = 0.64f), fontSize = 16.sp,
+                    color = FlymeInk.copy(alpha = 0.64f), fontSize = 16.sp,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 16.dp),
                 )
             }
@@ -954,14 +954,14 @@ private fun HomeShelvesBody(
                 modifier = Modifier
                     .width(680.dp)
                     .clip(RoundedCornerShape(22.dp))
-                    .background(Color.White.copy(alpha = 0.06f))
+                    .background(FlymeInk.copy(alpha = 0.06f))
                     .padding(horizontal = 36.dp, vertical = 32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 Text(
                     text = stringResource(R.string.browse_content_unavailable),
-                    color = Color.White,
+                    color = FlymeInk,
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
@@ -973,7 +973,7 @@ private fun HomeShelvesBody(
                 }
                 Text(
                     text = detailText,
-                    color = Color.White.copy(alpha = 0.72f),
+                    color = FlymeInk.copy(alpha = 0.72f),
                     fontSize = 16.sp,
                     lineHeight = 24.sp,
                     textAlign = TextAlign.Center,
@@ -996,8 +996,8 @@ private fun HomeShelvesBody(
                                 },
                             cornerRadius = 24.dp,
                             focusedScale = 1.04f,
-                            background = Color.White.copy(alpha = 0.9f),
-                            focusedBackground = Color.White,
+                            background = FlymeInk.copy(alpha = 0.9f),
+                            focusedBackground = FlymeInk,
                         ) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
@@ -1021,8 +1021,8 @@ private fun HomeShelvesBody(
                                     },
                                 cornerRadius = 24.dp,
                                 focusedScale = 1.04f,
-                                background = Color.White.copy(alpha = 0.14f),
-                                focusedBackground = Color.White.copy(alpha = 0.28f),
+                                background = FlymeInk.copy(alpha = 0.14f),
+                                focusedBackground = FlymeInk.copy(alpha = 0.28f),
                             ) {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     Text(
@@ -1031,7 +1031,7 @@ private fun HomeShelvesBody(
                                         } else {
                                             stringResource(R.string.browse_apple_sign_in)
                                         },
-                                        color = Color.White,
+                                        color = FlymeInk,
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.SemiBold,
                                     )
@@ -1435,8 +1435,8 @@ private fun LibraryLoadMoreCard(
         cornerRadius = 14.dp,
         focusedScale = 1.035f,
         focusedLift = 2.dp,
-        background = Color.White.copy(alpha = 0.06f),
-        focusedBackground = Color.White.copy(alpha = 0.14f),
+        background = FlymeInk.copy(alpha = 0.06f),
+        focusedBackground = FlymeInk.copy(alpha = 0.14f),
         padding = PaddingValues(16.dp),
     ) {
         Column(
@@ -1445,14 +1445,14 @@ private fun LibraryLoadMoreCard(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (pagination.loading) AppleLoadingIndicator()
-            else Text("+", color = Color.White.copy(alpha = 0.75f), fontSize = 38.sp)
+            else Text("+", color = FlymeInk.copy(alpha = 0.75f), fontSize = 38.sp)
             Spacer(Modifier.height(16.dp))
-            Text(label, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+            Text(label, color = FlymeInk, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center)
             if (pagination.failed) {
                 Text(
                     stringResource(R.string.browse_load_more_error),
-                    color = Color.White.copy(alpha = 0.62f),
+                    color = FlymeInk.copy(alpha = 0.62f),
                     fontSize = 13.sp,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(top = 8.dp),
@@ -1466,7 +1466,7 @@ private fun LibraryLoadMoreCard(
 private fun SectionHeading(text: String) {
     Text(
         text = text,
-        color = Color.White.copy(alpha = 0.66f),
+        color = FlymeInk.copy(alpha = 0.66f),
         fontSize = 22.sp,
         lineHeight = 26.sp,
         fontWeight = FontWeight.Bold,
@@ -1531,7 +1531,7 @@ private fun HomeCardEyebrow(ready: State<Boolean>, label: String) {
             text = label,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            color = Color.White.copy(alpha = 0.62f),
+            color = FlymeInk.copy(alpha = 0.62f),
             fontSize = 14.sp,
         )
     }
@@ -1540,6 +1540,7 @@ private fun HomeCardEyebrow(ready: State<Boolean>, label: String) {
 /** No font shaping, image request or changing geometry before the card's grant. */
 @Composable
 private fun HomeCardPlaceholder(track: Track, featured: Boolean) {
+    val ink = FlymeInk
     Canvas(Modifier.fillMaxSize().then(if (featured) Modifier.clip(RoundedCornerShape(14.dp)) else Modifier)) {
         val coverHeight = if (featured) (size.height - 72.dp.toPx()).coerceAtLeast(0f) else 168.dp.toPx()
         val corner = CornerRadius(14.dp.toPx())
@@ -1555,11 +1556,11 @@ private fun HomeCardPlaceholder(track: Track, featured: Boolean) {
         val titleX = if (featured) (size.width - titleWidth) / 2f else 0f
         val artistX = if (featured) (size.width - artistWidth) / 2f else 0f
         drawRoundRect(
-            Color.White.copy(alpha = 0.12f), Offset(titleX, titleY),
+            ink.copy(alpha = 0.12f), Offset(titleX, titleY),
             Size(titleWidth, 8.dp.toPx()), CornerRadius(4.dp.toPx()),
         )
         drawRoundRect(
-            Color.White.copy(alpha = 0.07f), Offset(artistX, titleY + 16.dp.toPx()),
+            ink.copy(alpha = 0.07f), Offset(artistX, titleY + 16.dp.toPx()),
             Size(artistWidth, 6.dp.toPx()), CornerRadius(3.dp.toPx()),
         )
     }
@@ -1640,7 +1641,7 @@ private fun TopPick(
                     ) {
                         Text(
                             text = track.title,
-                            color = Color.White.copy(alpha = 0.96f),
+                            color = FlymeInk.copy(alpha = 0.96f),
                             fontSize = 14.sp,
                             lineHeight = 18.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -1652,7 +1653,7 @@ private fun TopPick(
                             Spacer(Modifier.height(2.dp))
                             Text(
                                 text = track.artist,
-                                color = Color.White.copy(alpha = 0.72f),
+                                color = FlymeInk.copy(alpha = 0.72f),
                                 fontSize = 12.sp,
                                 lineHeight = 16.sp,
                                 fontWeight = FontWeight.Medium,
@@ -1701,7 +1702,7 @@ private fun RecentCard(
                 )
                 Text(
                     text = track.title,
-                    color = Color.White.copy(alpha = 0.92f),
+                    color = FlymeInk.copy(alpha = 0.92f),
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -1710,7 +1711,7 @@ private fun RecentCard(
                 )
                 Text(
                     text = track.artist,
-                    color = Color.White.copy(alpha = 0.56f),
+                    color = FlymeInk.copy(alpha = 0.56f),
                     fontSize = 13.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

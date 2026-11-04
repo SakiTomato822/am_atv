@@ -2022,8 +2022,8 @@ fun AmAtvApp() {
                         else -> false
                     }
                 },
-            color = Color(0xFF080A09),
-            contentColor = Color.White,
+            color = if (BuildConfig.FLYME_AUTO) LocalFlymePalette.current.page else Color(0xFF080A09),
+            contentColor = FlymeInk,
         ) {
             CompositionLocalProvider(LocalFocusFrameController provides focusFrameController) {
             Box(Modifier.fillMaxSize()) {
@@ -2159,6 +2159,7 @@ fun AmAtvApp() {
                         cacheSettingsContent = {
                             LanguageSettings()
                             FlymeMediaSettings(services)
+                            if (BuildConfig.FLYME_AUTO) FlymeAppearanceSettings(services.playbackOptions)
                             if (BuildConfig.FLYME_AUTO) FlymePlaybackOptionsSettings(services.playbackOptions)
                             if (BuildConfig.FLYME_AUTO) FlymePlaybackDiagnostics(services.playbackDiagnostics)
                             ContentCacheSettings(services.contentCache)
@@ -2439,7 +2440,7 @@ private fun BrowseShell(
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    if (BuildConfig.FLYME_AUTO) listOf(Color(0xFF15111D), Color(0xFF0B0A0E))
+                    if (BuildConfig.FLYME_AUTO) listOf(LocalFlymePalette.current.pageTop, LocalFlymePalette.current.page)
                     else listOf(
                         Color(0xFF19241E),
                         Color(0xFF0B1411),
@@ -2453,9 +2454,9 @@ private fun BrowseShell(
             PlayerBackdrop(currentTrack, animate = isBrowseVisible && !lowPerformanceMode,
                 modifier = Modifier.fillMaxSize())
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
-                0f to Color(0xFF0B0A0E).copy(alpha = 0.42f),
-                0.45f to Color(0xFF0B0A0E).copy(alpha = 0.78f),
-                1f to Color(0xFF0B0A0E).copy(alpha = 0.92f),
+                0f to LocalFlymePalette.current.scrim.copy(alpha = 0.42f),
+                0.45f to LocalFlymePalette.current.scrim.copy(alpha = 0.78f),
+                1f to LocalFlymePalette.current.scrim.copy(alpha = 0.92f),
             )))
         }
         CompositionLocalProvider(
@@ -2672,7 +2673,7 @@ private fun TopNavigation(
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(28.dp))
-                .background(Color.White.copy(alpha = 0.055f))
+                .background(FlymeInk.copy(alpha = 0.055f))
                 .padding(4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -2719,14 +2720,14 @@ private fun TopNavigation(
                     padding = PaddingValues(
                         horizontal = if (destination == Destination.Search) 12.dp else 16.dp,
                     ),
-                    background = if (isSelected) Color.White.copy(alpha = 0.9f)
+                    background = if (isSelected) FlymeInk.copy(alpha = 0.9f)
                     else Color.Transparent,
-                    focusedBackground = if (isSelected) Color.White.copy(alpha = 0.96f)
-                    else Color.White.copy(alpha = 0.13f),
+                    focusedBackground = if (isSelected) FlymeInk.copy(alpha = 0.96f)
+                    else FlymeInk.copy(alpha = 0.13f),
                 ) { focused ->
                     Box(Modifier.height(36.dp), contentAlignment = Alignment.Center) {
                         val tint = if (isSelected) Color(0xFF17191A)
-                        else if (focused) Color.White else Color.White.copy(alpha = 0.65f)
+                        else if (focused) FlymeInk else FlymeInk.copy(alpha = 0.65f)
                         when (destination) {
                             Destination.Search -> {
                                 Icon(
@@ -2778,7 +2779,7 @@ private fun TopNavigation(
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(28.dp))
-                .background(Color.White.copy(alpha = 0.055f))
+                .background(FlymeInk.copy(alpha = 0.055f))
                 .padding(4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -2826,14 +2827,14 @@ private fun TopNavigation(
                     focusedElevation = 0.dp,
                     showBorder = false,
                     padding = PaddingValues(horizontal = 14.dp),
-                    background = if (isSelected) Color.White.copy(alpha = 0.9f)
+                    background = if (isSelected) FlymeInk.copy(alpha = 0.9f)
                     else Color.Transparent,
-                    focusedBackground = if (isSelected) Color.White.copy(alpha = 0.96f)
-                    else Color.White.copy(alpha = 0.13f),
+                    focusedBackground = if (isSelected) FlymeInk.copy(alpha = 0.96f)
+                    else FlymeInk.copy(alpha = 0.13f),
                 ) { focused ->
                     Box(Modifier.height(36.dp), contentAlignment = Alignment.Center) {
                         val tint = if (isSelected) Color(0xFF17191A)
-                        else if (focused) Color.White else Color.White.copy(alpha = 0.65f)
+                        else if (focused) FlymeInk else FlymeInk.copy(alpha = 0.65f)
                         when (destination) {
                             Destination.NowPlaying -> {
                                 Row(verticalAlignment = Alignment.CenterVertically) {

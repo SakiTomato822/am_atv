@@ -32,6 +32,7 @@ internal fun AppleLoadingIndicator(modifier: Modifier = Modifier) {
         animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart),
         label = "activity-spokes",
     ) else null
+    val ink = FlymeInk
     Canvas(modifier.size(28.dp).semantics { contentDescription = loadingDescription }) {
         val radius = size.minDimension / 2f
         val head = (phase?.value?.toInt() ?: 0) % 12
@@ -40,7 +41,7 @@ internal fun AppleLoadingIndicator(modifier: Modifier = Modifier) {
             val distance = (head - index + 12) % 12
             val direction = Offset(cos(angle), sin(angle))
             drawLine(
-                color = Color.White.copy(alpha = 0.18f + (1f - distance / 12f) * 0.72f),
+                color = ink.copy(alpha = 0.18f + (1f - distance / 12f) * 0.72f),
                 start = center + direction * (radius * 0.50f),
                 end = center + direction * (radius * 0.86f),
                 strokeWidth = radius * 0.14f,

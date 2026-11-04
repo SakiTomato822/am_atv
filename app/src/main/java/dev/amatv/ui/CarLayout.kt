@@ -1,5 +1,6 @@
 package dev.amatv.ui
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -7,6 +8,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.runtime.Composable
+import kotlinx.coroutines.delay
+import dev.amatv.integration.FlymePlaybackSettings
+import dev.amatv.integration.FlymePlaybackOptions
+import androidx.core.view.WindowCompat
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -43,6 +55,7 @@ fun CarLayout(content: @Composable () -> Unit) {
             (1.5f * minOf(maxWidth.value / 1920f, fullHeight.value / 968f)).coerceIn(0.4f, 1.5f)
         } else carContentScale(maxWidth.value, fullHeight.value)
         CompositionLocalProvider(
+            LocalFlymePalette provides if (rememberFlymeLight()) LightFlymePalette else DarkFlymePalette,
             LocalDensity provides Density(systemDensity.density * scale, systemDensity.fontScale),
             LocalCarKeyboardOverlap provides (fullHeight - maxHeight) / scale,
         ) {
@@ -70,3 +83,34 @@ private class CarWindowSize {
 
 internal fun carContentScale(widthDp: Float, heightDp: Float): Float =
     (1.5f * minOf(widthDp / 1920f, heightDp / 968f)).coerceIn(1f, 1.5f)
+
+/** Light or dark, from Settings: fixed, the system night mode, or the chosen hours of the day. */
+@Composable
+private fun rememberFlymeLight(): Boolean {
+    val context = LocalContext.current
+    val options = remember(context) { FlymePlaybackOptions.get(context) }
+    val settings by options.settings.collectAsState()
+    val systemDark = isSystemInDarkTheme()
+    var minuteOfDay by remember { mutableIntStateOf(currentMinuteOfDay()) }
+    LaunchedEffect(settings.appearance) {
+        while (settings.appearance == FlymePlaybackSettings.Appearance.Time) {
+            minuteOfDay = currentMinuteOfDay()
+            delay(30_000L)
+        }
+    }
+    val light = settings.isLight(systemDark, minuteOfDay)
+    // Dark status and navigation bar icons on the light UI.
+    val view = LocalView.current
+    SideEffect {
+        val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
+        WindowCompat.getInsetsController(window, view).apply {
+            isAppearanceLightStatusBars = light
+            isAppearanceLightNavigationBars = light
+        }
+    }
+    return light
+}
+
+private fun currentMinuteOfDay(): Int = java.util.Calendar.getInstance().let {
+    it.get(java.util.Calendar.HOUR_OF_DAY) * 60 + it.get(java.util.Calendar.MINUTE)
+}

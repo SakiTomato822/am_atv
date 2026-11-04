@@ -91,4 +91,8 @@
     <string name="services_pick_new_release">New Release</string>
     <string name="services_pick_for_you">For You</string>
     <string name="services_pick_station">Station for You</string>
+    <string name="services_media_previous">Previous</string>
+    <string name="services_media_play">Play</string>
+    <string name="services_media_pause">Pause</string>
+    <string name="services_media_next">Next</string>
 </resources>

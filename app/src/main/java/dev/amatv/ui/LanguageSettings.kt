@@ -52,7 +52,7 @@ internal fun LanguageSettings() {
     val focus = remember { List(choices.size) { FocusRequester() } }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
-            text = stringResource(R.string.language_title), color = Color.White,
+            text = stringResource(R.string.language_title), color = FlymeInk,
             fontSize = 22.sp, fontWeight = FontWeight.SemiBold,
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -77,13 +77,13 @@ internal fun LanguageSettings() {
                             right = focus.getOrNull(index + 1) ?: FocusRequester.Cancel
                         },
                     cornerRadius = 23.dp,
-                    background = Color.White.copy(alpha = if (selected) .26f else .12f),
-                    focusedBackground = Color.White.copy(alpha = .38f),
+                    background = FlymeInk.copy(alpha = if (selected) .26f else .12f),
+                    focusedBackground = FlymeInk.copy(alpha = .38f),
                     padding = PaddingValues(horizontal = 12.dp),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
-                            stringResource(label), color = Color.White, fontSize = 15.sp,
+                            stringResource(label), color = FlymeInk, fontSize = 15.sp,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )

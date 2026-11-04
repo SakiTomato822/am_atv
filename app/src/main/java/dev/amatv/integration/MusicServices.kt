@@ -40,7 +40,7 @@ class MusicServices(context: Context) : RecommendationProvider {
     private val appContext = context.applicationContext
     val contentCache = ContentCache.get(appContext)
     val playbackDiagnostics = PlaybackDiagnostics.get(appContext)
-    val playbackOptions = FlymePlaybackOptions(appContext)
+    val playbackOptions = FlymePlaybackOptions.get(appContext)
     /** Call off the main thread: whether the system Widevine lets the web player play stations. */
     val widevineReady: Boolean by lazy { checkWidevine().first }
     private val tokenStore = SecureTokenStore(appContext)

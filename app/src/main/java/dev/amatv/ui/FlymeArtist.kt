@@ -71,9 +71,9 @@ internal fun FlymeArtistScreen(
                 // The back button sits outside FitDesign (below) so it matches every other page.
                 Spacer(Modifier.height(54.dp))
                 MotionArtwork(track = hero, modifier = Modifier.size(300.dp)
-                    .border(0.75.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(16.dp)),
+                    .border(0.75.dp, FlymeInk.copy(alpha = 0.14f), RoundedCornerShape(16.dp)),
                     animate = false, cornerRadius = 16.dp)
-                Text(artist.title, color = Color.White, fontSize = 32.sp, lineHeight = 37.sp,
+                Text(artist.title, color = FlymeInk, fontSize = 32.sp, lineHeight = 37.sp,
                     fontWeight = FontWeight.Bold, letterSpacing = (-0.6).sp, maxLines = 2,
                     overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 18.dp, end = 20.dp))
                 if (topSongs.isNotEmpty()) {
@@ -146,7 +146,7 @@ private fun FlymeArtistShelves(
 
 @Composable
 private fun ArtistHeading(text: String, modifier: Modifier = Modifier) {
-    Text(text, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp,
+    Text(text, color = FlymeInk, fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp,
         modifier = modifier.padding(bottom = 10.dp))
 }
 
@@ -159,15 +159,15 @@ private fun ArtistSongRow(song: Track, modifier: Modifier, onClick: () -> Unit) 
         focusedScale = 1.01f,
         padding = PaddingValues(horizontal = 6.dp),
         background = Color.Transparent,
-        focusedBackground = Color.White.copy(alpha = 0.08f),
+        focusedBackground = FlymeInk.copy(alpha = 0.08f),
     ) {
         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
             MotionArtwork(track = song, modifier = Modifier.size(44.dp), animate = false, cornerRadius = 5.dp)
             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                 ExplicitTitle(song.title, song.isExplicit,
-                    TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold), badgeSize = 13.dp)
+                    TextStyle(color = FlymeInk, fontSize = 14.sp, fontWeight = FontWeight.SemiBold), badgeSize = 13.dp)
                 val detail = song.album.takeIf { it.isNotBlank() && it != song.title } ?: song.artist
-                Text(detail, color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, maxLines = 1,
+                Text(detail, color = FlymeInk.copy(alpha = 0.5f), fontSize = 12.sp, maxLines = 1,
                     overflow = TextOverflow.Ellipsis)
             }
         }
@@ -196,14 +196,14 @@ private fun ArtistCardRow(items: List<Track>, onNearEnd: () -> Unit = {}, onOpen
                     MotionArtwork(track = item, modifier = Modifier.size(150.dp), animate = false,
                         cornerRadius = if (item.catalogKind == CatalogKind.Artist) 75.dp else 9.dp)
                     ExplicitTitle(item.title, item.isExplicit,
-                        TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                        TextStyle(color = FlymeInk, fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
                         modifier = Modifier.padding(top = 8.dp), badgeSize = 12.dp)
                     // Albums carry only their kind in this field; songs show their album.
                     val detail = if (item.catalogKind == CatalogKind.Song) {
                         item.album.takeIf { it.isNotBlank() && it != item.title }
                     } else null
                     if (detail != null) {
-                        Text(detail, color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp, maxLines = 1,
+                        Text(detail, color = FlymeInk.copy(alpha = 0.5f), fontSize = 11.sp, maxLines = 1,
                             overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
                     }
                 }
@@ -227,10 +227,10 @@ private fun FlymePill(
         cornerRadius = 21.dp,
         focusedScale = 1.04f,
         padding = PaddingValues(horizontal = 20.dp),
-        background = if (primary) Color.White else Color.White.copy(alpha = 0.12f),
-        focusedBackground = if (primary) Color.White else Color.White.copy(alpha = 0.22f),
+        background = if (primary) FlymeInk else FlymeInk.copy(alpha = 0.12f),
+        focusedBackground = if (primary) FlymeInk else FlymeInk.copy(alpha = 0.22f),
     ) {
-        val content = if (primary) Color(0xFF17151C) else Color.White
+        val content = if (primary) FlymeOnInk else FlymeInk
         Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, null, tint = content, modifier = Modifier.size(18.dp))
             Text(label, color = content, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,

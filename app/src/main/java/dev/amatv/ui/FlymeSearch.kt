@@ -151,7 +151,7 @@ internal fun FlymeSearchScreen(
                 if (loading) AppleLoadingIndicator()
                 else Text(
                     stringResource(if (setupMessage.isNullOrBlank()) R.string.browse_search_empty else R.string.browse_search_error),
-                    color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp,
+                    color = FlymeInk.copy(alpha = 0.6f), fontSize = 16.sp,
                 )
             }
             typing -> FlymeCompactResults(results, bottomPadding = keyboardOverlap + 12.dp, onOpen = open)
@@ -173,7 +173,7 @@ private fun FlymeSearchBar(
         value = query,
         onValueChange = onQueryChange,
         singleLine = true,
-        textStyle = TextStyle(color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium),
+        textStyle = TextStyle(color = FlymeInk, fontSize = 17.sp, fontWeight = FontWeight.Medium),
         cursorBrush = SolidColor(FlymeLiveRed),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
         keyboardActions = KeyboardActions(onSearch = { onSubmit() }),
@@ -184,16 +184,16 @@ private fun FlymeSearchBar(
         decorationBox = { field ->
             Row(
                 Modifier.fillMaxSize().clip(RoundedCornerShape(23.dp))
-                    .background(Color.White.copy(alpha = 0.12f))
+                    .background(FlymeInk.copy(alpha = 0.12f))
                     .padding(start = 16.dp, end = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Rounded.Search, null, tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(21.dp))
+                Icon(Icons.Rounded.Search, null, tint = FlymeInk.copy(alpha = 0.6f), modifier = Modifier.size(21.dp))
                 Spacer(Modifier.width(10.dp))
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                     if (query.isEmpty()) {
                         Text(stringResource(R.string.browse_search_hint), fontSize = 17.sp,
-                            color = Color.White.copy(alpha = 0.42f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            color = FlymeInk.copy(alpha = 0.42f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     field()
                 }
@@ -205,7 +205,7 @@ private fun FlymeSearchBar(
                             .automationId("search-clear"),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(Icons.Rounded.Close, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(19.dp))
+                        Icon(Icons.Rounded.Close, null, tint = FlymeInk.copy(alpha = 0.7f), modifier = Modifier.size(19.dp))
                     }
                 }
             }
@@ -241,16 +241,16 @@ private fun FlymeSearchStart(
                         modifier = Modifier.height(36.dp).automationId("search-term-$index"),
                         cornerRadius = 18.dp,
                         padding = PaddingValues(start = 14.dp, end = 4.dp),
-                        background = Color.White.copy(alpha = 0.10f),
+                        background = FlymeInk.copy(alpha = 0.10f),
                     ) {
                         Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.History, null, tint = Color.White.copy(alpha = 0.5f),
+                            Icon(Icons.Rounded.History, null, tint = FlymeInk.copy(alpha = 0.5f),
                                 modifier = Modifier.size(16.dp))
-                            Text(term, color = Color.White.copy(alpha = 0.88f), fontSize = 14.sp,
+                            Text(term, color = FlymeInk.copy(alpha = 0.88f), fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 6.dp))
                             Box(Modifier.size(28.dp).clip(CircleShape).clickable { onRemove(term) },
                                 contentAlignment = Alignment.Center) {
-                                Icon(Icons.Rounded.Close, null, tint = Color.White.copy(alpha = 0.45f),
+                                Icon(Icons.Rounded.Close, null, tint = FlymeInk.copy(alpha = 0.45f),
                                     modifier = Modifier.size(14.dp))
                             }
                         }
@@ -332,7 +332,7 @@ private fun FlymeGroupedResults(results: List<Track>, onOpen: (Track) -> Unit) {
 
 @Composable
 private fun FlymeSearchHeading(text: String, modifier: Modifier = Modifier) {
-    Text(text, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold,
+    Text(text, color = FlymeInk, fontSize = 19.sp, fontWeight = FontWeight.Bold,
         modifier = modifier.padding(bottom = 10.dp))
 }
 
@@ -345,15 +345,15 @@ private fun FlymeTopResult(item: Track, onOpen: (Track) -> Unit) {
         cornerRadius = 14.dp,
         focusedScale = 1.02f,
         padding = PaddingValues(18.dp),
-        background = Color.White.copy(alpha = 0.08f),
+        background = FlymeInk.copy(alpha = 0.08f),
     ) {
         Column {
             MotionArtwork(track = item, modifier = Modifier.size(104.dp), animate = false,
                 cornerRadius = if (circular) 52.dp else 10.dp)
             Spacer(Modifier.weight(1f))
             ExplicitTitle(item.title, item.isExplicit,
-                TextStyle(color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold), badgeSize = 17.dp)
-            Text(item.kindLine(), color = Color.White.copy(alpha = 0.58f), fontSize = 14.sp,
+                TextStyle(color = FlymeInk, fontSize = 21.sp, fontWeight = FontWeight.Bold), badgeSize = 17.dp)
+            Text(item.kindLine(), color = FlymeInk.copy(alpha = 0.58f), fontSize = 14.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
         }
     }
@@ -369,17 +369,17 @@ private fun FlymeResultRow(item: Track, showKind: Boolean, onOpen: (Track) -> Un
         focusedScale = 1.01f,
         padding = PaddingValues(horizontal = 6.dp),
         background = Color.Transparent,
-        focusedBackground = Color.White.copy(alpha = 0.08f),
+        focusedBackground = FlymeInk.copy(alpha = 0.08f),
     ) {
         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
             MotionArtwork(track = item, modifier = Modifier.size(40.dp), animate = false,
                 cornerRadius = if (circular) 20.dp else 5.dp)
             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                 ExplicitTitle(item.title, item.isExplicit,
-                    TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold), badgeSize = 13.dp)
+                    TextStyle(color = FlymeInk, fontSize = 14.sp, fontWeight = FontWeight.SemiBold), badgeSize = 13.dp)
                 val subtitle = if (showKind) item.kindLine() else item.artist
                 if (subtitle.isNotBlank()) {
-                    Text(subtitle, color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp,
+                    Text(subtitle, color = FlymeInk.copy(alpha = 0.55f), fontSize = 12.sp,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
@@ -401,10 +401,10 @@ private fun FlymeSearchCard(item: Track, onOpen: (Track) -> Unit) {
         Column(horizontalAlignment = if (circular) Alignment.CenterHorizontally else Alignment.Start) {
             MotionArtwork(track = item, modifier = Modifier.size(140.dp), animate = false,
                 cornerRadius = if (circular) 70.dp else 9.dp)
-            Text(item.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            Text(item.title, color = FlymeInk, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
             if (!circular && item.artist.isNotBlank()) {
-                Text(item.artist, color = Color.White.copy(alpha = 0.55f), fontSize = 11.sp,
+                Text(item.artist, color = FlymeInk.copy(alpha = 0.55f), fontSize = 11.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
             }
         }

@@ -125,6 +125,9 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -786,7 +789,7 @@ fun PlayerScreen(
         if (statusMessage != null) {
             Text(
                 text = statusMessage,
-                color = Color.White,
+                color = FlymeInk,
                 fontSize = 14.sp,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -858,8 +861,8 @@ fun PlayerScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(24.dp))
-                            .background(Color.White.copy(alpha = 0.12f))
-                            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(24.dp))
+                            .background(FlymeInk.copy(alpha = 0.12f))
+                            .border(1.dp, FlymeInk.copy(alpha = 0.14f), RoundedCornerShape(24.dp))
                             .padding(4.dp),
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -897,8 +900,8 @@ fun PlayerScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(24.dp))
-                            .background(Color.White.copy(alpha = 0.12f))
-                            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(24.dp))
+                            .background(FlymeInk.copy(alpha = 0.12f))
+                            .border(1.dp, FlymeInk.copy(alpha = 0.14f), RoundedCornerShape(24.dp))
                             .padding(4.dp),
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -994,7 +997,7 @@ private fun Progress(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Box(Modifier.size(8.dp).background(Color.White, CircleShape))
+            Box(Modifier.size(8.dp).background(FlymeInk, CircleShape))
             Text(stringResource(R.string.player_live_stream), fontSize = 14.sp)
         }
         return
@@ -1066,6 +1069,7 @@ private fun Progress(
                 .height(18.dp),
             contentAlignment = Alignment.CenterStart,
         ) {
+            val ink = FlymeInk
             Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1080,7 +1084,7 @@ private fun Progress(
 
                 // 1. Unfilled track capsule
                 drawRoundRect(
-                    color = Color.White.copy(alpha = trackAlpha),
+                    color = ink.copy(alpha = trackAlpha),
                     size = size,
                     cornerRadius = cornerRadius,
                 )
@@ -1088,7 +1092,7 @@ private fun Progress(
                 // 2. Filled played progress capsule
                 if (playedWidth > 0f) {
                     drawRoundRect(
-                        color = Color.White,
+                        color = ink,
                         size = Size(playedWidth, h),
                         cornerRadius = cornerRadius,
                     )
@@ -1109,7 +1113,7 @@ private fun Progress(
                     )
                     // Solid white Apple scrubber knob
                     drawCircle(
-                        color = Color.White,
+                        color = ink,
                         radius = thumbPx,
                         center = knobCenter,
                     )
@@ -1128,13 +1132,13 @@ private fun Progress(
                 text = formatTime(positionMs),
                 fontSize = 13.sp,
                 fontWeight = if (isScrubPreview) FontWeight.Bold else FontWeight.Medium,
-                color = Color.White.copy(alpha = textAlpha),
+                color = FlymeInk.copy(alpha = textAlpha),
             )
             Text(
                 text = "−${formatTime(remainingMs)}",
                 fontSize = 13.sp,
                 fontWeight = if (isScrubPreview) FontWeight.Bold else FontWeight.Medium,
-                color = Color.White.copy(alpha = textAlpha),
+                color = FlymeInk.copy(alpha = textAlpha),
             )
         }
     }
@@ -1166,9 +1170,9 @@ private fun PlayerButton(
     )
     val background by animateColorAsState(
         targetValue = when {
-            focused -> Color.White
-            selected -> Color.White.copy(alpha = 0.22f)
-            pressed -> Color.White.copy(alpha = 0.15f)
+            focused -> FlymeInk
+            selected -> FlymeInk.copy(alpha = 0.22f)
+            pressed -> FlymeInk.copy(alpha = 0.15f)
             else -> Color.Transparent
         },
         animationSpec = tween(160), label = "player-button-container",
@@ -1202,10 +1206,10 @@ private fun PlayerButton(
                 imageVector = displayedIcon,
                 contentDescription = null,
                 tint = when {
-                    !enabled -> Color.White.copy(alpha = 0.25f)
-                    focused -> Color(0xFF18181A)
-                    selected -> Color.White
-                    else -> Color.White.copy(alpha = 0.88f)
+                    !enabled -> FlymeInk.copy(alpha = 0.25f)
+                    focused -> FlymeOnInk
+                    selected -> FlymeInk
+                    else -> FlymeInk.copy(alpha = 0.88f)
                 },
                 modifier = Modifier.size(24.dp),
             )
@@ -1390,8 +1394,8 @@ private fun LyricsDisplaySettingsDialog(
                     },
                     modifier = Modifier.width(112.dp).height(42.dp),
                     cornerRadius = 21.dp,
-                    background = Color.White.copy(alpha = 0.12f),
-                    focusedBackground = Color.White,
+                    background = FlymeInk.copy(alpha = 0.12f),
+                    focusedBackground = FlymeInk,
                 ) { focused ->
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
@@ -1399,16 +1403,16 @@ private fun LyricsDisplaySettingsDialog(
                                 if (languagePicker == null) R.string.player_lyrics_display_done
                                 else R.string.player_lyrics_language_back,
                             ),
-                            color = if (focused) Color(0xFF18181A) else Color.White,
+                            color = if (focused) FlymeOnInk else FlymeInk,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
                     }
                 }
             },
-            containerColor = Color(0xFF252529),
-            titleContentColor = Color.White,
-            textContentColor = Color.White,
+            containerColor = if (LocalFlymePalette.current.light) Color.White else Color(0xFF252529),
+            titleContentColor = FlymeInk,
+            textContentColor = FlymeInk,
         )
     }
 }
@@ -1427,8 +1431,8 @@ private fun LyricsDisplaySettingRow(
         cornerRadius = 14.dp,
         showBorder = true,
         padding = PaddingValues(horizontal = 16.dp),
-        background = Color.White.copy(alpha = 0.08f),
-        focusedBackground = Color.White.copy(alpha = 0.18f),
+        background = FlymeInk.copy(alpha = 0.08f),
+        focusedBackground = FlymeInk.copy(alpha = 0.18f),
     ) { _ ->
         Row(
             Modifier.fillMaxSize(),
@@ -1436,10 +1440,10 @@ private fun LyricsDisplaySettingRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Text(title, color = FlymeInk, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                 Text(
                     description,
-                    color = Color.White.copy(alpha = 0.55f),
+                    color = FlymeInk.copy(alpha = 0.55f),
                     fontSize = 13.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -1449,7 +1453,7 @@ private fun LyricsDisplaySettingRow(
                 modifier = Modifier
                     .padding(start = 16.dp)
                     .clip(RoundedCornerShape(13.dp))
-                    .background(if (enabled) Color.White else Color.White.copy(alpha = 0.12f))
+                    .background(if (enabled) FlymeInk else FlymeInk.copy(alpha = 0.12f))
                     .padding(horizontal = 13.dp, vertical = 6.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -1457,7 +1461,7 @@ private fun LyricsDisplaySettingRow(
                     text = stringResource(
                         if (enabled) R.string.player_lyrics_display_on else R.string.player_lyrics_display_off,
                     ),
-                    color = if (enabled) Color(0xFF18181A) else Color.White.copy(alpha = 0.66f),
+                    color = if (enabled) FlymeOnInk else FlymeInk.copy(alpha = 0.66f),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                 )
@@ -1475,8 +1479,8 @@ private fun LyricsLanguageSummaryRow(title: String, value: String) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, color = Color.White.copy(alpha = 0.62f), fontSize = 14.sp)
-        Text(value, color = Color.White.copy(alpha = 0.82f), fontSize = 14.sp)
+        Text(title, color = FlymeInk.copy(alpha = 0.62f), fontSize = 14.sp)
+        Text(value, color = FlymeInk.copy(alpha = 0.82f), fontSize = 14.sp)
     }
 }
 
@@ -1493,18 +1497,18 @@ private fun LyricsDisplayValueRow(
         cornerRadius = 14.dp,
         showBorder = true,
         padding = PaddingValues(horizontal = 16.dp),
-        background = Color.White.copy(alpha = 0.08f),
-        focusedBackground = Color.White.copy(alpha = 0.18f),
+        background = FlymeInk.copy(alpha = 0.08f),
+        focusedBackground = FlymeInk.copy(alpha = 0.18f),
     ) { _ ->
         Row(
             Modifier.fillMaxSize(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(title, color = FlymeInk, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Text(
                 value,
-                color = Color.White.copy(alpha = 0.68f),
+                color = FlymeInk.copy(alpha = 0.68f),
                 fontSize = 14.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1527,17 +1531,17 @@ private fun LyricsLanguageChoiceRow(
         cornerRadius = 13.dp,
         showBorder = true,
         padding = PaddingValues(horizontal = 16.dp),
-        background = if (selected) Color.White.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.06f),
-        focusedBackground = Color.White.copy(alpha = 0.22f),
+        background = if (selected) FlymeInk.copy(alpha = 0.15f) else FlymeInk.copy(alpha = 0.06f),
+        focusedBackground = FlymeInk.copy(alpha = 0.22f),
     ) { _ ->
         Row(
             Modifier.fillMaxSize(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(label, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(label, color = FlymeInk, fontSize = 15.sp, fontWeight = FontWeight.Medium)
             if (selected) {
-                Text("✓", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text("✓", color = FlymeInk, fontSize = 17.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1861,10 +1865,14 @@ private fun FlymePlayerStage(
     val noOffset = remember { mutableFloatStateOf(0f) }
     FitDesign(modifier.fillMaxSize()) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            // Darken the artwork-colored backdrop so white text keeps its contrast.
-            Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(
-                Color(0xC406030E), Color(0x8206030E), Color(0xA806030E),
-            ))))
+            // Veil the artwork-colored backdrop so the text keeps its contrast: dark under white
+            // text, light under the dark text of light mode.
+            val veil = if (LocalFlymePalette.current.light) {
+                listOf(Color(0xC4F7F7F9), Color(0x9EF7F7F9), Color(0xB8F7F7F9))
+            } else {
+                listOf(Color(0xC406030E), Color(0x8206030E), Color(0xA806030E))
+            }
+            Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(veil)))
             // A station item (live, or not yet started) has no song to scrub or skip within.
             if (isLiveStream || track.catalogKind == CatalogKind.Station) {
                 FlymeLiveLayout(track, artScale, artworkPlaying, playWhenReady, lowPerformanceMode, live = isLiveStream,
@@ -1925,14 +1933,14 @@ private fun FlymePlayerStage(
             ) {
                 if (stationName != null) {
                     Row(
-                        Modifier.clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.14f))
+                        Modifier.clip(RoundedCornerShape(12.dp)).background(FlymeInk.copy(alpha = 0.14f))
                             .padding(start = 7.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        Icon(Icons.Rounded.AllInclusive, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(15.dp))
+                        Icon(Icons.Rounded.AllInclusive, null, tint = FlymeInk.copy(alpha = 0.85f), modifier = Modifier.size(15.dp))
                         Text(stationName, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold,
-                            color = Color.White.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            color = FlymeInk.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Spacer(Modifier.height(10.dp))
                 }
@@ -1968,7 +1976,7 @@ private fun FlymePlayerStage(
                                 }
                             }
                         }
-                        .border(0.75.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(10.dp)),
+                        .border(0.75.dp, FlymeInk.copy(alpha = 0.14f), RoundedCornerShape(10.dp)),
                     animate = artworkPlaying && !lowPerformanceMode,
                     cornerRadius = 10.dp,
                     crossfadeTrackChanges = true,
@@ -1978,44 +1986,39 @@ private fun FlymePlayerStage(
                     label = "flyme-title") { (title, explicit) ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         ExplicitTitle(title, explicit, TextStyle(fontSize = 23.sp, lineHeight = 29.sp,
-                            fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, color = Color.White),
+                            fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, color = FlymeInk),
                             badgeSize = 18.dp, marquee = true, modifier = Modifier.weight(1f))
                         if (isFavorite != null && onToggleFavorite != null) {
                             FlymeGlyphButton(
                                 if (isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
                                 stringResource(if (isFavorite) R.string.player_favorite_remove else R.string.player_favorite_add),
                                 onClick = onToggleFavorite, size = 36.dp, iconSize = 22.dp,
-                                tint = if (isFavorite) FlymeLiveRed else Color.White.copy(alpha = 0.72f),
+                                tint = if (isFavorite) FlymeLiveRed else FlymeInk.copy(alpha = 0.72f),
                                 modifier = Modifier.automationId("player-favorite"),
                             )
                         }
                     }
                 }
-                // Artist and album are links to their pages, as in Apple Music. The artist takes at most
-                // half the line; the album gets the rest instead of an equal half it may not need.
-                BoxWithConstraints(Modifier.padding(top = 2.dp)) {
-                val lineWidth = maxWidth
-                val artistMaxWidth = lineWidth / 2
-                Row {
-                    val linkStyle = TextStyle(fontSize = 16.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold,
-                        letterSpacing = (-0.1).sp, color = Color.White.copy(alpha = 0.52f))
-                    val album = track.album.takeIf { it.isNotBlank() && it != track.artist }
-                    if (track.artist.isNotBlank()) {
-                        Text(track.artist, style = linkStyle, maxLines = 1, overflow = TextOverflow.Clip,
-                            modifier = Modifier.widthIn(max = if (album != null) artistMaxWidth else lineWidth)
-                                .alignByBaseline().flymeMarquee()
-                                .automationId("player-artist")
-                                .then(onOpenArtist?.let { Modifier.clickable(onClick = it) } ?: Modifier))
-                    }
-                    if (album != null) {
-                        if (track.artist.isNotBlank()) Text(" — ", style = linkStyle, maxLines = 1, modifier = Modifier.alignByBaseline())
-                        Text(album, style = linkStyle, maxLines = 1, overflow = TextOverflow.Clip,
-                            modifier = Modifier.weight(1f, fill = false).alignByBaseline().flymeMarquee()
-                                .automationId("player-album")
-                                .then(onOpenAlbum?.let { Modifier.clickable(onClick = it) } ?: Modifier))
+                // Artist and album are links to their pages, as in Apple Music. One line that scrolls
+                // as a whole when too long, instead of two halves scrolling on their own.
+                val album = track.album.takeIf { it.isNotBlank() && it != track.artist }
+                val artistLine = remember(track.artist, album, onOpenArtist, onOpenAlbum) {
+                    buildAnnotatedString {
+                        if (track.artist.isNotBlank()) {
+                            val link = onOpenArtist?.let { open -> LinkAnnotation.Clickable("artist") { open() } }
+                            if (link != null) withLink(link) { append(track.artist) } else append(track.artist)
+                        }
+                        if (album != null) {
+                            if (track.artist.isNotBlank()) append(" — ")
+                            val link = onOpenAlbum?.let { open -> LinkAnnotation.Clickable("album") { open() } }
+                            if (link != null) withLink(link) { append(album) } else append(album)
+                        }
                     }
                 }
-                }
+                Text(artistLine, maxLines = 1, overflow = TextOverflow.Clip,
+                    style = TextStyle(fontSize = 16.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold,
+                        letterSpacing = (-0.1).sp, color = FlymeInk.copy(alpha = 0.52f)),
+                    modifier = Modifier.padding(top = 2.dp).flymeMarquee().automationId("player-artist-album"))
                 Spacer(Modifier.height(18.dp))
                 FlymeSeekBar(
                     positionState = positionState,
@@ -2045,7 +2048,7 @@ private fun FlymePlayerStage(
                 Spacer(Modifier.height(6.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(22.dp, Alignment.CenterHorizontally),
                     verticalAlignment = Alignment.CenterVertically) {
-                    val secondary = Color.White.copy(alpha = 0.72f)
+                    val secondary = FlymeInk.copy(alpha = 0.72f)
                     if (supportsLyrics) {
                         FlymeGlyphButton(Icons.Rounded.Translate, stringResource(R.string.player_lyrics_display_settings),
                             onClick = { onControl(PlayerControl.LyricsDisplay) }, size = 36.dp, iconSize = 19.dp,
@@ -2113,26 +2116,26 @@ private fun FlymeLiveLayout(
             Column(Modifier.weight(1f)) {
                 Row(
                     Modifier.clip(RoundedCornerShape(14.dp))
-                        .background(if (live && playWhenReady) FlymeLiveRed else Color.White.copy(alpha = 0.2f))
+                        .background(if (live && playWhenReady) FlymeLiveRed else FlymeInk.copy(alpha = 0.2f))
                         .padding(start = 10.dp, end = 13.dp, top = 5.dp, bottom = 5.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
                     Box(Modifier.size(7.dp).graphicsLayer { alpha = if (live && playWhenReady) dotAlpha.value else 1f }
-                        .background(Color.White, CircleShape))
+                        .background(FlymeInk, CircleShape))
                     Text(stringResource(when {
                         !live -> R.string.browse_kind_station
                         playWhenReady -> R.string.player_live_stream
                         else -> R.string.player_state_paused
                     }),
-                        fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White, letterSpacing = 0.5.sp)
+                        fontSize = 13.sp, fontWeight = FontWeight.Bold, color = FlymeInk, letterSpacing = 0.5.sp)
                 }
                 Spacer(Modifier.height(15.dp))
                 Text(track.title, fontSize = 51.sp, lineHeight = 55.sp, fontWeight = FontWeight.Bold,
-                    color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    color = FlymeInk, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (track.artist.isNotBlank()) {
                     Text(track.artist, fontSize = 21.sp, lineHeight = 27.sp, fontWeight = FontWeight.SemiBold,
-                        color = Color.White.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        color = FlymeInk.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(top = 10.dp))
                 }
                 Spacer(Modifier.height(34.dp))
@@ -2145,15 +2148,15 @@ private fun FlymeLiveLayout(
                     Modifier.size(69.dp)
                         .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
                         .clip(CircleShape)
-                        .background(Color.White)
-                        .then(if (focused) Modifier.border(3.dp, Color.White.copy(alpha = 0.5f), CircleShape) else Modifier)
+                        .background(FlymeInk)
+                        .then(if (focused) Modifier.border(3.dp, FlymeInk.copy(alpha = 0.5f), CircleShape) else Modifier)
                         .clickable(interactionSource = interaction, indication = null, onClick = onPlayPause)
                         .automationId("player-play-pause")
                         .semantics { contentDescription = playLabel },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(if (playWhenReady) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null,
-                        tint = Color(0xFF1A0A10), modifier = Modifier.size(32.dp))
+                        tint = FlymeOnInk, modifier = Modifier.size(32.dp))
                 }
             }
         }
@@ -2162,7 +2165,7 @@ private fun FlymeLiveLayout(
                 .padding(start = 120.dp, end = 107.dp, bottom = 51.dp).height(10.dp),
             contentAlignment = Alignment.CenterEnd,
         ) {
-            Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.82f)))
+            Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(FlymeInk.copy(alpha = 0.82f)))
             Box(Modifier.size(10.dp).background(FlymeLiveRed, CircleShape))
         }
     }
@@ -2189,7 +2192,7 @@ private fun LyricsUnavailablePanel(
                 text = stringResource(if (confirmedUnavailable) {
                     R.string.player_lyrics_unavailable
                 } else R.string.player_lyrics_load_failed),
-                color = Color.White.copy(alpha = 0.72f),
+                color = FlymeInk.copy(alpha = 0.72f),
                 fontSize = 24.sp,
                 lineHeight = 32.sp,
                 fontWeight = FontWeight.Medium,
@@ -2215,7 +2218,7 @@ private fun TrackIdentity(
         fontSize = titleSize.sp,
         lineHeight = (titleSize + 8).sp,
         fontWeight = FontWeight.SemiBold,
-        color = Color.White.copy(alpha = 0.95f),
+        color = FlymeInk.copy(alpha = 0.95f),
         textAlign = TextAlign.Center,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
@@ -2227,7 +2230,7 @@ private fun TrackIdentity(
         artist = track.artist,
         fontSize = (titleSize - 4).sp,
         lineHeight = (titleSize + 2).sp,
-        color = Color.White.copy(alpha = 0.64f),
+        color = FlymeInk.copy(alpha = 0.64f),
         showBands = true,
         isPlaying = isPlaying,
         audioSpectrum = audioSpectrum,
@@ -3237,6 +3240,7 @@ private fun InstrumentalInterludeRow(
             .fillMaxWidth()
             .padding(start = 28.dp, end = 84.dp, top = 18.dp, bottom = 26.dp),
     ) {
+        val ink = FlymeInk
         Canvas(
             modifier = Modifier
                 .width(66.dp)
@@ -3269,7 +3273,7 @@ private fun InstrumentalInterludeRow(
                 val dotTintAlpha = unlitAlpha + (MotionTokens.KaraokePrimaryAlpha - unlitAlpha) * tintProgress
 
                 drawCircle(
-                    color = Color.White.copy(alpha = (dotTintAlpha * enterAlpha).coerceIn(0f, 1f)),
+                    color = ink.copy(alpha = (dotTintAlpha * enterAlpha).coerceIn(0f, 1f)),
                     radius = dotRadius,
                     center = Offset(firstCenterX + dotIndex * dotStepX, centerY),
                 )
@@ -3295,7 +3299,7 @@ private fun SongwritersFooterRow(text: String) {
             fontSize = 15.sp,
             lineHeight = 19.sp,
             fontWeight = FontWeight.Normal,
-            color = Color.White.copy(alpha = MotionTokens.KaraokeSecondaryAlpha),
+            color = FlymeInk.copy(alpha = MotionTokens.KaraokeSecondaryAlpha),
         )
     }
 }
@@ -3355,7 +3359,7 @@ private fun KaraokeLyricLine(
                 .fillMaxWidth()
                 .padding(start = 24.dp, end = 84.dp, top = 2.dp, bottom = 10.dp)
                 .then(if (isFocused) Modifier.background(
-                    Color.White.copy(alpha = 0.18f), RoundedCornerShape(16.dp),
+                    FlymeInk.copy(alpha = 0.18f), RoundedCornerShape(16.dp),
                 ) else Modifier)
                 .padding(horizontal = 14.dp, vertical = 6.dp),
         ) {
@@ -3366,7 +3370,7 @@ private fun KaraokeLyricLine(
                         fontSize = staticPronunciationFontSize,
                         lineHeight = staticPronunciationLineHeight,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color.White.copy(alpha = 0.58f),
+                        color = FlymeInk.copy(alpha = 0.58f),
                         modifier = Modifier.padding(bottom = staticLocalizationGap),
                     )
                 }
@@ -3375,7 +3379,7 @@ private fun KaraokeLyricLine(
                     fontSize = staticMainFontSize,
                     lineHeight = staticMainLineHeight,
                     fontWeight = LyricPrimaryWeight,
-                    color = Color.White.copy(alpha = if (isFocused) 1f else MotionTokens.KaraokePrimaryAlpha),
+                    color = FlymeInk.copy(alpha = if (isFocused) 1f else MotionTokens.KaraokePrimaryAlpha),
                 )
                 if (!line.translation.isNullOrBlank()) {
                     Text(
@@ -3383,7 +3387,7 @@ private fun KaraokeLyricLine(
                         fontSize = staticTranslationFontSize,
                         lineHeight = staticTranslationLineHeight,
                         fontWeight = FontWeight.Medium,
-                        color = Color.White.copy(alpha = 0.62f),
+                        color = FlymeInk.copy(alpha = 0.62f),
                         modifier = Modifier.padding(top = staticLocalizationGap),
                     )
                 }
@@ -3393,7 +3397,7 @@ private fun KaraokeLyricLine(
                         fontSize = staticBackgroundTypography.pronunciationSizeSp.sp,
                         lineHeight = staticBackgroundTypography.pronunciationLineHeightSp.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color.White.copy(alpha = 0.48f),
+                        color = FlymeInk.copy(alpha = 0.48f),
                         modifier = Modifier.padding(
                             top = 4.dp,
                             bottom = staticBackgroundTypography.localizationGapDp.dp,
@@ -3406,7 +3410,7 @@ private fun KaraokeLyricLine(
                         fontSize = staticBackgroundTypography.fontSizeSp.sp,
                         lineHeight = staticBackgroundTypography.lineHeightSp.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color.White.copy(alpha = 0.52f),
+                        color = FlymeInk.copy(alpha = 0.52f),
                         modifier = Modifier.padding(top = 4.dp),
                     )
                 }
@@ -3416,7 +3420,7 @@ private fun KaraokeLyricLine(
                         fontSize = staticBackgroundTypography.translationSizeSp.sp,
                         lineHeight = staticBackgroundTypography.translationLineHeightSp.sp,
                         fontWeight = FontWeight.Medium,
-                        color = Color.White.copy(alpha = 0.48f),
+                        color = FlymeInk.copy(alpha = 0.48f),
                         modifier = Modifier.padding(top = 4.dp),
                     )
                 }
@@ -3529,7 +3533,7 @@ private fun KaraokeLyricLine(
             .fillMaxWidth()
             .padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 8.dp)
             .then(if (isFocused) Modifier.background(
-                Color.White.copy(alpha = 0.18f), RoundedCornerShape(16.dp),
+                FlymeInk.copy(alpha = 0.18f), RoundedCornerShape(16.dp),
             ) else Modifier)
             .padding(horizontal = 10.dp, vertical = 6.dp),
         contentAlignment = if (alignEnd) Alignment.TopEnd else Alignment.TopStart,
@@ -3568,7 +3572,7 @@ private fun KaraokeLyricLine(
                         fontSize = mainPronunciationFontSize,
                         lineHeight = mainPronunciationLineHeight,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color.White,
+                        color = FlymeInk,
                         textAlign = if (alignEnd) TextAlign.End else TextAlign.Start,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -3606,7 +3610,7 @@ private fun KaraokeLyricLine(
                         fontSize = mainTranslationFontSize,
                         lineHeight = mainTranslationLineHeight,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color.White,
+                        color = FlymeInk,
                         textAlign = if (alignEnd) TextAlign.End else TextAlign.Start,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -3632,7 +3636,7 @@ private fun KaraokeLyricLine(
                             fontSize = backgroundPronunciationFontSize,
                             lineHeight = backgroundPronunciationLineHeight,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color.White,
+                            color = FlymeInk,
                             textAlign = if (alignEnd) TextAlign.End else TextAlign.Start,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -3670,7 +3674,7 @@ private fun KaraokeLyricLine(
                         fontSize = backgroundTranslationFontSize,
                         lineHeight = backgroundTranslationLineHeight,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color.White,
+                        color = FlymeInk,
                         textAlign = if (alignEnd) TextAlign.End else TextAlign.Start,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -3800,7 +3804,7 @@ private fun LineSyncedContent(
             fontSize = pronunciationFontSize,
             lineHeight = pronunciationLineHeight,
             fontWeight = FontWeight.SemiBold,
-            color = Color.White,
+            color = FlymeInk,
             textAlign = textAlign,
             modifier = Modifier.fillMaxWidth().then(subAlphaModifier).padding(bottom = mainGap),
         )
@@ -3810,7 +3814,7 @@ private fun LineSyncedContent(
         fontSize = mainFontSize,
         lineHeight = mainLineHeight,
         fontWeight = LyricPrimaryWeight,
-        color = Color.White,
+        color = FlymeInk,
         textAlign = textAlign,
         modifier = Modifier.fillMaxWidth().then(mainAlphaModifier),
     )
@@ -3820,7 +3824,7 @@ private fun LineSyncedContent(
             fontSize = translationFontSize,
             lineHeight = translationLineHeight,
             fontWeight = FontWeight.SemiBold,
-            color = Color.White,
+            color = FlymeInk,
             textAlign = textAlign,
             modifier = Modifier.fillMaxWidth().then(subAlphaModifier).padding(top = mainGap),
         )
@@ -3832,7 +3836,7 @@ private fun LineSyncedContent(
                 fontSize = backgroundPronunciationFontSize,
                 lineHeight = backgroundPronunciationLineHeight,
                 fontWeight = FontWeight.SemiBold,
-                color = Color.White,
+                color = FlymeInk,
                 textAlign = textAlign,
                 modifier = Modifier.fillMaxWidth().then(backgroundAlphaModifier).padding(top = backgroundGap),
             )
@@ -3842,7 +3846,7 @@ private fun LineSyncedContent(
             fontSize = backgroundFontSize,
             lineHeight = backgroundLineHeight,
             fontWeight = if (BuildConfig.FLYME_AUTO) FontWeight.SemiBold else LyricPrimaryWeight,
-            color = Color.White,
+            color = FlymeInk,
             textAlign = textAlign,
             modifier = Modifier.fillMaxWidth().then(backgroundAlphaModifier).padding(top = backgroundGap),
         )
@@ -3853,7 +3857,7 @@ private fun LineSyncedContent(
             fontSize = backgroundTranslationFontSize,
             lineHeight = backgroundTranslationLineHeight,
             fontWeight = FontWeight.SemiBold,
-            color = Color.White,
+            color = FlymeInk,
             textAlign = textAlign,
             modifier = Modifier.fillMaxWidth().then(backgroundAlphaModifier).padding(top = backgroundGap),
         )
@@ -4172,10 +4176,11 @@ private fun KaraokeWordItem(
     val liftDistancePx = with(density) { MotionTokens.KaraokeWordLiftDp.dp.toPx() }
     val shadowRadiusPx = with(density) { MotionTokens.KaraokeEmphasisShadowDp.dp.toPx() }
     val baseTextStyle = LocalTextStyle.current
+    val ink = FlymeInk
     val shadowStyle = remember(shadowRadiusPx, baseTextStyle) {
         baseTextStyle.copy(
             shadow = Shadow(
-                color = Color.White,
+                color = ink,
                 blurRadius = shadowRadiusPx,
             ),
         )
@@ -4221,7 +4226,7 @@ private fun KaraokeWordItem(
                 fontSize = pronunciationFontSize,
                 lineHeight = pronunciationLineHeight,
                 fontWeight = FontWeight.SemiBold,
-                color = Color.White.copy(
+                color = FlymeInk.copy(
                     alpha = MotionTokens.KaraokeBgVocalLitAlpha / MotionTokens.KaraokePrimaryAlpha,
                 ),
                 modifier = Modifier.padding(bottom = pronunciationGap),
@@ -4236,7 +4241,7 @@ private fun KaraokeWordItem(
                 fontWeight = if (isBackgroundVocal && BuildConfig.FLYME_AUTO) {
                     FontWeight.SemiBold
                 } else LyricPrimaryWeight,
-                color = Color.White,
+                color = FlymeInk,
             )
         } else {
             // Character-split long-emphasis wave (`z0` in A.java lines 2078-2491)
@@ -4261,7 +4266,7 @@ private fun KaraokeWordItem(
                             fontWeight = if (isBackgroundVocal && BuildConfig.FLYME_AUTO) {
                                 FontWeight.SemiBold
                             } else LyricPrimaryWeight,
-                            color = Color.White,
+                            color = FlymeInk,
                         )
                     } else {
                         val groupCharIdx = (charStartOffsetInGroup + localCharIdx)
@@ -4331,7 +4336,7 @@ private fun KaraokeWordItem(
                                 fontWeight = if (isBackgroundVocal && BuildConfig.FLYME_AUTO) {
                                     FontWeight.SemiBold
                                 } else LyricPrimaryWeight,
-                                color = Color.White,
+                                color = FlymeInk,
                                 onTextLayout = { result ->
                                     charWidthsPx[localCharIdx] = result.size.width.toFloat()
                                     if (result.size.height > 0) {
@@ -4352,8 +4357,8 @@ private fun KaraokeWordItem(
  * Exact reproduction of `FullWidthAlphaGradientFlexboxLayout` + `A.i0` / `A.q0` / `A.h0`
  * from Apple Music 6.5.3 (`A.java` lines 1126-1171, 1244-1251, 4303-4484):
  * - Draws a single `BlendMode.DstIn` clamped two-color gradient with the original four-stop feather.
- * - Uses `litColor = Color.White.copy(alpha = effectiveLitAlpha)` and
- *   `unlitColor = Color.White.copy(alpha = unlitAlpha)` so both lit and unlit portions are
+ * - Uses `litColor = FlymeInk.copy(alpha = effectiveLitAlpha)` and
+ *   `unlitColor = FlymeInk.copy(alpha = unlitAlpha)` so both lit and unlit portions are
  *   masked in a single pass over the same white glyphs!
  * - Applies `h0` feather adjustment (`1.0f * feather` at the end of a flex row, `0.0f` for CJK,
  *   `0.5f / 0.25f / 0.12f * feather` for non-CJK based on word/row width ratio `0.2f / 0.4f`)
@@ -4599,7 +4604,7 @@ private fun QueuePanel(
                                 Text(
                                     text = label?.let { stringResource(it) }.orEmpty(),
                                     fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold,
-                                    color = Color.White.copy(alpha = if (isCurrent) 0.9f else 0.55f),
+                                    color = FlymeInk.copy(alpha = if (isCurrent) 0.9f else 0.55f),
                                     maxLines = 1,
                                     modifier = Modifier.height(16.dp),
                                 )
@@ -4628,7 +4633,7 @@ private fun QueuePanel(
                                 text = item.title,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Color.White.copy(
+                                color = FlymeInk.copy(
                                     alpha = if (focused || isCurrent) 1f else 0.72f,
                                 ),
                                 textAlign = if (flyme) TextAlign.Start else TextAlign.Center,
@@ -4640,7 +4645,7 @@ private fun QueuePanel(
                                 artist = item.artist,
                                 alignStart = flyme,
                                 fontSize = 12.sp,
-                                color = Color.White.copy(
+                                color = FlymeInk.copy(
                                     alpha = if (focused || isCurrent) 0.68f else 0.46f,
                                 ),
                                 showBands = isCurrent,
@@ -4763,10 +4768,10 @@ private fun QueueModeButton(
             .clickable(enabled = interactive, onClick = onClick)
             .background(
                 when {
-                    focused -> Color.White.copy(alpha = 0.94f)
+                    focused -> FlymeInk.copy(alpha = 0.94f)
                     selected && ytmBadge -> Color(0xFFE32636).copy(alpha = 0.38f)
-                    selected -> Color.White.copy(alpha = 0.24f)
-                    else -> Color.White.copy(alpha = 0.1f)
+                    selected -> FlymeInk.copy(alpha = 0.24f)
+                    else -> FlymeInk.copy(alpha = 0.1f)
                 },
             )
             .padding(horizontal = 14.dp, vertical = 9.dp),
@@ -4777,18 +4782,18 @@ private fun QueueModeButton(
             imageVector = icon,
             contentDescription = label,
             tint = when {
-                !enabled -> Color.White.copy(alpha = 0.3f)
+                !enabled -> FlymeInk.copy(alpha = 0.3f)
                 focused -> Color.Black
-                else -> Color.White
+                else -> FlymeInk
             },
             modifier = Modifier.size(19.dp),
         )
         Text(
             text = label,
             color = when {
-                !enabled -> Color.White.copy(alpha = 0.3f)
+                !enabled -> FlymeInk.copy(alpha = 0.3f)
                 focused -> Color.Black
-                else -> Color.White.copy(alpha = 0.82f)
+                else -> FlymeInk.copy(alpha = 0.82f)
             },
             fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
@@ -4796,7 +4801,7 @@ private fun QueueModeButton(
         if (ytmBadge) {
             Text(
                 text = stringResource(R.string.player_provider_ytm),
-                color = Color.White,
+                color = FlymeInk,
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier

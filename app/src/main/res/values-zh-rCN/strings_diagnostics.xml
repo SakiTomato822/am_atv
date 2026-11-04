@@ -35,4 +35,11 @@
     <string name="playback_station_mode_summary">很多车机和电视没有 Widevine；逐首播放会用原生播放器播电台里的歌，不需要 Widevine。直播电台仍需要 Widevine。</string>
     <string name="playback_station_mode_auto">自动（Widevine 可用时用网页播放器）</string>
     <string name="playback_station_mode_songs">始终逐首播放（不需要 Widevine）</string>
+    <string name="appearance_title">外观</string>
+    <string name="appearance_light">浅色</string>
+    <string name="appearance_dark">深色</string>
+    <string name="appearance_system">跟随系统</string>
+    <string name="appearance_time">按时间</string>
+    <string name="appearance_light_from">浅色开始：%1$s</string>
+    <string name="appearance_light_until">浅色结束：%1$s</string>
 </resources>

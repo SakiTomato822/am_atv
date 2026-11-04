@@ -35,4 +35,11 @@
     <string name="playback_station_mode_summary">Many cars and TVs have no Widevine; song by song plays a station on the native player without it. Live radio always needs Widevine.</string>
     <string name="playback_station_mode_auto">Automatic (web player when Widevine works)</string>
     <string name="playback_station_mode_songs">Always song by song (no Widevine needed)</string>
+    <string name="appearance_title">Appearance</string>
+    <string name="appearance_light">Light</string>
+    <string name="appearance_dark">Dark</string>
+    <string name="appearance_system">System</string>
+    <string name="appearance_time">By time</string>
+    <string name="appearance_light_from">Light from %1$s</string>
+    <string name="appearance_light_until">Light until %1$s</string>
 </resources>

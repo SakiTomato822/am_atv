@@ -36,13 +36,13 @@ internal fun ContentCacheSettings(cache: ContentCache) {
         storage = withContext(Dispatchers.IO) { cache.storage(ArtworkImages.diskBytes(context)) }
     }
     Spacer(Modifier.height(8.dp))
-    Text(stringResource(R.string.browse_cache_title), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+    Text(stringResource(R.string.browse_cache_title), color = FlymeInk, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
     Box(Modifier.fillMaxWidth().height(28.dp), contentAlignment = Alignment.CenterStart) {
         val current = storage
         if (current == null) AppleLoadingIndicator(Modifier.size(18.dp))
         else Text(
             stringResource(R.string.browse_cache_storage, storageSize(current.usedBytes), storageSize(current.availableBytes)),
-            color = Color.White.copy(alpha = 0.62f), fontSize = 14.sp,
+            color = FlymeInk.copy(alpha = 0.62f), fontSize = 14.sp,
         )
     }
     if (storage?.storageLow == true) {
@@ -85,11 +85,11 @@ internal fun ContentCacheSettings(cache: ContentCache) {
 internal fun CacheButton(label: String, onClick: () -> Unit, modifier: Modifier) {
     FocusSurface(
         onClick = onClick, modifier = modifier.height(46.dp), cornerRadius = 23.dp,
-        background = Color.White.copy(alpha = 0.12f), focusedBackground = Color.White.copy(alpha = 0.28f),
+        background = FlymeInk.copy(alpha = 0.12f), focusedBackground = FlymeInk.copy(alpha = 0.28f),
         padding = PaddingValues(horizontal = 18.dp),
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(label, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(label, color = FlymeInk, fontSize = 15.sp, fontWeight = FontWeight.Medium)
         }
     }
 }

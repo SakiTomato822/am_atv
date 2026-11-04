@@ -41,7 +41,7 @@ internal fun LibraryCategories(
         LibraryCategory.entries.forEach { category ->
             val isSelected = category == selected
             val background by animateColorAsState(
-                targetValue = Color.White.copy(alpha = if (isSelected) 0.18f else 0.06f),
+                targetValue = FlymeInk.copy(alpha = if (isSelected) 0.18f else 0.06f),
                 animationSpec = tween(
                     MotionTokens.BrowseCategoryChangeMillis,
                     easing = MotionTokens.BrowseContentEasing,
@@ -49,7 +49,7 @@ internal fun LibraryCategories(
                 label = "library-category-background",
             )
             val focusedBackground by animateColorAsState(
-                targetValue = Color.White.copy(alpha = if (isSelected) 0.24f else 0.14f),
+                targetValue = FlymeInk.copy(alpha = if (isSelected) 0.24f else 0.14f),
                 animationSpec = tween(
                     MotionTokens.BrowseCategoryChangeMillis,
                     easing = MotionTokens.BrowseContentEasing,
@@ -57,7 +57,7 @@ internal fun LibraryCategories(
                 label = "library-category-focused-background",
             )
             val textColor by animateColorAsState(
-                targetValue = Color.White.copy(alpha = if (isSelected) 1f else 0.78f),
+                targetValue = FlymeInk.copy(alpha = if (isSelected) 1f else 0.78f),
                 animationSpec = tween(
                     MotionTokens.BrowseCategoryChangeMillis,
                     easing = MotionTokens.BrowseContentEasing,

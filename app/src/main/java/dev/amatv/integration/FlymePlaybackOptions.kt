@@ -12,16 +12,39 @@ data class FlymePlaybackSettings(
     val fadePlaylists: Boolean = true,
     /** Play stations song by song on the native player, never through the Widevine web player. */
     val stationsAsSongs: Boolean = false,
-)
+    /** Light or dark car UI; [lightFromMinute]..[lightUntilMinute] (minutes after midnight) for [Appearance.Time]. */
+    val appearance: Appearance = Appearance.System,
+    val lightFromMinute: Int = 7 * 60,
+    val lightUntilMinute: Int = 19 * 60,
+) {
+    enum class Appearance { Light, Dark, System, Time }
 
-/** Car playback options from Settings; the player and the settings page share this one state. */
-class FlymePlaybackOptions(context: Context) {
+    /** Whether the UI is light now, given the system night mode and the minute of the day. */
+    fun isLight(systemDark: Boolean, minuteOfDay: Int): Boolean = when (appearance) {
+        Appearance.Light -> true
+        Appearance.Dark -> false
+        Appearance.System -> !systemDark
+        Appearance.Time -> if (lightFromMinute <= lightUntilMinute) {
+            minuteOfDay in lightFromMinute until lightUntilMinute
+        } else {
+            minuteOfDay >= lightFromMinute || minuteOfDay < lightUntilMinute
+        }
+    }
+}
+
+/** Car playback and appearance options from Settings; one shared state for the whole app. */
+class FlymePlaybackOptions private constructor(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences("am_atv_flyme_playback", Context.MODE_PRIVATE)
     private val mutableSettings = MutableStateFlow(FlymePlaybackSettings(
         fadeAlbums = preferences.getBoolean(KEY_FADE_ALBUMS, false),
         fadeStations = preferences.getBoolean(KEY_FADE_STATIONS, true),
         fadePlaylists = preferences.getBoolean(KEY_FADE_PLAYLISTS, true),
         stationsAsSongs = preferences.getBoolean(KEY_STATIONS_AS_SONGS, false),
+        appearance = runCatching {
+            FlymePlaybackSettings.Appearance.valueOf(preferences.getString(KEY_APPEARANCE, null) ?: "System")
+        }.getOrDefault(FlymePlaybackSettings.Appearance.System),
+        lightFromMinute = preferences.getInt(KEY_LIGHT_FROM, 7 * 60),
+        lightUntilMinute = preferences.getInt(KEY_LIGHT_UNTIL, 19 * 60),
     ))
     val settings: StateFlow<FlymePlaybackSettings> = mutableSettings.asStateFlow()
 
@@ -33,13 +56,25 @@ class FlymePlaybackOptions(context: Context) {
             .putBoolean(KEY_FADE_STATIONS, next.fadeStations)
             .putBoolean(KEY_FADE_PLAYLISTS, next.fadePlaylists)
             .putBoolean(KEY_STATIONS_AS_SONGS, next.stationsAsSongs)
+            .putString(KEY_APPEARANCE, next.appearance.name)
+            .putInt(KEY_LIGHT_FROM, next.lightFromMinute)
+            .putInt(KEY_LIGHT_UNTIL, next.lightUntilMinute)
             .apply()
     }
 
-    private companion object {
-        const val KEY_FADE_ALBUMS = "fade_albums"
-        const val KEY_FADE_STATIONS = "fade_stations"
-        const val KEY_FADE_PLAYLISTS = "fade_playlists"
-        const val KEY_STATIONS_AS_SONGS = "stations_as_songs"
+    companion object {
+        @Volatile private var instance: FlymePlaybackOptions? = null
+
+        fun get(context: Context): FlymePlaybackOptions = instance ?: synchronized(this) {
+            instance ?: FlymePlaybackOptions(context).also { instance = it }
+        }
+
+        private const val KEY_APPEARANCE = "appearance"
+        private const val KEY_LIGHT_FROM = "light_from_minute"
+        private const val KEY_LIGHT_UNTIL = "light_until_minute"
+        private const val KEY_FADE_ALBUMS = "fade_albums"
+        private const val KEY_FADE_STATIONS = "fade_stations"
+        private const val KEY_FADE_PLAYLISTS = "fade_playlists"
+        private const val KEY_STATIONS_AS_SONGS = "stations_as_songs"
     }
 }

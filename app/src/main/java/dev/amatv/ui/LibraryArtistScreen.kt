@@ -41,7 +41,7 @@ internal fun LibraryArtistScreen(
         FocusSurface(onClick = onBack,
             modifier = Modifier.height(56.dp).focusRequester(firstFocus),
             padding = PaddingValues(horizontal = 20.dp), cornerRadius = 14.dp) {
-            Text("‹  ${artist.title}", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Text("‹  ${artist.title}", color = FlymeInk, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(16.dp))
         HomeScreen(destination = Destination.Browse, currentTrack = currentTrack,

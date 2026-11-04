@@ -9,6 +9,7 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
+import coil3.request.allowHardware
 import dev.amatv.playback.PlaybackService
 import dev.amatv.model.LyricLine
 import dev.amatv.model.Track
@@ -91,6 +92,52 @@ class PlaybackMediaSession(private val context: Context) {
 
     internal val sessionToken: MediaSession.Token get() = session.sessionToken
 
+    init {
+        // The media notification hands this session to the system media controls.
+        PlaybackService.token = session.sessionToken
+    }
+
+    /** Song artwork as a bitmap: system media controls cannot fetch an https artwork URI. */
+    private var artworkUrl: String? = null
+
+    private fun loadArtwork(url: String?) {
+        if (url == artworkUrl) return
+        artworkUrl = url
+        PlaybackService.artwork = null
+        if (url == null || !url.startsWith("https://")) return
+        val request = coil3.request.ImageRequest.Builder(context).data(url).size(ARTWORK_PX)
+            .allowHardware(false)
+            .target(onSuccess = { image ->
+                onMain {
+                    if (artworkUrl != url) return@onMain
+                    val bitmap = image.toBitmapCopy() ?: return@onMain
+                    PlaybackService.artwork = bitmap
+                    session.controller.metadata?.let { current ->
+                        session.setMetadata(MediaMetadata.Builder(current)
+                            .putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, bitmap).build())
+                    }
+                    refreshNotification()
+                }
+            })
+            .build()
+        dev.amatv.ui.ArtworkImages.loader(context).enqueue(request)
+    }
+
+    private fun coil3.Image.toBitmapCopy(): android.graphics.Bitmap? = runCatching {
+        (this as? coil3.BitmapImage)?.bitmap?.let { it.copy(it.config ?: android.graphics.Bitmap.Config.ARGB_8888, false) }
+    }.getOrNull()
+
+    private fun refreshNotification() {
+        val key = metadataKey ?: return
+        when {
+            foregroundServiceStarted -> PlaybackService.update(context, key.title, key.artist)
+            notificationPaused -> PlaybackService.paused(context, key.title, key.artist)
+        }
+    }
+
+    /** The paused notification is still up (controls kept, service out of the foreground). */
+    private var notificationPaused = false
+
     fun setCallbacks(value: Callbacks?) = onMain {
         callbacks = value
         session.isActive = value != null && activatedByPlayback
@@ -111,7 +158,17 @@ class PlaybackMediaSession(private val context: Context) {
 
     fun playbackPaused() = onMain {
         foregroundRequested = false
-        stopForegroundService()
+        if (foregroundServiceStarted) {
+            PlaybackService.paused(
+                context,
+                metadataKey?.title ?: context.getString(dev.amatv.R.string.app_name),
+                metadataKey?.artist.orEmpty(),
+            )
+            notificationPaused = true
+        }
+        foregroundServiceStarted = false
+        foregroundStartAttempted = false
+        foregroundMetadata = null
     }
 
     fun publish(snapshot: PlaybackSnapshot, canSkipNext: Boolean, canSkipPrevious: Boolean) = onMain {
@@ -135,6 +192,7 @@ class PlaybackMediaSession(private val context: Context) {
         )
         if (metadataKey != nextMetadata) {
             metadataKey = nextMetadata
+            loadArtwork(nextMetadata.artworkUrl)
             session.setMetadata(MediaMetadata.Builder()
                 .putString(MediaMetadata.METADATA_KEY_MEDIA_ID, nextMetadata.id)
                 .putString(MediaMetadata.METADATA_KEY_TITLE, nextMetadata.title)
@@ -247,7 +305,10 @@ class PlaybackMediaSession(private val context: Context) {
             if (foregroundStartAttempted) return
             foregroundStartAttempted = true
             foregroundServiceStarted = PlaybackService.start(context, title, artist)
-            if (foregroundServiceStarted) foregroundMetadata = nextMetadata
+            if (foregroundServiceStarted) {
+                foregroundMetadata = nextMetadata
+                notificationPaused = false
+            }
         } else if (foregroundMetadata != nextMetadata) {
             PlaybackService.update(context, title, artist)
             foregroundMetadata = nextMetadata
@@ -272,7 +333,8 @@ class PlaybackMediaSession(private val context: Context) {
     }
 
     private fun stopForegroundService() {
-        if (foregroundServiceStarted) PlaybackService.stop(context)
+        if (foregroundServiceStarted || notificationPaused) PlaybackService.stop(context)
+        notificationPaused = false
         foregroundServiceStarted = false
         foregroundStartAttempted = false
         foregroundMetadata = null
@@ -295,4 +357,8 @@ class PlaybackMediaSession(private val context: Context) {
         val durationMs: Long,
         val lyrics: String,
     )
+
+    private companion object {
+        const val ARTWORK_PX = 512
+    }
 }
