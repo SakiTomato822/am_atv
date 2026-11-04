@@ -110,7 +110,7 @@ class PlaybackService : Service() {
         return Notification.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(artist)
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification_music)
             .setLargeIcon(artwork)
             .setContentIntent(contentPendingIntent)
             .setOngoing(playing)
