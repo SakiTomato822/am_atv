@@ -364,6 +364,62 @@ class MusicKitBridge(private val context: Context) {
         fade.apply(MusicKitAudioSession.currentId(), minOf(fadeOut, fadeIn))
     }
 
+    /**
+     * Preview builds only, for a crossfade feasibility test: can a second MusicKit controller play
+     * while the first one keeps playing? Creates one on its own thread, plays [catalogId] for about
+     * 12 s, logs both controllers every second (state, position, audio session) and every callback
+     * of the second, then releases it. Nothing in the app uses the second controller.
+     */
+    fun probeSecondController(catalogId: String) {
+        val developer = playbackDeveloperToken
+        val user = playbackUserToken
+        if (developer == null || user == null) {
+            Log.w(TAG, "Probe2: play something first; no tokens yet")
+            return
+        }
+        val thread = HandlerThread("AMATV:MusicKit2", Process.THREAD_PRIORITY_DEFAULT).apply { start() }
+        val handler = Handler(thread.looper)
+        handler.post {
+            runCatching {
+                val providerClass = Class.forName(TOKEN_PROVIDER)
+                val second = Class.forName(PLAYER_FACTORY).getMethod(
+                    "createLocalController", Context::class.java, Handler::class.java, providerClass,
+                ).invoke(null, context, handler, MusicKitTokenProvider(developer, user))!!
+                Log.i(TAG, "Probe2 created second controller; first session=${MusicKitAudioSession.currentId()}")
+                val listenerClass = Class.forName("com.apple.android.music.playback.controller.MediaPlayerController\$Listener")
+                val listener = java.lang.reflect.Proxy.newProxyInstance(listenerClass.classLoader, arrayOf(listenerClass)) { _, method, args ->
+                    Log.i(TAG, "Probe2 callback ${method.name} ${args?.joinToString { it?.toString()?.take(120) ?: "null" }}")
+                    if (method.returnType == Boolean::class.javaPrimitiveType) false else null
+                }
+                second.javaClass.methods.first { it.name == "addListener" && it.parameterTypes.size == 1 }.invoke(second, listener)
+                val track = Track(id = "apple:$catalogId", title = "probe", artist = "", album = "", durationMs = 1L,
+                    palette = emptyList(), lyrics = emptyList(), catalogId = catalogId)
+                val provider = createCatalogPlaybackQueueProvider(track, Class.forName(QUEUE_BUILDER))
+                second.javaClass.methods.first {
+                    it.name == "prepare" && it.parameterTypes.size == 2 && it.parameterTypes[1] == Boolean::class.javaPrimitiveType
+                }.invoke(second, provider, true)
+                repeat(13) { tick ->
+                    handler.postDelayed({
+                        val first = controller
+                        Log.i(TAG, "Probe2 t=${tick}s first state=${first?.callOrNull("getPlaybackState")} " +
+                            "pos=${first?.callOrNull("getCurrentPosition")} | second state=${second.callOrNull("getPlaybackState")} " +
+                            "pos=${second.callOrNull("getCurrentPosition")} buffering=${second.callOrNull("isBuffering")} " +
+                            "session=${MusicKitAudioSession.currentId()}")
+                        if (tick == 3) runCatching { second.callVoid("play") }
+                    }, tick * 1_000L)
+                }
+                handler.postDelayed({
+                    runCatching { second.callVoid("release") }
+                    Log.i(TAG, "Probe2 released second controller; first state=${controller?.callOrNull("getPlaybackState")}")
+                    thread.quitSafely()
+                }, 13_500L)
+            }.onFailure {
+                Log.w(TAG, "Probe2 failed", it)
+                thread.quitSafely()
+            }
+        }
+    }
+
     /** Diagnostics: why a song that just ended did not continue into a queued next song. */
     private fun recordEndWithoutContinuation(title: String) {
         val wanted = lookahead

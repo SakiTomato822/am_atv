@@ -321,6 +321,18 @@ class MusicServices(context: Context) : RecommendationProvider {
     /** Gapless preloading of the app's next song; stations manage their own queue. */
     fun setLookahead(next: Track?) { if (!stationEngineActive) bridge.setLookahead(next) }
     fun setFadeEnabled(enabled: Boolean) { bridge.fadeEnabled = enabled }
+
+    init {
+        // Preview builds only: `adb shell am broadcast -a dev.amatv.debug.DUAL_PROBE --es id <song>`
+        // starts the two-controller crossfade test (see MusicKitBridge.probeSecondController).
+        if (BuildConfig.FLYME_UI_PREVIEW) {
+            androidx.core.content.ContextCompat.registerReceiver(appContext, object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                    intent.getStringExtra("id")?.takeIf { it.matches(Regex("[0-9]+")) }?.let(bridge::probeSecondController)
+                }
+            }, android.content.IntentFilter("dev.amatv.debug.DUAL_PROBE"), androidx.core.content.ContextCompat.RECEIVER_EXPORTED)
+        }
+    }
     /** A station's next songs, to play it on the native player without Widevine. */
     suspend fun stationSongs(stationId: String): List<Track> = api.stationNextTracks(stationId)
     fun skipToQueuedLookahead(catalogId: String): Boolean = !stationEngineActive && bridge.skipToQueuedLookahead(catalogId)
