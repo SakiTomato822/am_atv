@@ -82,6 +82,32 @@ internal fun correctNames(
 
 private fun latinKey(text: String) = text.lowercase().filter { it in 'a'..'z' || it in '0'..'9' }
 
+/**
+ * Nicknames fans say for names Apple spells otherwise (a Japanese band by its Chinese nickname).
+ * Keys are matched without spaces or case; the longest key wins.
+ */
+internal val VOICE_ALIASES: Map<String, String> = mapOf(
+    "无刺有刺" to "トゲナシトゲアリ",
+    "無刺有刺" to "トゲナシトゲアリ",
+    "刺刺" to "トゲナシトゲアリ",
+    "迷途之子" to "MyGO!!!!!",
+    "mygo" to "MyGO!!!!!",
+    "米哈游音乐" to "HOYO-MiX",
+    "米哈游" to "HOYO-MiX",
+    "初星学园" to "初星学園",
+)
+
+/** [text] with every spoken nickname from [aliases] replaced by the name Apple uses. */
+internal fun applyAliases(text: String, aliases: Map<String, String> = VOICE_ALIASES): String {
+    var out = text
+    aliases.entries.sortedByDescending { it.key.length }.forEach { (spoken, name) ->
+        val pattern = Regex(spoken.toList().joinToString("\\s*") { Regex.escape(it.toString()) }, RegexOption.IGNORE_CASE)
+        // Already the real name (MyGO!!!!! contains "mygo"): leave it.
+        if (!out.contains(name, ignoreCase = true)) out = pattern.replace(out, Regex.escapeReplacement(name))
+    }
+    return out
+}
+
 /** Two Latin keys (letters and digits only) one letter apart, or two for long names. */
 internal fun latinClose(a: String, b: String): Boolean {
     if (a.length < 4 || b.length < 4 || a == b) return false

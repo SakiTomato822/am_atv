@@ -33,6 +33,14 @@ class VoiceNameCorrectionTest {
     }
 
     @Test
+    fun nicknamesBecomeAppleNames() {
+        assertEquals("播放トゲナシトゲアリ", applyAliases("播放无刺有刺"))
+        assertEquals("播放 MyGO!!!!! 的歌", applyAliases("播放 my go 的歌"))
+        assertEquals("播放MyGO!!!!!", applyAliases("播放MyGO!!!!!"))
+        assertEquals("播放晴天", applyAliases("播放晴天"))
+    }
+
+    @Test
     fun nasalsSwapForSearch() {
         assertEquals("xi lian", nasalVariant("xi liang"))
         assertEquals("fan da tong", nasalVariant("fang da tong"))

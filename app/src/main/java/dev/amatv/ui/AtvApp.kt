@@ -2461,6 +2461,15 @@ fun AmAtvApp() {
                         ranked = rankCatalog(command, found, voiceLibrary)
                     }
                 }
+                // No album by that name (罗大佑 has a song 首都, no album): show what does carry the
+                // name, the song first, as choices; never played unasked, an album was asked for.
+                var albumMissing = false
+                if (ranked.candidates.isEmpty() && command.kind == VoiceCommand.Kind.Album && command.album != null) {
+                    val asAnything = command.copy(kind = VoiceCommand.Kind.Any, title = command.album, album = null, kindExplicit = false)
+                    ranked = rankCatalog(asAnything, found, voiceLibrary)
+                    albumMissing = ranked.candidates.isNotEmpty()
+                    android.util.Log.i("AMATV-Voice", "No album \"${command.album}\"; offering ${ranked.candidates.size} other match(es)")
+                }
                 // Personal stations (音乐寻宝电台 is the account's own) come back under names the
                 // spoken one does not match: any station Apple found for it is the answer.
                 if (ranked.candidates.isEmpty() && command.kind == VoiceCommand.Kind.Station) {
@@ -2469,9 +2478,23 @@ fun AmAtvApp() {
                         return if (playVoiceCatalog(station)) null else AppText.text(R.string.voice_not_found_format, query)
                     }
                 }
+                // Our matching found nothing, but Apple's search did: trust its own associations
+                // (nicknames like 无刺有刺, misheard English) and offer its top results as choices.
+                // Never played unasked: nothing here matched what was said.
+                if (ranked.candidates.isEmpty()) {
+                    val wantedKind = CatalogKind.entries.firstOrNull { it.name == command.kind.name }
+                    val guess = found.filter { item ->
+                        item.catalogKind != CatalogKind.MusicVideo && (wantedKind == null || item.catalogKind == wantedKind)
+                    }.distinctBy { it.catalogKind to (it.catalogId ?: it.id) }.take(8)
+                    if (guess.isNotEmpty()) {
+                        android.util.Log.i("AMATV-Voice", "Nothing matched \"$query\"; offering Apple's top ${guess.size}: " +
+                            guess.take(3).joinToString { "${it.title} · ${it.artist}" })
+                        ranked = dev.amatv.integration.VoiceCatalogMatch(guess, confident = false)
+                    }
+                }
                 if (ranked.candidates.isEmpty()) return AppText.text(R.string.voice_not_found_format, query)
                 // An artist: all their songs, or one of the hits? The user picks (no guessing).
-                if (ranked.confident && ranked.candidates.first().catalogKind == CatalogKind.Artist) {
+                if (ranked.confident && !albumMissing && ranked.candidates.first().catalogKind == CatalogKind.Artist) {
                     val artist = ranked.candidates.first()
                     val hits = cancellableResult { services.catalogArtistPage(artist).topSongs }.getOrNull().orEmpty()
                     if (hits.isNotEmpty()) {
@@ -2488,7 +2511,11 @@ fun AmAtvApp() {
                         return null
                     }
                 }
-                val item = if (ranked.confident) ranked.candidates.first() else chooseVoiceCatalog(ranked.candidates)
+                if (albumMissing) {
+                    voiceState = VoiceUiState.Message(AppText.text(R.string.voice_no_album_format, command.album.orEmpty()))
+                    sayVoice(AppText.text(R.string.voice_no_album_format, command.album.orEmpty()), choice = true)
+                }
+                val item = if (ranked.confident && !albumMissing) ranked.candidates.first() else chooseVoiceCatalog(ranked.candidates)
                 if (item == null) {
                     voiceChoiceDismissed = true
                     return null
@@ -2542,8 +2569,10 @@ fun AmAtvApp() {
             steps.all { it is VoiceCommand.Play || it is VoiceCommand.Search || it is VoiceCommand.Open || it == VoiceCommand.Nothing }
         }?.let {
             val names = (libraryVoiceNames() + voiceHotwords().asSequence() +
-                voiceScreen.read().asSequence().map { target -> target.primary }).toSet()
-            correctNames(heard, names)
+                voiceScreen.read().asSequence().map { target -> target.primary } +
+                dev.amatv.integration.VOICE_ALIASES.values.asSequence()).toSet()
+            // Nicknames first (无刺有刺 -> トゲナシトゲアリ), then misheard names.
+            correctNames(dev.amatv.integration.applyAliases(heard), names)
         } ?: heard
         if (said != heard) android.util.Log.i("AMATV-Voice", "Corrected \"$heard\" -> \"$said\"")
         val followUp = voiceCatalogKey(said)

@@ -68,4 +68,5 @@
     <string name="voice_speak_rate_normal">Normal</string>
     <string name="voice_speak_rate_fast">Fast</string>
     <string name="voice_artist_all_format">All songs by %1$s</string>
+    <string name="voice_no_album_format">No album called %1$s; here is what has that name</string>
 </resources>

@@ -67,4 +67,5 @@
     <string name="voice_speak_rate_normal">正常</string>
     <string name="voice_speak_rate_fast">快</string>
     <string name="voice_artist_all_format">%1$s的全部熱門歌曲</string>
+    <string name="voice_no_album_format">沒有叫%1$s的專輯，同名的有這些</string>
 </resources>
