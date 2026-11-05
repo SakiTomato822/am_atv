@@ -182,7 +182,11 @@ jobs:
           # Name the release by the app's own version (e.g. Flyme.6), not the workflow run count.
           version=$(sed -n 's/.*versionNameSuffix = "-flyme\.\([0-9][0-9.]*\)".*/\1/p' app/build.gradle.kts | head -n 1)
           test -n "$version"
-          if [ "${{ inputs.stable }}" = "true" ]; then
+          if [ "${{ inputs.stable }}" = "true" ] && gh release view "flyme-auto-v${version}" > /dev/null 2>&1; then
+            # A rebuilt stable version replaces its APK, checksums and notes in place.
+            gh release upload "flyme-auto-v${version}" dist/AMATV-FlymeAuto-Gecko-arm64.apk dist/SHA256SUMS.txt --clobber
+            gh release edit "flyme-auto-v${version}" --notes-file dist/release-notes.md
+          elif [ "${{ inputs.stable }}" = "true" ]; then
             gh release create "flyme-auto-v${version}" dist/AMATV-FlymeAuto-Gecko-arm64.apk dist/SHA256SUMS.txt --target "$(git rev-parse HEAD)" --latest --title "Flyme Auto · Flyme.${version}" --notes-file dist/release-notes.md
           else
             gh release create "$tag" dist/AMATV-FlymeAuto-Gecko-arm64.apk dist/SHA256SUMS.txt --target "$(git rev-parse HEAD)" --prerelease --latest=false --title "Flyme Auto 测试版 · Flyme.${version}" --notes-file dist/release-notes.md
