@@ -355,6 +355,13 @@ fun AmAtvApp() {
     DisposableEffect(voice) {
         onDispose { voice.release() }
     }
+    val voiceEngineId = voice.settings.collectAsState().value.engine
+    LaunchedEffect(voice, voiceEnabled, voiceEngineId) {
+        // Load the chosen model before the first tap, so the microphone opens at once.
+        if (BuildConfig.FLYME_AUTO && voiceEnabled) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { voice.preload() }
+        }
+    }
     var pendingRequestedSongCatalogId by remember { mutableStateOf<String?>(null) }
     // Read only by callbacks/effects: native position polls do not recompose the app.
     val systemPlaybackSnapshot = remember { mutableStateOf<PlaybackSnapshot?>(null) }
@@ -2013,6 +2020,7 @@ fun AmAtvApp() {
                 if (!playWhenReady) requestPlayback()
             }
             is VoiceCommand.Seek -> seekPlaybackBy(command.seconds * 1_000L)
+            VoiceCommand.SeekDirectionUnclear -> return AppText.text(R.string.voice_seek_direction)
             VoiceCommand.NowPlaying -> if (track.catalogId != null) destination = Destination.NowPlaying
             is VoiceCommand.Go -> goTo(command.page)
             VoiceCommand.CurrentArtist -> openFromPlayer(services::catalogArtistOf)
@@ -2270,7 +2278,7 @@ fun AmAtvApp() {
                         LocalFocusFrameVisibility provides browseVisibility,
                     ) {
                     BrowseShell(
-                        onVoice = if (BuildConfig.FLYME_AUTO && voiceEnabled) ::startVoice else null,
+                        onVoice = null,
                         onVoicePickable = { voicePickable = it },
                         voiceActive = voiceState is VoiceUiState.Listening,
                         onMiniPlayerPlaced = { miniPlayerCenter = it },
@@ -2542,6 +2550,15 @@ fun AmAtvApp() {
                     }
                 }
                 FocusFrameOverlay(focusFrameController)
+                if (BuildConfig.FLYME_AUTO && voiceEnabled) {
+                    val micPosition = remember(voice) { voice.micPosition().let { Offset(it.first, it.second) } }
+                    FlymeFloatingVoiceButton(
+                        active = voiceState is VoiceUiState.Listening,
+                        position = micPosition,
+                        onMoved = { voice.saveMicPosition(it.x, it.y) },
+                        onClick = ::startVoice,
+                    )
+                }
                 if (BuildConfig.FLYME_AUTO) FlymeVoicePanel(voiceState, onDismiss = ::dismissVoice)
             }
             }

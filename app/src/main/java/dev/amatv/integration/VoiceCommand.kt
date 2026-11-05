@@ -8,6 +8,8 @@ sealed interface VoiceCommand {
     data object Previous : VoiceCommand
     /** Move within the song by [seconds] (negative: back). */
     data class Seek(val seconds: Int) : VoiceCommand
+    /** "往前一点": a seek of unclear direction; the app asks for 快进 or 快退. */
+    data object SeekDirectionUnclear : VoiceCommand
     /** Now Playing with its lyrics. */
     data object NowPlaying : VoiceCommand
     data class Go(val page: Page) : VoiceCommand
@@ -78,6 +80,7 @@ fun parseVoiceCommand(spoken: String): VoiceCommand {
         val number = match.groupValues[1].let { it.toIntOrNull() ?: chineseNumber(it) }
         if (number != null && number > 0) return VoiceCommand.Pick(number)
     }
+    if (UNCLEAR_SEEK.matches(compact)) return VoiceCommand.SeekDirectionUnclear
     SEEK.matchEntire(compact)?.takeUnless { it.groupValues[1].length == 1 && it.groupValues[2].isEmpty() }?.let { match ->
         val back = match.groupValues[1] in BACKWARD
         val amount = match.groupValues[2]
@@ -147,14 +150,16 @@ internal fun chineseNumber(text: String): Int? {
     return tens * 10 + ones
 }
 
-private val BACKWARD = setOf("快退", "后退", "倒退", "退回", "往前", "向前", "倒回", "退", "回退")
+// 往前/向前 can mean either direction, so they are not seeks at all (the user says 快进/快退).
+private val BACKWARD = setOf("快退", "后退", "倒退", "退回", "倒回", "退", "回退")
+private val UNCLEAR_SEEK = Regex("^(?:请|帮我)?(往前|向前)(?:拖|跳|走)?(一点|一下|一些|[0-9]{1,3}(?:秒钟|秒|s)|[一二两三四五六七八九十]{1,3}(?:秒钟|秒))?$")
 private val UNIT = Regex("(秒钟|秒|s|sec|分钟|分|min)$")
 private val MINUTES = Regex("(分钟|分|min)$")
 
 // "第三个" / "播放第2首" / "选第十二项"; the whole step must be about the position.
 private val PICK = Regex("^(?:请|帮我)?(?:播放|放|选|选择|点|点击|打开|听)?第([0-9]{1,2}|[一二两三四五六七八九十]{1,3})(?:个|首|项|条|张|位)?(?:歌|歌曲)?$")
 // "快进30秒" / "退10s" / "往后一点" / "回退一分钟"; a lone 退/进 needs an amount ("进资料库" is not a seek).
-private val SEEK = Regex("^(?:请|帮我)?(快进|前进|往后|向后|快退|后退|倒退|退回|回退|往前|向前|倒回|退|进)(?:了|拖|个)?(一点|一下|一些|[0-9]{1,3}(?:秒钟|秒|s|sec)|[0-9]{1,2}(?:分钟|分|min)|[一二两三四五六七八九十]{1,3}(?:秒钟|秒|分钟|分))?$")
+private val SEEK = Regex("^(?:请|帮我)?(快进|前进|往后|向后|快退|后退|倒退|退回|回退|倒回|退|进)(?:了|拖|个)?(一点|一下|一些|[0-9]{1,3}(?:秒钟|秒|s|sec)|[0-9]{1,2}(?:分钟|分|min)|[一二两三四五六七八九十]{1,3}(?:秒钟|秒|分钟|分))?$")
 private val SCROLL = Regex("^(.*?)(?:向|往)?(上|下|左|右)(?:滑|翻|滚|拉|划)(?:动)?(?:一点|一些|一下)?$")
 private val NEXT_PAGE = Regex("下一页|翻页|往下看")
 private val THEN = Regex("然后|接着|并且")

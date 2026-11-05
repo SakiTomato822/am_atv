@@ -258,19 +258,26 @@ class SherpaOfflineEngine(private val model: VoiceModel, private val store: Voic
 
     override fun listen(hotwords: List<String>): Flow<VoiceEvent> = flow {
         if (!store.isInstalled(model)) { emit(VoiceEvent.Failed(VoiceFailure.ModelMissing)); return@flow }
-        // Start listening at once; a model not loaded yet loads while the user speaks.
-        val loading = kotlinx.coroutines.CoroutineScope(Dispatchers.Default).async { recognizer() }
-        val pcm = recordUtterance() ?: return@flow
-        emit(VoiceEvent.Recognizing)
-        val engine = loading.await()
-        val stream = engine.createStream()
-        try {
-            stream.acceptWaveform(pcm.toFloats(), SAMPLE_RATE)
-            engine.decode(stream)
-            val text = engine.getResult(stream).text.replace(Regex("<\\|[^|]*\\|>"), "").trim()
-            emit(if (text.isEmpty()) VoiceEvent.Failed(VoiceFailure.NoSpeech) else VoiceEvent.Final(text))
-        } finally {
-            stream.release()
+        // Start listening at once; a model not loaded yet loads while the user speaks. The load
+        // belongs to this listen: cancelling the recording cancels the wait for it.
+        kotlinx.coroutines.coroutineScope {
+            val loading = async(Dispatchers.Default) { recognizer() }
+            val pcm = recordUtterance()
+            if (pcm == null) {
+                loading.cancel()
+                return@coroutineScope
+            }
+            emit(VoiceEvent.Recognizing)
+            val engine = loading.await()
+            val stream = engine.createStream()
+            try {
+                stream.acceptWaveform(pcm.toFloats(), SAMPLE_RATE)
+                engine.decode(stream)
+                val text = engine.getResult(stream).text.replace(Regex("<\\|[^|]*\\|>"), "").trim()
+                emit(if (text.isEmpty()) VoiceEvent.Failed(VoiceFailure.NoSpeech) else VoiceEvent.Final(text))
+            } finally {
+                stream.release()
+            }
         }
     }.flowOn(Dispatchers.IO)
 

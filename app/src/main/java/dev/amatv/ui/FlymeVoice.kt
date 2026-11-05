@@ -11,6 +11,11 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -142,6 +147,53 @@ private fun VoicePulse(listening: Boolean) {
             contentAlignment = Alignment.Center) {
             Icon(Icons.Rounded.Mic, null, modifier = Modifier.size(22.dp),
                 tint = if (listening) FlymeOnInk else FlymeInk.copy(alpha = 0.7f))
+        }
+    }
+}
+
+/**
+ * The mic on every page (browse, Now Playing, album and artist pages): a round button the user can
+ * drag out of the way. [position] is its centre as a fraction of the screen, so it stays on screen
+ * whatever the size; [onMoved] saves the new place.
+ */
+@Composable
+internal fun FlymeFloatingVoiceButton(
+    active: Boolean,
+    position: androidx.compose.ui.geometry.Offset,
+    onMoved: (androidx.compose.ui.geometry.Offset) -> Unit,
+    onClick: () -> Unit,
+) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val widthPx = with(density) { maxWidth.toPx() }
+        val heightPx = with(density) { maxHeight.toPx() }
+        val sizePx = with(density) { 58.dp.toPx() }
+        var fraction by remember(position) { androidx.compose.runtime.mutableStateOf(position) }
+        val x = (fraction.x * widthPx - sizePx / 2).coerceIn(0f, (widthPx - sizePx).coerceAtLeast(0f))
+        val y = (fraction.y * heightPx - sizePx / 2).coerceIn(0f, (heightPx - sizePx).coerceAtLeast(0f))
+        val label = stringResource(R.string.voice_button)
+        Box(
+            Modifier
+                .offset { androidx.compose.ui.unit.IntOffset(x.toInt(), y.toInt()) }
+                .size(58.dp)
+                .graphicsLayer { shadowElevation = 10f; shape = CircleShape; clip = true }
+                .background(if (active) FlymeInk else LocalFlymePalette.current.pageTop.copy(alpha = 0.94f))
+                .border(1.dp, FlymeInk.copy(alpha = 0.14f), CircleShape)
+                .pointerInput(widthPx, heightPx) {
+                    detectDragGestures(onDragEnd = { onMoved(fraction) }) { change, drag ->
+                        change.consume()
+                        fraction = androidx.compose.ui.geometry.Offset(
+                            ((fraction.x * widthPx + drag.x) / widthPx).coerceIn(0.03f, 0.97f),
+                            ((fraction.y * heightPx + drag.y) / heightPx).coerceIn(0.05f, 0.95f),
+                        )
+                    }
+                }
+                .clickable(onClickLabel = label, onClick = onClick)
+                .semantics { contentDescription = label },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Rounded.Mic, null, modifier = Modifier.size(26.dp),
+                tint = if (active) FlymeOnInk else FlymeInk.copy(alpha = 0.85f))
         }
     }
 }

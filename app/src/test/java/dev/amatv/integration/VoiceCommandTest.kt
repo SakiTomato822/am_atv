@@ -68,6 +68,9 @@ class VoiceCommandTest {
         assertEquals(VoiceCommand.Seek(-10), parseVoiceCommand("退 10 秒。"))
         assertEquals(VoiceCommand.Seek(60), parseVoiceCommand("快进一分钟"))
         assertEquals(VoiceCommand.Seek(-30), parseVoiceCommand("回退30秒钟"))
+        // 往前 could mean either way: ask instead of guessing.
+        assertEquals(VoiceCommand.SeekDirectionUnclear, parseVoiceCommand("往前一点"))
+        assertEquals(VoiceCommand.SeekDirectionUnclear, parseVoiceCommand("向前跳10秒"))
         assertEquals(VoiceCommand.Next, parseVoiceCommand("下一首"))
         assertEquals(VoiceCommand.NowPlaying, parseVoiceCommand("打开歌词页面"))
         assertEquals(play("音乐寻宝电台"), parseVoiceCommand("音乐寻宝电台"))

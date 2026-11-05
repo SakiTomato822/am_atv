@@ -43,4 +43,5 @@
     <string name="voice_field_api_key">API Key</string>
     <string name="voice_field_model">模型</string>
     <string name="voice_cloud_privacy">使用云端识别时，每段录音会发送到对应服务；Key 只保存在本机。</string>
+    <string name="voice_seek_direction">请说“快进”或“快退”</string>
 </resources>

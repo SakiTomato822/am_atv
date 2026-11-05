@@ -44,4 +44,5 @@
     <string name="voice_field_api_key">API key</string>
     <string name="voice_field_model">Model</string>
     <string name="voice_cloud_privacy">Cloud engines send each recording to that service. Keys stay on this device.</string>
+    <string name="voice_seek_direction">Say “fast forward” or “rewind”</string>
 </resources>

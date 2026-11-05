@@ -93,6 +93,14 @@ class VoiceService(context: Context) {
         }
     }
 
+    /** Where the floating mic sits, as fractions of the screen; bottom right at first. */
+    fun micPosition(): Pair<Float, Float> =
+        preferences.getFloat("mic_x", 0.95f) to preferences.getFloat("mic_y", 0.84f)
+
+    fun saveMicPosition(x: Float, y: Float) {
+        preferences.edit().putFloat("mic_x", x).putFloat("mic_y", y).apply()
+    }
+
     /** Loads the chosen local model now (off the main thread), so the mic opens at once. */
     fun preload() {
         if (settings.value.engine.startsWith("model:")) engine()?.preload()

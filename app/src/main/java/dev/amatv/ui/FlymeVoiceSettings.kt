@@ -87,6 +87,10 @@ internal fun FlymeVoiceEngineSettings() {
                             jobs.remove(model.id)
                             if (result.isFailure) failed = model.name
                             installedNonce++
+                            // The model in use just arrived: load it now, not on the first tap.
+                            if (result.isSuccess && voice.settings.value.engine == id) {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { voice.preload() }
+                            }
                         }
                     }, modifier = Modifier.width(170.dp))
                 }
