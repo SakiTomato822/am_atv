@@ -52,8 +52,15 @@ private val versionSuffix = Regex(
     """(?i)[\s(（\[【\-–]*(?:live\b|remaster\w*|cover\b|instrumental\b|karaoke\b|dj\b|remix\b|现场|現場|翻唱|伴奏|女版|男版).*?$""",
 )
 
+// Accents dropped (Céline -> celine, Beyoncé -> beyonce): nobody says them, recognizers never
+// write them. Decomposed first so the mark is separate from its letter, then removed, but only
+// after Latin letters: kana voicing marks (ゲ = ケ + ゙) are part of the word.
+private val combiningMarks = Regex("(?<=\\p{IsLatin})\\p{Mn}+")
+
 internal fun voiceCatalogKey(text: String, simplify: (String) -> String = ChineseText::simplified): String =
     simplify(Normalizer.normalize(text, Normalizer.Form.NFKC))
+        .let { Normalizer.normalize(it, Normalizer.Form.NFD).replace(combiningMarks, "") }
+        .let { Normalizer.normalize(it, Normalizer.Form.NFC) }
         .lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }
 
 /** Ranks concrete catalog entries. A partial or phonetic match always needs confirmation. */

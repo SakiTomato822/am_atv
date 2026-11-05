@@ -49,7 +49,8 @@ internal fun correctNames(
         .map { it.trim() }
         .filter { name -> name.any { it in 'A'..'Z' || it in 'a'..'z' } && name.none { syllables(it) != null } }
         .map { it to latinKey(it) }
-        .filter { (_, key) -> key.length >= 4 }
+        // Five letters at least: "deon" is one letter from "neon", and short words collide.
+        .filter { (_, key) -> key.length >= 5 }
         .distinctBy { it.second }
         .sortedByDescending { it.second.length }
         .forEach { (name, key) ->

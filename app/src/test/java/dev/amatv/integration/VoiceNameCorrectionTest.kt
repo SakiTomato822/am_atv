@@ -33,6 +33,19 @@ class VoiceNameCorrectionTest {
     }
 
     @Test
+    fun shortWordsAreNotSnapped() {
+        assertEquals("播放 Celine Deon", fix("播放 Celine Deon", "NEON"))
+        assertEquals("播放 Celine Dion", fix("播放 Celine Deon", "Celine Dion"))
+    }
+
+    @Test
+    fun accentsAndKana() {
+        assertEquals("celinedion", voiceCatalogKey("Céline Dion") { it })
+        assertEquals("beyonce", voiceCatalogKey("Beyoncé") { it })
+        assertEquals("トゲナシトゲアリ", voiceCatalogKey("トゲナシトゲアリ") { it })
+    }
+
+    @Test
     fun nicknamesBecomeAppleNames() {
         assertEquals("播放トゲナシトゲアリ", applyAliases("播放无刺有刺"))
         assertEquals("播放 MyGO!!!!! 的歌", applyAliases("播放 my go 的歌"))

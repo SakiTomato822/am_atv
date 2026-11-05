@@ -364,11 +364,14 @@ fun AmAtvApp() {
     // Playback a voice sentence starts stays on the current page (the user opens Now Playing
     // themselves). A time window, not a flag: station songs start a moment later, asynchronously.
     val voiceStayUntil = remember { longArrayOf(0L) }
+    /** Preview test runs: decide and log, never play or wait (see the VOICE_TEXT receiver). */
+    var voiceDry by remember { mutableStateOf(false) }
     fun voiceKeepsPage(): Boolean = android.os.SystemClock.elapsedRealtime() < voiceStayUntil[0]
     // Spoken prompts (system text-to-speech); see VoiceSpeak for what is read.
     val voiceSpeaker = remember { dev.amatv.integration.voice.VoiceSpeaker(context) }
     DisposableEffect(voiceSpeaker) { onDispose { voiceSpeaker.release() } }
     suspend fun sayVoice(text: String, choice: Boolean = false) {
+        if (voiceDry) return
         val mode = voice.settings.value.speak
         if (mode == dev.amatv.integration.voice.VoiceSpeak.Off ||
             (mode == dev.amatv.integration.voice.VoiceSpeak.ChoicesOnly && !choice)) return
@@ -2151,6 +2154,9 @@ fun AmAtvApp() {
 
     // Each reply gets its own 8 s (paging restarts the clock); nothing plays if the user says nothing.
     suspend fun chooseVoiceCatalog(initial: List<Track>, initialPage: Int = 0): Track? = run choose@{
+        android.util.Log.i("AMATV-Voice", "Outcome choices: " +
+            initial.take(8).joinToString(" | ") { "${it.catalogKind}:${it.title} · ${it.artist}" })
+        if (voiceDry) return@choose null
         voicePendingChoices = emptyList()
         var candidates = initial
         var page = initialPage.coerceIn(0, (initial.size - 1).coerceAtLeast(0) / 4)
@@ -2249,6 +2255,8 @@ fun AmAtvApp() {
     }
 
     suspend fun playVoiceCatalog(item: Track): Boolean {
+        android.util.Log.i("AMATV-Voice", "Outcome play: ${item.catalogKind}:${item.title} · ${item.artist}")
+        if (voiceDry) return true
         when (item.catalogKind) {
             CatalogKind.Album, CatalogKind.Playlist -> {
                 val songs = cancellableResult { services.collectionTracks(item) }.getOrNull().orEmpty()
@@ -2382,6 +2390,7 @@ fun AmAtvApp() {
                 // "播放喜好歌曲": a list on screen is opened and its first song played; a song on
                 // screen plays when pressed. Lists not on this page are looked for in the library.
                 suspend fun playFromScreen(): Boolean {
+                    if (voiceDry) return false
                     val listBefore = voicePickable
                     val playingBefore = track.id
                     if (!tapOnScreen(command.query, exactPrimary = true)) return false
@@ -2784,11 +2793,25 @@ fun AmAtvApp() {
         DisposableEffect(context) {
             val receiver = object : android.content.BroadcastReceiver() {
                 override fun onReceive(receiverContext: android.content.Context, intent: android.content.Intent) {
+                    // `--a dev.amatv.debug.VOICE_DUMP`: the library names voice knows, for building
+                    // test sentences on this machine (logcat only; nothing leaves the device).
+                    if (intent.action == "dev.amatv.debug.VOICE_DUMP") {
+                        android.util.Log.i("AMATV-VoiceDump", "library ${voiceLibrary.size}")
+                        voiceLibrary.forEach {
+                            android.util.Log.i("AMATV-VoiceDump", "${it.catalogKind}\t${it.title}\t${it.artist}\t${it.album}")
+                        }
+                        android.util.Log.i("AMATV-VoiceDump", "end")
+                        return
+                    }
                     val text = intent.getStringExtra("text")?.takeIf { it.isNotBlank() } ?: return
                     if (voiceChoiceReply?.complete(text) == true) return
                     if (voiceJob?.isActive == true) return
+                    // `--ez dry true`: decide only. Logs "Outcome ..." (what would play, or which
+                    // choices); nothing plays, no bubble waits, nothing is said.
+                    voiceDry = intent.getBooleanExtra("dry", false)
                     scope.launch {
-                        val (problem, steps) = actOnSentence(text, intent.getStringExtra("previous"))
+                        val (problem, steps) = try { actOnSentence(text, intent.getStringExtra("previous")) } finally { voiceDry = false }
+                        if (problem != null) android.util.Log.i("AMATV-Voice", "Outcome problem: $problem")
                         val message = problem ?: AppText.text(R.string.voice_ok).takeIf { VoiceCommand.Cancel in steps }
                         if (message != null) voiceState = VoiceUiState.Message(message)
                         delay(2_000L)
@@ -2796,8 +2819,9 @@ fun AmAtvApp() {
                     }
                 }
             }
-            ContextCompat.registerReceiver(context, receiver, android.content.IntentFilter("dev.amatv.debug.VOICE_TEXT"),
-                ContextCompat.RECEIVER_EXPORTED)
+            ContextCompat.registerReceiver(context, receiver, android.content.IntentFilter("dev.amatv.debug.VOICE_TEXT").apply {
+                addAction("dev.amatv.debug.VOICE_DUMP")
+            }, ContextCompat.RECEIVER_EXPORTED)
             onDispose { context.unregisterReceiver(receiver) }
         }
     }
