@@ -72,10 +72,13 @@ import dev.amatv.integration.toSessionTrack
 import dev.amatv.integration.toSessionJson
 import dev.amatv.data.MockCatalog
 import dev.amatv.i18n.AppText
-import dev.amatv.integration.OfflineVoiceRecognizer
+import dev.amatv.integration.voice.VoiceService
+import dev.amatv.integration.voice.bestTarget
+import dev.amatv.integration.voice.scrollTarget
+import dev.amatv.integration.parseVoiceSteps
 import dev.amatv.integration.VoiceCommand
-import dev.amatv.integration.VoiceEvent
-import dev.amatv.integration.VoiceFailure
+import dev.amatv.integration.voice.VoiceEvent
+import dev.amatv.integration.voice.VoiceFailure
 import dev.amatv.integration.parseVoiceCommand
 import dev.amatv.integration.ChineseText
 import dev.amatv.integration.songsMatch
@@ -336,8 +339,10 @@ fun AmAtvApp() {
     val spectrumPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         spectrumPermissionGranted = it
     }
-    // Voice: on-device recognition, then a fixed set of commands (see VoiceCommand).
-    val voice = remember { OfflineVoiceRecognizer(context.applicationContext) }
+    // Voice: a chosen recognizer (downloaded model or cloud API), then commands (see VoiceCommand)
+    // and anything named on screen (VoiceScreen).
+    val voice = remember { VoiceService.get(context.applicationContext) }
+    val voiceScreen = remember(currentView) { VoiceScreen(currentView) }
     var voiceState by remember { mutableStateOf<VoiceUiState?>(null) }
     var voiceJob by remember { mutableStateOf<Job?>(null) }
     var voiceStartRequests by remember { mutableIntStateOf(0) }
@@ -349,12 +354,6 @@ fun AmAtvApp() {
     }
     DisposableEffect(voice) {
         onDispose { voice.release() }
-    }
-    LaunchedEffect(voice, voiceEnabled) {
-        // Loaded once voice is turned on, so the first command does not wait for the model.
-        if (BuildConfig.FLYME_AUTO && voiceEnabled) {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { voice.preload() }
-        }
     }
     var pendingRequestedSongCatalogId by remember { mutableStateOf<String?>(null) }
     // Read only by callbacks/effects: native position polls do not recompose the app.
@@ -1967,6 +1966,115 @@ fun AmAtvApp() {
         voiceState = null
     }
 
+    /** Names worth favouring in recognition: what is on screen and what was played lately. */
+    fun voiceHotwords(): List<String> = buildList {
+        addAll(voicePickable.flatMap { listOf(it.title, it.artist) })
+        addAll(recentTracks.flatMap { listOf(it.title, it.artist, it.album) })
+        add(track.artist)
+        add(track.album)
+    }.map { it.trim() }.filter { it.length in 2..16 }.distinct().take(200)
+
+    val normalizeLabel: (String) -> String = { label ->
+        ChineseText.simplified(label).lowercase().replace(Regex("[\\s，。、·・:：()（）\\-]"), "")
+    }
+    val labelPinyin: (String) -> String? = { ChineseText.pinyin(it) }
+
+    /** Press the visible control named [label]; false if nothing on screen matches. */
+    fun tapOnScreen(label: String): Boolean {
+        val target = bestTarget(label, voiceScreen.read(), normalizeLabel, labelPinyin) ?: return false
+        return voiceScreen.click(target)
+    }
+
+    fun goTo(page: VoiceCommand.Page) {
+        destination = when (page) {
+            VoiceCommand.Page.Home -> Destination.Home
+            VoiceCommand.Page.Browse -> Destination.Browse
+            VoiceCommand.Page.Library -> Destination.Library
+            VoiceCommand.Page.Search -> Destination.Search
+        }
+    }
+
+    /** Songs for a spoken name; sound-alike characters are retried by pinyin. */
+    suspend fun voiceSongs(query: String): List<Track> {
+        val direct = cancellableResult { services.searchSongs(query) }.getOrNull().orEmpty()
+        if (songsMatch(query, direct, ChineseText::simplified)) return direct
+        return ChineseText.pinyin(query)
+            ?.let { latin -> cancellableResult { services.searchSongs(latin) }.getOrNull() }
+            ?.takeIf { it.isNotEmpty() } ?: direct
+    }
+
+    /** Runs one step; returns a message to show when it could not be done. */
+    suspend fun runVoiceStep(command: VoiceCommand): String? {
+        when (command) {
+            VoiceCommand.Pause -> pausePlayback()
+            VoiceCommand.Resume -> requestPlayback()
+            VoiceCommand.Next, VoiceCommand.Previous -> {
+                skip(if (command == VoiceCommand.Next) 1 else -1)
+                if (!playWhenReady) requestPlayback()
+            }
+            is VoiceCommand.Seek -> seekPlaybackBy(command.seconds * 1_000L)
+            VoiceCommand.NowPlaying -> if (track.catalogId != null) destination = Destination.NowPlaying
+            is VoiceCommand.Go -> goTo(command.page)
+            VoiceCommand.CurrentArtist -> openFromPlayer(services::catalogArtistOf)
+            VoiceCommand.CurrentAlbum -> openFromPlayer(services::catalogAlbumOf)
+            VoiceCommand.Favorite -> if (favoriteState[track.catalogId] != true) toggleFavorite()
+            VoiceCommand.Shuffle -> if (!tapOnScreen("随机播放")) dispatchQueueAction(StartupQueueAction.ToggleShuffle)
+            is VoiceCommand.Scroll -> {
+                val horizontal = command.direction == VoiceCommand.Direction.Left ||
+                    command.direction == VoiceCommand.Direction.Right
+                val list = scrollTarget(command.section, horizontal, voiceScreen.read(), normalizeLabel, labelPinyin)
+                    ?: return AppText.text(R.string.voice_nothing_to_scroll)
+                val sign = if (command.direction == VoiceCommand.Direction.Down ||
+                    command.direction == VoiceCommand.Direction.Right) 1f else -1f
+                voiceScreen.scroll(list, if (horizontal) sign else 0f, if (horizontal) 0f else sign)
+            }
+            VoiceCommand.PersonalStation -> {
+                val station = cancellableResult { services.personalStation() }.getOrNull()
+                    ?: return AppText.text(R.string.voice_no_personal_station)
+                playTrack(station, listOf(station))
+            }
+            is VoiceCommand.Pick -> {
+                // A list just opened by the previous step may still be loading.
+                var list = emptyList<Track>()
+                for (attempt in 0 until 15) {
+                    list = if (destination == Destination.NowPlaying) emptyList() else voicePickable
+                    if (list.size >= command.number) break
+                    delay(200L)
+                }
+                val picked = list.getOrNull(command.number - 1)
+                    ?: return AppText.text(R.string.voice_no_item_format, command.number)
+                playTrack(picked, contextQueue = list.filter { it.openAction == CatalogOpenAction.Play })
+            }
+            is VoiceCommand.Open -> {
+                if (tapOnScreen(command.label)) return null
+                // Not on this page: the library holds most named lists ("喜好歌曲").
+                if (destination != Destination.Library) {
+                    destination = Destination.Library
+                    delay(900L)
+                    if (tapOnScreen(command.label)) return null
+                }
+                return runVoiceStep(VoiceCommand.Play(command.label))
+            }
+            is VoiceCommand.Play -> {
+                if (tapOnScreen(command.query)) return null
+                voiceState = VoiceUiState.Searching(command.query)
+                if (command.query.endsWith("电台")) {
+                    val station = cancellableResult { services.search(command.query) }.getOrNull().orEmpty()
+                        .firstOrNull { it.catalogKind == CatalogKind.Station }
+                    if (station != null) {
+                        playTrack(station, listOf(station))
+                        return null
+                    }
+                }
+                val songs = voiceSongs(command.query)
+                if (songs.isEmpty()) return AppText.text(R.string.voice_not_found_format, command.query)
+                playTrack(songs.first(), contextQueue = songs)
+            }
+            VoiceCommand.Nothing -> return AppText.text(R.string.voice_not_understood)
+        }
+        return null
+    }
+
     /** Listens once and acts on what was said; a second tap while listening cancels. */
     fun startVoice() {
         if (voiceJob?.isActive == true) {
@@ -1977,10 +2085,19 @@ fun AmAtvApp() {
             voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             return
         }
+        if (!voice.ready()) {
+            voiceState = VoiceUiState.Message(AppText.text(R.string.voice_engine_not_ready))
+            scope.launch {
+                delay(3_000L)
+                if (voiceState is VoiceUiState.Message) voiceState = null
+            }
+            return
+        }
         // The speakers would drown the voice: pause while listening, carry on afterwards.
         val resumeAfter = playWhenReady
         if (resumeAfter) pausePlayback()
         voiceState = VoiceUiState.Listening("", ready = false)
+        val hotwords = voiceHotwords()
         voiceJob = scope.launch {
             suspend fun showBriefly(text: String) {
                 voiceState = VoiceUiState.Message(text)
@@ -1990,10 +2107,11 @@ fun AmAtvApp() {
             var heard: String? = null
             var failure: VoiceFailure? = null
             try {
-                voice.listen().collect { event ->
+                voice.listen(hotwords).collect { event ->
                     when (event) {
                         VoiceEvent.Listening -> voiceState = VoiceUiState.Listening("")
                         is VoiceEvent.Partial -> voiceState = VoiceUiState.Listening(event.text)
+                        VoiceEvent.Recognizing -> voiceState = VoiceUiState.Recognizing
                         is VoiceEvent.Final -> heard = event.text
                         is VoiceEvent.Failed -> failure = event.reason
                     }
@@ -2002,64 +2120,37 @@ fun AmAtvApp() {
                 if (resumeAfter) requestPlayback()
                 throw cancelled
             }
-            when (val command = heard?.let(::parseVoiceCommand) ?: VoiceCommand.Nothing) {
-                VoiceCommand.Pause -> voiceState = null
-                VoiceCommand.Resume -> {
-                    voiceState = null
-                    requestPlayback()
-                }
-                VoiceCommand.Next, VoiceCommand.Previous -> {
-                    voiceState = null
-                    skip(if (command == VoiceCommand.Next) 1 else -1)
-                    if (!playWhenReady) requestPlayback()
-                }
-                is VoiceCommand.Pick -> {
-                    val list = if (destination == Destination.NowPlaying) emptyList() else voicePickable
-                    val picked = list.getOrNull(command.number - 1)
-                    if (picked == null) {
-                        if (resumeAfter) requestPlayback()
-                        showBriefly(AppText.text(R.string.voice_no_item_format, command.number))
-                    } else {
-                        voiceState = null
-                        playTrack(picked, contextQueue = list.filter { it.openAction == CatalogOpenAction.Play })
-                    }
-                }
-                VoiceCommand.PersonalStation -> {
-                    val station = cancellableResult { services.personalStation() }.getOrNull()
-                    if (station == null) {
-                        if (resumeAfter) requestPlayback()
-                        showBriefly(AppText.text(R.string.voice_no_personal_station))
-                    } else {
-                        voiceState = null
-                        playTrack(station, listOf(station))
-                    }
-                }
-                is VoiceCommand.Play -> {
-                    voiceState = VoiceUiState.Searching(command.query)
-                    // Names often come out as sound-alike characters: retry by pinyin when the
-                    // songs found do not contain what was said.
-                    val direct = cancellableResult { services.searchSongs(command.query) }.getOrNull().orEmpty()
-                    val songs = if (songsMatch(command.query, direct, ChineseText::simplified)) direct else {
-                        ChineseText.pinyin(command.query)
-                            ?.let { latin -> cancellableResult { services.searchSongs(latin) }.getOrNull() }
-                            ?.takeIf { it.isNotEmpty() } ?: direct
-                    }
-                    if (songs.isEmpty()) {
-                        if (resumeAfter) requestPlayback()
-                        showBriefly(AppText.text(R.string.voice_not_found_format, command.query))
-                    } else {
-                        voiceState = null
-                        playTrack(songs.first(), contextQueue = songs)
-                    }
-                }
-                VoiceCommand.Nothing -> {
-                    if (resumeAfter) requestPlayback()
-                    showBriefly(AppText.text(when (failure) {
-                        VoiceFailure.MicUnavailable -> R.string.voice_mic_unavailable
-                        VoiceFailure.ModelMissing -> R.string.voice_model_missing
-                        else -> R.string.voice_not_understood
-                    }))
-                }
+            val said = heard
+            if (said == null) {
+                if (resumeAfter) requestPlayback()
+                showBriefly(AppText.text(when (failure) {
+                    VoiceFailure.MicUnavailable -> R.string.voice_mic_unavailable
+                    VoiceFailure.ModelMissing, VoiceFailure.NotConfigured -> R.string.voice_engine_not_ready
+                    VoiceFailure.Network -> R.string.voice_network_failed
+                    else -> R.string.voice_not_understood
+                }))
+                voiceJob = null
+                return@launch
+            }
+            voiceState = VoiceUiState.Heard(said)
+            val steps = parseVoiceSteps(said)
+            val changesPlayback = steps.any {
+                it is VoiceCommand.Pause || it is VoiceCommand.Resume || it is VoiceCommand.Next ||
+                    it is VoiceCommand.Previous || it is VoiceCommand.Play || it is VoiceCommand.Pick ||
+                    it is VoiceCommand.PersonalStation || it is VoiceCommand.Open
+            }
+            var problem: String? = null
+            for ((index, step) in steps.withIndex()) {
+                if (index > 0) delay(700L) // let the page the previous step opened appear
+                problem = runVoiceStep(step)
+                if (problem != null) break
+            }
+            if (resumeAfter && (!changesPlayback || problem != null) && !playWhenReady) requestPlayback()
+            if (problem != null) {
+                showBriefly(problem)
+            } else {
+                delay(600L)
+                voiceState = null
             }
             voiceJob = null
         }
@@ -2179,7 +2270,7 @@ fun AmAtvApp() {
                         LocalFocusFrameVisibility provides browseVisibility,
                     ) {
                     BrowseShell(
-                        onVoice = if (BuildConfig.FLYME_AUTO && voiceEnabled && voice.isAvailable()) ::startVoice else null,
+                        onVoice = if (BuildConfig.FLYME_AUTO && voiceEnabled) ::startVoice else null,
                         onVoicePickable = { voicePickable = it },
                         voiceActive = voiceState is VoiceUiState.Listening,
                         onMiniPlayerPlaced = { miniPlayerCenter = it },

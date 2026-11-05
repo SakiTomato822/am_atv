@@ -123,6 +123,7 @@ internal fun FlymePlaybackOptionsSettings(options: FlymePlaybackOptions) {
     Spacer(Modifier.height(6.dp))
     CacheButton(stringResource(R.string.voice_setting_button, if (settings.voiceEnabled) on else off),
         onClick = { options.update { it.copy(voiceEnabled = !it.voiceEnabled) } }, modifier = Modifier.width(260.dp))
+    if (settings.voiceEnabled) FlymeVoiceEngineSettings()
 }
 
 /** Light / dark / system / by time of day, with the light hours chosen in 30-minute steps. */

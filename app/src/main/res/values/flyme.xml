@@ -24,4 +24,24 @@
     <string name="voice_setting_button">Voice button: %1$s</string>
     <string name="voice_preparing">Getting ready…</string>
     <string name="voice_no_personal_station">You have no personal station yet</string>
+    <string name="voice_recognizing">Recognizing…</string>
+    <string name="voice_heard">Heard</string>
+    <string name="voice_engine_not_ready">Choose a voice engine in Settings → Voice: download a model or enter an API key</string>
+    <string name="voice_network_failed">Voice recognition failed: check the network and the API key</string>
+    <string name="voice_nothing_to_scroll">Nothing to scroll here</string>
+    <string name="voice_engine_title">Recognizer</string>
+    <string name="voice_engine_summary">Download a model to recognize on this device, or use your own cloud API.</string>
+    <string name="voice_model_download">Download (%1$d MB)</string>
+    <string name="voice_model_downloading">Downloading %1$d%% · cancel</string>
+    <string name="voice_model_delete">Delete</string>
+    <string name="voice_model_download_failed">Could not download %1$s; check the network and try again</string>
+    <string name="voice_engine_tencent">Tencent Cloud (sentence recognition)</string>
+    <string name="voice_engine_openai">OpenAI-compatible API</string>
+    <string name="voice_engine_openai_hint">SiliconFlow (SenseVoice) by default; OpenAI, Groq and others work with their own URL and model.</string>
+    <string name="voice_field_secret_id">SecretId</string>
+    <string name="voice_field_secret_key">SecretKey</string>
+    <string name="voice_field_base_url">API URL</string>
+    <string name="voice_field_api_key">API key</string>
+    <string name="voice_field_model">Model</string>
+    <string name="voice_cloud_privacy">Cloud engines send each recording to that service. Keys stay on this device.</string>
 </resources>

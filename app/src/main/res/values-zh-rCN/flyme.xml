@@ -23,4 +23,24 @@
     <string name="voice_setting_button">语音按钮：%1$s</string>
     <string name="voice_preparing">准备中…</string>
     <string name="voice_no_personal_station">还没有你的个人电台</string>
+    <string name="voice_recognizing">识别中…</string>
+    <string name="voice_heard">听到了</string>
+    <string name="voice_engine_not_ready">请先在设置 → 语音里选择识别方式：下载模型或填写 API Key</string>
+    <string name="voice_network_failed">语音识别失败：请检查网络和 API Key</string>
+    <string name="voice_nothing_to_scroll">这里没有可以滑动的内容</string>
+    <string name="voice_engine_title">识别方式</string>
+    <string name="voice_engine_summary">下载模型在本机识别，或使用你自己的云端 API。</string>
+    <string name="voice_model_download">下载（%1$d MB）</string>
+    <string name="voice_model_downloading">下载中 %1$d%% · 取消</string>
+    <string name="voice_model_delete">删除</string>
+    <string name="voice_model_download_failed">%1$s 下载失败，请检查网络后重试</string>
+    <string name="voice_engine_tencent">腾讯云（一句话识别）</string>
+    <string name="voice_engine_openai">OpenAI 兼容接口</string>
+    <string name="voice_engine_openai_hint">默认硅基流动（SenseVoice）；OpenAI、Groq 等填对应地址和模型即可。</string>
+    <string name="voice_field_secret_id">SecretId</string>
+    <string name="voice_field_secret_key">SecretKey</string>
+    <string name="voice_field_base_url">接口地址</string>
+    <string name="voice_field_api_key">API Key</string>
+    <string name="voice_field_model">模型</string>
+    <string name="voice_cloud_privacy">使用云端识别时，每段录音会发送到对应服务；Key 只保存在本机。</string>
 </resources>

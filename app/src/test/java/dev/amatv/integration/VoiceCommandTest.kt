@@ -55,4 +55,35 @@ class VoiceCommandTest {
         assertEquals(VoiceCommand.Nothing, parseVoiceCommand("。"))
         assertEquals(VoiceCommand.Nothing, parseVoiceCommand("a"))
     }
+
+    // The user's list of things to say (2026-11-05).
+    @Test
+    fun requestedCommands() {
+        assertEquals(VoiceCommand.Seek(10), parseVoiceCommand("向后一点"))
+        assertEquals(VoiceCommand.Seek(30), parseVoiceCommand("快进30秒"))
+        assertEquals(VoiceCommand.Seek(30), parseVoiceCommand("快进三十秒"))
+        assertEquals(VoiceCommand.Seek(-15), parseVoiceCommand("后退十五秒"))
+        assertEquals(VoiceCommand.Next, parseVoiceCommand("下一首"))
+        assertEquals(VoiceCommand.NowPlaying, parseVoiceCommand("打开歌词页面"))
+        assertEquals(play("音乐寻宝电台"), parseVoiceCommand("音乐寻宝电台"))
+        assertEquals(VoiceCommand.Shuffle, parseVoiceCommand("随机播放"))
+        assertEquals(VoiceCommand.Scroll(VoiceCommand.Direction.Down, null), parseVoiceCommand("向下滑"))
+        assertEquals(VoiceCommand.Scroll(VoiceCommand.Direction.Right, "热门音乐"), parseVoiceCommand("热门音乐向右滑"))
+        assertEquals(VoiceCommand.Go(VoiceCommand.Page.Home), parseVoiceCommand("回主页"))
+        assertEquals(VoiceCommand.CurrentAlbum, parseVoiceCommand("进整张专辑"))
+        assertEquals(VoiceCommand.CurrentArtist, parseVoiceCommand("看歌手主页"))
+        assertEquals(VoiceCommand.Favorite, parseVoiceCommand("收藏这首歌"))
+        assertEquals(VoiceCommand.Open("电台"), parseVoiceCommand("打开电台"))
+    }
+
+    @Test
+    fun twoStepSentences() {
+        assertEquals(listOf(VoiceCommand.Go(VoiceCommand.Page.Library), VoiceCommand.Open("专辑")),
+            parseVoiceSteps("进资料库看专辑"))
+        assertEquals(listOf(VoiceCommand.Open("喜好歌曲"), VoiceCommand.Pick(3)),
+            parseVoiceSteps("播放喜好歌曲里的第三首"))
+        assertEquals(listOf(VoiceCommand.Go(VoiceCommand.Page.Home), VoiceCommand.Scroll(VoiceCommand.Direction.Down, null)),
+            parseVoiceSteps("回主页然后向下滑"))
+        assertEquals(listOf(play("周杰伦")), parseVoiceSteps("播放周杰伦的歌"))
+    }
 }

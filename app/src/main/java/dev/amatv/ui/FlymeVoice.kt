@@ -46,6 +46,10 @@ import dev.amatv.R
 internal sealed interface VoiceUiState {
     /** [ready]: the microphone is open; before that the panel says it is getting ready. */
     data class Listening(val heard: String, val ready: Boolean = true) : VoiceUiState
+    /** Recording done; the engine (often a cloud API) is turning it into text. */
+    data object Recognizing : VoiceUiState
+    /** What was understood, shown while the app acts on it. */
+    data class Heard(val text: String) : VoiceUiState
     data class Searching(val query: String) : VoiceUiState
     data class Message(val text: String) : VoiceUiState
 }
@@ -101,13 +105,15 @@ internal fun FlymeVoicePanel(state: VoiceUiState?, onDismiss: () -> Unit) {
                         is VoiceUiState.Listening -> stringResource(
                             if (shown.ready) R.string.voice_listening else R.string.voice_preparing,
                         ) to shown.heard.ifEmpty { stringResource(R.string.voice_hint) }
+                        VoiceUiState.Recognizing -> stringResource(R.string.voice_recognizing) to ""
+                        is VoiceUiState.Heard -> stringResource(R.string.voice_heard) to shown.text
                         is VoiceUiState.Searching -> stringResource(R.string.voice_searching_format, shown.query) to ""
                         is VoiceUiState.Message -> shown.text to ""
                     }
                     Text(title, color = FlymeInk.copy(alpha = 0.6f), fontSize = 14.sp, fontWeight = FontWeight.Medium,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (body.isNotEmpty()) {
-                        val heard = shown is VoiceUiState.Listening && shown.heard.isNotEmpty()
+                        val heard = (shown is VoiceUiState.Listening && shown.heard.isNotEmpty()) || shown is VoiceUiState.Heard
                         Text(body, color = if (heard) FlymeInk else FlymeInk.copy(alpha = 0.45f),
                             fontSize = if (heard) 24.sp else 17.sp, fontWeight = FontWeight.SemiBold,
                             maxLines = 2, overflow = TextOverflow.Ellipsis)

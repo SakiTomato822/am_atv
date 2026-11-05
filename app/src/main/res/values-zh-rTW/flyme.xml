@@ -23,4 +23,24 @@
     <string name="voice_setting_button">語音按鈕：%1$s</string>
     <string name="voice_preparing">準備中…</string>
     <string name="voice_no_personal_station">還沒有你的個人電台</string>
+    <string name="voice_recognizing">辨識中…</string>
+    <string name="voice_heard">聽到了</string>
+    <string name="voice_engine_not_ready">請先在設定 → 語音裡選擇辨識方式：下載模型或填寫 API Key</string>
+    <string name="voice_network_failed">語音辨識失敗：請檢查網路和 API Key</string>
+    <string name="voice_nothing_to_scroll">這裡沒有可以滑動的內容</string>
+    <string name="voice_engine_title">辨識方式</string>
+    <string name="voice_engine_summary">下載模型在本機辨識，或使用你自己的雲端 API。</string>
+    <string name="voice_model_download">下載（%1$d MB）</string>
+    <string name="voice_model_downloading">下載中 %1$d%% · 取消</string>
+    <string name="voice_model_delete">刪除</string>
+    <string name="voice_model_download_failed">%1$s 下載失敗，請檢查網路後重試</string>
+    <string name="voice_engine_tencent">騰訊雲（一句話識別）</string>
+    <string name="voice_engine_openai">OpenAI 相容介面</string>
+    <string name="voice_engine_openai_hint">預設矽基流動（SenseVoice）；OpenAI、Groq 等填寫對應位址和模型即可。</string>
+    <string name="voice_field_secret_id">SecretId</string>
+    <string name="voice_field_secret_key">SecretKey</string>
+    <string name="voice_field_base_url">介面位址</string>
+    <string name="voice_field_api_key">API Key</string>
+    <string name="voice_field_model">模型</string>
+    <string name="voice_cloud_privacy">使用雲端辨識時，每段錄音會傳送到對應服務；Key 只儲存在本機。</string>
 </resources>

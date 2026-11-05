@@ -11,6 +11,10 @@ on:
         description: Publish as a stable release (latest, not a prerelease)
         type: boolean
         default: false
+      test_build:
+        description: Experimental test build of the branch it runs on (vehicle package, prerelease, notes from .github/test-build-notes.md)
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -26,8 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          # Releases always come from flyme-auto; a preview builds the branch it was started on.
-          ref: ${{ inputs.preview && github.ref || 'flyme-auto' }}
+          # Releases always come from flyme-auto; previews and test builds use the branch they run on.
+          ref: ${{ (inputs.preview || inputs.test_build) && github.ref || 'flyme-auto' }}
           persist-credentials: false
 
       # The SDK is not redistributable: it lives as a release asset of a private repo,
@@ -91,20 +95,14 @@ jobs:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
 
-      # On-device speech recognition (sherpa-onnx, Apache-2.0): public engine and model, pinned by hash.
-      - name: Retrieve speech engine and model
+      # On-device speech recognition engine (sherpa-onnx, Apache-2.0), pinned by hash. Models are
+      # downloaded by the app when the user picks one; none ships in the APK.
+      - name: Retrieve speech engine
         shell: bash
         run: |
           set -euo pipefail
-          base=https://github.com/k2-fsa/sherpa-onnx/releases/download
-          curl -fsSL -o app/libs/sherpa-onnx-2.0.1.aar "$base/v2.0.1/sherpa-onnx-2.0.1.aar"
+          curl -fsSL -o app/libs/sherpa-onnx-2.0.1.aar https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.1/sherpa-onnx-2.0.1.aar
           echo 'a8d09d1d32f3eb8520482c6d3d43fae674681c5b050385967c70a3c2c9bf0ee7  app/libs/sherpa-onnx-2.0.1.aar' | sha256sum -c -
-          model=sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01
-          curl -fsSL -o "work/$model.tar.bz2" "$base/asr-models/$model.tar.bz2"
-          echo "b3b309f7ce4a737195fcc6963ea19b0653a7d3401580af5ae0d3e284cbb71f0b  work/$model.tar.bz2" | sha256sum -c -
-          tar -xjf "work/$model.tar.bz2" -C work
-          mkdir -p app/src/flymeGecko/assets/asr
-          cp "work/$model/model.int8.onnx" "work/$model/tokens.txt" app/src/flymeGecko/assets/asr/
 
       - name: Install Android build tools
         run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
@@ -194,6 +192,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="flyme-auto-test-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [ "${{ inputs.test_build }}" = "true" ]; then
+            notes=.github/test-build-notes.md
+            [ -f "$notes" ] || notes=dist/release-notes.md
+            gh release create "flyme-experiment-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" dist/AMATV-FlymeAuto-Gecko-arm64.apk dist/SHA256SUMS.txt               --target "$(git rev-parse HEAD)" --prerelease --latest=false               --title "实验测试包 · ${GITHUB_REF_NAME} · $(git rev-parse --short HEAD)" --notes-file "$notes"
+            exit 0
+          fi
           # Name the release by the app's own version (e.g. Flyme.6), not the workflow run count.
           version=$(sed -n 's/.*versionNameSuffix = "-flyme\.\([0-9][0-9.]*\)".*/\1/p' app/build.gradle.kts | head -n 1)
           test -n "$version"
