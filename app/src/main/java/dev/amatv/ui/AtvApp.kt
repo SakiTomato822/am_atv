@@ -126,6 +126,10 @@ import kotlinx.coroutines.Job
 /** Words that make a spoken name sound like one of the user's lists rather than a song. */
 private val LIBRARY_LIST_HINT = Regex("喜好|收藏|喜欢|歌单|播放列表|列表|资料库")
 
+/** Ways of saying the favourites list, and the names Apple shows it under. */
+private val FAVORITES_SPOKEN = Regex("喜好歌曲|喜好的歌|喜欢的歌|收藏的歌|收藏歌曲|红心歌|最爱的歌|喜爱的歌|favorite")
+private val FAVORITES_LABELS = listOf("Favorite Songs", "Favourite Songs", "喜好歌曲", "喜愛的歌曲", "喜爱的歌曲", "最愛的歌曲")
+
 private suspend fun <T> cancellableResult(block: suspend () -> T): Result<T> = try {
     Result.success(block())
 } catch (cancelled: CancellationException) {
