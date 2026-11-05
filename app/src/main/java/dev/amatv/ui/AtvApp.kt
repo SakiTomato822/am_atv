@@ -2013,7 +2013,11 @@ fun AmAtvApp() {
 
     /** Press the visible control named [label]; false if nothing on screen matches. */
     fun tapOnScreen(label: String): Boolean {
-        val target = bestTarget(label, voiceScreen.read(), normalizeLabel, labelPinyin) ?: return false
+        val targets = voiceScreen.read()
+        // Apple names the favourites list by the account language ("Favorite Songs" on this
+        // account), so the ways people say it are tried as its other names.
+        val names = if (FAVORITES_SPOKEN.containsMatchIn(label)) listOf(label) + FAVORITES_LABELS else listOf(label)
+        val target = names.firstNotNullOfOrNull { bestTarget(it, targets, normalizeLabel, labelPinyin) } ?: return false
         return voiceScreen.click(target)
     }
 
