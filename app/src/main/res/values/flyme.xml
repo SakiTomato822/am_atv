@@ -22,4 +22,6 @@
     <string name="voice_setting_title">Voice</string>
     <string name="voice_setting_summary">Speak to play, skip or pause. Recognition stays on this device; the microphone is used only while the button is lit.</string>
     <string name="voice_setting_button">Voice button: %1$s</string>
+    <string name="voice_preparing">Getting ready…</string>
+    <string name="voice_no_personal_station">You have no personal station yet</string>
 </resources>

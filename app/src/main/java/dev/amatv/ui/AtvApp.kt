@@ -77,6 +77,8 @@ import dev.amatv.integration.VoiceCommand
 import dev.amatv.integration.VoiceEvent
 import dev.amatv.integration.VoiceFailure
 import dev.amatv.integration.parseVoiceCommand
+import dev.amatv.integration.ChineseText
+import dev.amatv.integration.songsMatch
 import dev.amatv.i18n.destinationLabel
 import dev.amatv.integration.AutoplaySource
 import dev.amatv.integration.MusicConnectionState
@@ -348,8 +350,11 @@ fun AmAtvApp() {
     DisposableEffect(voice) {
         onDispose { voice.release() }
     }
-    LaunchedEffect(voice) {
-        if (BuildConfig.FLYME_AUTO) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { voice.preload() }
+    LaunchedEffect(voice, voiceEnabled) {
+        // Loaded once voice is turned on, so the first command does not wait for the model.
+        if (BuildConfig.FLYME_AUTO && voiceEnabled) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { voice.preload() }
+        }
     }
     var pendingRequestedSongCatalogId by remember { mutableStateOf<String?>(null) }
     // Read only by callbacks/effects: native position polls do not recompose the app.
@@ -1975,7 +1980,7 @@ fun AmAtvApp() {
         // The speakers would drown the voice: pause while listening, carry on afterwards.
         val resumeAfter = playWhenReady
         if (resumeAfter) pausePlayback()
-        voiceState = VoiceUiState.Listening("")
+        voiceState = VoiceUiState.Listening("", ready = false)
         voiceJob = scope.launch {
             suspend fun showBriefly(text: String) {
                 voiceState = VoiceUiState.Message(text)
@@ -1987,7 +1992,7 @@ fun AmAtvApp() {
             try {
                 voice.listen().collect { event ->
                     when (event) {
-                        VoiceEvent.Listening -> Unit
+                        VoiceEvent.Listening -> voiceState = VoiceUiState.Listening("")
                         is VoiceEvent.Partial -> voiceState = VoiceUiState.Listening(event.text)
                         is VoiceEvent.Final -> heard = event.text
                         is VoiceEvent.Failed -> failure = event.reason
@@ -2019,9 +2024,26 @@ fun AmAtvApp() {
                         playTrack(picked, contextQueue = list.filter { it.openAction == CatalogOpenAction.Play })
                     }
                 }
+                VoiceCommand.PersonalStation -> {
+                    val station = cancellableResult { services.personalStation() }.getOrNull()
+                    if (station == null) {
+                        if (resumeAfter) requestPlayback()
+                        showBriefly(AppText.text(R.string.voice_no_personal_station))
+                    } else {
+                        voiceState = null
+                        playTrack(station, listOf(station))
+                    }
+                }
                 is VoiceCommand.Play -> {
                     voiceState = VoiceUiState.Searching(command.query)
-                    val songs = cancellableResult { services.searchSongs(command.query) }.getOrNull().orEmpty()
+                    // Names often come out as sound-alike characters: retry by pinyin when the
+                    // songs found do not contain what was said.
+                    val direct = cancellableResult { services.searchSongs(command.query) }.getOrNull().orEmpty()
+                    val songs = if (songsMatch(command.query, direct, ChineseText::simplified)) direct else {
+                        ChineseText.pinyin(command.query)
+                            ?.let { latin -> cancellableResult { services.searchSongs(latin) }.getOrNull() }
+                            ?.takeIf { it.isNotEmpty() } ?: direct
+                    }
                     if (songs.isEmpty()) {
                         if (resumeAfter) requestPlayback()
                         showBriefly(AppText.text(R.string.voice_not_found_format, command.query))

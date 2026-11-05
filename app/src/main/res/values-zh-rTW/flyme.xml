@@ -21,4 +21,6 @@
     <string name="voice_setting_title">語音</string>
     <string name="voice_setting_summary">用說話來播放、切歌或暫停。辨識在本機完成，只在按鈕亮起時使用麥克風。</string>
     <string name="voice_setting_button">語音按鈕：%1$s</string>
+    <string name="voice_preparing">準備中…</string>
+    <string name="voice_no_personal_station">還沒有你的個人電台</string>
 </resources>

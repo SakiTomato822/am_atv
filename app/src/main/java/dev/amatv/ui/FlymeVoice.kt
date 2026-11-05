@@ -44,7 +44,8 @@ import dev.amatv.R
 
 /** What the voice panel shows. */
 internal sealed interface VoiceUiState {
-    data class Listening(val heard: String) : VoiceUiState
+    /** [ready]: the microphone is open; before that the panel says it is getting ready. */
+    data class Listening(val heard: String, val ready: Boolean = true) : VoiceUiState
     data class Searching(val query: String) : VoiceUiState
     data class Message(val text: String) : VoiceUiState
 }
@@ -94,11 +95,12 @@ internal fun FlymeVoicePanel(state: VoiceUiState?, onDismiss: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(20.dp),
             ) {
-                VoicePulse(listening = shown is VoiceUiState.Listening)
+                VoicePulse(listening = shown is VoiceUiState.Listening && shown.ready)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     val (title, body) = when (shown) {
-                        is VoiceUiState.Listening -> stringResource(R.string.voice_listening) to
-                            shown.heard.ifEmpty { stringResource(R.string.voice_hint) }
+                        is VoiceUiState.Listening -> stringResource(
+                            if (shown.ready) R.string.voice_listening else R.string.voice_preparing,
+                        ) to shown.heard.ifEmpty { stringResource(R.string.voice_hint) }
                         is VoiceUiState.Searching -> stringResource(R.string.voice_searching_format, shown.query) to ""
                         is VoiceUiState.Message -> shown.text to ""
                     }

@@ -43,6 +43,13 @@ class VoiceCommandTest {
     }
 
     @Test
+    fun personalStation() {
+        assertEquals(VoiceCommand.PersonalStation, parseVoiceCommand("播放我的电台"))
+        assertEquals(VoiceCommand.PersonalStation, parseVoiceCommand("我的电台"))
+        assertEquals(VoiceCommand.PersonalStation, parseVoiceCommand("放一下个人电台吧"))
+    }
+
+    @Test
     fun emptyOrNoise() {
         assertEquals(VoiceCommand.Nothing, parseVoiceCommand(""))
         assertEquals(VoiceCommand.Nothing, parseVoiceCommand("。"))

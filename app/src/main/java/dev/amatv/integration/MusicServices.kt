@@ -240,6 +240,7 @@ class MusicServices(context: Context) : RecommendationProvider {
     suspend fun liveRadio(): List<Track> = api.liveRadio()
     suspend fun search(term: String): List<Track> = api.search(term)
     suspend fun searchSongs(term: String): List<Track> = api.searchSongs(term)
+    suspend fun personalStation(): Track? = api.personalStation()
     override suspend fun createAmStation(songId: String): Pair<String?, List<Track>> =
         api.createContinuousStation(songId)
     override suspend fun amStationNextTracks(stationId: String): List<Track> =

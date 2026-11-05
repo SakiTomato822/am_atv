@@ -489,6 +489,15 @@ class AppleMusicApi(
         )
     }
 
+    /** The listener's own station ("我的电台"), built by Apple Music from their listening. */
+    suspend fun personalStation(): Track? {
+        val sf = effectiveStorefront()
+        return request(
+            path = "/v1/catalog/$sf/stations?filter%5Bidentity%5D=personal",
+            needsUserToken = true,
+        ).firstOrNull()
+    }
+
     suspend fun liveRadio(): List<Track> {
         val sf = effectiveStorefront()
         return request(

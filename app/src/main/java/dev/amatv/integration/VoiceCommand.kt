@@ -6,6 +6,8 @@ sealed interface VoiceCommand {
     data object Resume : VoiceCommand
     data object Next : VoiceCommand
     data object Previous : VoiceCommand
+    /** The listener's personal station. */
+    data object PersonalStation : VoiceCommand
     /** The [number]th item (from 1) of the list on screen. */
     data class Pick(val number: Int) : VoiceCommand
     /** Search the catalog for [query] and play the best song. */
@@ -27,6 +29,7 @@ fun parseVoiceCommand(spoken: String): VoiceCommand {
         if (number != null && number > 0) return VoiceCommand.Pick(number)
     }
     when {
+        PERSONAL_STATION.containsMatchIn(compact) -> return VoiceCommand.PersonalStation
         PREVIOUS.containsMatchIn(compact) -> return VoiceCommand.Previous
         NEXT.containsMatchIn(compact) -> return VoiceCommand.Next
         PAUSE.matches(compact) -> return VoiceCommand.Pause
@@ -62,6 +65,7 @@ private val PICK = Regex("^(?:请|帮我)?(?:播放|放|选|选择|点|点击|�
 
 private val PUNCTUATION = Regex("[，。！？、,.!?;；:：\"“”'‘’()（）]")
 private val SPACES = Regex("\\s+")
+private val PERSONAL_STATION = Regex("我的电台|个人电台|私人电台|专属电台|我的广播|为我推荐的电台")
 private val PREVIOUS = Regex("上一首|上一曲|上首|前一首|上一个")
 private val NEXT = Regex("下一首|下一曲|下首|下一个|切歌|换一首|换首|换歌|跳过")
 private val PAUSE = Regex("(请|帮我)?(暂停|停止|停一下|停下|别放了|不要放了|不听了|关掉音乐|停)(播放|音乐|一下)?")
