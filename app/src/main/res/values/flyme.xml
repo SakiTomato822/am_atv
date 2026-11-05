@@ -16,6 +16,8 @@
     <string name="voice_not_found_format">Nothing found for “%1$s”</string>
     <string name="voice_not_understood">Didn’t catch that</string>
     <string name="voice_ok">Okay</string>
+    <string name="voice_choices_format">Choose a result · %1$d/%2$d</string>
+    <string name="voice_playing_format">Playing %1$s</string>
     <string name="voice_mic_unavailable">The microphone is in use by another app</string>
     <string name="voice_model_missing">Voice recognition isn’t included in this build</string>
     <string name="voice_permission_needed">Allow the microphone to use voice</string>
@@ -48,7 +50,7 @@
     <string name="voice_seek_direction">Say “fast forward” or “rewind”</string>
     <string name="voice_understanding">Understanding…</string>
     <string name="voice_intent_title">Understand any phrasing</string>
-    <string name="voice_intent_summary">Sentences the built-in commands do not know go to a small chat model on the API above, with the names on screen. Over 2.5 s, it falls back to searching.</string>
+    <string name="voice_intent_summary">Sends the sentence, text on screen, and a few related song or artist names to the model on the API above.</string>
     <string name="voice_intent_toggle">Chat model: %1$s</string>
     <string name="voice_field_intent_model">Chat model</string>
 </resources>

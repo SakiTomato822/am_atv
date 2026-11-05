@@ -15,6 +15,8 @@
     <string name="voice_not_found_format">没找到“%1$s”</string>
     <string name="voice_not_understood">没听清，请再说一次</string>
     <string name="voice_ok">好的</string>
+    <string name="voice_choices_format">请选择候选项 · %1$d/%2$d</string>
+    <string name="voice_playing_format">播放 %1$s</string>
     <string name="voice_mic_unavailable">麦克风正被其他应用占用</string>
     <string name="voice_model_missing">此版本未包含语音识别</string>
     <string name="voice_permission_needed">需要麦克风权限才能用语音</string>
@@ -47,7 +49,7 @@
     <string name="voice_seek_direction">请说“快进”或“快退”</string>
     <string name="voice_understanding">理解中…</string>
     <string name="voice_intent_title">大模型理解指令</string>
-    <string name="voice_intent_summary">内置命令听不懂的话，连同屏幕上的名字发给上面接口里的小模型理解；超过 2.5 秒就按搜索处理。</string>
+    <string name="voice_intent_summary">会将这句话、屏幕上的文字和少量相关的歌名或歌手名发送给上方接口里的模型。</string>
     <string name="voice_intent_toggle">大模型理解：%1$s</string>
     <string name="voice_field_intent_model">理解模型</string>
 </resources>

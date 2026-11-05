@@ -12,6 +12,7 @@ data class ScreenTarget(
     val scrollsHorizontally: Boolean = false,
     val scrollsVertically: Boolean = false,
     val id: Int = 0,
+    val primary: String = label,
 ) {
     val area: Float get() = (right - left).coerceAtLeast(0f) * (bottom - top).coerceAtLeast(0f)
 }
@@ -44,9 +45,24 @@ fun bestTarget(
     targets: List<ScreenTarget>,
     normalize: (String) -> String,
     pinyin: (String) -> String?,
+    exactPrimary: Boolean = false,
 ): ScreenTarget? = targets.asSequence()
     .filter { it.clickable && it.label.isNotBlank() }
-    .map { it to matchScore(spoken, it.label, normalize, pinyin) }
+    .map {
+        val score = if (!exactPrimary) matchScore(spoken, it.label, normalize, pinyin)
+        else {
+            val left = normalize(spoken)
+            val right = normalize(it.primary)
+            val sound = pinyin(left)?.replace(" ", "")?.takeIf { value -> value.isNotBlank() }
+            when {
+                left.isEmpty() || right.isEmpty() -> 0
+                left == right -> 100
+                sound != null && sound == pinyin(right)?.replace(" ", "") -> 75
+                else -> 0
+            }
+        }
+        it to score
+    }
     .filter { it.second >= 50 }
     .maxWithOrNull(compareBy<Pair<ScreenTarget, Int>> { it.second }.thenByDescending { it.first.label.length })
     ?.first

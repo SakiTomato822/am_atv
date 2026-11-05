@@ -6,7 +6,7 @@ import org.junit.Test
 class VoiceCommandTest {
     private fun play(q: String) = VoiceCommand.Play(q, title = q)
 
-    private fun artist(name: String) = VoiceCommand.Play(name, VoiceCommand.Kind.Artist, artist = name)
+    private fun artist(name: String) = VoiceCommand.Play(name, VoiceCommand.Kind.Artist, artist = name, kindExplicit = true)
 
     @Test
     fun transportControls() {
@@ -31,7 +31,7 @@ class VoiceCommandTest {
         assertEquals(artist("张惠妹"), parseVoiceCommand("帮我放点张惠妹的歌吧"))
         assertEquals(play("taylor swift"), parseVoiceCommand("播放 Taylor Swift"))
         assertEquals(play("五月天"), parseVoiceCommand("五月天"))
-        assertEquals(VoiceCommand.Play("喜好歌曲", VoiceCommand.Kind.Playlist), parseVoiceCommand("播放我的喜好歌曲"))
+        assertEquals(VoiceCommand.Play("喜好歌曲", VoiceCommand.Kind.Playlist, kindExplicit = true), parseVoiceCommand("播放我的喜好歌曲"))
         assertEquals(play("我的天空"), parseVoiceCommand("播放我的天空"))
     }
 
@@ -78,7 +78,7 @@ class VoiceCommandTest {
         assertEquals(VoiceCommand.SeekDirectionUnclear, parseVoiceCommand("向前跳10秒"))
         assertEquals(VoiceCommand.Next, parseVoiceCommand("下一首"))
         assertEquals(VoiceCommand.NowPlaying, parseVoiceCommand("打开歌词页面"))
-        assertEquals(VoiceCommand.Play("音乐寻宝电台", VoiceCommand.Kind.Station, title = "音乐寻宝电台"),
+        assertEquals(VoiceCommand.Play("音乐寻宝电台", VoiceCommand.Kind.Station, title = "音乐寻宝电台", kindExplicit = true),
             parseVoiceCommand("音乐寻宝电台"))
         assertEquals(VoiceCommand.Shuffle, parseVoiceCommand("随机播放"))
         assertEquals(VoiceCommand.Scroll(VoiceCommand.Direction.Down, null), parseVoiceCommand("向下滑"))
@@ -122,14 +122,14 @@ class VoiceCommandTest {
         assertEquals(VoiceCommand.Seek(-10), parseVoiceCommand("往后退十秒"))
         assertEquals(VoiceCommand.Pick(3), parseVoiceCommand("打开第三张专辑"))
         assertEquals(VoiceCommand.Pick(1), parseVoiceCommand("播放搜索结果第一首"))
-        assertEquals(VoiceCommand.Play("喜好歌曲", VoiceCommand.Kind.Playlist), parseVoiceCommand("播放我喜欢的歌"))
+        assertEquals(VoiceCommand.Play("喜好歌曲", VoiceCommand.Kind.Playlist, kindExplicit = true), parseVoiceCommand("播放我喜欢的歌"))
         assertEquals(VoiceCommand.Nothing, parseVoiceCommand("调大音量"))
         assertEquals(VoiceCommand.Pause, parseVoiceCommand("关闭音乐"))
     }
 
     @Test
     fun handlesReviewCases() {
-        assertEquals(VoiceCommand.Play("孙燕姿 天黑黑", VoiceCommand.Kind.Song, title = "天黑黑", artist = "孙燕姿"),
+        assertEquals(VoiceCommand.Play("孙燕姿 天黑黑", VoiceCommand.Kind.Song, title = "天黑黑", artist = "孙燕姿", kindExplicit = true),
             parseVoiceCommand("播放歌手孙燕姿的歌曲天黑黑"))
         assertEquals(VoiceCommand.CurrentAlbum, parseVoiceCommand("播放当前专辑"))
         assertEquals(VoiceCommand.Favorite, parseVoiceCommand("把这首歌加到喜好歌曲"))
@@ -150,7 +150,7 @@ class VoiceCommandTest {
             "陶喆" to "黑色柳丁", "方大同" to "危险世界")) {
             assertEquals(VoiceCommand.Play("$artist $title", VoiceCommand.Kind.Song, title = title, artist = artist),
                 parseVoiceCommand("播放${artist}的$title"))
-            assertEquals(VoiceCommand.Play("$artist $title", VoiceCommand.Kind.Album, artist = artist, album = title),
+            assertEquals(VoiceCommand.Play("$artist $title", VoiceCommand.Kind.Album, artist = artist, album = title, kindExplicit = true),
                 parseVoiceCommand("播放${artist}的专辑$title"))
         }
         assertEquals(VoiceCommand.Play("adele easy on me", VoiceCommand.Kind.Song, title = "easy on me", artist = "adele"),
@@ -159,7 +159,7 @@ class VoiceCommandTest {
 
     @Test
     fun keepsMediaFieldsAndVersions() {
-        val album = VoiceCommand.Play("林忆莲 0", VoiceCommand.Kind.Album, artist = "林忆莲", album = "0")
+        val album = VoiceCommand.Play("林忆莲 0", VoiceCommand.Kind.Album, artist = "林忆莲", album = "0", kindExplicit = true)
         assertEquals(album, parseVoiceCommand("林忆莲的专辑0"))
         assertEquals(album, parseVoiceCommand("播放林忆莲的0专辑"))
         assertEquals(VoiceCommand.Play("林忆莲 0", VoiceCommand.Kind.Song, title = "0", artist = "林忆莲"),
@@ -169,7 +169,16 @@ class VoiceCommandTest {
         assertEquals(VoiceCommand.Play("孙燕姿 天黑黑 live", VoiceCommand.Kind.Song, title = "天黑黑 live", artist = "孙燕姿"),
             parseVoiceCommand("孙燕姿唱的天黑黑 (Live)"))
         assertEquals(listOf(artist("孙燕姿"), VoiceCommand.Shuffle), parseVoiceSteps("随机播放孙燕姿的歌"))
-        assertEquals(VoiceCommand.Play("音乐寻宝电台", VoiceCommand.Kind.Station, title = "音乐寻宝电台"),
+        assertEquals(VoiceCommand.Play("音乐寻宝电台", VoiceCommand.Kind.Station, title = "音乐寻宝电台", kindExplicit = true),
             parseVoiceCommand("播放音乐寻宝电台"))
+    }
+
+    @Test
+    fun songWordIsNotATitle() {
+        assertEquals(artist("林忆莲"), parseVoiceCommand("播放林忆莲的歌曲"))
+        assertEquals(VoiceCommand.Play("罗大佑 首都", VoiceCommand.Kind.Song, title = "首都", artist = "罗大佑", kindExplicit = true),
+            parseVoiceCommand("播放罗大佑的歌曲首都"))
+        assertEquals(VoiceCommand.Play("罗大佑 首都", VoiceCommand.Kind.Song, title = "首都", artist = "罗大佑"),
+            parseVoiceCommand("播放罗大佑的首都"))
     }
 }

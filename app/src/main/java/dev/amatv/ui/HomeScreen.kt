@@ -102,6 +102,7 @@ fun HomeScreen(
     currentTrack: Track,
     tracks: List<Track> = emptyList(),
     searchLoading: Boolean = false,
+    voiceSearchTerm: String? = null,
     recentTracks: List<Track> = emptyList(),
     homeShelves: List<ContentShelf> = emptyList(),
     homeLoading: Boolean = false,
@@ -225,6 +226,7 @@ fun HomeScreen(
             Destination.Search -> if (dev.amatv.BuildConfig.FLYME_AUTO) {
                 FlymeSearchScreen(
                     tracks = tracks,
+                    voiceSearchTerm = voiceSearchTerm,
                     recentTracks = recentTracks,
                     loading = searchLoading,
                     setupMessage = setupMessage,

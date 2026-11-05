@@ -71,6 +71,7 @@ import kotlinx.coroutines.delay
 @Composable
 internal fun FlymeSearchScreen(
     tracks: List<Track>,
+    voiceSearchTerm: String?,
     recentTracks: List<Track>,
     loading: Boolean,
     setupMessage: String?,
@@ -87,6 +88,12 @@ internal fun FlymeSearchScreen(
     }
     var query by rememberSaveable { mutableStateOf("") }
     var lastExecutedQuery by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(voiceSearchTerm) {
+        if (voiceSearchTerm != null) {
+            query = voiceSearchTerm
+            lastExecutedQuery = voiceSearchTerm
+        }
+    }
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val keyboardOverlap = LocalCarKeyboardOverlap.current

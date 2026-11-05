@@ -36,6 +36,7 @@ sealed interface VoiceCommand {
         val title: String? = null,
         val artist: String? = null,
         val album: String? = null,
+        val kindExplicit: Boolean = false,
     ) : VoiceCommand
     data class Search(val query: String) : VoiceCommand
     data object Nothing : VoiceCommand
@@ -155,28 +156,28 @@ fun parseVoiceCommand(spoken: String): VoiceCommand {
     query = query.trim()
     val namedTarget = query.replace(REQUEST_END, "").trim()
     if (FAVORITE_LIST.matches(namedTarget.replace(" ", ""))) {
-        return VoiceCommand.Play("喜好歌曲", VoiceCommand.Kind.Playlist)
+        return VoiceCommand.Play("喜好歌曲", VoiceCommand.Kind.Playlist, kindExplicit = true)
     }
     if (namedTarget.endsWith("电台") || namedTarget.endsWith("電台")) {
         val title = namedTarget.removePrefix("我的")
-        return VoiceCommand.Play(title, VoiceCommand.Kind.Station, title = title)
+        return VoiceCommand.Play(title, VoiceCommand.Kind.Station, title = title, kindExplicit = true)
     }
     ALBUM_TARGET.matchEntire(namedTarget)?.let { match ->
         val artist = match.groupValues[1].trim().ifEmpty { null }
         val album = match.groupValues[2].ifEmpty { match.groupValues[3] }.trim()
         if (album.isNotEmpty()) {
             return VoiceCommand.Play(listOfNotNull(artist, album).joinToString(" "), VoiceCommand.Kind.Album,
-                artist = artist, album = album)
+                artist = artist, album = album, kindExplicit = true)
         }
     }
     EXPLICIT_SONG.matchEntire(namedTarget)?.let { match ->
-        val artist = match.groupValues[1].trim()
-        val title = match.groupValues[2].trim()
-        return VoiceCommand.Play("$artist $title", VoiceCommand.Kind.Song, title = title, artist = artist)
+        val artist = match.groupValues[1].ifEmpty { match.groupValues[2] }.trim()
+        val title = match.groupValues[3].trim()
+        return VoiceCommand.Play("$artist $title", VoiceCommand.Kind.Song, title = title, artist = artist, kindExplicit = true)
     }
     ARTIST_TARGET.matchEntire(namedTarget)?.let { match ->
         val artist = match.groupValues[1].ifEmpty { match.groupValues[2] }.trim()
-        if (artist.isNotEmpty()) return VoiceCommand.Play(artist, VoiceCommand.Kind.Artist, artist = artist)
+        if (artist.isNotEmpty()) return VoiceCommand.Play(artist, VoiceCommand.Kind.Artist, artist = artist, kindExplicit = true)
     }
     while (true) {
         val withoutSuffix = query.replace(QUERY_SUFFIX, "").trim()
@@ -195,6 +196,10 @@ fun parseVoiceCommand(spoken: String): VoiceCommand {
                 return VoiceCommand.Play("$artist $title", VoiceCommand.Kind.Song, title = title, artist = artist)
             }
         }
+    }
+    if (SONG_TITLE_PREFIX.containsMatchIn(query)) {
+        val title = query.replace(SONG_TITLE_PREFIX, "").trim()
+        if (title.isNotEmpty()) return VoiceCommand.Play(title, VoiceCommand.Kind.Song, title = title, kindExplicit = true)
     }
     return if (query.length >= 2 || query.singleOrNull()?.isDigit() == true || query.any { it.code > 0x2E80 }) {
         VoiceCommand.Play(query, title = query)
@@ -261,9 +266,11 @@ private val PLAY_PREFIX = Regex(
 )
 private val REQUEST_END = Regex("(?:吧|呗|一下|好吗|可以吗)$")
 private val FAVORITE_LIST = Regex("(?:我的?)?(?:喜好歌曲|喜欢的歌(?:曲)?|收藏的歌(?:曲)?)")
-private val ALBUM_TARGET = Regex("(?:(.+?)的\\s*)?(?:(?:整[张張](?:专辑|專輯)?|专辑|專輯)\\s*(.+)|(.+?)\\s*(?:专辑|專輯))")
+private val ALBUM_TARGET = Regex("(?:(.+?)的\\s*)?(?:(?:整[张張](?:专辑|專輯)?|专辑|專輯)\\s*(.+)|(.+?)\\s*(?:[这這][张張])?(?:专辑|專輯))")
 private val ARTIST_TARGET = Regex("(?:(.+?)(?:的所有歌曲|所有歌曲|的歌曲|的歌|的音乐)|歌手\\s*(.+))")
-private val EXPLICIT_SONG = Regex("歌手\\s*(.+?)的\\s*(?:歌曲|歌)?\\s*(.+)")
+// 歌 must not start 歌曲/歌单/歌手, or 「林忆莲的歌曲」 would ask for a song called 曲.
+private val EXPLICIT_SONG = Regex("(?:歌手\\s*(.+?)的\\s*(?:歌曲|单曲|歌(?![曲单手]))?\\s*|(.+?)的\\s*(?:歌曲|单曲|歌(?![曲单手]))\\s*)(.+)")
+private val SONG_TITLE_PREFIX = Regex("^(?:歌曲|单曲|这首)\\s*(?=.)")
 private val SONG_TARGET = Regex("(.+?)(?:唱的|来一首|的)(.+)")
 private val LIST_WORDS = Regex("喜好|收藏|喜欢|歌单|播放列表|列表|电台|资料库")
 private val QUERY_LEAD = Regex("^(一首|一下|点|一些|些|个)")

@@ -410,32 +410,44 @@ private fun FlymePill(
     contentDescription: String? = null,
     content: @Composable (Color) -> Unit,
 ) {
+    // Inside a group the capsule slides between segments; on its own the pill fills itself.
+    val sliding = LocalSlidingPill.current != null
+    val ink by animateColorAsState(if (selected) FlymeOnInk else FlymeInk.copy(alpha = 0.74f),
+        spring(stiffness = 420f), label = "flyme-pill-ink")
     FocusSurface(
         onClick = onClick,
         modifier = modifier
             .height(if (small) 27.dp else 31.dp)
+            .slidingPillSegment(selected)
             .then(if (contentDescription != null) Modifier.semantics { this.contentDescription = contentDescription } else Modifier)
             .semantics { this.selected = selected },
         cornerRadius = 16.dp,
         focusedScale = 1.03f,
         padding = PaddingValues(horizontal = if (small) 11.dp else 15.dp),
-        background = if (selected) FlymeInk else Color.Transparent,
-        focusedBackground = if (selected) FlymeInk else FlymeInk.copy(alpha = 0.16f),
+        background = if (selected && !sliding) FlymeInk else Color.Transparent,
+        focusedBackground = when {
+            selected && sliding -> Color.Transparent
+            selected -> FlymeInk
+            else -> FlymeInk.copy(alpha = 0.16f)
+        },
     ) {
         Box(Modifier.align(Alignment.Center)) {
-            content(if (selected) FlymeOnInk else FlymeInk.copy(alpha = 0.74f))
+            content(ink)
         }
     }
 }
 
 @Composable
 private fun FlymePillGroup(content: @Composable RowScope.() -> Unit) {
+    val pill = rememberSlidingPill()
     Row(
-        Modifier.clip(RoundedCornerShape(19.dp)).background(FlymeInk.copy(alpha = 0.08f)).padding(3.dp),
+        Modifier.clip(RoundedCornerShape(19.dp)).background(FlymeInk.copy(alpha = 0.08f)).padding(3.dp)
+            .slidingPillBackground(pill, FlymeInk),
         horizontalArrangement = Arrangement.spacedBy(3.dp),
         verticalAlignment = Alignment.CenterVertically,
-        content = content,
-    )
+    ) {
+        ProvideSlidingPill(pill) { content() }
+    }
 }
 
 internal enum class LibrarySort(val label: Int, val descendingFirst: Boolean) {
@@ -812,16 +824,21 @@ internal fun FlymeTopBar(
         }
         if (!capsuleOnly) Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
           Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            val tabPill = rememberSlidingPill()
             Row(
-                Modifier.clip(RoundedCornerShape(22.dp)).background(FlymeInk.copy(alpha = 0.09f)).padding(4.dp),
+                Modifier.clip(RoundedCornerShape(22.dp)).background(FlymeInk.copy(alpha = 0.09f)).padding(4.dp)
+                    .slidingPillBackground(tabPill, FlymeInk),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically,
-            ) {
+            ) { ProvideSlidingPill(tabPill) {
                 listOf(Destination.Home, Destination.Browse, Destination.Library, Destination.Search).forEach { destination ->
                     val isSelected = destination == selected
+                    val tint by animateColorAsState(if (isSelected) FlymeOnInk else FlymeInk.copy(alpha = 0.78f),
+                        spring(stiffness = 420f), label = "flyme-tab-ink")
                     FocusSurface(
                         onClick = { onDestination(destination) },
                         modifier = Modifier.height(35.dp)
+                            .slidingPillSegment(isSelected)
                             .automationId("nav-${destination.name.lowercase()}")
                             .focusRequester(focusRequesters.getValue(destination))
                             .focusProperties { down = downFocus() }
@@ -829,10 +846,9 @@ internal fun FlymeTopBar(
                         cornerRadius = 18.dp,
                         focusedScale = 1.03f,
                         padding = PaddingValues(horizontal = if (destination == Destination.Search) 9.dp else 17.dp),
-                        background = if (isSelected) FlymeInk else Color.Transparent,
-                        focusedBackground = if (isSelected) FlymeInk else FlymeInk.copy(alpha = 0.14f),
+                        background = Color.Transparent,
+                        focusedBackground = if (isSelected) Color.Transparent else FlymeInk.copy(alpha = 0.14f),
                     ) {
-                        val tint = if (isSelected) FlymeOnInk else FlymeInk.copy(alpha = 0.78f)
                         Box(Modifier.align(Alignment.Center)) {
                             if (destination == Destination.Search) {
                                 Icon(Icons.Rounded.Search, destinationLabel(destination), tint = tint, modifier = Modifier.size(18.dp))
@@ -843,17 +859,24 @@ internal fun FlymeTopBar(
                         }
                     }
                 }
-            }
+            } }
             if (onVoice != null) FlymeVoiceButton(active = voiceActive, onClick = onVoice)
           }
         }
         Box(Modifier.width(sideWidth), contentAlignment = Alignment.CenterEnd) {
             if (hasCurrentTrack) {
+                // A floating surface of its own: pages scroll under it (artist and album pages), so a
+                // see-through tint let the rows beneath show through the title. Nearly opaque, with a
+                // soft shadow and hairline edge, it reads on any page without a costly live blur.
+                val palette = LocalFlymePalette.current
+                val capsuleShape = RoundedCornerShape(23.dp)
                 Row(
                     Modifier.fillMaxWidth().height(46.dp)
                         .onGloballyPositioned { onMiniPlayerPlaced(it.boundsInWindow().center) }
-                        .clip(RoundedCornerShape(23.dp))
-                        .background(FlymeInk.copy(alpha = if (selected == Destination.NowPlaying) 0.18f else 0.09f))
+                        .graphicsLayer { shadowElevation = 14f; shape = capsuleShape; clip = true }
+                        .background(palette.pageTop.copy(alpha = 0.94f))
+                        .background(FlymeInk.copy(alpha = if (selected == Destination.NowPlaying) 0.14f else 0.06f))
+                        .border(1.dp, FlymeInk.copy(alpha = 0.1f), capsuleShape)
                         .padding(start = 6.dp, end = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -870,7 +893,15 @@ internal fun FlymeTopBar(
                     ) {
                         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                            MotionArtwork(track = currentTrack, modifier = Modifier.size(34.dp), animate = false, cornerRadius = 7.dp)
+                            // A new song pops its cover in with a small spring (layer scale only).
+                            val pop = remember { androidx.compose.animation.core.Animatable(1f) }
+                            LaunchedEffect(currentTrack.id) {
+                                if (pop.value == 1f) pop.snapTo(0.82f)
+                                pop.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 420f))
+                            }
+                            MotionArtwork(track = currentTrack, modifier = Modifier.size(34.dp)
+                                .graphicsLayer { scaleX = pop.value; scaleY = pop.value },
+                                animate = false, cornerRadius = 7.dp)
                             // CJK fonts carry tall ascents: trim line boxes so two lines fit the capsule, centered.
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(currentTrack.title, style = CompactLine, fontSize = 12.sp, lineHeight = 14.sp,

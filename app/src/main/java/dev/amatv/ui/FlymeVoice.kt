@@ -8,6 +8,14 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.scaleIn
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import kotlinx.coroutines.delay
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -65,6 +73,7 @@ internal sealed interface VoiceUiState {
     /** What was understood, shown while the app acts on it. */
     data class Heard(val text: String) : VoiceUiState
     data class Searching(val query: String) : VoiceUiState
+    data class Choices(val items: List<dev.amatv.model.Track>, val page: Int, val pages: Int) : VoiceUiState
     data class Message(val text: String) : VoiceUiState
 }
 
@@ -90,7 +99,7 @@ internal fun FlymeVoiceButton(active: Boolean, onClick: () -> Unit, modifier: Mo
  * they come, and floats up and away when done. Tapping outside cancels.
  */
 @Composable
-internal fun FlymeVoicePanel(state: VoiceUiState?, onDismiss: () -> Unit) {
+internal fun FlymeVoicePanel(state: VoiceUiState?, onDismiss: () -> Unit, onChoice: (Int) -> Unit) {
     if (state != null) {
         Box(Modifier.fillMaxSize().clickable(
             interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss,
@@ -102,7 +111,8 @@ internal fun FlymeVoicePanel(state: VoiceUiState?, onDismiss: () -> Unit) {
     Box(Modifier.fillMaxSize().padding(bottom = 104.dp, start = 40.dp, end = 40.dp), contentAlignment = Alignment.BottomCenter) {
         AnimatedVisibility(
             visible = state != null,
-            enter = fadeIn(tween(220)) + slideInVertically(tween(320, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { it },
+            enter = fadeIn(tween(200)) + scaleIn(spring(dampingRatio = 0.62f, stiffness = 380f), initialScale = 0.9f) +
+                slideInVertically(spring(dampingRatio = 0.7f, stiffness = 300f, visibilityThreshold = IntOffset.VisibilityThreshold)) { it / 2 },
             exit = fadeOut(tween(420)) + slideOutVertically(tween(520)) { -it * 2 },
         ) {
             val shown = lastShown
@@ -112,7 +122,7 @@ internal fun FlymeVoicePanel(state: VoiceUiState?, onDismiss: () -> Unit) {
                     .graphicsLayer { shadowElevation = 18f; shape = RoundedCornerShape(36.dp); clip = true }
                     .background(palette.pageTop.copy(alpha = 0.9f))
                     .border(1.dp, FlymeInk.copy(alpha = 0.12f), RoundedCornerShape(36.dp))
-                    .animateContentSize()
+                    .animateContentSize(spring(dampingRatio = 0.8f, stiffness = 420f, visibilityThreshold = IntSize.VisibilityThreshold))
                     .padding(horizontal = 26.dp, vertical = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -127,10 +137,54 @@ internal fun FlymeVoicePanel(state: VoiceUiState?, onDismiss: () -> Unit) {
                         is VoiceUiState.Heard -> stringResource(R.string.voice_heard) to shown.text
                         is VoiceUiState.Understanding -> stringResource(R.string.voice_understanding) to shown.text
                         is VoiceUiState.Searching -> stringResource(R.string.voice_searching_format, shown.query) to ""
+                        is VoiceUiState.Choices -> stringResource(R.string.voice_choices_format, shown.page, shown.pages) to ""
                         is VoiceUiState.Message -> shown.text to ""
                     }
                     Text(title, color = FlymeInk.copy(alpha = 0.6f), fontSize = 14.sp, fontWeight = FontWeight.Medium,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (shown is VoiceUiState.Choices) {
+                        shown.items.forEachIndexed { index, item ->
+                            val kind = stringResource(when (item.catalogKind) {
+                                dev.amatv.model.CatalogKind.Song -> R.string.services_kind_song
+                                dev.amatv.model.CatalogKind.Album -> R.string.services_kind_album
+                                dev.amatv.model.CatalogKind.Artist -> R.string.services_kind_artist
+                                dev.amatv.model.CatalogKind.Playlist -> R.string.services_kind_playlist
+                                dev.amatv.model.CatalogKind.Station -> R.string.services_kind_station
+                                dev.amatv.model.CatalogKind.MusicVideo -> R.string.services_kind_music_video
+                            })
+                            val details = listOf(kind, item.artist, item.album.takeUnless { it == item.title }.orEmpty())
+                                .filter { it.isNotBlank() }.joinToString(" · ")
+                            // Rows drop in one after another with a soft spring; only layer
+                            // properties animate, so the list never re-measures while it moves.
+                            val appear = remember(shown.page, item.id) { Animatable(0f) }
+                            LaunchedEffect(appear) {
+                                delay(45L * index)
+                                appear.animateTo(1f, spring(dampingRatio = 0.66f, stiffness = 340f))
+                            }
+                            Row(
+                                Modifier.graphicsLayer {
+                                    alpha = appear.value.coerceIn(0f, 1f)
+                                    translationY = (1f - appear.value) * 18.dp.toPx()
+                                }
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable(enabled = state is VoiceUiState.Choices) { onChoice(index + 1) }
+                                    .padding(vertical = 6.dp, horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Box(Modifier.size(28.dp).background(FlymeInk.copy(alpha = 0.1f), CircleShape),
+                                    contentAlignment = Alignment.Center) {
+                                    Text("${index + 1}", color = FlymeInk, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Column {
+                                    Text(item.title, color = FlymeInk, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(details, color = FlymeInk.copy(alpha = 0.55f), fontSize = 13.sp,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                    }
                     if (body.isNotEmpty()) {
                         val heard = (shown is VoiceUiState.Listening && shown.heard.isNotEmpty()) || shown is VoiceUiState.Heard || shown is VoiceUiState.Understanding
                         Text(body, color = if (heard) FlymeInk else FlymeInk.copy(alpha = 0.45f),

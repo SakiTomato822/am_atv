@@ -10,7 +10,7 @@ object MotionTokens {
     // readable and remote focus can move as soon as the incoming state exists.
     const val BrowseContentEnterMillis = 240
     const val BrowseContentExitMillis = 180
-    const val BrowseContentTravelDp = 10f
+    const val BrowseContentTravelDp = 16f
     const val BrowseContentExitTravelDp = 5f
     const val BrowseCategoryChangeMillis = 210
     const val FocusPressEnterMillis = 90

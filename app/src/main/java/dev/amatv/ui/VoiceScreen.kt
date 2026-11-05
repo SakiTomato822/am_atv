@@ -31,6 +31,8 @@ internal class VoiceScreen(private val view: View) {
         nodes = found
         return found.mapIndexed { index, node ->
             val config = node.config
+            val primary = config.getOrNull(SemanticsProperties.Text)?.firstOrNull()?.text
+                ?: config.getOrNull(SemanticsProperties.ContentDescription)?.firstOrNull().orEmpty()
             val label = buildList {
                 config.getOrNull(SemanticsProperties.Text)?.forEach { add(it.text) }
                 config.getOrNull(SemanticsProperties.ContentDescription)?.forEach { add(it) }
@@ -44,6 +46,7 @@ internal class VoiceScreen(private val view: View) {
                 scrollsHorizontally = canScroll && config.getOrNull(SemanticsProperties.HorizontalScrollAxisRange) != null,
                 scrollsVertically = canScroll && config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) != null,
                 id = index,
+                primary = primary.trim(),
             )
         }
     }

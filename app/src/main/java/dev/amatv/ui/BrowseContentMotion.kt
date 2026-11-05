@@ -7,11 +7,14 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 
 /**
@@ -41,9 +44,11 @@ internal fun <T> BrowseContentMotion(
                     easing = MotionTokens.BrowseContentEasing,
                 ),
             ) + slideInVertically(
-                animationSpec = tween(
-                    MotionTokens.BrowseContentEnterMillis,
-                    easing = MotionTokens.BrowseContentEasing,
+                // A soft spring: the page settles into place with a hint of give, not a linear stop.
+                animationSpec = spring(
+                    dampingRatio = 0.74f,
+                    stiffness = 320f,
+                    visibilityThreshold = IntOffset.VisibilityThreshold,
                 ),
                 initialOffsetY = {
                     with(density) { MotionTokens.BrowseContentTravelDp.dp.roundToPx() }

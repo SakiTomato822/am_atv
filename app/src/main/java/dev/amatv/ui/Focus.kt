@@ -116,10 +116,13 @@ fun FocusSurface(
     }
     val targetScale = when {
         pressed && active -> focusedScale * 0.972f
-        pressed -> 0.985f
+        pressed -> 0.955f
         active -> focusedScale
         else -> 1f
     }
+    // Touch: sink quickly and firmly, then spring back with a small overshoot on release.
+    val scaleSpec = if (pressed) spring<Float>(dampingRatio = 0.9f, stiffness = 900f)
+    else spring(dampingRatio = 0.58f, stiffness = 420f)
     val scale: State<Float>
     val focusProgress: State<Float>
     val pressTarget = if (pressed && interactive) 1f else 0f
@@ -131,7 +134,7 @@ fun FocusSurface(
             val scaleAnimation = remember(deferredInteraction.activationEpoch) { Animatable(1f) }
             val progressAnimation = remember(deferredInteraction.activationEpoch) { Animatable(0f) }
             LaunchedEffect(scaleAnimation, targetScale) {
-                scaleAnimation.animateTo(targetScale, spring(dampingRatio = 0.82f, stiffness = 430f))
+                scaleAnimation.animateTo(targetScale, scaleSpec)
             }
             LaunchedEffect(progressAnimation, active) {
                 progressAnimation.animateTo(if (active) 1f else 0f,
@@ -156,7 +159,7 @@ fun FocusSurface(
     } else {
         scale = animateFloatAsState(
             targetValue = targetScale,
-            animationSpec = spring(dampingRatio = 0.82f, stiffness = 430f),
+            animationSpec = scaleSpec,
             label = "focus-scale",
         )
         focusProgress = animateFloatAsState(
