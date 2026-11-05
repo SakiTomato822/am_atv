@@ -395,27 +395,39 @@ fun AmAtvApp() {
     // The library's names, used on this device only (hotwords, candidate ranking). Loaded only
     // with voice on, after startup traffic settles, and capped so huge libraries stay cheap.
     LaunchedEffect(connectionState, reloadNonce, voiceEnabled) {
-        voiceLibrary = emptyList()
+        android.util.Log.i("AMATV-Voice", "Library names: voice=$voiceEnabled connection=$connectionState reload=$reloadNonce")
         if (!BuildConfig.FLYME_AUTO || !voiceEnabled || connectionState != MusicConnectionState.SignedIn) {
+            voiceLibrary = emptyList()
             return@LaunchedEffect
         }
         delay(6_000L)
         val loadPages = listOf(
-            services::librarySongsPage, services::libraryAlbumsPage,
-            services::libraryArtistsPage, services::libraryPlaylistsPage,
+            "songs" to services::librarySongsPage, "albums" to services::libraryAlbumsPage,
+            "artists" to services::libraryArtistsPage, "playlists" to services::libraryPlaylistsPage,
         )
         val entries = mutableListOf<Track>()
-        for (load in loadPages) {
+        for ((name, load) in loadPages) {
             val seen = mutableSetOf<String?>()
             var next: String? = null
             var pages = 0
+            var count = 0
             while (seen.add(next) && pages++ < 40) {
-                val page = cancellableResult { load(next) }.getOrNull() ?: break
+                val result = cancellableResult { load(next) }
+                val page = result.getOrNull()
+                if (page == null) {
+                    android.util.Log.w("AMATV-Voice", "Library names: $name page $pages failed: " +
+                        "${result.exceptionOrNull()?.javaClass?.simpleName} ${result.exceptionOrNull()?.message?.take(120)}")
+                    break
+                }
                 entries += page.items
+                count += page.items.size
                 next = page.nextPage ?: break
             }
+            android.util.Log.i("AMATV-Voice", "Library names: $name $count in $pages page(s)")
         }
+        // Kept from the last load until this one is done (a reload no longer empties it first).
         voiceLibrary = entries.distinctBy { it.catalogKind to (it.catalogId ?: it.id) }
+        android.util.Log.i("AMATV-Voice", "Library names: ${voiceLibrary.size} entries")
     }
     /** The list on screen that "第三个" counts in; the browse pages report it. */
     var voicePickable by remember { mutableStateOf(emptyList<Track>()) }
