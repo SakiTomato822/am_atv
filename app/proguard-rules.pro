@@ -8,3 +8,6 @@
 -dontwarn org.apache.maven.plugins.annotations.Mojo
 -dontwarn org.slf4j.Logger
 -dontwarn org.slf4j.LoggerFactory
+
+# sherpa-onnx: the native library reads config fields and builds result objects by name.
+-keep class com.k2fsa.sherpa.onnx.** { *; }
