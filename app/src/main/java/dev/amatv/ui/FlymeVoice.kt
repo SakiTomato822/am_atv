@@ -152,7 +152,7 @@ internal fun FlymeVoicePanel(state: VoiceUiState?, onDismiss: () -> Unit, onChoi
                                 dev.amatv.model.CatalogKind.Station -> R.string.services_kind_station
                                 dev.amatv.model.CatalogKind.MusicVideo -> R.string.services_kind_music_video
                             })
-                            val details = listOf(kind, item.artist, item.album.takeIf { item.catalogKind == dev.amatv.model.CatalogKind.Song && it != item.title }.orEmpty())
+                            val details = listOf(kind, item.artist.takeUnless { item.catalogKind == dev.amatv.model.CatalogKind.Artist }.orEmpty(),item.album.takeIf { item.catalogKind == dev.amatv.model.CatalogKind.Song && it != item.title }.orEmpty())
                                 .filter { it.isNotBlank() }.joinToString(" · ")
                             // Rows drop in one after another with a soft spring; only layer
                             // properties animate, so the list never re-measures while it moves.
