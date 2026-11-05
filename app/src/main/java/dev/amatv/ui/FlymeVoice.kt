@@ -303,3 +303,9 @@ internal fun FlymeVoiceGlow(visible: Boolean) {
         }
     }
 }
+
+/** The list "第三个" counts in on the current page, and how that page opens one of its items. */
+internal class VoiceList(val items: List<dev.amatv.model.Track>, val open: (dev.amatv.model.Track) -> Unit)
+
+/** Pages with their own lists (the library grid) report them here; null when they go away. */
+internal val LocalVoiceListSink = androidx.compose.runtime.staticCompositionLocalOf<(VoiceList?) -> Unit> { {} }

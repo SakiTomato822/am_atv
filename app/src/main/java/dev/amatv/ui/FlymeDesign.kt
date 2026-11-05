@@ -577,6 +577,10 @@ internal fun FlymeLibrary(
                 val items = remember(shelf.items, effectiveSort, descending) {
                     sortLibrary(shelf.items, effectiveSort, descending, collator)
                 }
+                // Voice: "第三个" is the third item as shown, in this tab and order.
+                val voiceSink = LocalVoiceListSink.current
+                LaunchedEffect(items) { voiceSink(VoiceList(items) { onOpenTrack(it, items) }) }
+                androidx.compose.runtime.DisposableEffect(voiceSink) { onDispose { voiceSink(null) } }
                 val requestMore = {
                     if (page != null && page.hasMore && !page.loading && !page.failed) onLoadMore(category.shelfId)
                 }

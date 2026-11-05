@@ -356,6 +356,15 @@ fun AmAtvApp() {
     val voiceEnabled = services.playbackOptions.settings.collectAsState().value.voiceEnabled
     /** The list on screen that "第三个" counts in; the browse pages report it. */
     var voicePickable by remember { mutableStateOf(emptyList<Track>()) }
+    /** How the page that reported [voicePickable] opens an item; null: play it as a song. */
+    var voiceOpener by remember { mutableStateOf<((Track) -> Unit)?>(null) }
+    // One instance: a new lambda would recompose everything under the static local.
+    val voiceListSink = remember {
+        { list: VoiceList? ->
+            voicePickable = list?.items ?: emptyList()
+            voiceOpener = list?.open
+        }
+    }
     val voicePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) voiceStartRequests++ else voiceState = VoiceUiState.Message(AppText.text(R.string.voice_permission_needed))
     }
@@ -2063,7 +2072,9 @@ fun AmAtvApp() {
                 }
                 val picked = list.getOrNull(command.number - 1)
                     ?: return AppText.text(R.string.voice_no_item_format, command.number)
-                playTrack(picked, contextQueue = list.filter { it.openAction == CatalogOpenAction.Play })
+                val opener = voiceOpener
+                if (opener != null) opener(picked)
+                else playTrack(picked, contextQueue = list.filter { it.openAction == CatalogOpenAction.Play })
             }
             is VoiceCommand.Open -> {
                 if (tapOnScreen(command.label)) return null
@@ -2094,10 +2105,18 @@ fun AmAtvApp() {
                     return true
                 }
                 if (playFromScreen()) return null
-                if (LIBRARY_LIST_HINT.containsMatchIn(command.query) && destination != Destination.Library) {
-                    destination = Destination.Library
-                    delay(900L)
-                    if (playFromScreen()) return null
+                if (LIBRARY_LIST_HINT.containsMatchIn(command.query)) {
+                    if (destination != Destination.Library) {
+                        destination = Destination.Library
+                        delay(900L)
+                        if (playFromScreen()) return null
+                    }
+                    // Lists live in the 播放列表 tab; a song search for "喜好歌曲" only finds noise.
+                    if (tapOnScreen(AppText.text(R.string.app_library_playlists))) {
+                        delay(800L)
+                        if (playFromScreen()) return null
+                    }
+                    return AppText.text(R.string.voice_not_found_format, command.query)
                 }
                 voiceState = VoiceUiState.Searching(command.query)
                 if (command.query.endsWith("电台")) {
@@ -2387,7 +2406,10 @@ fun AmAtvApp() {
             color = if (BuildConfig.FLYME_AUTO) LocalFlymePalette.current.page else Color(0xFF080A09),
             contentColor = FlymeInk,
         ) {
-            CompositionLocalProvider(LocalFocusFrameController provides focusFrameController) {
+            CompositionLocalProvider(
+                LocalFocusFrameController provides focusFrameController,
+                LocalVoiceListSink provides voiceListSink,
+            ) {
             Box(Modifier.fillMaxSize()) {
                 Box(
                     modifier = Modifier
@@ -2408,7 +2430,7 @@ fun AmAtvApp() {
                     ) {
                     BrowseShell(
                         onVoice = null,
-                        onVoicePickable = { voicePickable = it },
+                        onVoicePickable = { voicePickable = it; voiceOpener = null },
                         voiceActive = voiceState is VoiceUiState.Listening,
                         onMiniPlayerPlaced = { miniPlayerCenter = it },
                         detailRequest = browseDetailRequest,
@@ -2785,7 +2807,11 @@ private fun BrowseShell(
             .filter { it.catalogKind == CatalogKind.Song || it.catalogKind == CatalogKind.MusicVideo }.take(8)
         else -> emptyList()
     }.filter { it.openAction == CatalogOpenAction.Play }
-    LaunchedEffect(voicePickable) { onVoicePickable(voicePickable) }
+    // The library grid reports its own list (LocalVoiceListSink); elsewhere this page's list counts.
+    val libraryGridShown = destination == Destination.Library && collection == null && artist == null
+    LaunchedEffect(voicePickable, destination, libraryGridShown) {
+        if (!libraryGridShown) onVoicePickable(voicePickable)
+    }
     var returnToContent by remember(destination) { mutableIntStateOf(0) }
     val detailFocus = remember(destination) { ContentFocusEntry() }
     val detailFirstFocus = remember(destination) { FocusRequester() }
