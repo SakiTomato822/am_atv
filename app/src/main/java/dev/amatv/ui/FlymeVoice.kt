@@ -1,6 +1,8 @@
 package dev.amatv.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -11,7 +13,11 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.semantics.onClick
+import dev.amatv.integration.voice.VoiceLevel
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
@@ -78,8 +84,8 @@ internal fun FlymeVoiceButton(active: Boolean, onClick: () -> Unit, modifier: Mo
 }
 
 /**
- * A card that drops in below the top bar while voice is in use: a pulsing mic, the words heard so
- * far, then what is being searched or why nothing happened. Tapping outside cancels.
+ * Siri-style: a translucent bubble rises from the bottom with the words heard so far, updates as
+ * they come, and floats up and away when done. Tapping outside cancels.
  */
 @Composable
 internal fun FlymeVoicePanel(state: VoiceUiState?, onDismiss: () -> Unit) {
@@ -88,25 +94,29 @@ internal fun FlymeVoicePanel(state: VoiceUiState?, onDismiss: () -> Unit) {
             interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss,
         ))
     }
-    Box(Modifier.fillMaxSize().padding(top = 78.dp), contentAlignment = Alignment.TopCenter) {
+    // The last thing shown stays during the exit, so the bubble floats away with its words.
+    var lastShown by remember { androidx.compose.runtime.mutableStateOf<VoiceUiState>(VoiceUiState.Message("")) }
+    if (state != null) lastShown = state
+    Box(Modifier.fillMaxSize().padding(bottom = 104.dp, start = 40.dp, end = 40.dp), contentAlignment = Alignment.BottomCenter) {
         AnimatedVisibility(
             visible = state != null,
-            enter = fadeIn(tween(160)) + slideInVertically(tween(220)) { -it / 3 },
-            exit = fadeOut(tween(160)) + slideOutVertically(tween(200)) { -it / 4 },
+            enter = fadeIn(tween(220)) + slideInVertically(tween(320, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { it },
+            exit = fadeOut(tween(420)) + slideOutVertically(tween(520)) { -it * 2 },
         ) {
-            val shown = state ?: VoiceUiState.Message("")
+            val shown = lastShown
             val palette = LocalFlymePalette.current
             Row(
-                Modifier.width(620.dp)
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(palette.pageTop.copy(alpha = 0.97f))
-                    .border(1.dp, FlymeInk.copy(alpha = 0.12f), RoundedCornerShape(28.dp))
-                    .padding(horizontal = 26.dp, vertical = 22.dp),
+                Modifier.widthIn(min = 320.dp, max = 860.dp)
+                    .graphicsLayer { shadowElevation = 18f; shape = RoundedCornerShape(36.dp); clip = true }
+                    .background(palette.pageTop.copy(alpha = 0.9f))
+                    .border(1.dp, FlymeInk.copy(alpha = 0.12f), RoundedCornerShape(36.dp))
+                    .animateContentSize()
+                    .padding(horizontal = 26.dp, vertical = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(20.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 VoicePulse(listening = shown is VoiceUiState.Listening && shown.ready)
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     val (title, body) = when (shown) {
                         is VoiceUiState.Listening -> stringResource(
                             if (shown.ready) R.string.voice_listening else R.string.voice_preparing,
@@ -153,16 +163,18 @@ private fun VoicePulse(listening: Boolean) {
 }
 
 /**
- * The mic on every page (browse, Now Playing, album and artist pages): a round button the user can
- * drag out of the way. [position] is its centre as a fraction of the screen, so it stays on screen
- * whatever the size; [onMoved] saves the new place.
+ * The mic on every page (browse, Now Playing, album and artist pages). Tap: a session that keeps
+ * listening until tapped again. Hold: walkie-talkie, records until released. Drag (move before
+ * the hold starts): put it somewhere else. [position] is its centre as a fraction of the screen.
  */
 @Composable
 internal fun FlymeFloatingVoiceButton(
     active: Boolean,
     position: androidx.compose.ui.geometry.Offset,
     onMoved: (androidx.compose.ui.geometry.Offset) -> Unit,
-    onClick: () -> Unit,
+    onTap: () -> Unit,
+    onHoldStart: () -> Unit,
+    onHoldEnd: () -> Unit,
 ) {
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = androidx.compose.ui.platform.LocalDensity.current
@@ -173,6 +185,10 @@ internal fun FlymeFloatingVoiceButton(
         val x = (fraction.x * widthPx - sizePx / 2).coerceIn(0f, (widthPx - sizePx).coerceAtLeast(0f))
         val y = (fraction.y * heightPx - sizePx / 2).coerceIn(0f, (heightPx - sizePx).coerceAtLeast(0f))
         val label = stringResource(R.string.voice_button)
+        val tap by androidx.compose.runtime.rememberUpdatedState(onTap)
+        val holdStart by androidx.compose.runtime.rememberUpdatedState(onHoldStart)
+        val holdEnd by androidx.compose.runtime.rememberUpdatedState(onHoldEnd)
+        val moved by androidx.compose.runtime.rememberUpdatedState(onMoved)
         Box(
             Modifier
                 .offset { androidx.compose.ui.unit.IntOffset(x.toInt(), y.toInt()) }
@@ -181,20 +197,106 @@ internal fun FlymeFloatingVoiceButton(
                 .background(if (active) FlymeInk else LocalFlymePalette.current.pageTop.copy(alpha = 0.94f))
                 .border(1.dp, FlymeInk.copy(alpha = 0.14f), CircleShape)
                 .pointerInput(widthPx, heightPx) {
-                    detectDragGestures(onDragEnd = { onMoved(fraction) }) { change, drag ->
-                        change.consume()
-                        fraction = androidx.compose.ui.geometry.Offset(
-                            ((fraction.x * widthPx + drag.x) / widthPx).coerceIn(0.03f, 0.97f),
-                            ((fraction.y * heightPx + drag.y) / heightPx).coerceIn(0.05f, 0.95f),
-                        )
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        var dragging = false
+                        // Until the long-press time: a release is a tap, a move is a drag.
+                        val released = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                            var up = false
+                            while (true) {
+                                val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
+                                if (change == null || !change.pressed) {
+                                    up = true
+                                    break
+                                }
+                                if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
+                                    dragging = true
+                                    break
+                                }
+                            }
+                            up
+                        }
+                        when {
+                            released == true -> tap()
+                            dragging -> {
+                                while (true) {
+                                    val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!change.pressed) break
+                                    val delta = change.positionChange()
+                                    change.consume()
+                                    fraction = androidx.compose.ui.geometry.Offset(
+                                        ((fraction.x * widthPx + delta.x) / widthPx).coerceIn(0.03f, 0.97f),
+                                        ((fraction.y * heightPx + delta.y) / heightPx).coerceIn(0.05f, 0.95f),
+                                    )
+                                }
+                                moved(fraction)
+                            }
+                            else -> {
+                                holdStart()
+                                while (true) {
+                                    val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                                    change.consume()
+                                    if (!change.pressed) break
+                                }
+                                holdEnd()
+                            }
+                        }
                     }
                 }
-                .clickable(onClickLabel = label, onClick = onClick)
-                .semantics { contentDescription = label },
+                .semantics {
+                    contentDescription = label
+                    onClick(label) { tap(); true }
+                },
             contentAlignment = Alignment.Center,
         ) {
             Icon(Icons.Rounded.Mic, null, modifier = Modifier.size(26.dp),
                 tint = if (active) FlymeOnInk else FlymeInk.copy(alpha = 0.85f))
+        }
+    }
+}
+
+/**
+ * Siri-style glow around the screen edge while voice is on: a band of blue, violet, pink and
+ * orange that runs around the edge, thicker and brighter as the user speaks. Android 11 has no
+ * blur, so the glow is a few strokes from wide and faint to narrow and bright.
+ */
+@Composable
+internal fun FlymeVoiceGlow(visible: Boolean) {
+    val shown by androidx.compose.animation.core.animateFloatAsState(
+        if (visible) 1f else 0f, tween(if (visible) 280 else 420), label = "voice-glow",
+    )
+    if (shown <= 0.01f) return
+    val spin by rememberInfiniteTransition(label = "voice-glow-spin").animateFloat(
+        initialValue = 0f, targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(3200, easing = androidx.compose.animation.core.LinearEasing)),
+        label = "voice-glow-angle",
+    )
+    var level by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        while (true) androidx.compose.runtime.withFrameNanos { level += (VoiceLevel.value - level) * 0.35f }
+    }
+    val colors = remember {
+        listOf(0xFF3B82F6, 0xFF8B5CF6, 0xFFEC4899, 0xFFF97316, 0xFFFACC15, 0xFF22D3EE, 0xFF3B82F6)
+            .map { androidx.compose.ui.graphics.Color(it) }
+    }
+    androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+        val center = androidx.compose.ui.geometry.Offset(size.width / 2, size.height / 2)
+        val shader = androidx.compose.ui.graphics.SweepGradientShader(center, colors)
+        shader.setLocalMatrix(android.graphics.Matrix().apply { setRotate(spin, center.x, center.y) })
+        val brush = androidx.compose.ui.graphics.ShaderBrush(shader)
+        val base = 5.dp.toPx() + level * 12.dp.toPx()
+        val corner = 26.dp.toPx()
+        for (layer in 3 downTo 0) {
+            val width = base * (1f + layer * 1.1f)
+            val alpha = shown * (0.9f - layer * 0.2f) * (0.65f + 0.35f * level)
+            drawRoundRect(
+                brush = brush,
+                topLeft = androidx.compose.ui.geometry.Offset(width / 2, width / 2),
+                size = androidx.compose.ui.geometry.Size(size.width - width, size.height - width),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(corner, corner),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width),
+                alpha = alpha.coerceIn(0f, 1f) * (if (layer == 0) 1f else 0.45f),
+            )
         }
     }
 }

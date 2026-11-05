@@ -106,8 +106,8 @@ class VoiceService(context: Context) {
         if (settings.value.engine.startsWith("model:")) engine()?.preload()
     }
 
-    fun listen(hotwords: List<String>): Flow<VoiceEvent> =
-        engine()?.listen(hotwords) ?: flowOf(VoiceEvent.Failed(VoiceFailure.NotConfigured))
+    fun listen(hotwords: List<String>, control: ListenControl = ListenControl()): Flow<VoiceEvent> =
+        engine()?.listen(hotwords, control) ?: flowOf(VoiceEvent.Failed(VoiceFailure.NotConfigured))
 
     private fun releaseEngine() = synchronized(this) {
         local?.second?.release()

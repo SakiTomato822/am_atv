@@ -44,9 +44,37 @@ sealed interface VoiceEvent {
 
 enum class VoiceFailure { ModelMissing, MicUnavailable, NoSpeech, NotConfigured, Network }
 
+/**
+ * How one listen ends. Normally at a pause in speech; with [holdToTalk] (the mic held down like a
+ * walkie-talkie) only when the user lets go, which sets [finish].
+ */
+class ListenControl(val holdToTalk: Boolean = false) {
+    @Volatile var finish: Boolean = false
+}
+
+/** The microphone level for the screen glow, 0 (silence) .. 1 (loud speech), smoothed. */
+object VoiceLevel {
+    @Volatile var value: Float = 0f
+        private set
+
+    internal fun update(rms: Double) {
+        // -50 dBFS .. -10 dBFS mapped to 0..1; rises fast, falls slowly.
+        val db = 20 * kotlin.math.log10(rms.coerceAtLeast(1e-5))
+        val target = ((db + 50) / 40).toFloat().coerceIn(0f, 1f)
+        value = if (target > value) value + (target - value) * 0.6f else value + (target - value) * 0.15f
+    }
+
+    internal fun reset() {
+        value = 0f
+    }
+}
+
+private fun rmsOf(samples: ShortArray, count: Int): Double =
+    sqrt((0 until count).sumOf { (samples[it] / 32768.0) * (samples[it] / 32768.0) } / count.coerceAtLeast(1))
+
 /** One way of turning speech into text. [hotwords]: names worth favouring (library, recent plays). */
 interface SpeechEngine {
-    fun listen(hotwords: List<String>): Flow<VoiceEvent>
+    fun listen(hotwords: List<String>, control: ListenControl = ListenControl()): Flow<VoiceEvent>
     /** Loads the model ahead of the first tap (slow for the large ones); call off the main thread. */
     fun preload() = Unit
     fun release() = Unit
@@ -84,7 +112,7 @@ private suspend fun FlowCollector<VoiceEvent>.openMic(): AudioRecord? {
  * the level rises clearly above the room's noise, ends after [SILENCE_MS] of quiet. Null when
  * nothing was said or the microphone failed (a [VoiceEvent.Failed] has been emitted).
  */
-internal suspend fun FlowCollector<VoiceEvent>.recordUtterance(): ShortArray? {
+internal suspend fun FlowCollector<VoiceEvent>.recordUtterance(control: ListenControl): ShortArray? {
     val audio = openMic() ?: return null
     try {
         val buffer = ShortArray(CHUNK)
@@ -96,7 +124,10 @@ internal suspend fun FlowCollector<VoiceEvent>.recordUtterance(): ShortArray? {
         var quietMs = 0L
         var zeroReads = 0
         val pre = ArrayDeque<ShortArray>() // 300 ms before speech starts, so first syllables survive
+        // Held down: everything counts as speech until the user lets go.
+        if (control.holdToTalk) speaking = true
         while (currentCoroutineContext().isActive) {
+            if (control.finish) break
             val read = audio.read(buffer, 0, buffer.size)
             if (read < 0) { emit(VoiceEvent.Failed(VoiceFailure.MicUnavailable)); return null }
             if (read == 0) {
@@ -104,8 +135,14 @@ internal suspend fun FlowCollector<VoiceEvent>.recordUtterance(): ShortArray? {
                 continue
             }
             val chunk = buffer.copyOf(read)
-            val rms = sqrt(chunk.sumOf { (it / 32768.0) * (it / 32768.0) } / read)
+            val rms = rmsOf(chunk, read)
+            VoiceLevel.update(rms)
             val elapsed = SystemClock.elapsedRealtime() - started
+            if (control.holdToTalk) {
+                speech.writeShorts(chunk)
+                if (elapsed > HOLD_MAX_MS) break
+                continue
+            }
             if (!speaking) {
                 if (noiseChunks < 3) { noise += rms; noiseChunks++ }
                 val floor = (noise / noiseChunks.coerceAtLeast(1)).coerceAtLeast(0.004)
@@ -125,12 +162,16 @@ internal suspend fun FlowCollector<VoiceEvent>.recordUtterance(): ShortArray? {
                 if (quietMs >= SILENCE_MS || elapsed > MAX_MS) break
             }
         }
-        if (!speaking) return null
+        if (!speaking || speech.size() < SAMPLE_RATE / 5) {
+            if (control.holdToTalk) emit(VoiceEvent.Failed(VoiceFailure.NoSpeech))
+            return null
+        }
         val bytes = speech.toByteArray()
         return ShortArray(bytes.size / 2) { (bytes[it * 2].toInt() and 0xFF or (bytes[it * 2 + 1].toInt() shl 8)).toShort() }
     } finally {
         runCatching { audio.stop() }
         audio.release()
+        VoiceLevel.reset()
     }
 }
 
@@ -141,6 +182,7 @@ private fun ByteArrayOutputStream.writeShorts(samples: ShortArray) {
 private const val SILENCE_MS = 800L
 private const val NO_SPEECH_MS = 5_000L
 private const val MAX_MS = 10_000L
+private const val HOLD_MAX_MS = 30_000L
 
 internal fun ShortArray.toFloats() = FloatArray(size) { this[it] / 32768f }
 
@@ -196,7 +238,7 @@ class SherpaStreamingEngine(private val model: VoiceModel, private val store: Vo
         if (store.isInstalled(model)) runCatching { recognizer() }.onFailure { Log.w(TAG, "Preload failed", it) }
     }
 
-    override fun listen(hotwords: List<String>): Flow<VoiceEvent> = flow {
+    override fun listen(hotwords: List<String>, control: ListenControl): Flow<VoiceEvent> = flow {
         if (!store.isInstalled(model)) { emit(VoiceEvent.Failed(VoiceFailure.ModelMissing)); return@flow }
         val engine = recognizer()
         val audio = openMic() ?: return@flow
@@ -215,11 +257,15 @@ class SherpaStreamingEngine(private val model: VoiceModel, private val store: Vo
                     if (++zeroReads > 30) { emit(VoiceEvent.Failed(VoiceFailure.MicUnavailable)); return@flow }
                     continue
                 }
+                VoiceLevel.update(rmsOf(buffer, read))
                 stream.acceptWaveform(FloatArray(read) { buffer[it] / 32768f }, SAMPLE_RATE)
                 while (engine.isReady(stream)) engine.decode(stream)
                 val text = engine.getResult(stream).text.trim()
                 if (text != heard) { heard = text; emit(VoiceEvent.Partial(text)) }
-                if (engine.isEndpoint(stream) || SystemClock.elapsedRealtime() - started > MAX_MS) break
+                val elapsed = SystemClock.elapsedRealtime() - started
+                if (control.finish) break
+                if (control.holdToTalk) { if (elapsed > HOLD_MAX_MS) break } // only letting go ends it
+                else if (engine.isEndpoint(stream) || elapsed > MAX_MS) break
             }
             stream.inputFinished()
             while (engine.isReady(stream)) engine.decode(stream)
@@ -229,6 +275,7 @@ class SherpaStreamingEngine(private val model: VoiceModel, private val store: Vo
             runCatching { audio.stop() }
             audio.release()
             stream.release()
+            VoiceLevel.reset()
         }
     }.flowOn(Dispatchers.IO)
 
@@ -256,13 +303,13 @@ class SherpaOfflineEngine(private val model: VoiceModel, private val store: Voic
         )).also { recognizer = it }
     }
 
-    override fun listen(hotwords: List<String>): Flow<VoiceEvent> = flow {
+    override fun listen(hotwords: List<String>, control: ListenControl): Flow<VoiceEvent> = flow {
         if (!store.isInstalled(model)) { emit(VoiceEvent.Failed(VoiceFailure.ModelMissing)); return@flow }
         // Start listening at once; a model not loaded yet loads while the user speaks. The load
         // belongs to this listen: cancelling the recording cancels the wait for it.
         kotlinx.coroutines.coroutineScope {
             val loading = async(Dispatchers.Default) { recognizer() }
-            val pcm = recordUtterance()
+            val pcm = recordUtterance(control)
             if (pcm == null) {
                 loading.cancel()
                 return@coroutineScope
@@ -296,9 +343,9 @@ abstract class CloudSpeechEngine : SpeechEngine {
     protected abstract fun configured(): Boolean
     protected abstract fun transcribe(pcm: ShortArray, hotwords: List<String>): String
 
-    override fun listen(hotwords: List<String>): Flow<VoiceEvent> = flow {
+    override fun listen(hotwords: List<String>, control: ListenControl): Flow<VoiceEvent> = flow {
         if (!configured()) { emit(VoiceEvent.Failed(VoiceFailure.NotConfigured)); return@flow }
-        val pcm = recordUtterance() ?: return@flow
+        val pcm = recordUtterance(control) ?: return@flow
         emit(VoiceEvent.Recognizing)
         val text = runCatching { transcribe(pcm, hotwords) }
             .onFailure { Log.w(TAG, "Cloud recognition failed: ${it.javaClass.simpleName}: ${it.message?.take(200)}") }

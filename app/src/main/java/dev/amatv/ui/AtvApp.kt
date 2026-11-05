@@ -73,6 +73,7 @@ import dev.amatv.integration.toSessionJson
 import dev.amatv.data.MockCatalog
 import dev.amatv.i18n.AppText
 import dev.amatv.integration.voice.VoiceService
+import dev.amatv.integration.voice.ListenControl
 import dev.amatv.integration.voice.bestTarget
 import dev.amatv.integration.voice.scrollTarget
 import dev.amatv.integration.parseVoiceSteps
@@ -346,6 +347,9 @@ fun AmAtvApp() {
     var voiceState by remember { mutableStateOf<VoiceUiState?>(null) }
     var voiceJob by remember { mutableStateOf<Job?>(null) }
     var voiceStartRequests by remember { mutableIntStateOf(0) }
+    /** The walkie-talkie listen in progress (released -> finish), and which session is current. */
+    var voiceHold by remember { mutableStateOf<ListenControl?>(null) }
+    var voiceGeneration by remember { mutableIntStateOf(0) }
     val voiceEnabled = services.playbackOptions.settings.collectAsState().value.voiceEnabled
     /** The list on screen that "第三个" counts in; the browse pages report it. */
     var voicePickable by remember { mutableStateOf(emptyList<Track>()) }
@@ -1973,6 +1977,11 @@ fun AmAtvApp() {
         voiceState = null
     }
 
+    /** Steps after which the music is the user's choice, not ours to resume. */
+    fun VoiceCommand.decidesPlayback(): Boolean = this is VoiceCommand.Pause || this is VoiceCommand.Resume ||
+        this is VoiceCommand.Next || this is VoiceCommand.Previous || this is VoiceCommand.Play ||
+        this is VoiceCommand.Pick || this is VoiceCommand.PersonalStation
+
     /** Names worth favouring in recognition: what is on screen and what was played lately. */
     fun voiceHotwords(): List<String> = buildList {
         addAll(voicePickable.flatMap { listOf(it.title, it.artist) })
@@ -2083,88 +2092,121 @@ fun AmAtvApp() {
         return null
     }
 
-    /** Listens once and acts on what was said; a second tap while listening cancels. */
-    fun startVoice() {
-        if (voiceJob?.isActive == true) {
-            dismissVoice()
-            return
-        }
+    /** Whether voice can start now; asks for the microphone or explains what is missing. */
+    fun voiceUsable(): Boolean {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            return
+            return false
         }
         if (!voice.ready()) {
             voiceState = VoiceUiState.Message(AppText.text(R.string.voice_engine_not_ready))
             scope.launch {
                 delay(3_000L)
-                if (voiceState is VoiceUiState.Message) voiceState = null
+                if (voiceState is VoiceUiState.Message && voiceJob?.isActive != true) voiceState = null
             }
-            return
+            return false
         }
-        // The speakers would drown the voice: pause while listening, carry on afterwards.
+        return true
+    }
+
+    fun voiceFailureText(failure: VoiceFailure?): String = AppText.text(when (failure) {
+        VoiceFailure.MicUnavailable -> R.string.voice_mic_unavailable
+        VoiceFailure.ModelMissing, VoiceFailure.NotConfigured -> R.string.voice_engine_not_ready
+        VoiceFailure.Network -> R.string.voice_network_failed
+        else -> R.string.voice_not_understood
+    })
+
+    /**
+     * A voice session. Tap ([holdToTalk] false): keeps listening, one sentence after another, until
+     * the user taps again, stays silent, or a sentence starts music (the mic would hear it). Hold:
+     * one sentence, recorded until the button is released. Our music pauses meanwhile and carries
+     * on afterwards unless a command decided otherwise.
+     */
+    fun startVoiceSession(holdToTalk: Boolean) {
+        if (!voiceUsable()) return
+        val generation = ++voiceGeneration
         val resumeAfter = playWhenReady
         if (resumeAfter) pausePlayback()
-        voiceState = VoiceUiState.Listening("", ready = false)
         val hotwords = voiceHotwords()
+        voiceState = VoiceUiState.Listening("", ready = false)
         voiceJob = scope.launch {
-            suspend fun showBriefly(text: String) {
-                voiceState = VoiceUiState.Message(text)
-                delay(2_400L)
-                voiceState = null
+            var playbackDecided = false
+            var problem: String? = null
+            fun finishPlayback() {
+                if (generation == voiceGeneration && resumeAfter && !playbackDecided && !playWhenReady) requestPlayback()
             }
-            var heard: String? = null
-            var failure: VoiceFailure? = null
             try {
-                voice.listen(hotwords).collect { event ->
-                    when (event) {
-                        VoiceEvent.Listening -> voiceState = VoiceUiState.Listening("")
-                        is VoiceEvent.Partial -> voiceState = VoiceUiState.Listening(event.text)
-                        VoiceEvent.Recognizing -> voiceState = VoiceUiState.Recognizing
-                        is VoiceEvent.Final -> heard = event.text
-                        is VoiceEvent.Failed -> failure = event.reason
+                while (true) {
+                    val control = ListenControl(holdToTalk)
+                    if (holdToTalk) voiceHold = control
+                    var heard: String? = null
+                    var failure: VoiceFailure? = null
+                    voice.listen(hotwords, control).collect { event ->
+                        when (event) {
+                            VoiceEvent.Listening -> voiceState = VoiceUiState.Listening("")
+                            is VoiceEvent.Partial -> voiceState = VoiceUiState.Listening(event.text)
+                            VoiceEvent.Recognizing -> voiceState = VoiceUiState.Recognizing
+                            is VoiceEvent.Final -> heard = event.text
+                            is VoiceEvent.Failed -> failure = event.reason
+                        }
                     }
+                    voiceHold = null
+                    val said = heard
+                    if (said == null) {
+                        // A tap session ends quietly when the user stops talking.
+                        if (holdToTalk || failure != VoiceFailure.NoSpeech) problem = voiceFailureText(failure)
+                        break
+                    }
+                    voiceState = VoiceUiState.Heard(said)
+                    val steps = parseVoiceSteps(said)
+                    for ((index, step) in steps.withIndex()) {
+                        if (index > 0) delay(700L) // let the page the previous step opened appear
+                        problem = runVoiceStep(step)
+                        if (problem != null) break
+                    }
+                    if (problem == null && steps.any { it.decidesPlayback() }) playbackDecided = true
+                    if (holdToTalk || playbackDecided) break
+                    if (problem != null) {
+                        voiceState = VoiceUiState.Message(problem)
+                        problem = null
+                        delay(1_800L)
+                    } else delay(500L)
+                    voiceState = VoiceUiState.Listening("", ready = false)
                 }
             } catch (cancelled: CancellationException) {
-                if (resumeAfter) requestPlayback()
+                voiceHold = null
+                finishPlayback()
                 throw cancelled
             }
-            val said = heard
-            if (said == null) {
-                if (resumeAfter) requestPlayback()
-                showBriefly(AppText.text(when (failure) {
-                    VoiceFailure.MicUnavailable -> R.string.voice_mic_unavailable
-                    VoiceFailure.ModelMissing, VoiceFailure.NotConfigured -> R.string.voice_engine_not_ready
-                    VoiceFailure.Network -> R.string.voice_network_failed
-                    else -> R.string.voice_not_understood
-                }))
-                voiceJob = null
-                return@launch
-            }
-            voiceState = VoiceUiState.Heard(said)
-            val steps = parseVoiceSteps(said)
-            val changesPlayback = steps.any {
-                it is VoiceCommand.Pause || it is VoiceCommand.Resume || it is VoiceCommand.Next ||
-                    it is VoiceCommand.Previous || it is VoiceCommand.Play || it is VoiceCommand.Pick ||
-                    it is VoiceCommand.PersonalStation || it is VoiceCommand.Open
-            }
-            var problem: String? = null
-            for ((index, step) in steps.withIndex()) {
-                if (index > 0) delay(700L) // let the page the previous step opened appear
-                problem = runVoiceStep(step)
-                if (problem != null) break
-            }
-            if (resumeAfter && (!changesPlayback || problem != null) && !playWhenReady) requestPlayback()
-            if (problem != null) {
-                showBriefly(problem)
-            } else {
-                delay(600L)
+            finishPlayback()
+            val shown = problem
+            if (shown != null) {
+                voiceState = VoiceUiState.Message(shown)
+                delay(2_400L)
+            } else delay(500L)
+            if (generation == voiceGeneration) {
                 voiceState = null
+                voiceJob = null
             }
-            voiceJob = null
         }
     }
+
+    /** Tap: start a listening session, or end the one in progress. */
+    fun onVoiceTap() {
+        if (voiceJob?.isActive == true) dismissVoice() else startVoiceSession(holdToTalk = false)
+    }
+
+    /** Hold: walkie-talkie; replaces a session in progress. */
+    fun onVoiceHoldStart() {
+        voiceJob?.cancel()
+        startVoiceSession(holdToTalk = true)
+    }
+
+    fun onVoiceHoldEnd() {
+        voiceHold?.finish = true
+    }
     LaunchedEffect(voiceStartRequests) {
-        if (voiceStartRequests > 0) startVoice()
+        if (voiceStartRequests > 0) startVoiceSession(holdToTalk = false)
     }
 
     val isNowPlaying = destination == Destination.NowPlaying
@@ -2550,16 +2592,22 @@ fun AmAtvApp() {
                     }
                 }
                 FocusFrameOverlay(focusFrameController)
+                if (BuildConfig.FLYME_AUTO) {
+                    FlymeVoiceGlow(visible = voiceJob?.isActive == true)
+                    FlymeVoicePanel(voiceState, onDismiss = ::dismissVoice)
+                }
+                // Drawn last: stays usable above the voice bubble, to end or restart a session.
                 if (BuildConfig.FLYME_AUTO && voiceEnabled) {
                     val micPosition = remember(voice) { voice.micPosition().let { Offset(it.first, it.second) } }
                     FlymeFloatingVoiceButton(
                         active = voiceState is VoiceUiState.Listening,
                         position = micPosition,
                         onMoved = { voice.saveMicPosition(it.x, it.y) },
-                        onClick = ::startVoice,
+                        onTap = ::onVoiceTap,
+                        onHoldStart = ::onVoiceHoldStart,
+                        onHoldEnd = ::onVoiceHoldEnd,
                     )
                 }
-                if (BuildConfig.FLYME_AUTO) FlymeVoicePanel(voiceState, onDismiss = ::dismissVoice)
             }
             }
         }
