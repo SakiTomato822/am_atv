@@ -83,10 +83,11 @@ class VoiceService(context: Context) {
         screenLabels: List<String>,
         candidates: List<String>,
         spokenPinyin: String?,
+        context: Map<String, String> = emptyMap(),
     ): List<dev.amatv.integration.VoiceCommand>? {
         if (!intentReady()) return null
         return kotlinx.coroutines.withTimeoutOrNull(INTENT_TIMEOUT_MS) {
-            intent.understand(spoken, screenLabels, candidates, spokenPinyin)
+            intent.understand(spoken, screenLabels, candidates, spokenPinyin, context)
         }
             ?.takeIf { it.isNotEmpty() }
     }

@@ -2117,6 +2117,38 @@ fun AmAtvApp() {
         return null
     }
 
+    /**
+     * Acts on one recognized sentence: the rules first; a sentence they would only open or search
+     * goes to the chat model (if on), which also sees the screen, the page, the song playing and
+     * [previousTurn]. Returns a message when something could not be done, and the steps taken.
+     */
+    suspend fun actOnSentence(said: String, previousTurn: String?): Pair<String?, List<VoiceCommand>> {
+        voiceState = VoiceUiState.Heard(said)
+        val ruled = parseVoiceSteps(said)
+        val unsure = ruled.all { it is VoiceCommand.Play || it is VoiceCommand.Open || it == VoiceCommand.Nothing }
+        val steps = if (unsure && voice.intentReady()) {
+            voiceState = VoiceUiState.Understanding(said)
+            val labels = voiceScreen.read().filter { it.clickable }.map { it.label }.filter { it.isNotBlank() }
+            val context = buildMap {
+                put("page", destination.name)
+                if (track.catalogId != null) put("now_playing", "${track.title} - ${track.artist} (${track.album})")
+                if (!previousTurn.isNullOrBlank()) put("previous_turn", previousTurn)
+            }
+            voice.understand(said, labels, voiceHotwords(), ChineseText.pinyin(said), context) ?: ruled
+        } else ruled
+        voiceState = VoiceUiState.Heard(said)
+        var problem: String? = null
+        for ((index, step) in steps.withIndex()) {
+            if (index > 0) delay(700L) // let the page the previous step opened appear
+            problem = runVoiceStep(step)
+            if (problem != null) break
+        }
+        if (BuildConfig.FLYME_UI_PREVIEW) {
+            android.util.Log.i("AMATV-Voice", "said=\"$said\" ruled=$ruled steps=$steps problem=$problem page=$destination")
+        }
+        return problem to steps
+    }
+
     /** Whether voice can start now; asks for the microphone or explains what is missing. */
     fun voiceUsable(): Boolean {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -2157,6 +2189,8 @@ fun AmAtvApp() {
         voiceJob = scope.launch {
             var playbackDecided = false
             var problem: String? = null
+            // Within one session only: the last sentence and what it did, for "第二个呢" follow-ups.
+            var previousTurn: String? = null
             fun finishPlayback() {
                 if (generation == voiceGeneration && resumeAfter && !playbackDecided && !playWhenReady) requestPlayback()
             }
@@ -2182,22 +2216,9 @@ fun AmAtvApp() {
                         if (holdToTalk || failure != VoiceFailure.NoSpeech) problem = voiceFailureText(failure)
                         break
                     }
-                    voiceState = VoiceUiState.Heard(said)
-                    // The rules first; a sentence they only take as something to open or search
-                    // goes to the chat model (if on), which also sees what is on screen.
-                    val ruled = parseVoiceSteps(said)
-                    val unsure = ruled.all { it is VoiceCommand.Play || it is VoiceCommand.Open || it == VoiceCommand.Nothing }
-                    val steps = if (unsure && voice.intentReady()) {
-                        voiceState = VoiceUiState.Understanding(said)
-                        val labels = voiceScreen.read().filter { it.clickable }.map { it.label }.filter { it.isNotBlank() }
-                        voice.understand(said, labels, voiceHotwords(), ChineseText.pinyin(said)) ?: ruled
-                    } else ruled
-                    voiceState = VoiceUiState.Heard(said)
-                    for ((index, step) in steps.withIndex()) {
-                        if (index > 0) delay(700L) // let the page the previous step opened appear
-                        problem = runVoiceStep(step)
-                        if (problem != null) break
-                    }
+                    val (sentenceProblem, steps) = actOnSentence(said, previousTurn)
+                    problem = sentenceProblem
+                    previousTurn = "$said -> ${steps.joinToString()}" + (problem?.let { " ($it)" } ?: "")
                     if (problem == null && steps.any { it.decidesPlayback() }) playbackDecided = true
                     if (holdToTalk || playbackDecided) break
                     if (problem != null) {
@@ -2241,6 +2262,26 @@ fun AmAtvApp() {
     }
     LaunchedEffect(voiceStartRequests) {
         if (voiceStartRequests > 0) startVoiceSession(holdToTalk = false)
+    }
+    // Preview builds only: `adb shell am broadcast -a dev.amatv.debug.VOICE_TEXT --es text 播放我的喜好歌曲`
+    // runs a sentence as if it had just been recognized, to test the commands without a voice.
+    if (BuildConfig.FLYME_UI_PREVIEW) {
+        DisposableEffect(context) {
+            val receiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(receiverContext: android.content.Context, intent: android.content.Intent) {
+                    val text = intent.getStringExtra("text")?.takeIf { it.isNotBlank() } ?: return
+                    scope.launch {
+                        val (problem, _) = actOnSentence(text, intent.getStringExtra("previous"))
+                        voiceState = problem?.let { VoiceUiState.Message(it) }
+                        delay(2_000L)
+                        if (voiceJob?.isActive != true) voiceState = null
+                    }
+                }
+            }
+            ContextCompat.registerReceiver(context, receiver, android.content.IntentFilter("dev.amatv.debug.VOICE_TEXT"),
+                ContextCompat.RECEIVER_EXPORTED)
+            onDispose { context.unregisterReceiver(receiver) }
+        }
     }
 
     val isNowPlaying = destination == Destination.NowPlaying

@@ -22,6 +22,7 @@ class VoiceIntentModel(private val settings: () -> Triple<String, String, String
         screenLabels: List<String>,
         candidates: List<String> = emptyList(),
         spokenPinyin: String? = null,
+        context: Map<String, String> = emptyMap(),
     ): List<VoiceCommand>? = withContext(Dispatchers.IO) {
         if (!configured()) return@withContext null
         val (base, key, model) = settings()
@@ -39,6 +40,7 @@ class VoiceIntentModel(private val settings: () -> Triple<String, String, String
                         .apply { if (!spokenPinyin.isNullOrBlank()) put("said_pinyin", spokenPinyin) }
                         .put("on_screen", JSONArray(screenLabels.distinct().take(80)))
                         .put("known_names", JSONArray(candidates.distinct().take(120)))
+                        .apply { context.forEach { (k, v) -> put(k, v) } }
                         .toString())))
             val connection = (URL(base.trimEnd('/') + "/chat/completions").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -81,6 +83,8 @@ class VoiceIntentModel(private val settings: () -> Triple<String, String, String
 on_screen 是当前屏幕上能看到的文字；known_names 是用户最近听过、当前列表里的歌名和歌手；said_pinyin 是识别文字的拼音。
 识别常把名字写成同音错字：按 said_pinyin 的读音和这些名字比对。和 on_screen 某项读音相近时，用 open 并写 on_screen 里的原文；
 和 known_names 某项读音相近时，用 play 并写 known_names 里的原文。都对不上时保留原话，不要编造名字。
+page 是当前页面（Home 主页 / Browse 最新发行 / Library 资料库 / Search 搜索 / NowPlaying 播放页）；
+now_playing 是正在播放的歌（"这首""这个歌手""这张专辑"指它）；previous_turn 是同一次对话里上一句和执行结果（"第二个呢""再往下"接着它）。
 只输出 JSON，不要解释。听不懂就输出 {"steps":[]}。
 """.trimIndent()
     }
