@@ -344,7 +344,7 @@ private fun AccountScreen(
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             text = if (connected) stringResource(R.string.browse_refresh_apple) else stringResource(R.string.browse_sign_in_tv),
-                            color = Color(0xFF111713),
+                            color = FlymeOnInk,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -696,7 +696,7 @@ private fun SearchScreen(
                     Box(Modifier.height(38.dp), contentAlignment = Alignment.Center) {
                         Text(
                             text = term,
-                            color = if (focused) Color(0xFF111713) else FlymeInk.copy(alpha = 0.88f),
+                            color = if (focused) FlymeOnInk else FlymeInk.copy(alpha = 0.88f),
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -1002,7 +1002,7 @@ private fun HomeShelvesBody(
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
                                     text = stringResource(R.string.browse_reload),
-                                    color = Color(0xFF111713),
+                                    color = FlymeOnInk,
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.SemiBold,
                                 )

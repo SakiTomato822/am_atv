@@ -2726,7 +2726,7 @@ private fun TopNavigation(
                     else FlymeInk.copy(alpha = 0.13f),
                 ) { focused ->
                     Box(Modifier.height(36.dp), contentAlignment = Alignment.Center) {
-                        val tint = if (isSelected) Color(0xFF17191A)
+                        val tint = if (isSelected) FlymeOnInk
                         else if (focused) FlymeInk else FlymeInk.copy(alpha = 0.65f)
                         when (destination) {
                             Destination.Search -> {
@@ -2833,7 +2833,7 @@ private fun TopNavigation(
                     else FlymeInk.copy(alpha = 0.13f),
                 ) { focused ->
                     Box(Modifier.height(36.dp), contentAlignment = Alignment.Center) {
-                        val tint = if (isSelected) Color(0xFF17191A)
+                        val tint = if (isSelected) FlymeOnInk
                         else if (focused) FlymeInk else FlymeInk.copy(alpha = 0.65f)
                         when (destination) {
                             Destination.NowPlaying -> {

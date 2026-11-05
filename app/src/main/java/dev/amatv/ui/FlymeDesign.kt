@@ -884,3 +884,15 @@ internal fun FlymeTopBar(
         }
     }
 }
+
+/**
+ * Lyric alpha for the current appearance. Apple's white-on-dark alphas leave dark ink on a light
+ * page too faint (unsung lines at 18% read as blank in daylight), so the light page lifts each
+ * level part of the way towards opaque.
+ */
+@Composable
+@ReadOnlyComposable
+internal fun flymeLyricAlpha(alpha: Float): Float =
+    if (LocalFlymePalette.current.light) alpha + (1f - alpha) * LIGHT_LYRIC_LIFT else alpha
+
+private const val LIGHT_LYRIC_LIFT = 0.18f

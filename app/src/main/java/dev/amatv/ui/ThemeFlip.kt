@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalView
@@ -112,9 +113,15 @@ internal fun FlymeThemeFlip(targetLight: Boolean, content: @Composable (light: B
         }
     }
 
-    // Dark status and navigation bar icons on the light UI.
+    // The bars follow the page: on the light UI they take its color and get dark icons. Dark icons
+    // alone would sit on the theme's black bars and vanish, leaving a plain black status bar.
+    val originalBars = remember { mutableStateOf<Pair<Int, Int>?>(null) }
     SideEffect {
         val window = (view.context as? Activity)?.window ?: return@SideEffect
+        val original = originalBars.value ?: (window.statusBarColor to window.navigationBarColor)
+            .also { originalBars.value = it }
+        window.statusBarColor = if (shownLight) LightFlymePalette.pageTop.toArgb() else original.first
+        window.navigationBarColor = if (shownLight) LightFlymePalette.page.toArgb() else original.second
         WindowCompat.getInsetsController(window, view).apply {
             isAppearanceLightStatusBars = shownLight
             isAppearanceLightNavigationBars = shownLight

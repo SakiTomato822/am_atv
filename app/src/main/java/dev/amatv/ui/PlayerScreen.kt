@@ -3248,11 +3248,11 @@ private fun InstrumentalInterludeRow(
     positionState: State<Long>,
     isUserScrolling: Boolean,
 ) {
-    val unlitAlpha = if (isUserScrolling) {
+    val unlitAlpha = flymeLyricAlpha(if (isUserScrolling) {
         MotionTokens.KaraokeSecondaryAlpha
     } else {
         MotionTokens.KaraokeTertiaryAlpha
-    }
+    })
 
     Box(
         modifier = Modifier
@@ -3517,13 +3517,13 @@ private fun KaraokeLyricLine(
     val activePresence = rememberContinuousVocalPresence(timedPresence, retainedPresence)
     val backgroundPresence = rememberContinuousVocalPresence(timedBackgroundPresence, retainedBackgroundPresence)
 
-    val unlitAlpha = if (isFocused) {
+    val unlitAlpha = flymeLyricAlpha(if (isFocused) {
         MotionTokens.KaraokePrimaryAlpha
     } else if (isUserScrolling) {
         MotionTokens.KaraokeSecondaryAlpha
     } else {
         MotionTokens.KaraokeTertiaryAlpha
-    }
+    })
     val fullLineStartPadding = if (alignEnd) 0.dp else 6.dp
     val fullLineEndPadding = if (alignEnd) 6.dp else 0.dp
     val mainFontSize = if (compactMainLocalization) 31.sp else 34.sp
@@ -3983,11 +3983,11 @@ private fun KaraokeVocalFlexbox(
     pronunciationLineHeight: TextUnit,
     pronunciationGap: Dp,
 ) {
-    val litAlpha = if (isBackgroundVocal) {
+    val litAlpha = flymeLyricAlpha(if (isBackgroundVocal) {
         MotionTokens.KaraokeBgVocalLitAlpha
     } else {
         MotionTokens.KaraokePrimaryAlpha
-    }
+    })
     val isHighlighting by remember(isActive, activePresence) {
         derivedStateOf { isActive || activePresence.value > 0.001f }
     }
@@ -4802,7 +4802,7 @@ private fun QueueModeButton(
             contentDescription = label,
             tint = when {
                 !enabled -> FlymeInk.copy(alpha = 0.3f)
-                focused -> Color.Black
+                focused -> FlymeOnInk
                 else -> FlymeInk
             },
             modifier = Modifier.size(19.dp),
@@ -4811,7 +4811,7 @@ private fun QueueModeButton(
             text = label,
             color = when {
                 !enabled -> FlymeInk.copy(alpha = 0.3f)
-                focused -> Color.Black
+                focused -> FlymeOnInk
                 else -> FlymeInk.copy(alpha = 0.82f)
             },
             fontSize = 13.sp,
