@@ -116,6 +116,8 @@ class MusicKitBridge(private val context: Context) {
     @Volatile private var manualSkipAtMs = 0L
     /** Fade at gapless song changes for the current queue; the app sets it per kind of queue. */
     @Volatile var fadeEnabled = false
+    /** Done when the last released controller's cleanup has run. */
+    @Volatile private var lastRelease: java.util.concurrent.CountDownLatch? = null
     private val fade = GaplessFade()
     private val sessionLevel = SessionLevel()
     private val tailLoudness = TailLoudness()
@@ -199,6 +201,11 @@ class MusicKitBridge(private val context: Context) {
         ) {
             if (nativeQueueEdited) Log.i(TAG, "Rebuilding controller after a gapless queue edit")
             release()
+            // The old controller is released on its own thread. A new one rendering before that
+            // finished crashed MusicKit's native renderer (SIGSEGV in SVAudioRenderer): wait for it.
+            if (lastRelease?.await(1_500L, java.util.concurrent.TimeUnit.MILLISECONDS) == false) {
+                Log.w(TAG, "Old controller still releasing after 1.5 s; starting anyway")
+            }
         }
         nativeQueueEdited = false
         val generation = prepareGeneration.incrementAndGet()
@@ -349,12 +356,23 @@ class MusicKitBridge(private val context: Context) {
      */
     private fun tickFade() {
         val current = controller ?: return
+        // Voice ducking: glide towards the target (~3 dB a tick, so ~0.3 s), never a jump.
+        val duckGoal = voiceDuckDb
+        duckDb = when {
+            duckDb > duckGoal -> maxOf(duckGoal, duckDb - DUCK_STEP_DB)
+            duckDb < duckGoal -> minOf(duckGoal, duckDb + DUCK_STEP_DB)
+            else -> duckDb
+        }
         if (!fadeEnabled) {
-            fade.reset()
             sessionLevel.release()
+            // Done ducking: let go of the effect so playback is back on its plain path.
+            if (duckDb < 0f) fade.apply(MusicKitAudioSession.currentId(), duckDb) else fade.release()
             return
         }
-        if ((current.callOrNull("getPlaybackState") as? Int) != PLAYBACK_STATE_PLAYING) return
+        if ((current.callOrNull("getPlaybackState") as? Int) != PLAYBACK_STATE_PLAYING) {
+            fade.apply(MusicKitAudioSession.currentId(), duckDb)
+            return
+        }
         val position = current.callOrNull("getCurrentPosition") as? Long ?: return
         val duration = (current.callOrNull("getDuration") as? Long)?.takeIf { it > 0L } ?: return
         val currentId = current.callOrNull("getCurrentItem")?.let(::trackFromQueueItem)?.catalogId
@@ -391,8 +409,18 @@ class MusicKitBridge(private val context: Context) {
             if (fadingIn != null && currentId == fadingIn) fadeInCatalogId = null
             0f
         }
-        fade.apply(session, minOf(outDb, inDb))
+        fade.apply(session, minOf(outDb, inDb) + duckDb)
     }
+
+    /**
+     * While voice listens or speaks, music keeps playing [VOICE_DUCK_DB] quieter instead of
+     * pausing, the way a car's own assistant does; false brings it back up.
+     */
+    fun setVoiceDuck(on: Boolean) {
+        voiceDuckDb = if (on) VOICE_DUCK_DB else 0f
+    }
+    @Volatile private var voiceDuckDb = 0f
+    private var duckDb = 0f
 
     /** Diagnostics: why a song that just ended did not continue into a queued next song. */
     private fun recordEndWithoutContinuation(title: String) {
@@ -462,6 +490,8 @@ class MusicKitBridge(private val context: Context) {
         val listener = controllerListener
         val oldHandler = playbackHandler
         val oldThread = playbackThread
+        val released = java.util.concurrent.CountDownLatch(1)
+        lastRelease = released
         val cleanup = {
             if (currentController != null && listener != null) {
                 runCatching {
@@ -474,6 +504,7 @@ class MusicKitBridge(private val context: Context) {
             fade.release()
             sessionLevel.release()
             oldThread?.quitSafely()
+            released.countDown()
             Unit
         }
         if (oldHandler == null || !oldHandler.post(cleanup)) cleanup()
@@ -1027,6 +1058,8 @@ class MusicKitBridge(private val context: Context) {
         const val AFTER_END_WINDOW_MS = 15_000L
         const val MANUAL_SKIP_WINDOW_MS = 2_000L
         const val FADE_TICK_MS = 50L
+        const val VOICE_DUCK_DB = -18f
+        const val DUCK_STEP_DB = 3f
         const val LEVEL_EVERY_TICKS = 5
         // PlaybackQueueInsertionType.INSERTION_TYPE_AT_END in mediaplayback 1.1.1.
         const val INSERTION_TYPE_AT_END = 2

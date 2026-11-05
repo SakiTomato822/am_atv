@@ -323,6 +323,8 @@ class MusicServices(context: Context) : RecommendationProvider {
     /** Gapless preloading of the app's next song; stations manage their own queue. */
     fun setLookahead(next: Track?) { if (!stationEngineActive) bridge.setLookahead(next) }
     fun setFadeEnabled(enabled: Boolean) { bridge.fadeEnabled = enabled }
+    /** Music quieter (not paused) while voice listens or speaks. */
+    fun setVoiceDuck(on: Boolean) = bridge.setVoiceDuck(on)
     /** A station's next songs, to play it on the native player without Widevine. */
     suspend fun stationSongs(stationId: String): List<Track> = api.stationNextTracks(stationId)
     fun skipToQueuedLookahead(catalogId: String): Boolean = !stationEngineActive && bridge.skipToQueuedLookahead(catalogId)

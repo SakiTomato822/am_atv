@@ -132,6 +132,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 /** Words that make a spoken name sound like one of the user's lists rather than a song. */
 private val LIBRARY_LIST_HINT = Regex("(?:歌单|播放列表|列表|资料库)$")
 
+/** How a spoken request starts ("播放…", "我想听…", "打开…", "第三个"). */
+private val COMMAND_START = Regex("^(?:请|帮我|给我|麻烦)?(?:播放|放|来|听|我想听|我要听|想听|打开|进入|搜索|搜|找|看|去|回|第|随机|收藏|切|换)", RegexOption.IGNORE_CASE)
+
 /** Ways of saying the favourites list, and the names Apple shows it under. */
 private val FAVORITES_SPOKEN = Regex("喜好歌曲|喜好的歌|喜欢的歌|收藏的歌|收藏歌曲|红心歌|最爱的歌|喜爱的歌|favorite")
 private val FAVORITES_LABELS = listOf("Favorite Songs", "Favourite Songs", "喜好歌曲", "喜愛的歌曲", "喜爱的歌曲", "最愛的歌曲")
@@ -358,6 +361,10 @@ fun AmAtvApp() {
     // and anything named on screen (VoiceScreen).
     val voice = remember { VoiceService.get(context.applicationContext) }
     val voiceScreen = remember(currentView) { VoiceScreen(currentView) }
+    // Playback a voice sentence starts stays on the current page (the user opens Now Playing
+    // themselves). A time window, not a flag: station songs start a moment later, asynchronously.
+    val voiceStayUntil = remember { longArrayOf(0L) }
+    fun voiceKeepsPage(): Boolean = android.os.SystemClock.elapsedRealtime() < voiceStayUntil[0]
     // Spoken prompts (system text-to-speech); see VoiceSpeak for what is read.
     val voiceSpeaker = remember { dev.amatv.integration.voice.VoiceSpeaker(context) }
     DisposableEffect(voiceSpeaker) { onDispose { voiceSpeaker.release() } }
@@ -421,9 +428,8 @@ fun AmAtvApp() {
     val voicePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) voiceStartRequests++ else voiceState = VoiceUiState.Message(AppText.text(R.string.voice_permission_needed))
     }
-    DisposableEffect(voice) {
-        onDispose { voice.release() }
-    }
+    // The loaded model is not released with this screen: VoiceService is process-wide, and a
+    // rotated or recreated activity reloaded it from scratch, so every tap on a phone waited.
     val voiceEngineId = voice.settings.collectAsState().value.engine
     val voiceSpeakMode = voice.settings.collectAsState().value.speak
     LaunchedEffect(voiceEnabled, voiceSpeakMode) {
@@ -1003,7 +1009,7 @@ fun AmAtvApp() {
             songs = songs.map(::withCachedLyrics),
             context = PlaybackContext(kind = ContextKind.SongList, id = stationId, title = station.title),
         )
-        destination = Destination.NowPlaying
+        if (!voiceKeepsPage()) destination = Destination.NowPlaying
     }
 
     fun playTrack(nextTrack: Track, contextQueue: List<Track> = emptyList(), webStation: Boolean = false) {
@@ -1055,7 +1061,7 @@ fun AmAtvApp() {
                 title = if (isStation) nextTrack.title else nextTrack.album,
             ),
         )
-        destination = Destination.NowPlaying
+        if (!voiceKeepsPage()) destination = Destination.NowPlaying
     }
 
     /** Leaves Now Playing for the song's artist or album page once Apple Music names it. */
@@ -1118,7 +1124,7 @@ fun AmAtvApp() {
             ),
             shuffle = shuffle,
         )
-        destination = Destination.NowPlaying
+        if (!voiceKeepsPage()) destination = Destination.NowPlaying
     }
 
     fun advanceNextTrack(isAuto: Boolean = true) {
@@ -2112,6 +2118,7 @@ fun AmAtvApp() {
 
     /** "周杰伦的晴天", or "周杰伦的专辑 晴天" when it is not a song. */
     fun spokenName(item: Track): String {
+        if (item.catalogKind == CatalogKind.Artist) return item.title
         val kind = when (item.catalogKind) {
             CatalogKind.Album -> AppText.text(R.string.services_kind_album)
             CatalogKind.Playlist -> AppText.text(R.string.services_kind_playlist)
@@ -2154,15 +2161,25 @@ fun AmAtvApp() {
                 val pages = (candidates.size + 3) / 4
                 val visible = candidates.drop(page * 4).take(4)
                 voiceState = VoiceUiState.Choices(visible, page + 1, pages)
-                // Read the page aloud before the mic opens (never while it listens). A reply that
-                // narrowed nothing ("首都" when all four are 首都) gets "请说第几个".
-                if (visible != spokenPage) {
-                    sayVoice(choicesPrompt(visible, candidates.size, page, first = spokenPage == null), choice = true)
-                    spokenPage = visible
-                } else if (askNumber) sayVoice(AppText.text(R.string.voice_tts_which), choice = true)
-                askNumber = false
                 val reply = CompletableDeferred<String>()
                 voiceChoiceReply = reply
+                // Read the page aloud before the mic opens (never while it listens). A tap on a row
+                // meanwhile cuts the prompt short and counts at once. A reply that narrowed nothing
+                // ("首都" when all four are 首都) gets "请说第几个".
+                val prompt = when {
+                    visible != spokenPage -> choicesPrompt(visible, candidates.size, page, first = spokenPage == null)
+                    askNumber -> AppText.text(R.string.voice_tts_which)
+                    else -> null
+                }
+                spokenPage = visible
+                askNumber = false
+                if (prompt != null) coroutineScope {
+                    val talking = async { sayVoice(prompt, choice = true) }
+                    select<Unit> {
+                        talking.onAwait { }
+                        reply.onAwait { voiceSpeaker.stop(); talking.cancel() }
+                    }
+                }
                 val said = withTimeoutOrNull(8_000L) { coroutineScope {
                     val spoken = if (voiceJob?.isActive == true) async {
                         (voice.listen(speechHotwords()).firstOrNull {
@@ -2379,6 +2396,24 @@ fun AmAtvApp() {
                     }
                     return false
                 }
+                // 喜好歌曲: straight from the library's playlists (Apple names it by the account's
+                // language, "Favorite Songs"), never by finding its tile on whatever page is shown.
+                if (FAVORITES_SPOKEN.containsMatchIn(command.query) || command.query in FAVORITES_LABELS) {
+                    val labels = FAVORITES_LABELS.map(::voiceCatalogKey).toSet()
+                    fun Track.isFavorites() = catalogKind == CatalogKind.Playlist && voiceCatalogKey(title) in labels
+                    var favorites = voiceLibrary.firstOrNull { it.isFavorites() }
+                    var next: String? = null
+                    var pages = 0
+                    while (favorites == null && pages++ < 8) {
+                        val page = cancellableResult { services.libraryPlaylistsPage(next) }.getOrNull() ?: break
+                        favorites = page.items.firstOrNull { it.isFavorites() }
+                        next = page.nextPage ?: break
+                    }
+                    android.util.Log.i("AMATV-Voice", "Favourites list: ${favorites?.title ?: "not in library playlists"}")
+                    if (favorites != null) {
+                        return if (playVoiceCatalog(favorites)) null else AppText.text(R.string.voice_not_found_format, command.query)
+                    }
+                }
                 if (command.kind == VoiceCommand.Kind.Playlist || LIBRARY_LIST_HINT.containsMatchIn(command.query)) {
                     if (playFromScreen()) return null
                     if (destination != Destination.Library) {
@@ -2426,7 +2461,33 @@ fun AmAtvApp() {
                         ranked = rankCatalog(command, found, voiceLibrary)
                     }
                 }
+                // Personal stations (音乐寻宝电台 is the account's own) come back under names the
+                // spoken one does not match: any station Apple found for it is the answer.
+                if (ranked.candidates.isEmpty() && command.kind == VoiceCommand.Kind.Station) {
+                    found.firstOrNull { it.catalogKind == CatalogKind.Station }?.let { station ->
+                        android.util.Log.i("AMATV-Voice", "Station by search: ${station.title}")
+                        return if (playVoiceCatalog(station)) null else AppText.text(R.string.voice_not_found_format, query)
+                    }
+                }
                 if (ranked.candidates.isEmpty()) return AppText.text(R.string.voice_not_found_format, query)
+                // An artist: all their songs, or one of the hits? The user picks (no guessing).
+                if (ranked.confident && ranked.candidates.first().catalogKind == CatalogKind.Artist) {
+                    val artist = ranked.candidates.first()
+                    val hits = cancellableResult { services.catalogArtistPage(artist).topSongs }.getOrNull().orEmpty()
+                    if (hits.isNotEmpty()) {
+                        val all = artist.copy(title = AppText.text(R.string.voice_artist_all_format, artist.title))
+                        val choice = chooseVoiceCatalog(listOf(all) + hits.take(7)) ?: run {
+                            voiceChoiceDismissed = true
+                            return null
+                        }
+                        if (choice === all) playTrack(hits.first(), hits)
+                        else playTrack(choice, listOf(choice) + hits.filterNot { it.matchesPlaybackQueueEntry(choice) })
+                        voiceState = VoiceUiState.Message(AppText.text(R.string.voice_playing_format,
+                            if (choice === all) choice.title else listOf(choice.title, choice.artist).joinToString(" · ")))
+                        sayVoice(AppText.text(R.string.voice_playing_format, if (choice === all) choice.title else spokenName(choice)))
+                        return null
+                    }
+                }
                 val item = if (ranked.confident) ranked.candidates.first() else chooseVoiceCatalog(ranked.candidates)
                 if (item == null) {
                     voiceChoiceDismissed = true
@@ -2472,7 +2533,7 @@ fun AmAtvApp() {
         }
     }
 
-    suspend fun actOnSentence(heard: String, previousTurn: String?): Pair<String?, List<VoiceCommand>> {
+    suspend fun actOnSentenceSteps(heard: String, previousTurn: String?): Pair<String?, List<VoiceCommand>> {
         voiceChoiceDismissed = false
         // Names misheard by sound ("西凉" for 昔涟, "hoyomex" for HOYO-MiX) snap back to names the
         // user has: library, recent plays, the screen. Only for sentences naming something, so a
@@ -2524,6 +2585,13 @@ fun AmAtvApp() {
         return problem to executed
     }
 
+    suspend fun actOnSentence(heard: String, previousTurn: String?): Pair<String?, List<VoiceCommand>> {
+        voiceStayUntil[0] = Long.MAX_VALUE
+        try { return actOnSentenceSteps(heard, previousTurn) } finally {
+            voiceStayUntil[0] = android.os.SystemClock.elapsedRealtime() + 8_000L
+        }
+    }
+
     /** Whether voice can start now; asks for the microphone or explains what is missing. */
     fun voiceUsable(): Boolean {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -2539,6 +2607,13 @@ fun AmAtvApp() {
             return false
         }
         return true
+    }
+
+    /** A control command, or a sentence that starts like a request (not a stray lyric). */
+    fun soundsLikeCommand(said: String): Boolean {
+        val steps = parseVoiceSteps(said)
+        if (steps.any { it !is VoiceCommand.Play && it != VoiceCommand.Nothing }) return true
+        return COMMAND_START.containsMatchIn(said.trim())
     }
 
     fun voiceFailureText(failure: VoiceFailure?): String = AppText.text(when (failure) {
@@ -2557,17 +2632,18 @@ fun AmAtvApp() {
     fun startVoiceSession(holdToTalk: Boolean) {
         if (!voiceUsable()) return
         val generation = ++voiceGeneration
-        val resumeAfter = playWhenReady
-        if (resumeAfter) pausePlayback()
+        // Music keeps playing, ducked, for the whole session (like the car's own assistant): a
+        // command acts at once instead of waiting for the bubble to go, and nothing is paused.
+        services.setVoiceDuck(true)
         val hotwords = speechHotwords()
         voiceState = VoiceUiState.Listening("", ready = false)
         voiceJob = scope.launch {
-            var playbackDecided = false
             var problem: String? = null
+            var turns = 0
             // Within one session only: the last sentence and what it did, for "第二个呢" follow-ups.
             var previousTurn: String? = null
             fun finishPlayback() {
-                if (generation == voiceGeneration && resumeAfter && !playbackDecided && !playWhenReady) requestPlayback()
+                if (generation == voiceGeneration) services.setVoiceDuck(false)
             }
             try {
                 while (true) {
@@ -2603,16 +2679,24 @@ fun AmAtvApp() {
                         if (holdToTalk || failure != VoiceFailure.NoSpeech) problem = voiceFailureText(failure)
                         break
                     }
+                    // Later sentences share the mic with the music now playing: lyrics the mic picked
+                    // up must not become "播放<lyric>". After the first command, only a sentence that
+                    // is a command (a control word, or 播放/打开/搜索/第N个…) counts.
+                    if (turns++ > 0 && !soundsLikeCommand(said)) {
+                        android.util.Log.i("AMATV-Voice", "Ignored follow-up \"$said\" (not a command)")
+                        voiceState = VoiceUiState.Listening("", ready = false)
+                        continue
+                    }
                     val (sentenceProblem, steps) = actOnSentence(said, previousTurn)
                     problem = sentenceProblem
                     previousTurn = "$said -> ${steps.joinToString()}" + (problem?.let { " ($it)" } ?: "")
                     if (problem == null && VoiceCommand.Cancel in steps) {
-                        playbackDecided = steps.takeWhile { it != VoiceCommand.Cancel }.any { it.decidesPlayback() }
                         problem = AppText.text(R.string.voice_ok)
                         break
                     }
-                    if (problem == null && steps.any { it.decidesPlayback() }) playbackDecided = true
-                    if (holdToTalk || playbackDecided) break
+                    // Tap sessions keep listening after a command (music now playing, ducked)
+                    // until the user is quiet for a few seconds or taps again.
+                    if (holdToTalk) break
                     if (problem != null) {
                         voiceState = VoiceUiState.Message(problem)
                         val said = problem
@@ -2645,7 +2729,12 @@ fun AmAtvApp() {
 
     /** Tap: start a listening session, or end the one in progress. */
     fun onVoiceTap() {
-        if (voiceJob?.isActive == true) dismissVoice() else startVoiceSession(holdToTalk = false)
+        when {
+            // Mid-prompt: cut it short and go straight to listening (barge-in by touch).
+            voiceJob?.isActive == true && voiceSpeaker.speaking() -> voiceSpeaker.stop()
+            voiceJob?.isActive == true -> dismissVoice()
+            else -> startVoiceSession(holdToTalk = false)
+        }
     }
 
     /** Hold: walkie-talkie; replaces a session in progress. */

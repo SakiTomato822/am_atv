@@ -255,7 +255,7 @@ class SherpaStreamingEngine(private val model: VoiceModel, private val store: Vo
                 enableEndpoint = true,
                 decodingMethod = if (transducer) "modified_beam_search" else "greedy_search",
                 hotwordsScore = 2.0f,
-            )).also { recognizer = it }
+            )).also { recognizer = it; Log.i(TAG, "Loaded ${model.id}") }
         }
     }
 
@@ -325,7 +325,7 @@ class SherpaOfflineEngine(private val model: VoiceModel, private val store: Voic
                 paraformer = OfflineParaformerModelConfig(model = store.file(model, "model").path),
                 tokens = store.file(model, "tokens").path, numThreads = 2, provider = "cpu",
             ),
-        )).also { recognizer = it }
+        )).also { recognizer = it; Log.i(TAG, "Loaded ${model.id}") }
     }
 
     override fun listen(hotwords: List<String>, control: ListenControl): Flow<VoiceEvent> = flow {

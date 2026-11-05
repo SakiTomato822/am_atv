@@ -71,10 +71,8 @@ class VoiceSpeaker(context: Context) {
         val id = "amatv-${ids.incrementAndGet()}"
         val done = CompletableDeferred<Unit>()
         pending[id] = done
-        val focus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
-                .setAudioAttributes(attributes).build().also { audio?.requestAudioFocus(it) }
-        } else null
+        // No audio focus request: the app ducks its own music (setVoiceDuck), and MusicKit pauses
+        // on any transient focus loss, which held songs back until the prompt was over.
         return try {
             runCatching { tts.setSpeechRate(rate.coerceIn(0.5f, 2f)) }
             val params = android.os.Bundle().apply {
@@ -89,9 +87,11 @@ class VoiceSpeaker(context: Context) {
             }
         } finally {
             pending.remove(id)
-            if (focus != null) audio?.abandonAudioFocusRequest(focus)
         }
     }
+
+    /** Whether a prompt is being read right now. */
+    fun speaking(): Boolean = pending.isNotEmpty()
 
     /** Stops talking at once (the user tapped the mic or dismissed the bubble). */
     fun stop() {
