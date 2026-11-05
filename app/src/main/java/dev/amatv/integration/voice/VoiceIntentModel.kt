@@ -24,8 +24,9 @@ class VoiceIntentModel(private val settings: () -> Triple<String, String, String
             val body = JSONObject()
                 .put("model", model)
                 .put("temperature", 0)
+                // No response_format: not every provider accepts it; the prompt asks for JSON and
+                // parseIntentJson tolerates code fences.
                 .put("max_tokens", 300)
-                .put("response_format", JSONObject().put("type", "json_object"))
                 .put("messages", JSONArray()
                     .put(JSONObject().put("role", "system").put("content", SYSTEM_PROMPT))
                     .put(JSONObject().put("role", "user").put("content", JSONObject()

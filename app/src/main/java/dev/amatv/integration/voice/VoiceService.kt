@@ -16,6 +16,9 @@ data class VoiceEngineSettings(
     val openAiBaseUrl: String = DEFAULT_OPENAI_BASE,
     val openAiKey: String = "",
     val openAiModel: String = DEFAULT_OPENAI_MODEL,
+    /** Let a small chat model read sentences the rules do not understand (same URL and key). */
+    val intentEnabled: Boolean = false,
+    val intentModel: String = VoiceIntentModel.DEFAULT_MODEL,
 ) {
     companion object {
         /** SiliconFlow serves SenseVoice through the OpenAI transcription API, reachable in mainland China. */
@@ -38,6 +41,8 @@ class VoiceService(context: Context) {
         openAiBaseUrl = preferences.getString("openai_base", null) ?: VoiceEngineSettings.DEFAULT_OPENAI_BASE,
         openAiKey = preferences.getString("openai_key", "").orEmpty(),
         openAiModel = preferences.getString("openai_model", null) ?: VoiceEngineSettings.DEFAULT_OPENAI_MODEL,
+        intentEnabled = preferences.getBoolean("intent_enabled", false),
+        intentModel = preferences.getString("intent_model", null) ?: VoiceIntentModel.DEFAULT_MODEL,
     ))
     val settings: StateFlow<VoiceEngineSettings> = mutable.asStateFlow()
 
@@ -52,6 +57,8 @@ class VoiceService(context: Context) {
             .putString("openai_base", next.openAiBaseUrl)
             .putString("openai_key", next.openAiKey)
             .putString("openai_model", next.openAiModel)
+            .putBoolean("intent_enabled", next.intentEnabled)
+            .putString("intent_model", next.intentModel)
             .apply()
     }
 
@@ -60,6 +67,22 @@ class VoiceService(context: Context) {
         Triple(settings.value.openAiBaseUrl.trim(), settings.value.openAiKey.trim(), settings.value.openAiModel.trim())
     }
     private var local: Pair<String, SpeechEngine>? = null
+    private val intent = VoiceIntentModel {
+        Triple(settings.value.openAiBaseUrl.trim(), settings.value.openAiKey.trim(), settings.value.intentModel.trim())
+    }
+
+    /** The chat model is on and has a key. */
+    fun intentReady(): Boolean = settings.value.intentEnabled && intent.configured()
+
+    /**
+     * Steps from the chat model for [spoken], given the labels on screen; null when it is off,
+     * slow (over [INTENT_TIMEOUT_MS]) or its answer is unusable, so the caller keeps its own steps.
+     */
+    suspend fun understand(spoken: String, screenLabels: List<String>): List<dev.amatv.integration.VoiceCommand>? {
+        if (!intentReady()) return null
+        return kotlinx.coroutines.withTimeoutOrNull(INTENT_TIMEOUT_MS) { intent.understand(spoken, screenLabels) }
+            ?.takeIf { it.isNotEmpty() }
+    }
 
     private fun engine(): SpeechEngine? = synchronized(this) {
         val id = settings.value.engine
@@ -117,6 +140,7 @@ class VoiceService(context: Context) {
     fun release() = releaseEngine()
 
     companion object {
+        const val INTENT_TIMEOUT_MS = 2_500L
         @Volatile private var instance: VoiceService? = null
         fun get(context: Context): VoiceService = instance ?: synchronized(this) {
             instance ?: VoiceService(context).also { instance = it }

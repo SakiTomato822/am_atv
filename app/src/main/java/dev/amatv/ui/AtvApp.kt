@@ -2158,7 +2158,16 @@ fun AmAtvApp() {
                         break
                     }
                     voiceState = VoiceUiState.Heard(said)
-                    val steps = parseVoiceSteps(said)
+                    // The rules first; a sentence they only take as something to open or search
+                    // goes to the chat model (if on), which also sees what is on screen.
+                    val ruled = parseVoiceSteps(said)
+                    val unsure = ruled.all { it is VoiceCommand.Play || it is VoiceCommand.Open || it == VoiceCommand.Nothing }
+                    val steps = if (unsure && voice.intentReady()) {
+                        voiceState = VoiceUiState.Understanding(said)
+                        val labels = voiceScreen.read().filter { it.clickable }.map { it.label }.filter { it.isNotBlank() }
+                        voice.understand(said, labels) ?: ruled
+                    } else ruled
+                    voiceState = VoiceUiState.Heard(said)
                     for ((index, step) in steps.withIndex()) {
                         if (index > 0) delay(700L) // let the page the previous step opened appear
                         problem = runVoiceStep(step)

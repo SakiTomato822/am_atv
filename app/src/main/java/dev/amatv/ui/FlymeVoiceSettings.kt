@@ -114,7 +114,8 @@ internal fun FlymeVoiceEngineSettings() {
     Spacer(Modifier.height(8.dp))
     CacheButton((if (settings.engine == "openai") "✓ " else "") + stringResource(R.string.voice_engine_openai),
         onClick = { voice.update { it.copy(engine = "openai") } }, modifier = Modifier.width(330.dp))
-    if (settings.engine == "openai") {
+    // The chat model shares the OpenAI-compatible URL and key, so those fields show for either.
+    if (settings.engine == "openai" || settings.intentEnabled) {
         Text(stringResource(R.string.voice_engine_openai_hint), color = FlymeInk.copy(alpha = 0.6f), fontSize = 13.sp)
         VoiceField(stringResource(R.string.voice_field_base_url), settings.openAiBaseUrl, secret = false) { v ->
             voice.update { it.copy(openAiBaseUrl = v.ifBlank { VoiceEngineSettings.DEFAULT_OPENAI_BASE }) }
@@ -122,8 +123,21 @@ internal fun FlymeVoiceEngineSettings() {
         VoiceField(stringResource(R.string.voice_field_api_key), settings.openAiKey, secret = true) { v ->
             voice.update { it.copy(openAiKey = v) }
         }
-        VoiceField(stringResource(R.string.voice_field_model), settings.openAiModel, secret = false) { v ->
-            voice.update { it.copy(openAiModel = v.ifBlank { VoiceEngineSettings.DEFAULT_OPENAI_MODEL }) }
+        if (settings.engine == "openai") {
+            VoiceField(stringResource(R.string.voice_field_model), settings.openAiModel, secret = false) { v ->
+                voice.update { it.copy(openAiModel = v.ifBlank { VoiceEngineSettings.DEFAULT_OPENAI_MODEL }) }
+            }
+        }
+    }
+    Spacer(Modifier.height(10.dp))
+    Text(stringResource(R.string.voice_intent_title), color = FlymeInk, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+    Text(stringResource(R.string.voice_intent_summary), color = FlymeInk.copy(alpha = 0.6f), fontSize = 14.sp)
+    CacheButton(stringResource(R.string.voice_intent_toggle,
+        stringResource(if (settings.intentEnabled) R.string.playback_option_on else R.string.playback_option_off)),
+        onClick = { voice.update { it.copy(intentEnabled = !it.intentEnabled) } }, modifier = Modifier.width(330.dp))
+    if (settings.intentEnabled) {
+        VoiceField(stringResource(R.string.voice_field_intent_model), settings.intentModel, secret = false) { v ->
+            voice.update { it.copy(intentModel = v.ifBlank { dev.amatv.integration.voice.VoiceIntentModel.DEFAULT_MODEL }) }
         }
     }
     Text(stringResource(R.string.voice_cloud_privacy), color = FlymeInk.copy(alpha = 0.5f), fontSize = 12.sp,

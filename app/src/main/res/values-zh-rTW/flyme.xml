@@ -44,4 +44,9 @@
     <string name="voice_field_model">模型</string>
     <string name="voice_cloud_privacy">使用雲端辨識時，每段錄音會傳送到對應服務；Key 只儲存在本機。</string>
     <string name="voice_seek_direction">請說「快轉」或「倒轉」</string>
+    <string name="voice_understanding">理解中…</string>
+    <string name="voice_intent_title">大模型理解指令</string>
+    <string name="voice_intent_summary">內建指令聽不懂的話，連同螢幕上的名字傳給上面介面裡的小模型理解；超過 2.5 秒就按搜尋處理。</string>
+    <string name="voice_intent_toggle">大模型理解：%1$s</string>
+    <string name="voice_field_intent_model">理解模型</string>
 </resources>

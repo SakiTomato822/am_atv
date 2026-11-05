@@ -45,4 +45,9 @@
     <string name="voice_field_model">Model</string>
     <string name="voice_cloud_privacy">Cloud engines send each recording to that service. Keys stay on this device.</string>
     <string name="voice_seek_direction">Say “fast forward” or “rewind”</string>
+    <string name="voice_understanding">Understanding…</string>
+    <string name="voice_intent_title">Understand any phrasing</string>
+    <string name="voice_intent_summary">Sentences the built-in commands do not know go to a small chat model on the API above, with the names on screen. Over 2.5 s, it falls back to searching.</string>
+    <string name="voice_intent_toggle">Chat model: %1$s</string>
+    <string name="voice_field_intent_model">Chat model</string>
 </resources>
