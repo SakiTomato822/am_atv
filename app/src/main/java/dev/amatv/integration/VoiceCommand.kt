@@ -131,6 +131,8 @@ fun parseVoiceCommand(spoken: String): VoiceCommand {
         if (trimmed == query) break
         query = trimmed
     }
+    // "我的喜好歌曲" names the list "喜好歌曲" (but "我的天空" is a song title: keep it).
+    if (query.startsWith("我的") && LIST_WORDS.containsMatchIn(query)) query = query.removePrefix("我的")
     // "周杰伦的晴天" -> "周杰伦 晴天"; a 的 at either end was already dropped.
     query = query.replaceFirst(Regex("(?<=\\S)的(?=\\S)"), " ").trim()
     return if (query.length >= 2 || query.any { it.code > 0x2E80 }) VoiceCommand.Play(query) else VoiceCommand.Nothing
@@ -185,5 +187,6 @@ private val OPEN_PREFIX = Regex("^(?:请|帮我)?(打开|进入|进|去|点|点�
 private val PLAY_PREFIX = Regex(
     "^(请|麻烦)?(帮我|给我|替我)?(播放|放一首|放首|放一下|放点|放|来一首|来首|来点|来个|我想听|我要听|想听|听一下|听听|听|搜索|搜一下|搜|找一下|找)",
 )
+private val LIST_WORDS = Regex("喜好|收藏|喜欢|歌单|播放列表|列表|电台|资料库")
 private val QUERY_LEAD = Regex("^(一首|一下|首|点|一些|些|个)")
 private val QUERY_SUFFIX = Regex("(的歌曲|的歌|的音乐|这首歌|这首|的|吧|呗|一下|好吗|可以吗)$")

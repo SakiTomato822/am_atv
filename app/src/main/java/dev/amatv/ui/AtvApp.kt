@@ -123,6 +123,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 
+/** Words that make a spoken name sound like one of the user's lists rather than a song. */
+private val LIBRARY_LIST_HINT = Regex("喜好|收藏|喜欢|歌单|播放列表|列表|资料库")
+
 private suspend fun <T> cancellableResult(block: suspend () -> T): Result<T> = try {
     Result.success(block())
 } catch (cancelled: CancellationException) {
@@ -2073,7 +2076,29 @@ fun AmAtvApp() {
                 return runVoiceStep(VoiceCommand.Play(command.label))
             }
             is VoiceCommand.Play -> {
-                if (tapOnScreen(command.query)) return null
+                // "播放喜好歌曲": a list on screen is opened and its first song played; a song on
+                // screen plays when pressed. Lists not on this page are looked for in the library.
+                suspend fun playFromScreen(): Boolean {
+                    val listBefore = voicePickable
+                    val playingBefore = track.id
+                    if (!tapOnScreen(command.query)) return false
+                    for (attempt in 0 until 12) {
+                        delay(200L)
+                        if (track.id != playingBefore) return true
+                        val list = voicePickable
+                        if (list.isNotEmpty() && list != listBefore) {
+                            playTrack(list.first(), contextQueue = list.filter { it.openAction == CatalogOpenAction.Play })
+                            return true
+                        }
+                    }
+                    return true
+                }
+                if (playFromScreen()) return null
+                if (LIBRARY_LIST_HINT.containsMatchIn(command.query) && destination != Destination.Library) {
+                    destination = Destination.Library
+                    delay(900L)
+                    if (playFromScreen()) return null
+                }
                 voiceState = VoiceUiState.Searching(command.query)
                 if (command.query.endsWith("电台")) {
                     val station = cancellableResult { services.search(command.query) }.getOrNull().orEmpty()
@@ -2165,7 +2190,7 @@ fun AmAtvApp() {
                     val steps = if (unsure && voice.intentReady()) {
                         voiceState = VoiceUiState.Understanding(said)
                         val labels = voiceScreen.read().filter { it.clickable }.map { it.label }.filter { it.isNotBlank() }
-                        voice.understand(said, labels) ?: ruled
+                        voice.understand(said, labels, voiceHotwords(), ChineseText.pinyin(said)) ?: ruled
                     } else ruled
                     voiceState = VoiceUiState.Heard(said)
                     for ((index, step) in steps.withIndex()) {

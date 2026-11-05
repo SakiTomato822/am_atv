@@ -32,7 +32,9 @@ fun matchScore(spoken: String, label: String, normalize: (String) -> String, pin
         if (pa == pb) return 75
         if (pa.length >= 4 && pb.contains(pa)) return 60 - ((pb.length - pa.length) / 3).coerceAtMost(15)
     }
-    if (b.length >= 2 && a.contains(b)) return 50
+    // The sentence holds the label: only if the label is most of it. "我喜好歌曲" must not press
+    // the "歌曲" tab just because both end in 歌曲.
+    if (b.length >= 2 && a.contains(b) && b.length * 10 >= a.length * 6) return 50
     return 0
 }
 

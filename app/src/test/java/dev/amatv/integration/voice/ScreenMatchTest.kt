@@ -28,6 +28,14 @@ class ScreenMatchTest {
     }
 
     @Test
+    fun shortLabelInsideALongerSentenceIsNotAMatch() {
+        // "播放我的喜好歌曲" once pressed the library's "歌曲" tab.
+        val targets = listOf(t("歌曲"), t("喜好歌曲"))
+        assertEquals("喜好歌曲", bestTarget("我喜好歌曲", targets, normalize, pinyin)?.label)
+        assertNull(bestTarget("我喜好歌曲", listOf(t("歌曲")), normalize, pinyin))
+    }
+
+    @Test
     fun nothingCloseIsNull() {
         assertNull(bestTarget("资料库", listOf(t("专辑")), normalize, pinyin))
         assertNull(bestTarget("专辑", listOf(t("专辑", clickable = false)), normalize, pinyin))

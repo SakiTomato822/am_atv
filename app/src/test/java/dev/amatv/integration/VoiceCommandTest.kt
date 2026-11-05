@@ -28,6 +28,8 @@ class VoiceCommandTest {
         assertEquals(play("张惠妹"), parseVoiceCommand("帮我放点张惠妹的歌吧"))
         assertEquals(play("taylor swift"), parseVoiceCommand("播放 Taylor Swift"))
         assertEquals(play("五月天"), parseVoiceCommand("五月天"))
+        assertEquals(play("喜好歌曲"), parseVoiceCommand("播放我的喜好歌曲"))
+        assertEquals(play("我 天空"), parseVoiceCommand("播放我的天空"))
     }
 
     @Test

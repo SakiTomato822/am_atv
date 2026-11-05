@@ -17,7 +17,12 @@ class VoiceIntentModel(private val settings: () -> Triple<String, String, String
     fun configured() = settings().let { it.first.isNotBlank() && it.second.isNotBlank() && it.third.isNotBlank() }
 
     /** Steps for [spoken], or null when the model is not set up or its answer is unusable. */
-    suspend fun understand(spoken: String, screenLabels: List<String>): List<VoiceCommand>? = withContext(Dispatchers.IO) {
+    suspend fun understand(
+        spoken: String,
+        screenLabels: List<String>,
+        candidates: List<String> = emptyList(),
+        spokenPinyin: String? = null,
+    ): List<VoiceCommand>? = withContext(Dispatchers.IO) {
         if (!configured()) return@withContext null
         val (base, key, model) = settings()
         runCatching {
@@ -31,7 +36,9 @@ class VoiceIntentModel(private val settings: () -> Triple<String, String, String
                     .put(JSONObject().put("role", "system").put("content", SYSTEM_PROMPT))
                     .put(JSONObject().put("role", "user").put("content", JSONObject()
                         .put("said", spoken)
+                        .apply { if (!spokenPinyin.isNullOrBlank()) put("said_pinyin", spokenPinyin) }
                         .put("on_screen", JSONArray(screenLabels.distinct().take(80)))
+                        .put("known_names", JSONArray(candidates.distinct().take(120)))
                         .toString())))
             val connection = (URL(base.trimEnd('/') + "/chat/completions").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -71,7 +78,9 @@ class VoiceIntentModel(private val settings: () -> Triple<String, String, String
 {"action":"pick","number":N}  当前列表的第 N 个
 {"action":"open","label":"屏幕上的文字"}  点击屏幕上的控件；label 尽量取 on_screen 里最接近的那一项
 {"action":"play","query":"歌名/歌手/专辑/歌单/电台名"}  搜索并播放
-on_screen 是当前屏幕上能看到的文字。用户说的名字和 on_screen 某项读音相近时，用 open 并写 on_screen 里的原文。
+on_screen 是当前屏幕上能看到的文字；known_names 是用户最近听过、当前列表里的歌名和歌手；said_pinyin 是识别文字的拼音。
+识别常把名字写成同音错字：按 said_pinyin 的读音和这些名字比对。和 on_screen 某项读音相近时，用 open 并写 on_screen 里的原文；
+和 known_names 某项读音相近时，用 play 并写 known_names 里的原文。都对不上时保留原话，不要编造名字。
 只输出 JSON，不要解释。听不懂就输出 {"steps":[]}。
 """.trimIndent()
     }

@@ -78,9 +78,16 @@ class VoiceService(context: Context) {
      * Steps from the chat model for [spoken], given the labels on screen; null when it is off,
      * slow (over [INTENT_TIMEOUT_MS]) or its answer is unusable, so the caller keeps its own steps.
      */
-    suspend fun understand(spoken: String, screenLabels: List<String>): List<dev.amatv.integration.VoiceCommand>? {
+    suspend fun understand(
+        spoken: String,
+        screenLabels: List<String>,
+        candidates: List<String>,
+        spokenPinyin: String?,
+    ): List<dev.amatv.integration.VoiceCommand>? {
         if (!intentReady()) return null
-        return kotlinx.coroutines.withTimeoutOrNull(INTENT_TIMEOUT_MS) { intent.understand(spoken, screenLabels) }
+        return kotlinx.coroutines.withTimeoutOrNull(INTENT_TIMEOUT_MS) {
+            intent.understand(spoken, screenLabels, candidates, spokenPinyin)
+        }
             ?.takeIf { it.isNotEmpty() }
     }
 
