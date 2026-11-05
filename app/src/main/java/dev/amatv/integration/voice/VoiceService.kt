@@ -93,6 +93,11 @@ class VoiceService(context: Context) {
         }
     }
 
+    /** Loads the chosen local model now (off the main thread), so the mic opens at once. */
+    fun preload() {
+        if (settings.value.engine.startsWith("model:")) engine()?.preload()
+    }
+
     fun listen(hotwords: List<String>): Flow<VoiceEvent> =
         engine()?.listen(hotwords) ?: flowOf(VoiceEvent.Failed(VoiceFailure.NotConfigured))
 

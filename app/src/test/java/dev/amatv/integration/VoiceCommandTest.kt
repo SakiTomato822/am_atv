@@ -63,6 +63,11 @@ class VoiceCommandTest {
         assertEquals(VoiceCommand.Seek(30), parseVoiceCommand("快进30秒"))
         assertEquals(VoiceCommand.Seek(30), parseVoiceCommand("快进三十秒"))
         assertEquals(VoiceCommand.Seek(-15), parseVoiceCommand("后退十五秒"))
+        // As the recognizer writes them.
+        assertEquals(VoiceCommand.Seek(-10), parseVoiceCommand("退10s"))
+        assertEquals(VoiceCommand.Seek(-10), parseVoiceCommand("退 10 秒。"))
+        assertEquals(VoiceCommand.Seek(60), parseVoiceCommand("快进一分钟"))
+        assertEquals(VoiceCommand.Seek(-30), parseVoiceCommand("回退30秒钟"))
         assertEquals(VoiceCommand.Next, parseVoiceCommand("下一首"))
         assertEquals(VoiceCommand.NowPlaying, parseVoiceCommand("打开歌词页面"))
         assertEquals(play("音乐寻宝电台"), parseVoiceCommand("音乐寻宝电台"))

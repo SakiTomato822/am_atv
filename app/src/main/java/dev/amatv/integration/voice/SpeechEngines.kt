@@ -20,6 +20,7 @@ import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import com.k2fsa.sherpa.onnx.OnlineZipformer2CtcModelConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.FlowCollector
@@ -46,6 +47,8 @@ enum class VoiceFailure { ModelMissing, MicUnavailable, NoSpeech, NotConfigured,
 /** One way of turning speech into text. [hotwords]: names worth favouring (library, recent plays). */
 interface SpeechEngine {
     fun listen(hotwords: List<String>): Flow<VoiceEvent>
+    /** Loads the model ahead of the first tap (slow for the large ones); call off the main thread. */
+    fun preload() = Unit
     fun release() = Unit
 }
 
@@ -157,52 +160,49 @@ internal fun ShortArray.toWav(): ByteArray {
 /** Streaming sherpa-onnx model: text appears while speaking; ends on a pause. */
 class SherpaStreamingEngine(private val model: VoiceModel, private val store: VoiceModelStore) : SpeechEngine {
     @Volatile private var recognizer: OnlineRecognizer? = null
-    private var hotwordsKey: String? = null
 
-    private fun recognizer(hotwords: List<String>): OnlineRecognizer = synchronized(this) {
-        val words = if (model.supportsHotwords) hotwords.distinct().take(300) else emptyList()
-        val key = words.joinToString("\n")
-        recognizer?.takeIf { key == hotwordsKey }?.let { return it }
-        recognizer?.release()
-        val hotwordsFile = if (words.isEmpty()) "" else File(store.dir(model), "hotwords.txt").apply { writeText(key) }.path
-        val modelConfig = when (model.kind) {
-            VoiceModelKind.StreamingTransducer -> OnlineModelConfig(
+    /** Built once; hotwords go with each stream, so changing them costs nothing. */
+    private fun recognizer(): OnlineRecognizer = recognizer ?: synchronized(this) {
+        recognizer ?: run {
+            val transducer = model.kind == VoiceModelKind.StreamingTransducer
+            val modelConfig = if (transducer) OnlineModelConfig(
                 transducer = OnlineTransducerModelConfig(
                     encoder = store.file(model, "encoder").path,
                     decoder = store.file(model, "decoder").path,
                     joiner = store.file(model, "joiner").path,
                 ),
                 tokens = store.file(model, "tokens").path, numThreads = 2, provider = "cpu",
-                modelingUnit = if (words.isEmpty()) "" else "cjkchar",
-            )
-            else -> OnlineModelConfig(
+                modelingUnit = "cjkchar",
+            ) else OnlineModelConfig(
                 zipformer2Ctc = OnlineZipformer2CtcModelConfig(model = store.file(model, "model").path),
                 tokens = store.file(model, "tokens").path, numThreads = 2, provider = "cpu",
             )
+            OnlineRecognizer(null, OnlineRecognizerConfig(
+                featConfig = FeatureConfig(sampleRate = SAMPLE_RATE, featureDim = 80),
+                modelConfig = modelConfig,
+                endpointConfig = EndpointConfig(
+                    rule1 = EndpointRule(false, 4.0f, 0f),
+                    rule2 = EndpointRule(true, 0.9f, 0f),
+                    rule3 = EndpointRule(false, 0f, 12f),
+                ),
+                enableEndpoint = true,
+                decodingMethod = if (transducer) "modified_beam_search" else "greedy_search",
+                hotwordsScore = 2.0f,
+            )).also { recognizer = it }
         }
-        OnlineRecognizer(null, OnlineRecognizerConfig(
-            featConfig = FeatureConfig(sampleRate = SAMPLE_RATE, featureDim = 80),
-            modelConfig = modelConfig,
-            endpointConfig = EndpointConfig(
-                rule1 = EndpointRule(false, 4.0f, 0f),
-                rule2 = EndpointRule(true, 0.9f, 0f),
-                rule3 = EndpointRule(false, 0f, 12f),
-            ),
-            enableEndpoint = true,
-            decodingMethod = if (words.isEmpty()) "greedy_search" else "modified_beam_search",
-            hotwordsFile = hotwordsFile,
-            hotwordsScore = 2.0f,
-        )).also {
-            recognizer = it
-            hotwordsKey = key
-        }
+    }
+
+    override fun preload() {
+        if (store.isInstalled(model)) runCatching { recognizer() }.onFailure { Log.w(TAG, "Preload failed", it) }
     }
 
     override fun listen(hotwords: List<String>): Flow<VoiceEvent> = flow {
         if (!store.isInstalled(model)) { emit(VoiceEvent.Failed(VoiceFailure.ModelMissing)); return@flow }
-        val engine = recognizer(hotwords)
+        val engine = recognizer()
         val audio = openMic() ?: return@flow
-        val stream = engine.createStream()
+        val words = if (model.supportsHotwords) hotwords.map { it.replace("/", " ").trim() }.filter { it.isNotEmpty() }.take(200) else emptyList()
+        val stream = if (words.isEmpty()) engine.createStream() else
+            runCatching { engine.createStream(words.joinToString("/")) }.getOrElse { engine.createStream() }
         try {
             val buffer = ShortArray(CHUNK)
             val started = SystemClock.elapsedRealtime()
@@ -258,9 +258,11 @@ class SherpaOfflineEngine(private val model: VoiceModel, private val store: Voic
 
     override fun listen(hotwords: List<String>): Flow<VoiceEvent> = flow {
         if (!store.isInstalled(model)) { emit(VoiceEvent.Failed(VoiceFailure.ModelMissing)); return@flow }
-        val engine = recognizer()
+        // Start listening at once; a model not loaded yet loads while the user speaks.
+        val loading = kotlinx.coroutines.CoroutineScope(Dispatchers.Default).async { recognizer() }
         val pcm = recordUtterance() ?: return@flow
         emit(VoiceEvent.Recognizing)
+        val engine = loading.await()
         val stream = engine.createStream()
         try {
             stream.acceptWaveform(pcm.toFloats(), SAMPLE_RATE)
@@ -271,6 +273,10 @@ class SherpaOfflineEngine(private val model: VoiceModel, private val store: Voic
             stream.release()
         }
     }.flowOn(Dispatchers.IO)
+
+    override fun preload() {
+        if (store.isInstalled(model)) runCatching { recognizer() }.onFailure { Log.w(TAG, "Preload failed", it) }
+    }
 
     override fun release() = synchronized(this) {
         recognizer?.release()
