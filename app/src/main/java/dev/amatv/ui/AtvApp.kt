@@ -3113,7 +3113,9 @@ private fun BrowseShell(
         if (BuildConfig.FLYME_AUTO && hasCurrentTrack) {
             // Ambient colour from the playing artwork, like Apple TV: brightest at the top,
             // fading into the page so content stays readable. Still in low-performance mode.
-            PlayerBackdrop(currentTrack, animate = isBrowseVisible && !lowPerformanceMode,
+            // Flows only while music plays (as on Now Playing). Paused, it holds its last frame:
+            // each lava frame makes RenderThread recompose the whole screen (~40% CPU idle).
+            PlayerBackdrop(currentTrack, animate = isBrowseVisible && isPlaying && !lowPerformanceMode,
                 modifier = Modifier.fillMaxSize())
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
                 0f to LocalFlymePalette.current.scrim.copy(alpha = 0.42f),

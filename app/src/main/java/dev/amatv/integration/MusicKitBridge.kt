@@ -368,7 +368,11 @@ class MusicKitBridge(private val context: Context) {
             tailDecision = null
         }
         if (fadeTicks++ % LEVEL_EVERY_TICKS == 0 && remaining >= FadeCurve.OUT_MS) {
-            val allowed = androidx.core.content.ContextCompat.checkSelfPermission(
+            // Never on Flyme: there the microphone permission is for voice commands only. A
+            // Visualizer held on the playback session takes the track off the head unit's
+            // low-power path (heavy CPU, crackling, like the old spectrum view) and changed which
+            // stream the volume keys adjust. Without it every ending simply fades out.
+            val allowed = !dev.amatv.BuildConfig.FLYME_AUTO && androidx.core.content.ContextCompat.checkSelfPermission(
                 context, android.Manifest.permission.RECORD_AUDIO,
             ) == android.content.pm.PackageManager.PERMISSION_GRANTED
             sessionLevel.read(session, allowed)?.let { tailLoudness.add(it, position, remaining) }
