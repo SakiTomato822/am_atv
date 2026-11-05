@@ -14,7 +14,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.gestures.snapping.SnapPosition
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -105,10 +111,11 @@ private fun FlymeArtistShelves(
 ) {
     val artist = state.artist ?: return
     val nothingYet = topSongs.isEmpty() && state.catalogShelves.isEmpty() && state.albums.isEmpty()
-    LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 40.dp, top = 54.dp, bottom = 40.dp)) {
+    // No end padding: the song and card rows run to the screen edge and scroll under it.
+    LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, top = 54.dp, bottom = 40.dp)) {
         if (nothingYet) {
             item(key = "loading") {
-                Box(Modifier.fillMaxWidth().padding(top = 80.dp), Alignment.Center) {
+                Box(Modifier.fillMaxWidth().padding(top = 80.dp, end = EDGE_GAP), Alignment.Center) {
                     if (state.catalogLoading || state.loading) AppleLoadingIndicator()
                 }
             }
@@ -116,14 +123,7 @@ private fun FlymeArtistShelves(
         if (topSongs.isNotEmpty()) {
             item(key = "top-songs") {
                 ArtistHeading(stringResource(R.string.artist_top_songs))
-                topSongs.take(20).chunked(2).forEach { pair ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                        pair.forEach { song ->
-                            ArtistSongRow(song, Modifier.weight(1f)) { open(song, topSongs) }
-                        }
-                        if (pair.size == 1) Spacer(Modifier.weight(1f))
-                    }
-                }
+                ArtistTopSongs(topSongs, open)
             }
         }
         if (artist.isLibraryArtist && state.albums.isNotEmpty()) {
@@ -144,17 +144,45 @@ private fun FlymeArtistShelves(
     }
 }
 
+/**
+ * Top songs as columns of [TOP_SONG_ROWS] that scroll sideways past the screen edge; a fling
+ * settles on a column start, so a glance shows whole rows and the next column peeks in.
+ */
+@Composable
+private fun ArtistTopSongs(songs: List<Track>, open: (Track, List<Track>) -> Unit) {
+    val state = rememberLazyGridState()
+    LazyHorizontalGrid(
+        rows = GridCells.Fixed(TOP_SONG_ROWS),
+        state = state,
+        modifier = Modifier.fillMaxWidth().height(TOP_SONG_HEIGHT * TOP_SONG_ROWS + TOP_SONG_GAP * (TOP_SONG_ROWS - 1)),
+        contentPadding = PaddingValues(end = EDGE_GAP),
+        horizontalArrangement = Arrangement.spacedBy(24.dp),
+        verticalArrangement = Arrangement.spacedBy(TOP_SONG_GAP),
+        flingBehavior = rememberSnapFlingBehavior(state, SnapPosition.Start),
+    ) {
+        gridItemsIndexed(songs, key = { index, song -> "${song.id}#$index" }) { _, song ->
+            ArtistSongRow(song, Modifier.width(TOP_SONG_WIDTH)) { open(song, songs) }
+        }
+    }
+}
+
+private const val TOP_SONG_ROWS = 4
+private val TOP_SONG_HEIGHT = 56.dp
+private val TOP_SONG_GAP = 4.dp
+private val TOP_SONG_WIDTH = 340.dp
+private val EDGE_GAP = 40.dp
+
 @Composable
 private fun ArtistHeading(text: String, modifier: Modifier = Modifier) {
     Text(text, color = FlymeInk, fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp,
-        modifier = modifier.padding(bottom = 10.dp))
+        modifier = modifier.padding(bottom = 10.dp, end = EDGE_GAP))
 }
 
 @Composable
 private fun ArtistSongRow(song: Track, modifier: Modifier, onClick: () -> Unit) {
     FocusSurface(
         onClick = onClick,
-        modifier = modifier.height(56.dp),
+        modifier = modifier.height(TOP_SONG_HEIGHT),
         cornerRadius = 8.dp,
         focusedScale = 1.01f,
         padding = PaddingValues(horizontal = 6.dp),
@@ -182,7 +210,7 @@ private fun ArtistCardRow(items: List<Track>, onNearEnd: () -> Unit = {}, onOpen
         snapshotFlow { (state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= items.size - 4 }
             .collect { if (it) latestNearEnd() }
     }
-    LazyRow(state = state, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+    LazyRow(state = state, horizontalArrangement = Arrangement.spacedBy(18.dp), contentPadding = PaddingValues(end = EDGE_GAP)) {
         itemsIndexed(items, key = { index, item -> "${item.id}#$index" }) { _, item ->
             FocusSurface(
                 onClick = { onOpen(item) },

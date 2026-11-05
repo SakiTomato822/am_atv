@@ -117,6 +117,13 @@ class MusicKitBridge(private val context: Context) {
     /** Fade at gapless song changes for the current queue; the app sets it per kind of queue. */
     @Volatile var fadeEnabled = false
     private val fade = GaplessFade()
+    private val sessionLevel = SessionLevel()
+    private val tailLoudness = TailLoudness()
+    /** The song whose loudness [tailLoudness] holds, and whether its ending is fading by itself. */
+    private var levelCatalogId: String? = null
+    private var tailDecision: Boolean? = null
+    private var previousTailQuiet = false
+    private var fadeTicks = 0
     /** The song a gapless change moved into, faded in over its first seconds. */
     @Volatile private var fadeInCatalogId: String? = null
     private val fadeTick = object : Runnable {
@@ -344,6 +351,7 @@ class MusicKitBridge(private val context: Context) {
         val current = controller ?: return
         if (!fadeEnabled) {
             fade.reset()
+            sessionLevel.release()
             return
         }
         if ((current.callOrNull("getPlaybackState") as? Int) != PLAYBACK_STATE_PLAYING) return
@@ -351,17 +359,35 @@ class MusicKitBridge(private val context: Context) {
         val duration = (current.callOrNull("getDuration") as? Long)?.takeIf { it > 0L } ?: return
         val currentId = current.callOrNull("getCurrentItem")?.let(::trackFromQueueItem)?.catalogId
         val remaining = duration - position
-        val fadeOut = if (queuedLookaheadCatalogId != null && remaining in 0L until FADE_OUT_MS) {
-            remaining.toFloat() / FADE_OUT_MS
-        } else 1f
+        val session = MusicKitAudioSession.currentId()
+        if (currentId != levelCatalogId) {
+            // A new song: an ending that faded by itself is followed by a plain start too.
+            previousTailQuiet = tailDecision == true
+            levelCatalogId = currentId
+            tailLoudness.clear()
+            tailDecision = null
+        }
+        if (fadeTicks++ % LEVEL_EVERY_TICKS == 0 && remaining >= FadeCurve.OUT_MS) {
+            val allowed = androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.RECORD_AUDIO,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            sessionLevel.read(session, allowed)?.let { tailLoudness.add(it, position, remaining) }
+        }
+        val outDb = if (queuedLookaheadCatalogId != null && remaining in 0L until FadeCurve.OUT_MS) {
+            val quiet = tailDecision ?: tailLoudness.alreadyQuiet().also {
+                tailDecision = it
+                Log.i(TAG, if (it) "Fade: ending already quiet, left alone" else "Fade: fading out")
+            }
+            if (quiet) 0f else FadeCurve.outDb(remaining)
+        } else 0f
         val fadingIn = fadeInCatalogId
-        val fadeIn = if (fadingIn != null && currentId == fadingIn && position < FADE_IN_MS) {
-            position.toFloat() / FADE_IN_MS
+        val inDb = if (fadingIn != null && currentId == fadingIn && position < FadeCurve.IN_MS && !previousTailQuiet) {
+            FadeCurve.inDb(position)
         } else {
             if (fadingIn != null && currentId == fadingIn) fadeInCatalogId = null
-            1f
+            0f
         }
-        fade.apply(MusicKitAudioSession.currentId(), minOf(fadeOut, fadeIn))
+        fade.apply(session, minOf(outDb, inDb))
     }
 
     /** Diagnostics: why a song that just ended did not continue into a queued next song. */
@@ -442,6 +468,7 @@ class MusicKitBridge(private val context: Context) {
             }
             runCatching { currentController?.callVoid("release") }
             fade.release()
+            sessionLevel.release()
             oldThread?.quitSafely()
             Unit
         }
@@ -996,8 +1023,7 @@ class MusicKitBridge(private val context: Context) {
         const val AFTER_END_WINDOW_MS = 15_000L
         const val MANUAL_SKIP_WINDOW_MS = 2_000L
         const val FADE_TICK_MS = 50L
-        const val FADE_OUT_MS = 3_000L
-        const val FADE_IN_MS = 2_000L
+        const val LEVEL_EVERY_TICKS = 5
         // PlaybackQueueInsertionType.INSERTION_TYPE_AT_END in mediaplayback 1.1.1.
         const val INSERTION_TYPE_AT_END = 2
         const val CONTINUOUS_PLAYBACK_ON = 2
