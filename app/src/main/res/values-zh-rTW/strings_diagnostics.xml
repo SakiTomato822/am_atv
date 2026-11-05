@@ -42,4 +42,7 @@
     <string name="appearance_time">按時間</string>
     <string name="appearance_light_from">淺色開始：%1$s</string>
     <string name="appearance_light_until">淺色結束：%1$s</string>
+    <string name="appearance_ui_scale">介面大小：%1$d%%</string>
+    <string name="appearance_ui_scale_reset">還原</string>
+    <string name="appearance_hide_system_bars">隱藏狀態列：%1$s</string>
 </resources>

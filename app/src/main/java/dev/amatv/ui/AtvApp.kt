@@ -339,6 +339,7 @@ fun AmAtvApp() {
     var voiceState by remember { mutableStateOf<VoiceUiState?>(null) }
     var voiceJob by remember { mutableStateOf<Job?>(null) }
     var voiceStartRequests by remember { mutableIntStateOf(0) }
+    val voiceEnabled = services.playbackOptions.settings.collectAsState().value.voiceEnabled
     /** The list on screen that "第三个" counts in; the browse pages report it. */
     var voicePickable by remember { mutableStateOf(emptyList<Track>()) }
     val voicePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -2156,7 +2157,7 @@ fun AmAtvApp() {
                         LocalFocusFrameVisibility provides browseVisibility,
                     ) {
                     BrowseShell(
-                        onVoice = if (BuildConfig.FLYME_AUTO && voice.isAvailable()) ::startVoice else null,
+                        onVoice = if (BuildConfig.FLYME_AUTO && voiceEnabled && voice.isAvailable()) ::startVoice else null,
                         onVoicePickable = { voicePickable = it },
                         voiceActive = voiceState is VoiceUiState.Listening,
                         onMiniPlayerPlaced = { miniPlayerCenter = it },

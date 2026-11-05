@@ -18,4 +18,7 @@
     <string name="voice_model_missing">此版本未包含語音辨識</string>
     <string name="voice_permission_needed">需要麥克風權限才能使用語音</string>
     <string name="voice_no_item_format">這個頁面沒有第 %1$d 個</string>
+    <string name="voice_setting_title">語音</string>
+    <string name="voice_setting_summary">用說話來播放、切歌或暫停。辨識在本機完成，只在按鈕亮起時使用麥克風。</string>
+    <string name="voice_setting_button">語音按鈕：%1$s</string>
 </resources>

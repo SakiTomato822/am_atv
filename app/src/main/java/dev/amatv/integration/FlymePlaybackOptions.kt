@@ -16,7 +16,19 @@ data class FlymePlaybackSettings(
     val appearance: Appearance = Appearance.System,
     val lightFromMinute: Int = 7 * 60,
     val lightUntilMinute: Int = 19 * 60,
+    /** Full screen: hide the system status and navigation bars (a swipe shows them briefly). */
+    val hideSystemBars: Boolean = false,
+    /** The user's size on top of the automatic fit, in percent ([UI_SCALE_MIN]..[UI_SCALE_MAX]). */
+    val uiScalePercent: Int = 100,
+    /** Show the mic button for on-device voice commands; off until the user turns it on. */
+    val voiceEnabled: Boolean = false,
 ) {
+    companion object {
+        const val UI_SCALE_MIN = 70
+        const val UI_SCALE_MAX = 130
+        const val UI_SCALE_STEP = 10
+    }
+
     enum class Appearance { Light, Dark, System, Time }
 
     /** Whether the UI is light now, given the system night mode and the minute of the day. */
@@ -45,6 +57,10 @@ class FlymePlaybackOptions private constructor(context: Context) {
         }.getOrDefault(FlymePlaybackSettings.Appearance.System),
         lightFromMinute = preferences.getInt(KEY_LIGHT_FROM, 7 * 60),
         lightUntilMinute = preferences.getInt(KEY_LIGHT_UNTIL, 19 * 60),
+        hideSystemBars = preferences.getBoolean(KEY_HIDE_SYSTEM_BARS, false),
+        uiScalePercent = preferences.getInt(KEY_UI_SCALE, 100)
+            .coerceIn(FlymePlaybackSettings.UI_SCALE_MIN, FlymePlaybackSettings.UI_SCALE_MAX),
+        voiceEnabled = preferences.getBoolean(KEY_VOICE, false),
     ))
     val settings: StateFlow<FlymePlaybackSettings> = mutableSettings.asStateFlow()
 
@@ -59,6 +75,9 @@ class FlymePlaybackOptions private constructor(context: Context) {
             .putString(KEY_APPEARANCE, next.appearance.name)
             .putInt(KEY_LIGHT_FROM, next.lightFromMinute)
             .putInt(KEY_LIGHT_UNTIL, next.lightUntilMinute)
+            .putBoolean(KEY_HIDE_SYSTEM_BARS, next.hideSystemBars)
+            .putInt(KEY_UI_SCALE, next.uiScalePercent)
+            .putBoolean(KEY_VOICE, next.voiceEnabled)
             .apply()
     }
 
@@ -76,5 +95,8 @@ class FlymePlaybackOptions private constructor(context: Context) {
         private const val KEY_FADE_STATIONS = "fade_stations"
         private const val KEY_FADE_PLAYLISTS = "fade_playlists"
         private const val KEY_STATIONS_AS_SONGS = "stations_as_songs"
+        private const val KEY_HIDE_SYSTEM_BARS = "hide_system_bars"
+        private const val KEY_UI_SCALE = "ui_scale_percent"
+        private const val KEY_VOICE = "voice_enabled"
     }
 }

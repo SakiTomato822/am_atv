@@ -117,6 +117,12 @@ internal fun FlymePlaybackOptionsSettings(options: FlymePlaybackOptions) {
     Spacer(Modifier.height(6.dp))
     CacheButton(stringResource(if (settings.stationsAsSongs) R.string.playback_station_mode_songs else R.string.playback_station_mode_auto),
         onClick = { options.update { it.copy(stationsAsSongs = !it.stationsAsSongs) } }, modifier = Modifier.width(420.dp))
+    Spacer(Modifier.height(16.dp))
+    Text(stringResource(R.string.voice_setting_title), color = FlymeInk, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+    Text(stringResource(R.string.voice_setting_summary), color = FlymeInk.copy(alpha = 0.6f), fontSize = 14.sp)
+    Spacer(Modifier.height(6.dp))
+    CacheButton(stringResource(R.string.voice_setting_button, if (settings.voiceEnabled) on else off),
+        onClick = { options.update { it.copy(voiceEnabled = !it.voiceEnabled) } }, modifier = Modifier.width(260.dp))
 }
 
 /** Light / dark / system / by time of day, with the light hours chosen in 30-minute steps. */
@@ -153,4 +159,23 @@ internal fun FlymeAppearanceSettings(options: FlymePlaybackOptions) {
         Spacer(Modifier.height(8.dp))
         hours(R.string.appearance_light_until, settings.lightUntilMinute) { value -> options.update { it.copy(lightUntilMinute = value) } }
     }
+    Spacer(Modifier.height(10.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        fun resize(by: Int) = options.update {
+            it.copy(uiScalePercent = (it.uiScalePercent + by)
+                .coerceIn(FlymePlaybackSettings.UI_SCALE_MIN, FlymePlaybackSettings.UI_SCALE_MAX))
+        }
+        Text(stringResource(R.string.appearance_ui_scale, settings.uiScalePercent), color = FlymeInk, fontSize = 16.sp,
+            modifier = Modifier.width(200.dp))
+        CacheButton("−", onClick = { resize(-FlymePlaybackSettings.UI_SCALE_STEP) }, modifier = Modifier.width(90.dp))
+        CacheButton("+", onClick = { resize(FlymePlaybackSettings.UI_SCALE_STEP) }, modifier = Modifier.width(90.dp))
+        if (settings.uiScalePercent != 100) {
+            CacheButton(stringResource(R.string.appearance_ui_scale_reset),
+                onClick = { options.update { it.copy(uiScalePercent = 100) } }, modifier = Modifier.width(120.dp))
+        }
+    }
+    Spacer(Modifier.height(10.dp))
+    CacheButton(stringResource(R.string.appearance_hide_system_bars,
+        stringResource(if (settings.hideSystemBars) R.string.playback_option_on else R.string.playback_option_off)),
+        onClick = { options.update { it.copy(hideSystemBars = !it.hideSystemBars) } }, modifier = Modifier.width(260.dp))
 }

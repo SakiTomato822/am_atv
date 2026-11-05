@@ -19,4 +19,7 @@
     <string name="voice_model_missing">Voice recognition isn’t included in this build</string>
     <string name="voice_permission_needed">Allow the microphone to use voice</string>
     <string name="voice_no_item_format">No item %1$d on this page</string>
+    <string name="voice_setting_title">Voice</string>
+    <string name="voice_setting_summary">Speak to play, skip or pause. Recognition stays on this device; the microphone is used only while the button is lit.</string>
+    <string name="voice_setting_button">Voice button: %1$s</string>
 </resources>
