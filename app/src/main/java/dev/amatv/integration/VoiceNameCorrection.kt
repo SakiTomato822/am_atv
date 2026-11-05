@@ -108,6 +108,23 @@ private fun editDistance(a: String, b: String, limit: Int): Int {
     return previous[b.length]
 }
 
+/**
+ * The same pinyin with every front/back nasal swapped ("xi liang" -> "xi lian"), or null when
+ * nothing changes. Apple's search is exact about pinyin, so the misheard nasal is searched too.
+ */
+internal fun nasalVariant(pinyin: String): String? {
+    val swapped = pinyin.split(' ').joinToString(" ") { s ->
+        when {
+            s.endsWith("ang") -> s.dropLast(1)
+            s.endsWith("eng") -> s.dropLast(1)
+            s.endsWith("ing") -> s.dropLast(1)
+            s.endsWith("an") || s.endsWith("en") || s.endsWith("in") -> s + "g"
+            else -> s
+        }
+    }
+    return swapped.takeIf { it != pinyin }
+}
+
 /** Folds the sounds recognizers and accents mix up into one spelling. */
 internal fun fuzzySyllable(syllable: String): String {
     var s = syllable

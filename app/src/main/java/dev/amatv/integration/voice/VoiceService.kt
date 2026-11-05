@@ -19,6 +19,12 @@ data class VoiceEngineSettings(
     /** Let a small chat model read sentences the rules do not understand (same URL and key). */
     val intentEnabled: Boolean = false,
     val intentModel: String = VoiceIntentModel.DEFAULT_MODEL,
+    /** What the system text-to-speech reads aloud. */
+    val speak: VoiceSpeak = VoiceSpeak.All,
+    /** Prompt loudness, 0.1..1 of the stream's own volume. */
+    val speakVolume: Float = 0.8f,
+    /** Prompt speed, 1 = the engine's normal pace. */
+    val speakRate: Float = 1.1f,
 ) {
     companion object {
         /** SiliconFlow serves SenseVoice through the OpenAI transcription API, reachable in mainland China. */
@@ -43,6 +49,9 @@ class VoiceService(context: Context) {
         openAiModel = preferences.getString("openai_model", null) ?: VoiceEngineSettings.DEFAULT_OPENAI_MODEL,
         intentEnabled = preferences.getBoolean("intent_enabled", false),
         intentModel = preferences.getString("intent_model", null) ?: VoiceIntentModel.DEFAULT_MODEL,
+        speak = VoiceSpeak.entries.firstOrNull { it.name == preferences.getString("speak", null) } ?: VoiceSpeak.All,
+        speakVolume = preferences.getFloat("speak_volume", 0.8f).coerceIn(0.1f, 1f),
+        speakRate = preferences.getFloat("speak_rate", 1.1f).coerceIn(0.5f, 2f),
     ))
     val settings: StateFlow<VoiceEngineSettings> = mutable.asStateFlow()
 
@@ -59,6 +68,9 @@ class VoiceService(context: Context) {
             .putString("openai_model", next.openAiModel)
             .putBoolean("intent_enabled", next.intentEnabled)
             .putString("intent_model", next.intentModel)
+            .putString("speak", next.speak.name)
+            .putFloat("speak_volume", next.speakVolume)
+            .putFloat("speak_rate", next.speakRate)
             .apply()
     }
 

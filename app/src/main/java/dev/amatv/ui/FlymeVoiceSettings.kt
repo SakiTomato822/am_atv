@@ -58,6 +58,38 @@ internal fun FlymeVoiceEngineSettings() {
     Text(stringResource(R.string.voice_engine_title), color = FlymeInk, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
     Text(stringResource(R.string.voice_engine_summary), color = FlymeInk.copy(alpha = 0.6f), fontSize = 14.sp)
     Spacer(Modifier.height(6.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(vertical = 3.dp)) {
+        Text(stringResource(R.string.voice_speak_title), color = FlymeInk, fontSize = 15.sp, modifier = Modifier.width(170.dp))
+        listOf(
+            dev.amatv.integration.voice.VoiceSpeak.All to R.string.voice_speak_all,
+            dev.amatv.integration.voice.VoiceSpeak.ChoicesOnly to R.string.voice_speak_choices,
+            dev.amatv.integration.voice.VoiceSpeak.Off to R.string.voice_speak_off,
+        ).forEach { (mode, label) ->
+            CacheButton((if (settings.speak == mode) "✓ " else "") + stringResource(label),
+                onClick = { voice.update { it.copy(speak = mode) } }, modifier = Modifier.width(170.dp))
+        }
+    }
+    if (settings.speak != dev.amatv.integration.voice.VoiceSpeak.Off) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(vertical = 3.dp)) {
+            Text(stringResource(R.string.voice_speak_volume), color = FlymeInk, fontSize = 15.sp, modifier = Modifier.width(170.dp))
+            listOf(0.4f, 0.6f, 0.8f, 1f).forEach { level ->
+                CacheButton((if (kotlin.math.abs(settings.speakVolume - level) < 0.05f) "✓ " else "") + "${(level * 100).toInt()}%",
+                    onClick = { voice.update { it.copy(speakVolume = level) } }, modifier = Modifier.width(120.dp))
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(vertical = 3.dp)) {
+            Text(stringResource(R.string.voice_speak_rate), color = FlymeInk, fontSize = 15.sp, modifier = Modifier.width(170.dp))
+            listOf(0.9f to R.string.voice_speak_rate_slow, 1.1f to R.string.voice_speak_rate_normal, 1.4f to R.string.voice_speak_rate_fast)
+                .forEach { (rate, label) ->
+                    CacheButton((if (kotlin.math.abs(settings.speakRate - rate) < 0.05f) "✓ " else "") + stringResource(label),
+                        onClick = { voice.update { it.copy(speakRate = rate) } }, modifier = Modifier.width(120.dp))
+                }
+        }
+    }
+    Spacer(Modifier.height(6.dp))
     installedNonce.let { _ ->
         VoiceModelCatalog.all.forEach { model ->
             val id = "model:${model.id}"

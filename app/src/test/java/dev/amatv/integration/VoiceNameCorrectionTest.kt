@@ -33,6 +33,13 @@ class VoiceNameCorrectionTest {
     }
 
     @Test
+    fun nasalsSwapForSearch() {
+        assertEquals("xi lian", nasalVariant("xi liang"))
+        assertEquals("fan da tong", nasalVariant("fang da tong"))
+        assertEquals(null, nasalVariant("shou du"))
+    }
+
+    @Test
     fun exactAndFarAwayAreLeftAlone() {
         assertEquals("播放 hoyomix", fix("播放 hoyomix", "hoyomix"))
         assertEquals("播放 adele", fix("播放 adele", "HOYO-MiX"))

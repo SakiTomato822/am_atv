@@ -358,6 +358,15 @@ fun AmAtvApp() {
     // and anything named on screen (VoiceScreen).
     val voice = remember { VoiceService.get(context.applicationContext) }
     val voiceScreen = remember(currentView) { VoiceScreen(currentView) }
+    // Spoken prompts (system text-to-speech); see VoiceSpeak for what is read.
+    val voiceSpeaker = remember { dev.amatv.integration.voice.VoiceSpeaker(context) }
+    DisposableEffect(voiceSpeaker) { onDispose { voiceSpeaker.release() } }
+    suspend fun sayVoice(text: String, choice: Boolean = false) {
+        val mode = voice.settings.value.speak
+        if (mode == dev.amatv.integration.voice.VoiceSpeak.Off ||
+            (mode == dev.amatv.integration.voice.VoiceSpeak.ChoicesOnly && !choice)) return
+        voiceSpeaker.say(text, voice.settings.value.speakVolume, voice.settings.value.speakRate)
+    }
     var voiceState by remember { mutableStateOf<VoiceUiState?>(null) }
     var voiceChoiceReply by remember { mutableStateOf<CompletableDeferred<String>?>(null) }
     var voiceChoiceDismissed by remember { mutableStateOf(false) }
@@ -416,6 +425,13 @@ fun AmAtvApp() {
         onDispose { voice.release() }
     }
     val voiceEngineId = voice.settings.collectAsState().value.engine
+    val voiceSpeakMode = voice.settings.collectAsState().value.speak
+    LaunchedEffect(voiceEnabled, voiceSpeakMode) {
+        // The engine takes a moment to start; have it ready before the first prompt.
+        if (BuildConfig.FLYME_AUTO && voiceEnabled && voiceSpeakMode != dev.amatv.integration.voice.VoiceSpeak.Off) {
+            voiceSpeaker.warmUp()
+        }
+    }
     LaunchedEffect(voice, voiceEnabled, voiceEngineId) {
         // Load the chosen model before the first tap, so the microphone opens at once.
         if (BuildConfig.FLYME_AUTO && voiceEnabled) {
@@ -2028,6 +2044,7 @@ fun AmAtvApp() {
     }
 
     fun dismissVoice() {
+        voiceSpeaker.stop()
         voiceChoiceReply?.complete("取消")
         voiceJob?.cancel()
         voiceJob = null
@@ -2093,16 +2110,57 @@ fun AmAtvApp() {
         }
     }
 
+    /** "周杰伦的晴天", or "周杰伦的专辑 晴天" when it is not a song. */
+    fun spokenName(item: Track): String {
+        val kind = when (item.catalogKind) {
+            CatalogKind.Album -> AppText.text(R.string.services_kind_album)
+            CatalogKind.Playlist -> AppText.text(R.string.services_kind_playlist)
+            CatalogKind.Station -> AppText.text(R.string.services_kind_station)
+            else -> null
+        }
+        return AppText.text(R.string.voice_tts_name_format, item.artist.ifBlank { "" }, listOfNotNull(kind, item.title).joinToString(" "))
+            .trim().removePrefix("的").trim()
+    }
+
+    /**
+     * "找到4个。第1个，周杰伦；第2个，吴若希…请说第几个". Titles all alike are not repeated; then the
+     * artist (and kind, when kinds differ) is what tells the choices apart.
+     */
+    fun choicesPrompt(visible: List<Track>, total: Int, page: Int, first: Boolean): String = buildString {
+        if (first) append(AppText.text(R.string.voice_tts_found_format, total)).append("。")
+        else if (page > 0) append(AppText.text(R.string.voice_tts_page_format, page + 1)).append("。")
+        val sameTitle = visible.map { voiceCatalogKey(it.title) }.distinct().size == 1
+        val mixedKinds = visible.map { it.catalogKind }.distinct().size > 1
+        visible.forEachIndexed { index, item ->
+            val described = when {
+                !sameTitle -> spokenName(item)
+                mixedKinds && item.catalogKind != CatalogKind.Song -> spokenName(item)
+                else -> item.artist.ifBlank { item.title }
+            }
+            append(AppText.text(R.string.voice_tts_item_format, index + 1, described)).append("；")
+        }
+        append(AppText.text(R.string.voice_tts_which))
+    }
+
     // Each reply gets its own 8 s (paging restarts the clock); nothing plays if the user says nothing.
     suspend fun chooseVoiceCatalog(initial: List<Track>, initialPage: Int = 0): Track? = run choose@{
         voicePendingChoices = emptyList()
         var candidates = initial
         var page = initialPage.coerceIn(0, (initial.size - 1).coerceAtLeast(0) / 4)
+        var spokenPage: List<Track>? = null
+        var askNumber = false
         try {
             while (true) {
                 val pages = (candidates.size + 3) / 4
                 val visible = candidates.drop(page * 4).take(4)
                 voiceState = VoiceUiState.Choices(visible, page + 1, pages)
+                // Read the page aloud before the mic opens (never while it listens). A reply that
+                // narrowed nothing ("首都" when all four are 首都) gets "请说第几个".
+                if (visible != spokenPage) {
+                    sayVoice(choicesPrompt(visible, candidates.size, page, first = spokenPage == null), choice = true)
+                    spokenPage = visible
+                } else if (askNumber) sayVoice(AppText.text(R.string.voice_tts_which), choice = true)
+                askNumber = false
                 val reply = CompletableDeferred<String>()
                 voiceChoiceReply = reply
                 val said = withTimeoutOrNull(8_000L) { coroutineScope {
@@ -2160,10 +2218,10 @@ fun AmAtvApp() {
                     }
                 }
                 if (filtered.size == 1) return@choose filtered.single()
-                if (filtered.isNotEmpty()) {
+                if (filtered.isNotEmpty() && filtered.size < candidates.size) {
                     candidates = filtered
                     page = 0
-                }
+                } else askNumber = true
             }
             @Suppress("UNREACHABLE_CODE")
             null
@@ -2196,6 +2254,7 @@ fun AmAtvApp() {
         }
         voiceState = VoiceUiState.Message(AppText.text(R.string.voice_playing_format,
             listOf(item.title, item.artist).filter { it.isNotBlank() }.joinToString(" · ")))
+        sayVoice(AppText.text(R.string.voice_playing_format, spokenName(item)))
         return true
     }
 
@@ -2352,7 +2411,10 @@ fun AmAtvApp() {
                             command.artist != null && command.title != null) {
                             add("${command.artist}的${command.title}")
                         }
-                        ChineseText.pinyin(query)?.let(::add)
+                        ChineseText.pinyin(query)?.let { sound ->
+                            add(sound)
+                            dev.amatv.integration.nasalVariant(sound)?.let(::add)
+                        }
                         if (latin != null && latin.length >= 6 && ranked.candidates.isEmpty()) add(latin.take(maxOf(4, latin.length - 3)))
                     }.distinct()
                     if (retry.isNotEmpty()) {
@@ -2553,8 +2615,11 @@ fun AmAtvApp() {
                     if (holdToTalk || playbackDecided) break
                     if (problem != null) {
                         voiceState = VoiceUiState.Message(problem)
+                        val said = problem
                         problem = null
-                        delay(1_800L)
+                        // Spoken, then listen again; the mic must not hear the prompt.
+                        sayVoice(said)
+                        delay(600L)
                     } else delay(500L)
                     voiceState = VoiceUiState.Listening("", ready = false)
                 }
@@ -2567,7 +2632,9 @@ fun AmAtvApp() {
             val shown = problem
             if (shown != null) {
                 voiceState = VoiceUiState.Message(shown)
-                delay(2_400L)
+                // "好的" after a cancel is not worth saying out loud.
+                if (shown != AppText.text(R.string.voice_ok)) sayVoice(shown)
+                delay(1_200L)
             } else delay(500L)
             if (generation == voiceGeneration) {
                 voiceState = null

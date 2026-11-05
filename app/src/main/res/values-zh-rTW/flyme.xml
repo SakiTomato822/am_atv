@@ -52,4 +52,18 @@
     <string name="voice_intent_summary">會將這句話、螢幕上的文字和少量相關的歌名或歌手名傳送給上方介面裡的模型。</string>
     <string name="voice_intent_toggle">大模型理解：%1$s</string>
     <string name="voice_field_intent_model">理解模型</string>
+    <string name="voice_tts_found_format">找到%1$d個</string>
+    <string name="voice_tts_page_format">第%1$d頁</string>
+    <string name="voice_tts_item_format">第%1$d個，%2$s</string>
+    <string name="voice_tts_which">請說第幾個</string>
+    <string name="voice_tts_name_format">%1$s的%2$s</string>
+    <string name="voice_speak_title">語音播報提示</string>
+    <string name="voice_speak_all">全部</string>
+    <string name="voice_speak_choices">只播候選</string>
+    <string name="voice_speak_off">關閉</string>
+    <string name="voice_speak_volume">播報音量</string>
+    <string name="voice_speak_rate">播報語速</string>
+    <string name="voice_speak_rate_slow">慢</string>
+    <string name="voice_speak_rate_normal">正常</string>
+    <string name="voice_speak_rate_fast">快</string>
 </resources>

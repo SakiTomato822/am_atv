@@ -53,4 +53,18 @@
     <string name="voice_intent_summary">Sends the sentence, text on screen, and a few related song or artist names to the model on the API above.</string>
     <string name="voice_intent_toggle">Chat model: %1$s</string>
     <string name="voice_field_intent_model">Chat model</string>
+    <string name="voice_tts_found_format">Found %1$d</string>
+    <string name="voice_tts_page_format">Page %1$d</string>
+    <string name="voice_tts_item_format">Number %1$d, %2$s</string>
+    <string name="voice_tts_which">Say which number</string>
+    <string name="voice_tts_name_format">%2$s by %1$s</string>
+    <string name="voice_speak_title">Read prompts aloud</string>
+    <string name="voice_speak_all">All</string>
+    <string name="voice_speak_choices">Choices only</string>
+    <string name="voice_speak_off">Off</string>
+    <string name="voice_speak_volume">Prompt volume</string>
+    <string name="voice_speak_rate">Prompt speed</string>
+    <string name="voice_speak_rate_slow">Slow</string>
+    <string name="voice_speak_rate_normal">Normal</string>
+    <string name="voice_speak_rate_fast">Fast</string>
 </resources>
