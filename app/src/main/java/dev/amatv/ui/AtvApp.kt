@@ -362,6 +362,9 @@ fun AmAtvApp() {
     var voiceChoiceDismissed by remember { mutableStateOf(false) }
     var voiceCatalogContext by remember { mutableStateOf<List<Track>>(emptyList()) }
     var voiceCatalogContextUntil by remember { mutableLongStateOf(0L) }
+    /** The page of choices last shown when the user let them time out (see Pick). */
+    var voicePendingChoices by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var voicePendingUntil by remember { mutableLongStateOf(0L) }
     var voiceLibrary by remember { mutableStateOf<List<Track>>(emptyList()) }
     var voiceJob by remember { mutableStateOf<Job?>(null) }
     var voiceStartRequests by remember { mutableIntStateOf(0) }
@@ -2090,7 +2093,8 @@ fun AmAtvApp() {
     }
 
     // Each reply gets its own 8 s (paging restarts the clock); nothing plays if the user says nothing.
-    suspend fun chooseVoiceCatalog(initial: List<Track>, initialPage: Int = 0): Track? = run {
+    suspend fun chooseVoiceCatalog(initial: List<Track>, initialPage: Int = 0): Track? = run choose@{
+        voicePendingChoices = emptyList()
         var candidates = initial
         var page = initialPage.coerceIn(0, (initial.size - 1).coerceAtLeast(0) / 4)
         try {
@@ -2114,7 +2118,12 @@ fun AmAtvApp() {
                     } finally {
                         spoken?.cancel()
                     }
-                } } ?: return@run null
+                } } ?: run {
+                    // Timed out: the bubble goes, but "第一个" said soon after still means these.
+                    voicePendingChoices = visible
+                    voicePendingUntil = android.os.SystemClock.elapsedRealtime() + 30_000L
+                    return@choose null
+                }
                 val label = voiceCatalogKey(said)
                 when (label) {
                     "下一页", "翻页" -> {
@@ -2125,14 +2134,14 @@ fun AmAtvApp() {
                         if (page > 0) page--
                         continue
                     }
-                    "不是", "都不对", "不是这个", "不对", "取消" -> return@run null
-                    "这个", "对", "就它" -> return@run visible.firstOrNull()
+                    "不是", "都不对", "不是这个", "不对", "取消" -> return@choose null
+                    "这个", "对", "就它" -> return@choose visible.firstOrNull()
                 }
                 val step = parseVoiceCommand(said)
-                if (step == VoiceCommand.Cancel) return@run null
+                if (step == VoiceCommand.Cancel) return@choose null
                 val number = (step as? VoiceCommand.Pick)?.number ?: label.toIntOrNull()
                 if (number != null) {
-                    visible.getOrNull(number - 1)?.let { return@run it }
+                    visible.getOrNull(number - 1)?.let { return@choose it }
                     continue
                 }
                 val filtered = when (label) {
@@ -2149,7 +2158,7 @@ fun AmAtvApp() {
                             } == true
                     }
                 }
-                if (filtered.size == 1) return@run filtered.single()
+                if (filtered.size == 1) return@choose filtered.single()
                 if (filtered.isNotEmpty()) {
                     candidates = filtered
                     page = 0
@@ -2250,6 +2259,18 @@ fun AmAtvApp() {
                 playTrack(station, listOf(station))
             }
             is VoiceCommand.Pick -> {
+                // Candidates that timed out a moment ago still own "第一个": the user was looking
+                // at them, not at whatever list the page underneath holds.
+                val pending = voicePendingChoices.takeIf {
+                    android.os.SystemClock.elapsedRealtime() <= voicePendingUntil
+                }.orEmpty()
+                if (pending.isNotEmpty()) {
+                    voicePendingChoices = emptyList()
+                    val item = pending.getOrNull(command.number - 1)
+                        ?: return AppText.text(R.string.voice_no_item_format, command.number)
+                    android.util.Log.i("AMATV-Voice", "Pick ${command.number} from timed-out choices: ${item.title} · ${item.artist}")
+                    return if (playVoiceCatalog(item)) null else AppText.text(R.string.voice_not_found_format, item.title)
+                }
                 // A list just opened by the previous step may still be loading.
                 var list = emptyList<Track>()
                 for (attempt in 0 until 15) {
@@ -2260,6 +2281,8 @@ fun AmAtvApp() {
                 }
                 val picked = list.getOrNull(command.number - 1)
                     ?: return AppText.text(R.string.voice_no_item_format, command.number)
+                android.util.Log.i("AMATV-Voice", "Pick ${command.number} on $destination from ${list.size} " +
+                    "(${list.take(3).joinToString { it.title }}): ${picked.title} · ${picked.artist}")
                 val opener = voiceOpener
                 if (opener != null) opener(picked)
                 else when (picked.openAction) {
