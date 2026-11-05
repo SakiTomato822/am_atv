@@ -97,11 +97,22 @@ jobs:
 
       # On-device speech recognition engine (sherpa-onnx, Apache-2.0), pinned by hash. Models are
       # downloaded by the app when the user picks one; none ships in the APK.
+      # Cached between runs: GitHub's release downloads time out (504) now and then. The hash
+      # check below runs on a cached copy too.
+      - name: Cache speech engine
+        uses: actions/cache@v4
+        with:
+          path: app/libs/sherpa-onnx-2.0.1.aar
+          key: sherpa-onnx-2.0.1-aar-a8d09d1d
+
       - name: Retrieve speech engine
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL -o app/libs/sherpa-onnx-2.0.1.aar https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.1/sherpa-onnx-2.0.1.aar
+          if [ ! -s app/libs/sherpa-onnx-2.0.1.aar ]; then
+            curl -fsSL --retry 5 --retry-delay 15 --retry-all-errors \
+              -o app/libs/sherpa-onnx-2.0.1.aar https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.1/sherpa-onnx-2.0.1.aar
+          fi
           echo 'a8d09d1d32f3eb8520482c6d3d43fae674681c5b050385967c70a3c2c9bf0ee7  app/libs/sherpa-onnx-2.0.1.aar' | sha256sum -c -
 
       - name: Install Android build tools
