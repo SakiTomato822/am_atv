@@ -1939,7 +1939,7 @@ fun AmAtvApp() {
     }
 
     LaunchedEffect(destination) {
-        if (destination == Destination.Search && searchResults.isEmpty() && services.isCatalogConfigured) {
+        if (destination == Destination.Search && searchResults.isEmpty() && !searchLoading && services.isCatalogConfigured) {
             searchLoading = true
             runCatching { services.charts("songs") }
                 .onSuccess { searchResults = it }
@@ -2039,10 +2039,33 @@ fun AmAtvApp() {
             ?.takeIf { it.isNotEmpty() } ?: direct
     }
 
-    /** Runs one step; returns a message to show when it could not be done. */
+    fun searchCatalog(query: String) {
+        searchJob?.cancel()
+        searchLoading = true
+        searchJob = scope.launch {
+            try {
+                cancellableResult { services.search(query) }
+                    .onSuccess { items ->
+                        searchResults = items
+                        serviceMessage = if (items.isEmpty()) {
+                            AppText.text(R.string.app_search_no_results_format, query)
+                        } else null
+                    }
+                    .onFailure {
+                        searchResults = emptyList()
+                        serviceMessage = it.message ?: AppText.text(R.string.app_search_failed)
+                    }
+            } finally {
+                searchLoading = false
+            }
+        }
+    }
+
+    /** Runs one step; returns a message to show when the sequence should stop. */
     suspend fun runVoiceStep(command: VoiceCommand): String? {
         when (command) {
             VoiceCommand.Pause -> pausePlayback()
+            VoiceCommand.Cancel -> return null
             VoiceCommand.Resume -> requestPlayback()
             VoiceCommand.Next, VoiceCommand.Previous -> {
                 skip(if (command == VoiceCommand.Next) 1 else -1)
@@ -2052,6 +2075,10 @@ fun AmAtvApp() {
             VoiceCommand.SeekDirectionUnclear -> return AppText.text(R.string.voice_seek_direction)
             VoiceCommand.NowPlaying -> if (track.catalogId != null) destination = Destination.NowPlaying
             is VoiceCommand.Go -> goTo(command.page)
+            is VoiceCommand.Search -> {
+                searchCatalog(command.query)
+                destination = Destination.Search
+            }
             VoiceCommand.CurrentArtist -> openFromPlayer(services::catalogArtistOf)
             VoiceCommand.CurrentAlbum -> openFromPlayer(services::catalogAlbumOf)
             VoiceCommand.Favorite -> if (favoriteState[track.catalogId] != true) toggleFavorite()
@@ -2152,7 +2179,7 @@ fun AmAtvApp() {
     suspend fun actOnSentence(said: String, previousTurn: String?): Pair<String?, List<VoiceCommand>> {
         voiceState = VoiceUiState.Heard(said)
         val ruled = parseVoiceSteps(said)
-        val unsure = ruled.all { it is VoiceCommand.Play || it is VoiceCommand.Open || it == VoiceCommand.Nothing }
+        val unsure = ruled.isNotEmpty() && ruled.all { it is VoiceCommand.Play || it is VoiceCommand.Open || it == VoiceCommand.Nothing }
         val steps = if (unsure && voice.intentReady()) {
             voiceState = VoiceUiState.Understanding(said)
             val labels = voiceScreen.read().filter { it.clickable }.map { it.label }.filter { it.isNotBlank() }
@@ -2168,7 +2195,7 @@ fun AmAtvApp() {
         for ((index, step) in steps.withIndex()) {
             if (index > 0) delay(700L) // let the page the previous step opened appear
             problem = runVoiceStep(step)
-            if (problem != null) break
+            if (problem != null || step == VoiceCommand.Cancel) break
         }
         // What voice understood and did, for "导出完整日志" (no keys; the sentence is the user's own).
         android.util.Log.i("AMATV-Voice", "Sentence \"$said\" page=$destination rules=$ruled " +
@@ -2258,6 +2285,11 @@ fun AmAtvApp() {
                     val (sentenceProblem, steps) = actOnSentence(said, previousTurn)
                     problem = sentenceProblem
                     previousTurn = "$said -> ${steps.joinToString()}" + (problem?.let { " ($it)" } ?: "")
+                    if (problem == null && VoiceCommand.Cancel in steps) {
+                        playbackDecided = steps.takeWhile { it != VoiceCommand.Cancel }.any { it.decidesPlayback() }
+                        problem = AppText.text(R.string.voice_ok)
+                        break
+                    }
                     if (problem == null && steps.any { it.decidesPlayback() }) playbackDecided = true
                     if (holdToTalk || playbackDecided) break
                     if (problem != null) {
@@ -2513,27 +2545,7 @@ fun AmAtvApp() {
                             reloadNonce++
                         },
                         onRetry = (::refreshAllContent),
-                        onSearch = { query ->
-                            searchJob?.cancel()
-                            searchJob = scope.launch {
-                                searchLoading = true
-                                try {
-                                    cancellableResult { services.search(query) }
-                                        .onSuccess { items ->
-                                            searchResults = items
-                                            serviceMessage = if (items.isEmpty()) {
-                                                AppText.text(R.string.app_search_no_results_format, query)
-                                            } else null
-                                        }
-                                        .onFailure {
-                                            searchResults = emptyList()
-                                            serviceMessage = it.message ?: AppText.text(R.string.app_search_failed)
-                                        }
-                                } finally {
-                                    searchLoading = false
-                                }
-                            }
-                        },
+                        onSearch = ::searchCatalog,
                         onOpenTrack = { item, q -> playTrack(item, contextQueue = q) },
                         loadCollection = services::collectionTracks,
                         loadArtistAlbums = services::libraryArtistAlbumsPage,

@@ -15,6 +15,7 @@
     <string name="voice_searching_format">Finding “%1$s”</string>
     <string name="voice_not_found_format">Nothing found for “%1$s”</string>
     <string name="voice_not_understood">Didn’t catch that</string>
+    <string name="voice_ok">Okay</string>
     <string name="voice_mic_unavailable">The microphone is in use by another app</string>
     <string name="voice_model_missing">Voice recognition isn’t included in this build</string>
     <string name="voice_permission_needed">Allow the microphone to use voice</string>

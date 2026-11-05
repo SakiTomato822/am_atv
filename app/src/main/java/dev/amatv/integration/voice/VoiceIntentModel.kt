@@ -90,7 +90,9 @@ class VoiceIntentModel(private val settings: () -> Triple<String, String, String
 {"action":"personal_station"} 我的个人电台
 {"action":"pick","number":N}  当前列表的第 N 个
 {"action":"open","label":"屏幕上的文字"}  点击屏幕上的控件；label 尽量取 on_screen 里最接近的那一项
-{"action":"play","query":"歌名/歌手/专辑/歌单/电台名"}  搜索并播放
+{"action":"search","query":"搜索词"}  打开搜索页并查询
+{"action":"cancel"}  取消当前语音操作
+{"action":"play","query":"歌名/歌手/专辑/歌单/电台名"}  搜索并播放；可补充 kind（song|album|artist|playlist|station）及 title、artist、album
 on_screen 是当前屏幕上能看到的文字；known_names 是用户最近听过、当前列表里的歌名和歌手；said_pinyin 是识别文字的拼音。
 识别常把名字写成同音错字：按 said_pinyin 的读音和这些名字比对。和 on_screen 某项读音相近时，用 open 并写 on_screen 里的原文；
 和 known_names 某项读音相近时，用 play 并写 known_names 里的原文。都对不上时保留原话，不要编造名字。
@@ -112,6 +114,7 @@ fun parseIntentJson(content: String): List<VoiceCommand>? {
         val step = steps.optJSONObject(index) ?: return@mapNotNull null
         when (step.optString("action")) {
             "pause" -> VoiceCommand.Pause
+            "cancel" -> VoiceCommand.Cancel
             "resume" -> VoiceCommand.Resume
             "next" -> VoiceCommand.Next
             "previous" -> VoiceCommand.Previous
@@ -141,7 +144,19 @@ fun parseIntentJson(content: String): List<VoiceCommand>? {
             "personal_station" -> VoiceCommand.PersonalStation
             "pick" -> step.optInt("number", 0).takeIf { it > 0 }?.let { VoiceCommand.Pick(it) }
             "open" -> step.optString("label").takeIf { it.isNotBlank() }?.let { VoiceCommand.Open(it) }
-            "play" -> step.optString("query").takeIf { it.isNotBlank() }?.let { VoiceCommand.Play(it) }
+            "search" -> step.optString("query").takeIf { it.isNotBlank() }?.let { VoiceCommand.Search(it) }
+            "play" -> {
+                val kind = VoiceCommand.Kind.entries.firstOrNull {
+                    it.name.equals(step.optString("kind"), ignoreCase = true)
+                } ?: VoiceCommand.Kind.Any
+                val title = step.optString("title").trim().ifEmpty { null }
+                val artist = step.optString("artist").trim().ifEmpty { null }
+                val album = step.optString("album").trim().ifEmpty { null }
+                val query = step.optString("query").trim().ifEmpty {
+                    listOfNotNull(artist, if (kind == VoiceCommand.Kind.Album) album ?: title else title).joinToString(" ")
+                }
+                query.takeIf { it.isNotEmpty() }?.let { VoiceCommand.Play(it, kind, title, artist, album) }
+            }
             else -> null
         }
     }

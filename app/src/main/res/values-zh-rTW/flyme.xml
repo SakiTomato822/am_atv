@@ -14,6 +14,7 @@
     <string name="voice_searching_format">正在找「%1$s」</string>
     <string name="voice_not_found_format">找不到「%1$s」</string>
     <string name="voice_not_understood">沒聽清楚，請再說一次</string>
+    <string name="voice_ok">好的</string>
     <string name="voice_mic_unavailable">麥克風正被其他應用程式使用</string>
     <string name="voice_model_missing">此版本未包含語音辨識</string>
     <string name="voice_permission_needed">需要麥克風權限才能使用語音</string>

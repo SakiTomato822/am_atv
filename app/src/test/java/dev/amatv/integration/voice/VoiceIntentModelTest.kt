@@ -24,6 +24,15 @@ class VoiceIntentModelTest {
     }
 
     @Test
+    fun readsTypedPlayAndSearch() {
+        assertEquals(
+            listOf(VoiceCommand.Play("林忆莲 0", VoiceCommand.Kind.Album, artist = "林忆莲", album = "0"),
+                VoiceCommand.Search("天黑黑"), VoiceCommand.Cancel),
+            parseIntentJson("""{"steps":[{"action":"play","kind":"album","artist":"林忆莲","album":"0"},{"action":"search","query":"天黑黑"},{"action":"cancel"}]}"""),
+        )
+    }
+
+    @Test
     fun notJsonIsNull() {
         assertNull(parseIntentJson("我不知道"))
     }
