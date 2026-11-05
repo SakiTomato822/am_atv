@@ -174,6 +174,12 @@ class VoiceCommandTest {
     }
 
     @Test
+    fun cutOffAndBareAlbumNameTheArtist() {
+        assertEquals(artist("林忆莲"), parseVoiceCommand("播放林忆莲的专辑"))
+        assertEquals(VoiceCommand.Play("林忆莲", title = "林忆莲"), parseVoiceCommand("播放林忆莲的"))
+    }
+
+    @Test
     fun songWordIsNotATitle() {
         assertEquals(artist("林忆莲"), parseVoiceCommand("播放林忆莲的歌曲"))
         assertEquals(VoiceCommand.Play("罗大佑 首都", VoiceCommand.Kind.Song, title = "首都", artist = "罗大佑", kindExplicit = true),

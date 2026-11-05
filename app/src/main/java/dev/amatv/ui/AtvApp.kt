@@ -83,6 +83,7 @@ import dev.amatv.integration.voice.VoiceFailure
 import dev.amatv.integration.parseVoiceCommand
 import dev.amatv.integration.ChineseText
 import dev.amatv.integration.rankCatalog
+import dev.amatv.integration.correctNames
 import dev.amatv.integration.voiceCatalogKey
 import dev.amatv.i18n.destinationLabel
 import dev.amatv.integration.AutoplaySource
@@ -2339,18 +2340,28 @@ fun AmAtvApp() {
                 val query = command.query
                 var found = cancellableResult { services.search(query) }.getOrNull().orEmpty()
                 var ranked = rankCatalog(command, found, voiceLibrary)
-                if (!ranked.confident && ranked.candidates.isEmpty()) {
+                // Not sure yet: also ask by sound, all at once. Apple's search reads pinyin, so
+                // 「西凉」 searched as "xi liang" reaches 昔涟; a misspelt Latin name ("hoyomex")
+                // finds its artist by its first letters ("hoyo"), and the ranking keeps what is a
+                // letter or two away (HOYO-MiX) as a choice.
+                if (!ranked.confident) {
+                    val name = command.album ?: command.title ?: command.artist ?: query
+                    val latin = voiceCatalogKey(name).takeIf { key -> key.isNotEmpty() && key.all { it in 'a'..'z' || it in '0'..'9' } }
                     val retry = buildList {
                         if (command.kind == VoiceCommand.Kind.Song && !command.kindExplicit &&
                             command.artist != null && command.title != null) {
                             add("${command.artist}的${command.title}")
                         }
                         ChineseText.pinyin(query)?.let(::add)
-                    }
-                    for (term in retry.distinct()) {
-                        found = found + cancellableResult { services.search(term) }.getOrNull().orEmpty()
+                        if (latin != null && latin.length >= 6 && ranked.candidates.isEmpty()) add(latin.take(maxOf(4, latin.length - 3)))
+                    }.distinct()
+                    if (retry.isNotEmpty()) {
+                        val more = coroutineScope {
+                            retry.map { term -> async { cancellableResult { services.search(term) }.getOrNull().orEmpty() } }
+                                .flatMap { it.await() }
+                        }
+                        found = found + more
                         ranked = rankCatalog(command, found, voiceLibrary)
-                        if (ranked.confident) break
                     }
                 }
                 if (ranked.candidates.isEmpty()) return AppText.text(R.string.voice_not_found_format, query)
@@ -2399,8 +2410,19 @@ fun AmAtvApp() {
         }
     }
 
-    suspend fun actOnSentence(said: String, previousTurn: String?): Pair<String?, List<VoiceCommand>> {
+    suspend fun actOnSentence(heard: String, previousTurn: String?): Pair<String?, List<VoiceCommand>> {
         voiceChoiceDismissed = false
+        // Names misheard by sound ("西凉" for 昔涟, "hoyomex" for HOYO-MiX) snap back to names the
+        // user has: library, recent plays, the screen. Only for sentences naming something, so a
+        // song named like a command word can never rewrite "下一首".
+        val said = parseVoiceSteps(heard).takeIf { steps ->
+            steps.all { it is VoiceCommand.Play || it is VoiceCommand.Search || it is VoiceCommand.Open || it == VoiceCommand.Nothing }
+        }?.let {
+            val names = (libraryVoiceNames() + voiceHotwords().asSequence() +
+                voiceScreen.read().asSequence().map { target -> target.primary }).toSet()
+            correctNames(heard, names)
+        } ?: heard
+        if (said != heard) android.util.Log.i("AMATV-Voice", "Corrected \"$heard\" -> \"$said\"")
         val followUp = voiceCatalogKey(said)
         val correction = followUp in setOf("不对", "不是这个", "下一页", "上一页")
         if (correction && voiceCatalogContext.isNotEmpty() &&

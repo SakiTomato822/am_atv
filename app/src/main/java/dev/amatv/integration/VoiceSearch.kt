@@ -65,7 +65,9 @@ internal fun rankCatalog(
     pinyin: (String) -> String? = ChineseText::pinyin,
 ): VoiceCatalogMatch {
     fun key(text: String) = voiceCatalogKey(text, simplify)
-    fun sound(text: String) = pinyin(text)?.let(::key)?.takeIf { it.isNotEmpty() }
+    // Fuzzy pinyin (an/ang, z/zh, n/l...): 「西凉」 and 「昔涟」 sound the same to a recognizer.
+    fun sound(text: String) = pinyin(text)?.split(' ')?.filter { it.isNotEmpty() }
+        ?.joinToString("") { fuzzySyllable(it) }?.let(::key)?.takeIf { it.isNotEmpty() }
     fun sameSound(a: String, b: String) = sound(a)?.let { it == sound(b) } == true
     fun Track.identity() = catalogKind to (catalogId ?: id)
     val wantedKind = CatalogKind.entries.firstOrNull { it.name == request.kind.name }
@@ -101,6 +103,8 @@ internal fun rankCatalog(
                 sameSound(title, item.title) -> 70
                 titleKey.length >= 2 && itemTitle.startsWith(titleKey) -> 56
                 titleKey.length >= 2 && itemTitle.contains(titleKey) -> 44
+                // "hoyomex" for HOYO-MiX: a Latin name a letter or two off is only ever a choice.
+                latinClose(titleKey, itemTitle) -> 50
                 else -> return@mapNotNull null
             }
             Ranked(item, score + (if (artistExact) 5 else 0) +

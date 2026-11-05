@@ -69,6 +69,20 @@ object VoiceLevel {
     }
 }
 
+/**
+ * Hotwords as the cjkchar models can take them: simplified Han characters only. sherpa reads
+ * ":" in a line as "a score follows" and aborts the whole app on a name like
+ * 「復黑王：永遠是你的」 (std::stof, uncaught); "#", "/" and brackets are syntax too. Traditional
+ * characters, Latin and punctuation are not in these models' token tables anyway.
+ */
+internal fun hotwordLines(names: List<String>, simplify: (String) -> String = dev.amatv.integration.ChineseText::simplified): List<String> =
+    names.asSequence()
+        .map { name -> simplify(name).filter { Character.UnicodeScript.of(it.code) == Character.UnicodeScript.HAN } }
+        .filter { it.length in 2..16 }
+        .distinct()
+        .take(200)
+        .toList()
+
 // A plain loop: the audio thread calls this for every buffer, and sumOf boxed each sample.
 private fun rmsOf(samples: ShortArray, count: Int): Double {
     var sum = 0.0
@@ -151,8 +165,11 @@ internal suspend fun FlowCollector<VoiceEvent>.recordUtterance(control: ListenCo
                 continue
             }
             if (!speaking) {
-                if (noiseChunks < 3) { noise += rms; noiseChunks++ }
-                val floor = (noise / noiseChunks.coerceAtLeast(1)).coerceAtLeast(0.004)
+                // The quietest of the first chunks, not their mean: people start talking at once,
+                // and speech in the "noise" sample raised the bar until quieter words counted as
+                // silence and the sentence was cut in half.
+                if (noiseChunks < 3) { noise = if (noiseChunks == 0) rms else minOf(noise, rms); noiseChunks++ }
+                val floor = noise.coerceAtLeast(0.004)
                 pre.addLast(chunk)
                 if (pre.size > 3) pre.removeFirst()
                 if (noiseChunks >= 3 && rms > floor * 3) {
@@ -164,7 +181,7 @@ internal suspend fun FlowCollector<VoiceEvent>.recordUtterance(control: ListenCo
                 }
             } else {
                 speech.writeShorts(chunk)
-                val floor = (noise / noiseChunks).coerceAtLeast(0.004)
+                val floor = noise.coerceAtLeast(0.004)
                 quietMs = if (rms < floor * 2) quietMs + read * 1000L / SAMPLE_RATE else 0L
                 if (quietMs >= SILENCE_MS || elapsed > MAX_MS) break
             }
@@ -186,7 +203,8 @@ private fun ByteArrayOutputStream.writeShorts(samples: ShortArray) {
     for (s in samples) { write(s.toInt() and 0xFF); write((s.toInt() shr 8) and 0xFF) }
 }
 
-private const val SILENCE_MS = 800L
+// A breath between words ("林忆莲的专辑…零") is not the end of the sentence.
+private const val SILENCE_MS = 1_200L
 private const val NO_SPEECH_MS = 5_000L
 private const val MAX_MS = 10_000L
 private const val HOLD_MAX_MS = 30_000L
@@ -249,7 +267,7 @@ class SherpaStreamingEngine(private val model: VoiceModel, private val store: Vo
         if (!store.isInstalled(model)) { emit(VoiceEvent.Failed(VoiceFailure.ModelMissing)); return@flow }
         val engine = recognizer()
         val audio = openMic() ?: return@flow
-        val words = if (model.supportsHotwords) hotwords.map { it.replace("/", " ").trim() }.filter { it.isNotEmpty() }.take(200) else emptyList()
+        val words = if (model.supportsHotwords) hotwordLines(hotwords) else emptyList()
         val stream = if (words.isEmpty()) engine.createStream() else
             runCatching { engine.createStream(words.joinToString("/")) }.getOrElse { engine.createStream() }
         try {

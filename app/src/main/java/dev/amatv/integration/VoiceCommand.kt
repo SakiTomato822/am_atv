@@ -153,8 +153,14 @@ fun parseVoiceCommand(spoken: String): VoiceCommand {
     }
     var query = text.removePrefix("随机播放")
     PLAY_PREFIX.find(query)?.let { query = query.substring(it.range.last + 1) }
-    query = query.trim()
+    // A sentence cut off after 「的」 ("播放林忆莲的") still names 林忆莲.
+    query = query.trim().removeSuffix("的").trim()
     val namedTarget = query.replace(REQUEST_END, "").trim()
+    // 「林忆莲的专辑」 with no album named: the artist, not an album called 「林忆莲的」.
+    Regex("(.+?)的\\s*(?:专辑|專輯)").matchEntire(namedTarget)?.let { match ->
+        val artist = match.groupValues[1].trim()
+        return VoiceCommand.Play(artist, VoiceCommand.Kind.Artist, artist = artist, kindExplicit = true)
+    }
     if (FAVORITE_LIST.matches(namedTarget.replace(" ", ""))) {
         return VoiceCommand.Play("喜好歌曲", VoiceCommand.Kind.Playlist, kindExplicit = true)
     }
