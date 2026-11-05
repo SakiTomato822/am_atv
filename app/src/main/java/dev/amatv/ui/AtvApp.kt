@@ -72,6 +72,11 @@ import dev.amatv.integration.toSessionTrack
 import dev.amatv.integration.toSessionJson
 import dev.amatv.data.MockCatalog
 import dev.amatv.i18n.AppText
+import dev.amatv.integration.OfflineVoiceRecognizer
+import dev.amatv.integration.VoiceCommand
+import dev.amatv.integration.VoiceEvent
+import dev.amatv.integration.VoiceFailure
+import dev.amatv.integration.parseVoiceCommand
 import dev.amatv.i18n.destinationLabel
 import dev.amatv.integration.AutoplaySource
 import dev.amatv.integration.MusicConnectionState
@@ -328,6 +333,22 @@ fun AmAtvApp() {
     }
     val spectrumPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         spectrumPermissionGranted = it
+    }
+    // Voice: on-device recognition, then a fixed set of commands (see VoiceCommand).
+    val voice = remember { OfflineVoiceRecognizer(context.applicationContext) }
+    var voiceState by remember { mutableStateOf<VoiceUiState?>(null) }
+    var voiceJob by remember { mutableStateOf<Job?>(null) }
+    var voiceStartRequests by remember { mutableIntStateOf(0) }
+    /** The list on screen that "第三个" counts in; the browse pages report it. */
+    var voicePickable by remember { mutableStateOf(emptyList<Track>()) }
+    val voicePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) voiceStartRequests++ else voiceState = VoiceUiState.Message(AppText.text(R.string.voice_permission_needed))
+    }
+    DisposableEffect(voice) {
+        onDispose { voice.release() }
+    }
+    LaunchedEffect(voice) {
+        if (BuildConfig.FLYME_AUTO) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { voice.preload() }
     }
     var pendingRequestedSongCatalogId by remember { mutableStateOf<String?>(null) }
     // Read only by callbacks/effects: native position polls do not recompose the app.
@@ -1934,6 +1955,96 @@ fun AmAtvApp() {
         else -> null
     }
 
+    fun dismissVoice() {
+        voiceJob?.cancel()
+        voiceJob = null
+        voiceState = null
+    }
+
+    /** Listens once and acts on what was said; a second tap while listening cancels. */
+    fun startVoice() {
+        if (voiceJob?.isActive == true) {
+            dismissVoice()
+            return
+        }
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        // The speakers would drown the voice: pause while listening, carry on afterwards.
+        val resumeAfter = playWhenReady
+        if (resumeAfter) pausePlayback()
+        voiceState = VoiceUiState.Listening("")
+        voiceJob = scope.launch {
+            suspend fun showBriefly(text: String) {
+                voiceState = VoiceUiState.Message(text)
+                delay(2_400L)
+                voiceState = null
+            }
+            var heard: String? = null
+            var failure: VoiceFailure? = null
+            try {
+                voice.listen().collect { event ->
+                    when (event) {
+                        VoiceEvent.Listening -> Unit
+                        is VoiceEvent.Partial -> voiceState = VoiceUiState.Listening(event.text)
+                        is VoiceEvent.Final -> heard = event.text
+                        is VoiceEvent.Failed -> failure = event.reason
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                if (resumeAfter) requestPlayback()
+                throw cancelled
+            }
+            when (val command = heard?.let(::parseVoiceCommand) ?: VoiceCommand.Nothing) {
+                VoiceCommand.Pause -> voiceState = null
+                VoiceCommand.Resume -> {
+                    voiceState = null
+                    requestPlayback()
+                }
+                VoiceCommand.Next, VoiceCommand.Previous -> {
+                    voiceState = null
+                    skip(if (command == VoiceCommand.Next) 1 else -1)
+                    if (!playWhenReady) requestPlayback()
+                }
+                is VoiceCommand.Pick -> {
+                    val list = if (destination == Destination.NowPlaying) emptyList() else voicePickable
+                    val picked = list.getOrNull(command.number - 1)
+                    if (picked == null) {
+                        if (resumeAfter) requestPlayback()
+                        showBriefly(AppText.text(R.string.voice_no_item_format, command.number))
+                    } else {
+                        voiceState = null
+                        playTrack(picked, contextQueue = list.filter { it.openAction == CatalogOpenAction.Play })
+                    }
+                }
+                is VoiceCommand.Play -> {
+                    voiceState = VoiceUiState.Searching(command.query)
+                    val songs = cancellableResult { services.searchSongs(command.query) }.getOrNull().orEmpty()
+                    if (songs.isEmpty()) {
+                        if (resumeAfter) requestPlayback()
+                        showBriefly(AppText.text(R.string.voice_not_found_format, command.query))
+                    } else {
+                        voiceState = null
+                        playTrack(songs.first(), contextQueue = songs)
+                    }
+                }
+                VoiceCommand.Nothing -> {
+                    if (resumeAfter) requestPlayback()
+                    showBriefly(AppText.text(when (failure) {
+                        VoiceFailure.MicUnavailable -> R.string.voice_mic_unavailable
+                        VoiceFailure.ModelMissing -> R.string.voice_model_missing
+                        else -> R.string.voice_not_understood
+                    }))
+                }
+            }
+            voiceJob = null
+        }
+    }
+    LaunchedEffect(voiceStartRequests) {
+        if (voiceStartRequests > 0) startVoice()
+    }
+
     val isNowPlaying = destination == Destination.NowPlaying
     LaunchedEffect(isNowPlaying, isPlaying, spectrumPermissionGranted) {
         // Flyme has no spectrum display, so it never asks for the microphone.
@@ -2045,6 +2156,9 @@ fun AmAtvApp() {
                         LocalFocusFrameVisibility provides browseVisibility,
                     ) {
                     BrowseShell(
+                        onVoice = if (BuildConfig.FLYME_AUTO && voice.isAvailable()) ::startVoice else null,
+                        onVoicePickable = { voicePickable = it },
+                        voiceActive = voiceState is VoiceUiState.Listening,
                         onMiniPlayerPlaced = { miniPlayerCenter = it },
                         detailRequest = browseDetailRequest,
                         onDetailRequestHandled = { browseDetailRequest = null },
@@ -2314,6 +2428,7 @@ fun AmAtvApp() {
                     }
                 }
                 FocusFrameOverlay(focusFrameController)
+                if (BuildConfig.FLYME_AUTO) FlymeVoicePanel(voiceState, onDismiss = ::dismissVoice)
             }
             }
         }
@@ -2322,6 +2437,9 @@ fun AmAtvApp() {
 
 @Composable
 private fun BrowseShell(
+    onVoice: (() -> Unit)?,
+    onVoicePickable: (List<Track>) -> Unit,
+    voiceActive: Boolean,
     onMiniPlayerPlaced: (Offset) -> Unit = {},
     destination: Destination,
     isBrowseVisible: Boolean,
@@ -2393,6 +2511,15 @@ private fun BrowseShell(
     val artist = artistState.artist
     val artistFirstFocus = remember(destination) { FocusRequester() }
     val detailVisible = collection != null || artist != null
+    // What "第三个" means here: the open album/playlist, the artist's top songs, or the songs found.
+    val voicePickable = when {
+        collection != null -> collectionState.tracks
+        artist != null -> artistState.catalog.topSongs
+        destination == Destination.Search -> searchTracks.drop(1)
+            .filter { it.catalogKind == CatalogKind.Song || it.catalogKind == CatalogKind.MusicVideo }.take(8)
+        else -> emptyList()
+    }.filter { it.openAction == CatalogOpenAction.Play }
+    LaunchedEffect(voicePickable) { onVoicePickable(voicePickable) }
     var returnToContent by remember(destination) { mutableIntStateOf(0) }
     val detailFocus = remember(destination) { ContentFocusEntry() }
     val detailFirstFocus = remember(destination) { FocusRequester() }
@@ -2481,6 +2608,8 @@ private fun BrowseShell(
                     focusRequesters = navigationFocus,
                     downFocus = { contentFocusEntry.requester ?: firstContentFocus },
                     onMiniPlayerPlaced = onMiniPlayerPlaced,
+                    onVoice = onVoice,
+                    voiceActive = voiceActive,
                 )
             } else TopNavigation(
                 selected = destination,

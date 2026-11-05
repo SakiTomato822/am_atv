@@ -91,6 +91,21 @@ jobs:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
 
+      # On-device speech recognition (sherpa-onnx, Apache-2.0): public engine and model, pinned by hash.
+      - name: Retrieve speech engine and model
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=https://github.com/k2-fsa/sherpa-onnx/releases/download
+          curl -fsSL -o app/libs/sherpa-onnx-2.0.1.aar "$base/v2.0.1/sherpa-onnx-2.0.1.aar"
+          echo 'a8d09d1d32f3eb8520482c6d3d43fae674681c5b050385967c70a3c2c9bf0ee7  app/libs/sherpa-onnx-2.0.1.aar' | sha256sum -c -
+          model=sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01
+          curl -fsSL -o "work/$model.tar.bz2" "$base/asr-models/$model.tar.bz2"
+          echo "b3b309f7ce4a737195fcc6963ea19b0653a7d3401580af5ae0d3e284cbb71f0b  work/$model.tar.bz2" | sha256sum -c -
+          tar -xjf "work/$model.tar.bz2" -C work
+          mkdir -p app/src/flymeGecko/assets/asr
+          cp "work/$model/model.int8.onnx" "work/$model/tokens.txt" app/src/flymeGecko/assets/asr/
+
       - name: Install Android build tools
         run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
 

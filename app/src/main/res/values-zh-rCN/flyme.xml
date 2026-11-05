@@ -8,4 +8,14 @@
     <string name="flyme_text_standard">标准</string>
     <string name="flyme_text_large">大</string>
     <string name="flyme_text_extra_large">特大</string>
+    <string name="voice_button">语音</string>
+    <string name="voice_listening">正在听…</string>
+    <string name="voice_hint">可以说“播放周杰伦的歌”“下一首”“暂停”</string>
+    <string name="voice_searching_format">正在找“%1$s”</string>
+    <string name="voice_not_found_format">没找到“%1$s”</string>
+    <string name="voice_not_understood">没听清，请再说一次</string>
+    <string name="voice_mic_unavailable">麦克风正被其他应用占用</string>
+    <string name="voice_model_missing">此版本未包含语音识别</string>
+    <string name="voice_permission_needed">需要麦克风权限才能用语音</string>
+    <string name="voice_no_item_format">这个页面没有第 %1$d 个</string>
 </resources>

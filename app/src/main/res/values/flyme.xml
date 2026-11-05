@@ -9,4 +9,14 @@
     <string name="flyme_text_standard">Standard</string>
     <string name="flyme_text_large">Large</string>
     <string name="flyme_text_extra_large">Extra large</string>
+    <string name="voice_button">Voice</string>
+    <string name="voice_listening">Listening…</string>
+    <string name="voice_hint">Say “play Jay Chou”, “next”, or “pause”</string>
+    <string name="voice_searching_format">Finding “%1$s”</string>
+    <string name="voice_not_found_format">Nothing found for “%1$s”</string>
+    <string name="voice_not_understood">Didn’t catch that</string>
+    <string name="voice_mic_unavailable">The microphone is in use by another app</string>
+    <string name="voice_model_missing">Voice recognition isn’t included in this build</string>
+    <string name="voice_permission_needed">Allow the microphone to use voice</string>
+    <string name="voice_no_item_format">No item %1$d on this page</string>
 </resources>

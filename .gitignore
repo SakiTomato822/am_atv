@@ -37,3 +37,6 @@ decoded/
 /log/
 *.xapk
 *.apk.zip
+
+# On-device speech model and engine (sherpa-onnx, Apache-2.0), fetched by the workflow.
+/app/src/flymeGecko/assets/asr/

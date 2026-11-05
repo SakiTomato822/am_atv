@@ -779,6 +779,9 @@ internal fun FlymeTopBar(
     onMiniPlayerPlaced: (Offset) -> Unit = {},
     /** Only the mini player, for pages that cover the top bar. */
     capsuleOnly: Boolean = false,
+    /** Shows a mic button after the section tabs when set. */
+    onVoice: (() -> Unit)? = null,
+    voiceActive: Boolean = false,
 ) {
     val sideWidth = 267.dp
     val accountLabel = destinationLabel(Destination.Account)
@@ -804,6 +807,7 @@ internal fun FlymeTopBar(
             }
         }
         if (!capsuleOnly) Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(
                 Modifier.clip(RoundedCornerShape(22.dp)).background(FlymeInk.copy(alpha = 0.09f)).padding(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -836,6 +840,8 @@ internal fun FlymeTopBar(
                     }
                 }
             }
+            if (onVoice != null) FlymeVoiceButton(active = voiceActive, onClick = onVoice)
+          }
         }
         Box(Modifier.width(sideWidth), contentAlignment = Alignment.CenterEnd) {
             if (hasCurrentTrack) {
