@@ -69,8 +69,15 @@ object VoiceLevel {
     }
 }
 
-private fun rmsOf(samples: ShortArray, count: Int): Double =
-    sqrt((0 until count).sumOf { (samples[it] / 32768.0) * (samples[it] / 32768.0) } / count.coerceAtLeast(1))
+// A plain loop: the audio thread calls this for every buffer, and sumOf boxed each sample.
+private fun rmsOf(samples: ShortArray, count: Int): Double {
+    var sum = 0.0
+    for (i in 0 until count) {
+        val s = samples[i] / 32768.0
+        sum += s * s
+    }
+    return sqrt(sum / count.coerceAtLeast(1))
+}
 
 /** One way of turning speech into text. [hotwords]: names worth favouring (library, recent plays). */
 interface SpeechEngine {

@@ -323,29 +323,41 @@ internal fun FlymeVoiceGlow(visible: Boolean) {
         if (visible) 1f else 0f, tween(if (visible) 280 else 420), label = "voice-glow",
     )
     if (shown <= 0.01f) return
-    val spin by rememberInfiniteTransition(label = "voice-glow-spin").animateFloat(
-        initialValue = 0f, targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(3200, easing = androidx.compose.animation.core.LinearEasing)),
-        label = "voice-glow-angle",
-    )
+    // Cost matters more than smoothness here: music plays through the same CPU, and a full-screen
+    // redraw every vsync starved the audio thread (crackling), like the old spectrum view did.
+    // So the glow ticks at ~30 fps, skips frames when nothing moved, and draws on its own layer
+    // (graphicsLayer below) so a tick repaints only the glow, never the app underneath.
+    var spin by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var level by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        while (true) androidx.compose.runtime.withFrameNanos { level += (VoiceLevel.value - level) * 0.35f }
+        val start = android.os.SystemClock.uptimeMillis()
+        while (true) {
+            kotlinx.coroutines.delay(33L)
+            spin = ((android.os.SystemClock.uptimeMillis() - start) % 3_200L) * (360f / 3_200f)
+            val next = level + (VoiceLevel.value - level) * 0.5f
+            if (kotlin.math.abs(next - level) > 0.01f) level = next
+        }
     }
     val colors = remember {
         listOf(0xFF3B82F6, 0xFF8B5CF6, 0xFFEC4899, 0xFFF97316, 0xFFFACC15, 0xFF22D3EE, 0xFF3B82F6)
             .map { androidx.compose.ui.graphics.Color(it) }
     }
-    androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+    val matrix = remember { android.graphics.Matrix() }
+    // Plain holder, not state: filled during draw, which must not invalidate itself.
+    val cache = remember { arrayOfNulls<Any>(2) }
+    androidx.compose.foundation.Canvas(Modifier.fillMaxSize().graphicsLayer()) {
         val center = androidx.compose.ui.geometry.Offset(size.width / 2, size.height / 2)
-        val shader = androidx.compose.ui.graphics.SweepGradientShader(center, colors)
-        shader.setLocalMatrix(android.graphics.Matrix().apply { setRotate(spin, center.x, center.y) })
+        val shader = (cache[1] as? androidx.compose.ui.graphics.Shader)?.takeIf { cache[0] == size }
+            ?: androidx.compose.ui.graphics.SweepGradientShader(center, colors).also { cache[0] = size; cache[1] = it }
+        matrix.setRotate(spin, center.x, center.y)
+        shader.setLocalMatrix(matrix)
         val brush = androidx.compose.ui.graphics.ShaderBrush(shader)
-        val base = 5.dp.toPx() + level * 12.dp.toPx()
+        val base = 6.dp.toPx() + level * 12.dp.toPx()
         val corner = 26.dp.toPx()
-        for (layer in 3 downTo 0) {
-            val width = base * (1f + layer * 1.1f)
-            val alpha = shown * (0.9f - layer * 0.2f) * (0.65f + 0.35f * level)
+        // Two strokes (a wide soft one and a bright core) read as a glow at a fraction of the fill.
+        for (layer in 1 downTo 0) {
+            val width = base * (1f + layer * 2.2f)
+            val alpha = shown * (0.9f - layer * 0.35f) * (0.65f + 0.35f * level)
             drawRoundRect(
                 brush = brush,
                 topLeft = androidx.compose.ui.geometry.Offset(width / 2, width / 2),
