@@ -7,6 +7,10 @@ on:
         description: Build the minified UI preview APK (dev.amatv.flyme.preview) as a workflow artifact, no release
         type: boolean
         default: false
+      stable:
+        description: Publish as a stable release (latest, not a prerelease)
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -144,18 +148,31 @@ jobs:
           PY
           (cd dist && sha256sum AMATV-FlymeAuto-Gecko-arm64.apk > SHA256SUMS.txt)
           cat > dist/release-notes.md <<'EOF'
-          Flyme Auto 非官方适配测试版（ARM64，Android 9+）。
+          Flyme Auto 非官方适配版（ARM64，Android 9+）首个正式版，基于 Sam 的 AM for TV。
 
-          本版为 Flyme.11（versionCode 28），包含 Flyme.10 的全部内容。与此前测试版使用同一固定签名，可覆盖安装并保留应用数据。
+          本版为 Flyme.12（versionCode 29），包含此前全部测试版的内容。与测试版使用同一固定签名，可直接覆盖安装并保留登录与应用数据。
 
-          - 修复：播放页的歌手名和专辑名在 Flyme.10 中显示成红色加下划线，现已恢复为原本的灰色文字；点击仍可打开歌手页或专辑页，按下时文字会稍微变亮。
+          Flyme.12 的新变化：
+          - 歌曲间淡入淡出更自然：不再把音量压到静音，只在最后 2 秒内轻轻降低（最多约 9 dB），下一首在 0.8 秒内回到原音量；曲线按分贝计算，听起来不像在调音量。
+          - 歌手页的热门歌曲改为每列 4 首、左右滑动的横排，右侧延伸到屏幕边缘，松手后停在整列开头；下方的卡片排也延伸到边缘。
 
-          本版沿用上游 APK 的内置开发者 Token，有效期字段为 2027-04-22；不包含签名私钥或任何用户登录凭证。
+          主要功能（Flyme.6 至 Flyme.12 累计）：
+          - 车机横屏布局与触控：首页、搜索、资料库、专辑页、歌手页（Apple Music 网页版布局）、播放页与胶囊播放器。
+          - 原生 MusicKit 播放，不需要 Widevine；无缝播放，手动下一首也直接使用已排好的歌。
+          - 没有 Widevine 的车机也能完整收听个人电台与歌曲电台（逐首播放）；电台历史可在播放队列中查看。
+          - 歌曲间淡入淡出，专辑、电台、播放列表可分别开关。
+          - 浅色 / 深色 / 跟随系统 / 按时间（时间可自选）外观，切换时有毛玻璃翻页动画。
+          - 系统媒体控制：通知栏、锁屏与车机桌面媒体卡片，带封面与上一首 / 播放暂停 / 下一首。
+          - 歌词跟唱、点击跳转、手指拖动查看；中文歌词不再重复显示简繁「翻译」。
+          - 播放页加入喜好歌曲、跑马灯标题、可点击的歌手与专辑。
+          - 启动先显示上次的首页，断网时也能浏览；设置页提供播放诊断与完整日志导出（凭证已遮蔽）。
+
+          本版沿用上游 APK 的内置开发者 Token，有效期字段为 2027-04-22，到期前会随新版本更新；不包含签名私钥或任何用户登录凭证。
 
           包名 dev.amatv.flyme，与 UI Preview 包可并存。请下载 AMATV-FlymeAuto-Gecko-arm64.apk。
           EOF
 
-      - name: Publish prerelease APK
+      - name: Publish release APK
         if: ${{ !inputs.preview }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -164,7 +181,11 @@ jobs:
           # Name the release by the app's own version (e.g. Flyme.6), not the workflow run count.
           version=$(sed -n 's/.*versionNameSuffix = "-flyme\.\([0-9][0-9.]*\)".*/\1/p' app/build.gradle.kts | head -n 1)
           test -n "$version"
-          gh release create "$tag" dist/AMATV-FlymeAuto-Gecko-arm64.apk dist/SHA256SUMS.txt --target "$(git rev-parse HEAD)" --prerelease --latest=false --title "Flyme Auto 测试版 · Flyme.${version}" --notes-file dist/release-notes.md
+          if [ "${{ inputs.stable }}" = "true" ]; then
+            gh release create "flyme-auto-v${version}" dist/AMATV-FlymeAuto-Gecko-arm64.apk dist/SHA256SUMS.txt --target "$(git rev-parse HEAD)" --latest --title "Flyme Auto · Flyme.${version}" --notes-file dist/release-notes.md
+          else
+            gh release create "$tag" dist/AMATV-FlymeAuto-Gecko-arm64.apk dist/SHA256SUMS.txt --target "$(git rev-parse HEAD)" --prerelease --latest=false --title "Flyme Auto 测试版 · Flyme.${version}" --notes-file dist/release-notes.md
+          fi
 
       - name: Remove private build inputs
         if: always()
