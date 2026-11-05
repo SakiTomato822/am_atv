@@ -2143,9 +2143,9 @@ fun AmAtvApp() {
             problem = runVoiceStep(step)
             if (problem != null) break
         }
-        if (BuildConfig.FLYME_UI_PREVIEW) {
-            android.util.Log.i("AMATV-Voice", "said=\"$said\" ruled=$ruled steps=$steps problem=$problem page=$destination")
-        }
+        // What voice understood and did, for "导出完整日志" (no keys; the sentence is the user's own).
+        android.util.Log.i("AMATV-Voice", "Sentence \"$said\" page=$destination rules=$ruled " +
+            (if (steps !== ruled) "model=$steps " else "") + "problem=${problem ?: "none"}")
         return problem to steps
     }
 
@@ -2200,7 +2200,19 @@ fun AmAtvApp() {
                     if (holdToTalk) voiceHold = control
                     var heard: String? = null
                     var failure: VoiceFailure? = null
+                    val listenStarted = android.os.SystemClock.elapsedRealtime()
+                    var speechEnded = 0L
                     voice.listen(hotwords, control).collect { event ->
+                        if (event is VoiceEvent.Recognizing) speechEnded = android.os.SystemClock.elapsedRealtime()
+                        if (event is VoiceEvent.Final) {
+                            val now = android.os.SystemClock.elapsedRealtime()
+                            android.util.Log.i("AMATV-Voice", "Heard \"${event.text}\" engine=${voice.settings.value.engine} " +
+                                "listen=${now - listenStarted}ms" + (if (speechEnded > 0) " recognize=${now - speechEnded}ms" else "") +
+                                " hold=$holdToTalk")
+                        }
+                        if (event is VoiceEvent.Failed) {
+                            android.util.Log.i("AMATV-Voice", "Listen failed ${event.reason} engine=${voice.settings.value.engine}")
+                        }
                         when (event) {
                             VoiceEvent.Listening -> voiceState = VoiceUiState.Listening("")
                             is VoiceEvent.Partial -> voiceState = VoiceUiState.Listening(event.text)

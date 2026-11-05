@@ -50,20 +50,31 @@ class VoiceIntentModel(private val settings: () -> Triple<String, String, String
                 setRequestProperty("Authorization", "Bearer $key")
                 setRequestProperty("Content-Type", "application/json")
             }
+            val started = android.os.SystemClock.elapsedRealtime()
             try {
                 connection.outputStream.use { it.write(body.toString().toByteArray()) }
-                check(connection.responseCode in 200..299) { "HTTP ${connection.responseCode}" }
+                val code = connection.responseCode
+                if (code !in 200..299) {
+                    val error = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    android.util.Log.w(TAG, "Model $model HTTP $code in ${android.os.SystemClock.elapsedRealtime() - started}ms: ${error.take(200)}")
+                    error("HTTP $code")
+                }
                 val text = connection.inputStream.bufferedReader().use { it.readText() }
                 val content = JSONObject(text).getJSONArray("choices").getJSONObject(0)
                     .getJSONObject("message").getString("content")
-                parseIntentJson(content)
+                val steps = parseIntentJson(content)
+                android.util.Log.i(TAG, "Model $model ${android.os.SystemClock.elapsedRealtime() - started}ms " +
+                    "said=\"$spoken\" answer=${content.replace('\n', ' ').take(400)} steps=$steps")
+                steps
             } finally {
                 connection.disconnect()
             }
-        }.getOrNull()
+        }.onFailure { android.util.Log.w(TAG, "Model failed: ${it.javaClass.simpleName} ${it.message?.take(120)}") }
+            .getOrNull()
     }
 
     companion object {
+        private const val TAG = "AMATV-Voice"
         const val DEFAULT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
         private val SYSTEM_PROMPT = """

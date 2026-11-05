@@ -86,9 +86,12 @@ class VoiceService(context: Context) {
         context: Map<String, String> = emptyMap(),
     ): List<dev.amatv.integration.VoiceCommand>? {
         if (!intentReady()) return null
-        return kotlinx.coroutines.withTimeoutOrNull(INTENT_TIMEOUT_MS) {
+        return (kotlinx.coroutines.withTimeoutOrNull(INTENT_TIMEOUT_MS) {
             intent.understand(spoken, screenLabels, candidates, spokenPinyin, context)
-        }
+        } ?: run {
+            android.util.Log.i("AMATV-Voice", "Model gave no usable answer within ${INTENT_TIMEOUT_MS}ms; rules apply")
+            null
+        })
             ?.takeIf { it.isNotEmpty() }
     }
 
