@@ -98,11 +98,15 @@ class IntentRouterTest {
         assertTrue(failures.joinToString("\n"), failures.isEmpty())
     }
 
-    @Test fun secondDevelopmentMatrix() {
-        val original = matrix().readLines().drop(1).map { it.split('\t')[2] }.toSet()
-        val rows = matrix("intent_cases_dev2.tsv").readLines().drop(1).filter { it.isNotBlank() }.map { it.split('\t') }
-        assertEquals(60, rows.size)
-        assertEquals(60, rows.map { it[2] }.toSet().size)
+    @Test fun secondDevelopmentMatrix() = developmentMatrix("intent_cases_dev2.tsv", 60)
+    @Test fun thirdDevelopmentMatrix() = developmentMatrix("intent_cases_dev3.tsv", 40)
+
+    private fun developmentMatrix(name: String, count: Int) {
+        val previous = if (count == 40) listOf(matrix(), matrix("intent_cases_dev2.tsv")) else listOf(matrix())
+        val original = previous.flatMap { it.readLines().drop(1) }.map { it.split('\t')[2] }.toSet()
+        val rows = matrix(name).readLines().drop(1).filter { it.isNotBlank() }.map { it.split('\t') }
+        assertEquals(count, rows.size)
+        assertEquals(count, rows.map { it[2] }.toSet().size)
         val failures = rows.mapNotNull { c ->
             assertFalse("Repeated wording: " + c[2], c[2] in original)
             val actual = signature(IntentRouter.route(c[2], context(c[3])).steps.map { it.action })
@@ -113,7 +117,7 @@ class IntentRouterTest {
     }
 
     @Test fun alternativesAndInvalidInputsNeverProduceExecutableActions() {
-        val ambiguous = IntentRouter.route("播放旅行的歌").steps.single()
+        val ambiguous = IntentRouter.route("顺序随机播放").steps.single()
         assertTrue(ambiguous.action is Action.Clarify)
         assertEquals(2, ambiguous.alternatives.size)
         assertTrue(ambiguous.alternatives.zipWithNext().all { (a, b) -> a.confidence > b.confidence })

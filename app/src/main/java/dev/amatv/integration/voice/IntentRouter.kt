@@ -99,7 +99,7 @@ object IntentRouter {
         }
         val domain = when {
             volume.containsMatchIn(compact) -> Action.Domain.VolumeRequest
-            outside.containsMatchIn(compact) -> Action.Domain.Other
+            outside.containsMatchIn(compact) || weatherQuery.containsMatchIn(compact) -> Action.Domain.Other
             else -> null
         }
         if (domain != null) {
@@ -149,13 +149,16 @@ object IntentRouter {
             }
             return clarify("要播放哪个列表里的歌曲？", Failure.MissingContext)
         }
+        if (ordinalReference.containsMatchIn(compact)) {
+            return clarify("要播放哪个列表里的歌曲？", Failure.MissingContext)
+        }
         val modeInput = if (modeToken.replace(compact, "").isEmpty()) compact else target?.replace(" ", "") ?: compact
         val words = modeToken.findAll(modeInput).map { it.value }.toSet()
         if (modeToken.replace(modeInput, "").isEmpty()) {
             val negative = words.any { it in negation }
-            val ordered = words.any { it in orderWords }
+            val ordered = words.any { it in orderWords } && "打乱" !in words
             val random = words.any { it in randomWords }
-            val loop = words.any { it in loopWords }
+            val loop = words.any { it in loopWords } || "一直" in words && words.any { it in singleWords } && words.any { it in verbs }
             val single = words.any { it in singleWords }
             val repeat = Action.SetRepeat(if (negative) Repeat.Off else if (single) Repeat.One else Repeat.All)
             val shuffle = Action.SetShuffle(!negative && random)
@@ -171,10 +174,12 @@ object IntentRouter {
         if (resume.matches(compact)) return newTask(Action.Control(VoiceCommand.Resume), "resume-slots")
         if (target != null && generic.matches(target.replace(" ", ""))) return newTask(start, "generic-object")
         val moodMatch = moodLead.find(compact)
-        val rest = moodMatch?.let { compact.substring(it.range.last + 1).trimStart('，', ',').replace(polite, "") }
-        if (moodMatch != null && rest != null && request.containsMatchIn(rest) && generic.matches(request.replace(rest, ""))) {
+        val rest = moodMatch?.let { compact.substring(it.range.last + 1).trimStart('，', ',', '。', '、').replace(polite, "") }
+        val moodObject = rest?.takeIf { request.containsMatchIn(it) }?.let { request.replace(it, "") }
+        val moodEnergy = moodObject?.let { energy.matchEntire(it)?.groupValues?.get(1) }
+        if (moodMatch != null && moodObject != null && (generic.matches(moodObject) || moodEnergy != null)) {
             val value = moods.getValue(moodMatch.groupValues[1])
-            if (value in ambiguousMoods) {
+            if (value in ambiguousMoods && moodEnergy == null) {
                 // This is a new request unless replying to the existing one-question clarification.
                 val state = if (ctx.awaitingMood) ctx else ctx.copy(clarificationUsed = false)
                 return if (state.clarificationUsed) result(unheard(ctx), "clarification-budget", Failure.ClarificationExhausted,
@@ -182,14 +187,15 @@ object IntentRouter {
                     state.copy(clarificationUsed = true, awaitingMood = true, pendingMood = value,
                         candidateIds = emptyList(), awaitingConfirmation = false, correctionWindowOpen = false))
             }
-            return newTask(Action.Recommend(mood = value), "mood-slot")
+            return newTask(Action.Recommend(mood = value, energy = moodEnergy), "mood-slot")
         }
         val descriptor = (target ?: text).replace(" ", "")
         energy.matchEntire(descriptor)?.let {
             return newTask(Action.Recommend(energy = it.groupValues[1]), "energy-object")
         }
         (explicitScene.matchEntire(descriptor) ?: timedScene.matchEntire(descriptor)
-            ?: knownScene.matchEntire(descriptor))?.let {
+            ?: knownScene.matchEntire(descriptor)
+            ?: descriptive.matchEntire(descriptor)?.takeIf { recommendationLead.containsMatchIn(compact) })?.let {
             return newTask(Action.Recommend(scene = it.groupValues[1]), "scene-object")
         }
         val legacy = parseVoiceCommand(text)
@@ -199,9 +205,6 @@ object IntentRouter {
         if (!target.isNullOrBlank() && !reservedTarget.containsMatchIn(target)) {
             val named = parseVoiceCommand("播放 $target")
             if (named is VoiceCommand.Play) {
-                if (descriptive.matches(target.replace(" ", ""))) return uncertain(
-                    Candidate(Action.Recommend(scene = target.substringBeforeLast("的")), .57, "descriptive-object"),
-                    Candidate(Action.PlayNamed(named), .48, "explicit-play-verb"))
                 return newTask(Action.PlayNamed(named), "verb-and-name")
             }
         }
@@ -241,10 +244,11 @@ object IntentRouter {
     private val affirmations = setOf("对", "是", "是的", "嗯", "播", "没错", "好", "好啊", "好的", "可以", "行", "就这个", "就是它", "对的", "可以的")
     private val denials = setOf("不是", "不对", "不是这个", "不是这首", "不是这首歌", "错了", "播错了", "换一个", "不", "不要", "不要这个", "不要这首", "不是它", "错", "换", "换个")
     private val energyAnswers = mapOf("舒缓的" to "舒缓", "舒缓" to "舒缓", "提提精神" to "提神", "提神的" to "提神", "提神" to "提神", "放松" to "舒缓", "轻松一点" to "舒缓")
-    private const val NUM = "([0-9]+|[一二两三四五六七八九十]+)"
+    private const val NUM = "([0-9]+|[零一二两三四五六七八九十百千]+)"
     private val unit = "(?:首(?:歌曲?)?|个(?:歌单|结果)?|项|张(?:专辑)?)"
     private val select = "(?:(?:$verb)$quantity|选择|选中|选|点开|点击|点|打开)?"
-    private val collection = Regex("$select(?:我(?:的)?)?(?:喜好|喜欢|收藏|最爱)(?:的)?(?:歌曲?|歌单|播放列表|列表|夹)?(?:里面|里边|当中|中|里|内)(?:的)?第$NUM$unit")
+    private val collection = Regex("$select(?:我(?:的)?)?(?:喜好|喜欢|收藏|最爱)(?:的)?(?:歌曲?|歌单|播放列表|列表|夹)?(?:里面|里边|当中|中|里|内)?(?:的)?第$NUM$unit")
+    private val ordinalReference = Regex("第\\s*$NUM\\s*$unit(?:$|[，,。 ])")
     private val pick = Regex("$select(?:候选|结果|搜索结果)?(?:的)?第$NUM$unit")
     private val nextPage = Regex("(?:下(?:一)?页|(?:再|向下|往下)?翻(?:一页|页)|往后翻(?:一页)?)")
     private val previousPage = Regex("(?:上(?:一)?页|(?:往上|向上|往前)翻(?:一页)?|翻回(?:一页|上一页))")
@@ -255,24 +259,27 @@ object IntentRouter {
     private val singleWords = setOf("单曲", "这首歌", "这首", "当前歌曲")
     private val modeToken = Regex(vocabulary(negation + orderWords + randomWords + loopWords + singleWords +
         setOf("列表", "歌单", "全部", "整张", "改成", "改为", "切到", "切换到", "切换成", "设置为", "设成", "设为",
-            "开启", "打开", "启用", "模式", "把", "了", "地", "这张", "歌曲") + verbs))
+            "开启", "打开", "启用", "模式", "把", "了", "地", "一直", "一下", "这张", "歌曲") + verbs))
     private val generic = Regex("(?:音乐|歌曲?|曲子|歌儿|曲儿)?")
     private val track = Regex("(?:上|前|下)(?:一)?(?:首|曲)(?:歌曲?)?")
     private val resume = Regex("(?:继续|接着|恢复)(?:播放|放|播|听)(?:音乐|歌曲?)?")
     private const val MUSIC = "(?:音乐|歌曲?|曲子)"
-    private val explicitScene = Regex("适合(.+?)(?:氛围|时候|时)?的?$MUSIC")
+    private val explicitScene = Regex("适合(.+?)(?:氛围|(?:的时候|时候|时)(?:听|放|播)?|听)?的?$MUSIC")
     private val timedScene = Regex("(.+?)(?:(?:时候|时)(?:听|放|播)?的?|听的)$MUSIC")
     private val knownScene = Regex("(夜间开车|开车|深夜|健身|学习|睡前|工作|聚会)的$MUSIC")
-    private val descriptive = Regex(".+的$MUSIC")
+    private val descriptive = Regex("(.+?)的$MUSIC")
+    private val recommendationLead = Regex("^(?:来|放|播|听)(?:一点儿?|点儿?|一些|些|几首)")
     private val moods = mapOf("难过" to "难过", "伤心" to "难过", "沮丧" to "难过", "烦" to "烦", "烦躁" to "烦",
         "心烦" to "烦", "累" to "累", "疲惫" to "疲惫", "开心" to "开心", "高兴" to "开心",
-        "兴奋" to "兴奋", "孤独" to "孤独")
+        "兴奋" to "兴奋", "孤独" to "孤独", "不好" to "不好", "低落" to "难过",
+        "不开心" to "难过", "郁闷" to "烦", "困" to "困", "犯困" to "困", "困倦" to "困")
     private val moodWords = vocabulary(moods.keys)
-    private val moodLead = Regex("^(?:我)?(?:现在|今天|刚刚)?(?:心情)?(?:感觉|觉得)?(?:有点|特别|非常|挺|很|有些)?($moodWords)")
-    private val ambiguousMoods = setOf("难过", "烦")
+    private val moodLead = Regex("^(?:我)?(?:现在|今天|刚刚)?(?:心情)?(?:感觉|觉得)?(?:有点|特别|非常|挺|很|有些|好|太|比较)?($moodWords)")
+    private val ambiguousMoods = setOf("难过", "烦", "不好")
     private val energy = Regex("(舒缓|提神|轻松|安静)(?:点|一点)?的?$MUSIC")
-    private val volume = Regex("音量|(?:大声|小声)(?:一)?点|静音|声音(?:调大|调小)|(?:调大|调小)(?:声音)?$")
+    private val volume = Regex("音量|(?:大声|小声)(?:一)?点|静音|声音(?:调)?(?:大|小)(?:一?点|些)?|(?:调大|调小)(?:声音)?$")
     private val outside = Regex("天气|导航|空调|温度|电话|短信|车窗|座椅|打给|拨打|发消息|聊天|讲(?:个)?笑话|随便聊|几点|你好|你是谁")
+    private val weatherQuery = Regex("气温|降雨概率|天气预报|(?:会不会|要不要|会|要|是否|是不是)(?:下雨|下雪)|^(?:(?:今天|明天|现在|外面|等下)(?:还|在|会|要)?)?(?:下雨|下雪|刮风)(?:了吗|吗|了|没|没有)?$")
     private val reservedTarget = Regex("^(?:第[0-9一二三四五六七八九十]|不要|别|关闭|取消|不懂$|不清楚$)|适合|氛围|感觉|来点|天气|音量")
     private val separators = listOf("然后", "接着", "并且", "再")
     private val actionLead = Regex("^(?:$verb|暂停|继续|改成|改为|开启|关闭|切换到|设置为|设成|切到)")
