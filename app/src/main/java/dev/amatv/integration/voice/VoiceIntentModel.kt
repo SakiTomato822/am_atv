@@ -73,9 +73,59 @@ class VoiceIntentModel(private val settings: () -> Triple<String, String, String
             .getOrNull()
     }
 
+    /**
+     * Preview-only evaluation: asks the model with the R4 action schema and [state], and returns its
+     * raw JSON answer and latency. Nothing is executed; the caller only logs it.
+     */
+    suspend fun probe(spoken: String, state: String): Pair<String?, Long> = withContext(Dispatchers.IO) {
+        if (!configured()) return@withContext null to 0L
+        val (base, key, model) = settings()
+        val started = android.os.SystemClock.elapsedRealtime()
+        val answer = runCatching {
+            val body = JSONObject().put("model", model).put("temperature", 0).put("max_tokens", 200)
+                .put("messages", JSONArray()
+                    .put(JSONObject().put("role", "system").put("content", PROBE_PROMPT))
+                    .put(JSONObject().put("role", "user").put("content",
+                        JSONObject().put("said", spoken).put("state", state).toString())))
+            val connection = (URL(base.trimEnd('/') + "/chat/completions").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"; doOutput = true; connectTimeout = 8_000; readTimeout = 15_000
+                setRequestProperty("Authorization", "Bearer $key")
+                setRequestProperty("Content-Type", "application/json")
+            }
+            try {
+                connection.outputStream.use { it.write(body.toString().toByteArray()) }
+                if (connection.responseCode !in 200..299) error("HTTP ${connection.responseCode}")
+                JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                    .getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
+            } finally {
+                connection.disconnect()
+            }
+        }.onFailure { android.util.Log.w(TAG, "Probe failed: ${it.javaClass.simpleName} ${it.message?.take(80)}") }.getOrNull()
+        answer to (android.os.SystemClock.elapsedRealtime() - started)
+    }
+
     companion object {
         private const val TAG = "AMATV-Voice"
         const val DEFAULT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+
+        private val PROBE_PROMPT = """
+你是车载音乐 App 的语音意图解析器。输入 JSON：said 是语音识别文字（可能有错字），state 是当前状态。
+只输出一个 JSON：{"steps":[...]}，按顺序执行。每个 step 必须是以下之一：
+{"intent":"start_music","source":"queue|personal_station"}  泛泛地要听音乐。state 有队列用 queue，否则 personal_station
+{"intent":"set_shuffle","enabled":true|false}
+{"intent":"set_repeat","mode":"one|all|off"}
+{"intent":"play_from_collection","collection":"favorites|current","ordinal":N}  某个列表里的第 N 首
+{"intent":"pick","ordinal":N}  选当前候选里的第 N 个
+{"intent":"candidate_page","delta":1|-1}
+{"intent":"confirm"} {"intent":"deny"}  回答「你是说…吗」或否定刚播的歌
+{"intent":"recommend","scene":"…","mood":"…","energy":"…"}  按场景/情绪/能量推荐，没有的字段留空
+{"intent":"clarify"}  情绪与想听的音乐不明确时（难过、烦）问一次
+{"intent":"play_named","title":"…","artist":"…","album":"…","kind":"song|album|artist|any"}  明确点名的歌/歌手/专辑
+{"intent":"control","command":"pause|resume|next|previous"}
+{"intent":"out_of_domain","reason":"other|volume"}  天气、导航、车控、电话等；音量相关用 volume
+{"intent":"not_understood"}
+只输出 JSON，不要解释。
+""".trimIndent()
 
         private val SYSTEM_PROMPT = """
 你是车载音乐 App 的语音指令解析器。用户说的话来自语音识别，可能有同音错字。

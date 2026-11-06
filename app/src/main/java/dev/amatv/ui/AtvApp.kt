@@ -2883,6 +2883,15 @@ fun AmAtvApp() {
                         return
                     }
                     val text = intent.getStringExtra("text")?.takeIf { it.isNotBlank() } ?: return
+                    // `--es probe <state>`: only ask the chat model (R4 schema) and log its answer.
+                    intent.getStringExtra("probe")?.let { state ->
+                        scope.launch {
+                            val (answer, ms) = voice.probeIntent(text, state)
+                            android.util.Log.i("AMATV-Voice", "Probe ${ms}ms said=\"$text\" state=$state answer=" +
+                                (answer?.replace('\n', ' ')?.take(500) ?: "null"))
+                        }
+                        return
+                    }
                     if (voiceChoiceReply?.complete(text) == true) return
                     if (voiceJob?.isActive == true) return
                     // `--ez dry true`: decide only. Logs "Outcome ..." (what would play, or which

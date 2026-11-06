@@ -83,6 +83,9 @@ class VoiceService(context: Context) {
         Triple(settings.value.openAiBaseUrl.trim(), settings.value.openAiKey.trim(), settings.value.intentModel.trim())
     }
 
+    /** Preview-only: the model's raw answer with the R4 schema (see [VoiceIntentModel.probe]). */
+    suspend fun probeIntent(spoken: String, state: String) = intent.probe(spoken, state)
+
     /** The chat model is on and has a key. */
     fun intentReady(): Boolean = settings.value.intentEnabled && intent.configured()
 
