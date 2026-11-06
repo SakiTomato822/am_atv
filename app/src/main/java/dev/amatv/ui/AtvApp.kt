@@ -1189,6 +1189,8 @@ fun AmAtvApp() {
         }
     }
 
+    val voiceSkipDeduplicator = remember { dev.amatv.integration.voice.VoiceSkipDeduplicator() }
+
     fun skip(relative: Int) {
         if (isStationPlayback()) {
             val snapshot = currentPlaybackSnapshot() ?: return
@@ -1208,6 +1210,12 @@ fun AmAtvApp() {
             return
         }
         dispatchQueueAction(if (relative > 0) StartupQueueAction.Next else StartupQueueAction.Previous)
+    }
+
+    fun skipFromMediaEvent(relative: Int) {
+        voiceSkipDeduplicator.record(relative, android.os.SystemClock.elapsedRealtime())
+        android.util.Log.i("AMATV-Voice", "Media skip direction=$relative")
+        skip(relative)
     }
 
     fun showNowPlaying() {
@@ -1419,8 +1427,8 @@ fun AmAtvApp() {
         PlaybackMediaSession.Callbacks(
             play = ::requestPlayback,
             pause = ::pausePlayback,
-            next = { skip(1) },
-            previous = { skip(-1) },
+            next = { skipFromMediaEvent(1) },
+            previous = { skipFromMediaEvent(-1) },
             seekTo = { position -> seekPlaybackBy(position - currentPositionMs()) },
         ),
     )
@@ -2689,7 +2697,7 @@ fun AmAtvApp() {
         }
     }
 
-    suspend fun actOnSentenceSteps(heard: String, previousTurn: String?): Pair<String?, List<VoiceCommand>> {
+    suspend fun actOnSentenceSteps(heard: String, previousTurn: String?, mediaMatchFromMs: Long?): Pair<String?, List<VoiceCommand>> {
         voiceChoiceDismissed = false
         android.util.Log.i("AMATV-Voice", "Sentence received: " + heard)
         val said = heard
@@ -2722,6 +2730,16 @@ fun AmAtvApp() {
         val executed = mutableListOf<VoiceCommand>()
         for ((index, step) in steps.withIndex()) {
             if (index > 0) delay(700L) // let the page the previous step opened appear
+            val skipDirection = when (step) {
+                VoiceCommand.Next -> 1
+                VoiceCommand.Previous -> -1
+                else -> null
+            }
+            if (skipDirection != null && voiceSkipDeduplicator.consume(skipDirection, mediaMatchFromMs)) {
+                android.util.Log.i("AMATV-Voice", "ASR skip already handled by media event direction=$skipDirection")
+                executed += step
+                continue
+            }
             problem = runVoiceStep(step)
             if (voiceChoiceDismissed) {
                 executed += VoiceCommand.Cancel
@@ -2744,9 +2762,9 @@ fun AmAtvApp() {
         return problem to executed
     }
 
-    suspend fun actOnSentence(heard: String, previousTurn: String?): Pair<String?, List<VoiceCommand>> {
+    suspend fun actOnSentence(heard: String, previousTurn: String?, mediaMatchFromMs: Long? = null): Pair<String?, List<VoiceCommand>> {
         voiceStayUntil[0] = Long.MAX_VALUE
-        try { return actOnSentenceSteps(heard, previousTurn) } finally {
+        try { return actOnSentenceSteps(heard, previousTurn, mediaMatchFromMs) } finally {
             voiceStayUntil[0] = android.os.SystemClock.elapsedRealtime() + 8_000L
         }
     }
@@ -2847,7 +2865,11 @@ fun AmAtvApp() {
                         voiceState = VoiceUiState.Listening("", ready = false)
                         continue
                     }
-                    val (sentenceProblem, steps) = actOnSentence(said, previousTurn)
+                    // A system command near speech end may already have performed this skip.
+                    // Anchor to speech end so cloud transcription latency does not extend the match window backwards.
+                    val speechBoundary = speechEnded.takeIf { it > 0 } ?: android.os.SystemClock.elapsedRealtime()
+                    val mediaMatchFrom = maxOf(listenStarted, speechBoundary - 2_000L)
+                    val (sentenceProblem, steps) = actOnSentence(said, previousTurn, mediaMatchFrom)
                     problem = sentenceProblem
                     previousTurn = "$said -> ${steps.joinToString()}" + (problem?.let { " ($it)" } ?: "")
                     if (problem == null && VoiceCommand.Cancel in steps) {
@@ -3025,11 +3047,11 @@ fun AmAtvApp() {
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                            skip(1)
+                            skipFromMediaEvent(1)
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
-                            skip(-1)
+                            skipFromMediaEvent(-1)
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_REWIND -> {
