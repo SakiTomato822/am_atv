@@ -21,6 +21,9 @@ internal object NameTuning {
     const val VERSION_PENALTY = 0.22
     const val ALTERNATE_READING_PENALTY = 0.045
     const val CHOICE_LIMIT = 3
+    const val WEAK_RESULT = 0.71
+    const val SHORT_ARTIST_PREFIX_BONUS = 0.27
+    const val REPEATED_EVIDENCE_BONUS = 0.16
 }
 
 internal data class NameEvidence(
@@ -74,8 +77,9 @@ internal class NameEncoder(
         val mandarin = pinyin(text)?.let { reading ->
             (listOf(reading) + alternatePinyin(text)).mapNotNull(::splitReading).distinct()
         } ?: if (latin) listOfNotNull(splitPinyin(text)) else emptyList()
-        return NameForm(literal, aliasesByTarget[literal].orEmpty().toSet(), mandarin,
-            romaji(text)?.let(::key)?.takeIf { it.isNotBlank() },
+        val romanized = romaji(text)?.let(::key)?.takeIf { it.isNotBlank() }
+        return NameForm(literal, (aliasesByTarget[literal].orEmpty() + romanized?.let(aliasesByTarget::get).orEmpty()).toSet(),
+            mandarin, romanized,
             if (latin) latinSound(literal) else null)
     }
 }

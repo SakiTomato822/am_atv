@@ -2,9 +2,9 @@ package dev.amatv.integration
 
 /** Spoken catalog aliases. The destination remains the name returned by the catalog. */
 internal val VOICE_ALIASES: Map<String, String> = mapOf(
-    "无刺有刺" to "トゲナシトゲアリ",
-    "無刺有刺" to "トゲナシトゲアリ",
-    "刺刺" to "トゲナシトゲアリ",
+    "无刺有刺" to "TOGENASHI TOGEARI",
+    "無刺有刺" to "TOGENASHI TOGEARI",
+    "刺刺" to "TOGENASHI TOGEARI",
     "迷途之子" to "MyGO!!!!!",
     "mygo" to "MyGO!!!!!",
     "米哈游音乐" to "HOYO-MiX",

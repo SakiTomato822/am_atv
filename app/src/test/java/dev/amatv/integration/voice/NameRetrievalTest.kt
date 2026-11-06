@@ -3,6 +3,11 @@ package dev.amatv.integration.voice
 import dev.amatv.integration.VOICE_ALIASES
 import dev.amatv.integration.VoiceCatalogIndex
 import dev.amatv.integration.VoiceCommand
+import dev.amatv.integration.VoiceCatalogMatch
+import dev.amatv.integration.VOICE_CORRECTION_WINDOW_MS
+import dev.amatv.integration.confirmsVoiceChoice
+import dev.amatv.integration.isVoiceCorrection
+import dev.amatv.integration.mergeVoiceMatches
 import dev.amatv.integration.parseVoiceCommand
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
@@ -16,7 +21,7 @@ import kotlin.system.measureNanoTime
 class NameRetrievalTest {
     private val sounds = mapOf(
         '安' to "an", '眠' to "mian", '於' to "yu", '追' to "zhui", '憶' to "yi", '之' to "zhi", '地' to "di",
-        '因' to "yin", '為' to "wei", '所' to "suo", '以' to "yi",
+        '因' to "yin", '為' to "wei", '惟' to "wei", '所' to "suo", '以' to "yi",
         '什' to "shen", '麼' to "me", '是' to "shi", '遠' to "yuan", '方' to "fang",
         '林' to "lin", '家' to "jia", '謙' to "qian", '孫' to "sun", '燕' to "yan", '姿' to "zi",
         '西' to "xi", '凉' to "liang", '昔' to "xi", '涟' to "lian",
@@ -131,6 +136,69 @@ class NameRetrievalTest {
         val song = VoiceCommand.Play("Singer Title", VoiceCommand.Kind.Song, title = "Title",
             artist = "Singer", album = "Original", kindExplicit = true)
         assertEquals(listOf(original), index.rank(song, listOf(other, original)).candidates)
+    }
+
+    @Test
+    fun reworkRecallsAppleAliasesAndKeepsExactAndPopularSpellings() {
+        val canonical = track("TOGENASHI TOGEARI", CatalogKind.Artist)
+        val void = track("VOID", artist = canonical.title)
+        val show = track("Show", artist = "Ado")
+        val index = VoiceCatalogIndex(emptyList(), encoder)
+        val station = track("Personalized Discovery", CatalogKind.Station)
+        val discovery = index.fallbackChoices(request("播放音乐寻宝电台"), listOf(show, station))
+        assertEquals(listOf(station), discovery.candidates)
+        assertTrue(discovery.confident)
+        val band = request("播放无刺有刺")
+        assertTrue(canonical.title in index.recallTerms(band, index.rank(band)))
+        assertTrue(void in index.rank(band, listOf(void)).candidates)
+        assertEquals(listOf(show), index.fallbackChoices(request("播放Ado的唱"), listOf(show)).candidates)
+        val weekend = track("The Weekend", CatalogKind.Artist)
+        val weeknd = track("The Weeknd", CatalogKind.Artist)
+        val heard = request("播放The Weekend的歌")
+        assertTrue("the week" in index.recallTerms(heard, index.rank(heard)))
+        val result = index.rank(heard, listOf(weeknd, weekend))
+        assertEquals(setOf(weekend, weeknd), result.candidates.toSet())
+        assertFalse(result.confident)
+        val capital = track("首都", artist = "罗大佑")
+        assertEquals(listOf(capital), index.sameNameSongsForMissingAlbum(
+            request("播放罗大佑的专辑首都"), listOf(capital, capital.copy(artist = "其他歌手"))))
+    }
+
+    @Test
+    fun exactLibraryHomophoneCanPlayButShortArtistPrefixOnlyOffersChoices() {
+        val title = track("因為所以")
+        val heard = request("播放因惟所以")
+        assertTrue(VoiceCatalogIndex(listOf(title), encoder).rank(heard).confident)
+        assertFalse(VoiceCatalogIndex(emptyList(), encoder).rank(heard, listOf(title)).confident)
+        val artist = track("孫燕姿", CatalogKind.Artist)
+        val others = listOf("孫燕", "孫陽", "孫楊").map { track(it, CatalogKind.Artist) }
+        val result = VoiceCatalogIndex(listOf(artist), encoder).rank(request("播放孫燕的歌"), others)
+        assertTrue(artist in result.candidates)
+        assertFalse(result.confident)
+    }
+
+    @Test
+    fun confirmationAndOneRetryKeepTheirEvidenceAndCorrectionWindow() {
+        val title = track("Title")
+        val other = track("Other")
+        val key = title.catalogKind to title.id
+        val first = VoiceCatalogMatch(listOf(title), false, scores = mapOf(key to 0.65))
+        val second = VoiceCatalogMatch(listOf(other, title), false, scores = mapOf(key to 0.65,
+            (other.catalogKind to other.id) to 0.75))
+        assertTrue(first.weak)
+        val merged = mergeVoiceMatches(first, second)
+        assertEquals(title, merged.candidates.first())
+        assertFalse(merged.weak)
+        assertFalse(merged.confident)
+        for (reply in listOf("对", "是", "嗯", "播吧")) assertTrue(confirmsVoiceChoice(reply, 1))
+        assertFalse(confirmsVoiceChoice("嗯", 2))
+        assertFalse(confirmsVoiceChoice("不是", 1))
+        val ttsEnd = 3_000L
+        val until = ttsEnd + VOICE_CORRECTION_WINDOW_MS
+        for (phrase in listOf("不是这个", "不是这首歌", "播错了", "换一首")) {
+            assertTrue(isVoiceCorrection(phrase, until, until))
+            assertFalse(isVoiceCorrection(phrase, until + 1, until))
+        }
     }
 
     @Test

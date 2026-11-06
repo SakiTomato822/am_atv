@@ -84,6 +84,11 @@ import dev.amatv.integration.parseVoiceCommand
 import dev.amatv.integration.ChineseText
 import dev.amatv.integration.VoiceCatalogIndex
 import dev.amatv.integration.VoiceCatalogMatch
+import dev.amatv.integration.confirmsVoiceChoice
+import dev.amatv.integration.VOICE_CORRECTIONS
+import dev.amatv.integration.VOICE_CORRECTION_WINDOW_MS
+import dev.amatv.integration.isVoiceCorrection
+import dev.amatv.integration.mergeVoiceMatches
 import dev.amatv.integration.voice.NameTuning
 import dev.amatv.integration.voiceCatalogKey
 import dev.amatv.i18n.destinationLabel
@@ -381,6 +386,8 @@ fun AmAtvApp() {
     var voiceState by remember { mutableStateOf<VoiceUiState?>(null) }
     var voiceChoiceReply by remember { mutableStateOf<CompletableDeferred<String>?>(null) }
     var voiceChoiceDismissed by remember { mutableStateOf(false) }
+    var voiceChoiceRejected by remember { mutableStateOf(false) }
+    var voiceLastCatalogItem by remember { mutableStateOf<Track?>(null) }
     var voiceCatalogContext by remember { mutableStateOf<List<Track>>(emptyList()) }
     var voiceCatalogContextUntil by remember { mutableLongStateOf(0L) }
     /** The page of choices last shown when the user let them time out (see Pick). */
@@ -409,15 +416,26 @@ fun AmAtvApp() {
             "artists" to services::libraryArtistsPage, "playlists" to services::libraryPlaylistsPage,
         )
         val entries = mutableListOf<Track>()
+        var complete = true
         for ((name, load) in loadPages) {
             val seen = mutableSetOf<String?>()
             var next: String? = null
             var pages = 0
             var count = 0
             while (seen.add(next) && pages++ < 40) {
-                val result = cancellableResult { load(next) }
+                var attempt = 0
+                val result = cancellableResult {
+                    retryCatalogRequest({
+                        attempt++
+                        cancellableResult { load(next) }.onFailure { error ->
+                            android.util.Log.w("AMATV-Voice",
+                                "Library names: $name page $pages attempt $attempt/3 failed: ${error.javaClass.simpleName}")
+                        }.getOrThrow()
+                    })
+                }
                 val page = result.getOrNull()
                 if (page == null) {
+                    complete = false
                     android.util.Log.w("AMATV-Voice", "Library names: $name page $pages failed: " +
                         "${result.exceptionOrNull()?.javaClass?.simpleName} ${result.exceptionOrNull()?.message?.take(120)}")
                     break
@@ -427,6 +445,10 @@ fun AmAtvApp() {
                 next = page.nextPage ?: break
             }
             android.util.Log.i("AMATV-Voice", "Library names: $name $count in $pages page(s)")
+        }
+        if (!complete && voiceLibrary.isNotEmpty()) {
+            android.util.Log.w("AMATV-Voice", "Library names: incomplete reload; retained ${voiceLibrary.size} indexed entries")
+            return@LaunchedEffect
         }
         // Kept from the last load until this one is done (a reload no longer empties it first).
         val snapshot = entries.distinctBy { it.catalogKind to (it.catalogId ?: it.id) }
@@ -2172,6 +2194,7 @@ fun AmAtvApp() {
 
     // Each reply gets its own 8 s (paging restarts the clock); nothing plays if the user says nothing.
     suspend fun chooseVoiceCatalog(initial: List<Track>, initialPage: Int = 0): Track? = run choose@{
+        voiceChoiceRejected = false
         android.util.Log.i("AMATV-Voice", "Outcome choices: " +
             initial.take(8).joinToString(" | ") { "${it.catalogKind}:${it.title} · ${it.artist}" })
         if (voiceDry) return@choose null
@@ -2191,6 +2214,7 @@ fun AmAtvApp() {
                 // meanwhile cuts the prompt short and counts at once. A reply that narrowed nothing
                 // ("首都" when all four are 首都) gets "请说第几个".
                 val prompt = when {
+                    candidates.size == 1 -> AppText.text(R.string.voice_confirm_name, spokenName(visible.single()))
                     visible != spokenPage -> choicesPrompt(visible, candidates.size, page, first = spokenPage == null)
                     askNumber -> AppText.text(R.string.voice_tts_which)
                     else -> null
@@ -2225,6 +2249,13 @@ fun AmAtvApp() {
                     return@choose null
                 }
                 val label = voiceCatalogKey(said)
+                if (label in VOICE_CORRECTIONS || label == "都不对") {
+                    voiceChoiceRejected = true
+                    return@choose null
+                }
+                if (confirmsVoiceChoice(label, candidates.size)) {
+                    return@choose visible.firstOrNull()
+                }
                 when (label) {
                     "下一页", "翻页" -> {
                         if (page + 1 < pages) page++
@@ -2234,8 +2265,7 @@ fun AmAtvApp() {
                         if (page > 0) page--
                         continue
                     }
-                    "不是", "都不对", "不是这个", "不对", "取消" -> return@choose null
-                    "这个", "对", "就它" -> return@choose visible.firstOrNull()
+                    "取消" -> return@choose null
                 }
                 val step = parseVoiceCommand(said)
                 if (step == VoiceCommand.Cancel) return@choose null
@@ -2298,6 +2328,9 @@ fun AmAtvApp() {
         voiceState = VoiceUiState.Message(AppText.text(R.string.voice_playing_format,
             listOf(item.title, item.artist).filter { it.isNotBlank() }.joinToString(" · ")))
         sayVoice(AppText.text(R.string.voice_playing_format, spokenName(item)))
+        voiceLastCatalogItem = item
+        voiceCatalogContext = emptyList()
+        voiceCatalogContextUntil = android.os.SystemClock.elapsedRealtime() + VOICE_CORRECTION_WINDOW_MS
         return true
     }
 
@@ -2324,7 +2357,67 @@ fun AmAtvApp() {
     }
 
     /** Runs one step; returns a message to show when the sequence should stop. */
-    suspend fun runVoiceStep(command: VoiceCommand): String? {
+    suspend fun retrieveVoiceCatalog(command: VoiceCommand.Play): Pair<VoiceCatalogMatch, Boolean> {
+        val query = command.query
+        val index = voiceCatalogIndex
+        suspend fun rank(found: List<Track>) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            index.rank(command, found)
+        }
+        val local = rank(emptyList())
+        var ranked = local
+        var missingAlbum = false
+        // An explicit kind can make a local exact name safe without a catalog round trip.
+        // With an implicit kind, look for same-name albums/songs before committing.
+        if (!local.confident || !command.kindExplicit) {
+            val deadline = android.os.SystemClock.elapsedRealtime() + 4_500L
+            var found = withTimeoutOrNull(3_000L) {
+                cancellableResult { services.search(query) }.getOrNull().orEmpty()
+            }.orEmpty()
+            ranked = rank(found)
+            if (!ranked.confident || index.needsPhoneticRecall(command)) {
+                val terms = index.recallTerms(command, local)
+                val more = coroutineScope {
+                    terms.map { term ->
+                        async {
+                            val remaining = deadline - android.os.SystemClock.elapsedRealtime()
+                            withTimeoutOrNull(remaining) {
+                                cancellableResult { services.search(term) }.getOrNull().orEmpty()
+                            }.orEmpty()
+                        }
+                    }.flatMap { it.await() }
+                }
+                found = found + more
+                ranked = rank(found)
+            }
+            // Apple associations are a final source of choices, never autoplay evidence.
+            if (ranked.candidates.isEmpty()) {
+                val sameName = index.sameNameSongsForMissingAlbum(command, found)
+                when {
+                    sameName.isNotEmpty() -> {
+                        missingAlbum = true
+                        ranked = VoiceCatalogMatch(sameName, confident = false)
+                    }
+                    else -> ranked = index.fallbackChoices(command, found)
+                }
+            }
+        }
+        return ranked to missingAlbum
+    }
+
+    suspend fun askForVoiceName(): VoiceCommand.Play? {
+        if (voiceDry || voiceJob?.isActive != true) return null
+        val prompt = AppText.text(R.string.voice_repeat_name)
+        voiceState = VoiceUiState.Message(prompt)
+        sayVoice(prompt, choice = true)
+        voiceState = VoiceUiState.Listening("", ready = false)
+        val heard = withTimeoutOrNull(8_000L) {
+            (voice.listen(speechHotwords()).firstOrNull { it is VoiceEvent.Final || it is VoiceEvent.Failed }
+                as? VoiceEvent.Final)?.text
+        } ?: return null
+        return parseVoiceSteps(heard).singleOrNull() as? VoiceCommand.Play
+    }
+
+    suspend fun runVoiceStep(command: VoiceCommand, allowVoiceRepeat: Boolean = true): String? {
         when (command) {
             VoiceCommand.Pause -> pausePlayback()
             VoiceCommand.Cancel -> return null
@@ -2459,39 +2552,18 @@ fun AmAtvApp() {
                 }
                 voiceState = VoiceUiState.Searching(command.query)
                 val query = command.query
-                val index = voiceCatalogIndex
-                suspend fun rank(found: List<Track>) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                    index.rank(command, found)
-                }
-                val local = rank(emptyList())
-                var ranked = local
-                // An explicit kind can make a local exact name safe without a catalog round trip.
-                // With an implicit kind, look for same-name albums/songs before committing.
-                if (!local.confident || !command.kindExplicit) {
-                    val deadline = android.os.SystemClock.elapsedRealtime() + 4_500L
-                    var found = withTimeoutOrNull(3_000L) {
-                        cancellableResult { services.search(query) }.getOrNull().orEmpty()
-                    }.orEmpty()
-                    ranked = rank(found)
-                    if (!ranked.confident || index.needsPhoneticRecall(command)) {
-                        val terms = index.recallTerms(command, local)
-                        val more = coroutineScope {
-                            terms.map { term ->
-                                async {
-                                    val remaining = deadline - android.os.SystemClock.elapsedRealtime()
-                                    withTimeoutOrNull(remaining) {
-                                        cancellableResult { services.search(term) }.getOrNull().orEmpty()
-                                    }.orEmpty()
-                                }
-                            }.flatMap { it.await() }
-                        }
-                        found = found + more
-                        ranked = rank(found)
+                var (ranked, missingAlbum) = retrieveVoiceCatalog(command)
+                var repeated = !allowVoiceRepeat
+                if (ranked.weak && !ranked.confident && !missingAlbum && !voiceDry && allowVoiceRepeat) {
+                    val reply = askForVoiceName()
+                    if (reply == null) {
+                        voiceChoiceDismissed = true
+                        return null
                     }
-                    // Apple associations are a final source of choices, never autoplay evidence.
-                    if (ranked.candidates.isEmpty()) {
-                        ranked = VoiceCatalogMatch(index.appleChoices(command, found), confident = false)
-                    }
+                    val (other, otherMissing) = retrieveVoiceCatalog(reply)
+                    ranked = mergeVoiceMatches(ranked, other)
+                    missingAlbum = otherMissing
+                    repeated = true
                 }
                 if (ranked.candidates.isEmpty()) return AppText.text(R.string.voice_not_found_format, query)
                 // An artist: all their songs, or one of the hits? The user picks (no guessing).
@@ -2509,17 +2581,35 @@ fun AmAtvApp() {
                         voiceState = VoiceUiState.Message(AppText.text(R.string.voice_playing_format,
                             if (choice === all) choice.title else listOf(choice.title, choice.artist).joinToString(" · ")))
                         sayVoice(AppText.text(R.string.voice_playing_format, if (choice === all) choice.title else spokenName(choice)))
+                        if (!voiceDry) {
+                            voiceLastCatalogItem = if (choice === all) artist else choice
+                            voiceCatalogContext = listOf(artist) + hits
+                            voiceCatalogContextUntil = android.os.SystemClock.elapsedRealtime() + VOICE_CORRECTION_WINDOW_MS
+                        }
                         return null
                     }
                 }
-                val item = if (ranked.confident) ranked.candidates.first() else chooseVoiceCatalog(ranked.candidates)
+                if (missingAlbum) {
+                    val message = AppText.text(R.string.voice_no_album_format, command.album ?: command.title ?: query)
+                    voiceState = VoiceUiState.Message(message)
+                    sayVoice(message, choice = true)
+                }
+                var item = if (ranked.confident) ranked.candidates.first() else chooseVoiceCatalog(ranked.candidates)
+                if (item == null && voiceChoiceRejected && !repeated) {
+                    val reply = askForVoiceName()
+                    if (reply != null) {
+                        val (other, _) = retrieveVoiceCatalog(reply)
+                        ranked = mergeVoiceMatches(ranked, other)
+                        if (ranked.candidates.isNotEmpty()) item = chooseVoiceCatalog(ranked.candidates)
+                    }
+                }
                 if (item == null) {
                     voiceChoiceDismissed = true
                     return null
                 }
                 if (!playVoiceCatalog(item)) return AppText.text(R.string.voice_not_found_format, query)
                 voiceCatalogContext = ranked.alternatives
-                voiceCatalogContextUntil = android.os.SystemClock.elapsedRealtime() + 8_000L
+
             }
             VoiceCommand.Nothing -> return AppText.text(R.string.voice_not_understood)
         }
@@ -2561,12 +2651,24 @@ fun AmAtvApp() {
         voiceChoiceDismissed = false
         val said = heard
         val followUp = voiceCatalogKey(said)
-        val correction = followUp in setOf("不对", "不是这个", "下一页", "上一页")
-        if (correction && voiceCatalogContext.isNotEmpty() &&
-            android.os.SystemClock.elapsedRealtime() <= voiceCatalogContextUntil) {
-            val item = chooseVoiceCatalog(voiceCatalogContext, initialPage = if (followUp == "下一页") 1 else 0)
-                ?: return null to listOf(VoiceCommand.Cancel)
+        val now = android.os.SystemClock.elapsedRealtime()
+        val correction = isVoiceCorrection(followUp, now, voiceCatalogContextUntil) ||
+            (followUp in VOICE_CORRECTIONS && followUp != "换一首")
+        val paging = followUp in setOf("下一页", "上一页") && now <= voiceCatalogContextUntil && voiceCatalogContext.isNotEmpty()
+        if (correction || paging) {
+            val alternatives = if (now <= voiceCatalogContextUntil) voiceCatalogContext.filterNot {
+                voiceLastCatalogItem?.let(it::matchesPlaybackQueueEntry) == true
+            } else emptyList()
+            val item = alternatives.takeIf { it.isNotEmpty() }
+                ?.let { chooseVoiceCatalog(it, initialPage = if (followUp == "下一页") 1 else 0) }
+            if (item == null) {
+                if (alternatives.isNotEmpty() && !voiceChoiceRejected) return null to listOf(VoiceCommand.Cancel)
+                val reply = askForVoiceName() ?: return null to listOf(VoiceCommand.Cancel)
+                val problem = runVoiceStep(reply, allowVoiceRepeat = false)
+                return problem to listOf(if (voiceChoiceDismissed) VoiceCommand.Cancel else reply)
+            }
             val played = playVoiceCatalog(item)
+            if (played) voiceCatalogContext = alternatives
             return (if (played) null else AppText.text(R.string.voice_not_found_format, item.title)) to
                 listOf(VoiceCommand.Play(item.title))
         }
@@ -2625,6 +2727,7 @@ fun AmAtvApp() {
 
     /** A control command, or a sentence that starts like a request (not a stray lyric). */
     fun soundsLikeCommand(said: String): Boolean {
+        if (voiceCatalogKey(said) in VOICE_CORRECTIONS) return true
         val steps = parseVoiceSteps(said)
         if (steps.any { it !is VoiceCommand.Play && it != VoiceCommand.Nothing }) return true
         return COMMAND_START.containsMatchIn(said.trim())

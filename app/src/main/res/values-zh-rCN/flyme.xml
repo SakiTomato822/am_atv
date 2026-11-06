@@ -56,6 +56,8 @@
     <string name="voice_tts_page_format">第%1$d页</string>
     <string name="voice_tts_item_format">第%1$d个，%2$s</string>
     <string name="voice_tts_which">请说第几个</string>
+    <string name="voice_confirm_name">你是说《%1$s》吗？</string>
+    <string name="voice_repeat_name">没听清楚，请再说一次歌名，或者说歌手加歌名</string>
     <string name="voice_tts_name_format">%1$s的%2$s</string>
     <string name="voice_speak_title">语音播报提示</string>
     <string name="voice_speak_all">全部</string>

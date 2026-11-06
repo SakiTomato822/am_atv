@@ -41,8 +41,8 @@ class VoiceSearchTest {
                 assertFalse(match.confident)
                 assertEquals(items, match.candidates)
             }
-            assertEquals(VoiceCatalogMatch(listOf(song), true), ranked("播放${artist}的歌曲$title", items))
-            assertEquals(VoiceCatalogMatch(listOf(album), true), ranked("播放${title}这张专辑", items))
+            assertEquals(VoiceCatalogMatch(listOf(song), true), ranked("播放${artist}的歌曲$title", items).copy(scores = emptyMap()))
+            assertEquals(VoiceCatalogMatch(listOf(album), true), ranked("播放${title}这张专辑", items).copy(scores = emptyMap()))
         }
     }
 
@@ -51,9 +51,9 @@ class VoiceSearchTest {
         val capital = song("首都", "罗大佑")
         assertTrue(ranked("播放都", listOf(capital, song("成都", "赵雷"))).candidates.isEmpty())
         val literal = song("都", "艺人")
-        assertEquals(VoiceCatalogMatch(listOf(literal), true), ranked("播放都", listOf(capital, literal)))
+        assertEquals(VoiceCatalogMatch(listOf(literal), true), ranked("播放都", listOf(capital, literal)).copy(scores = emptyMap()))
         val fullTitle = song("最好的我", "房祖名")
-        assertEquals(VoiceCatalogMatch(listOf(fullTitle), true), ranked("播放最好的我", listOf(fullTitle)))
+        assertEquals(VoiceCatalogMatch(listOf(fullTitle), true), ranked("播放最好的我", listOf(fullTitle)).copy(scores = emptyMap()))
     }
 
     @Test
@@ -65,7 +65,7 @@ class VoiceSearchTest {
         assertEquals(listOf(original), originalMatch.candidates)
         assertEquals(listOf(original, live), originalMatch.alternatives)
         assertEquals(VoiceCatalogMatch(listOf(live), true),
-            ranked("播放 Adele 的 Easy On Me Live", listOf(original, live)))
+            ranked("播放 Adele 的 Easy On Me Live", listOf(original, live)).copy(scores = emptyMap()))
         val english = song("INTERNET OVERDOSE", "艺人")
         val match = ranked("播放 Internet OverDose", listOf(song("INTERNET OVERDOSE (Cover)", "翻唱歌手"), english))
         assertTrue(match.confident)

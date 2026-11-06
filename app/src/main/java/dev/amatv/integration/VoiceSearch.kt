@@ -62,7 +62,31 @@ internal data class VoiceCatalogMatch(
     val candidates: List<Track>,
     val confident: Boolean,
     val alternatives: List<Track> = candidates,
-)
+    val scores: Map<Pair<CatalogKind, String>, Double> = emptyMap(),
+) {
+    val weak: Boolean get() = candidates.firstOrNull()?.let { scores[it.voiceId()] }?.let {
+        it < NameTuning.WEAK_RESULT
+    } ?: true
+}
+
+internal fun mergeVoiceMatches(first: VoiceCatalogMatch, second: VoiceCatalogMatch): VoiceCatalogMatch {
+    val left = first.alternatives.associateBy { it.voiceId() }
+    val right = second.alternatives.associateBy { it.voiceId() }
+    val scores = (left.keys + right.keys).associateWith { id ->
+        maxOf(first.scores[id] ?: 0.0, second.scores[id] ?: 0.0) +
+            if (id in left && id in right) NameTuning.REPEATED_EVIDENCE_BONUS else 0.0
+    }
+    val choices = (right + left).values.sortedByDescending { scores.getValue(it.voiceId()) }.take(NameTuning.CHOICE_LIMIT)
+    return VoiceCatalogMatch(choices, false, scores = scores)
+}
+
+internal val VOICE_CORRECTIONS = setOf("不是", "不对", "不是这个", "不是这首", "不是这首歌", "错了", "播错了", "换一个", "换一首")
+internal fun confirmsVoiceChoice(label: String, count: Int): Boolean =
+    label in setOf("对", "这个", "就它") || (count == 1 && label in setOf("是", "嗯", "播吧"))
+internal const val VOICE_CORRECTION_WINDOW_MS = 20_000L
+
+internal fun isVoiceCorrection(label: String, now: Long, until: Long): Boolean =
+    until > 0 && now <= until && label in VOICE_CORRECTIONS
 
 private val versionSuffix = Regex(
     """(?i)(?:[\s(（\[【\-–]+(live\b|remaster\w*|cover\b|instrumental\b|karaoke\b|dj\b|remix\b)|[\s(（\[【\-–]*(现场|現場|翻唱|伴奏|女版|男版)).*?$""",
@@ -127,7 +151,15 @@ internal class VoiceCatalogIndex(
     fun needsPhoneticRecall(request: VoiceCommand.Play): Boolean {
         val title = request.targetTitle()
         return splitPinyin(title)?.let { it.size >= 2 } == true ||
-            (encoder.key(title).length in 2..3 && encoder.prepare(title).mandarin.isNotEmpty())
+            (encoder.key(title).length in 2..3 && encoder.prepare(title).mandarin.isNotEmpty()) ||
+            latinSearchStem(title) != null
+    }
+
+    private fun latinSearchStem(name: String): String? {
+        val words = name.trim().split(' ')
+        val last = words.last()
+        if (words.size < 2 || last.length < 7 || words.any { it.isEmpty() || !it.isAsciiName() }) return null
+        return (words.dropLast(1) + last.dropLast(3)).joinToString(" ")
     }
 
     fun recallTerms(request: VoiceCommand.Play, local: VoiceCatalogMatch): List<String> {
@@ -149,17 +181,20 @@ internal class VoiceCatalogIndex(
             for (item in local.candidates.take(2)) {
                 add(listOfNotNull(item.artist.takeIf { request.targetArtist() != null && it.isNotBlank() }, item.title).joinToString(" "))
             }
+            latinSearchStem(name)?.let { add(listOfNotNull(artist, it).joinToString(" ")) }
             addAll(phoneticRecallTerms(encoder.prepare(request.query)))
         }.distinct().filterNot { it.equals(request.query, ignoreCase = true) }.take(4)
     }
 
     fun appleChoices(request: VoiceCommand.Play, apple: List<Track>): List<Track> {
         val title = encoder.key(request.targetTitle())
-        if (title.length < 2) return emptyList()
+        val artist = request.targetArtist()?.let(encoder::key)
+        if (title.length < 2 && artist.isNullOrEmpty()) return emptyList()
         val version = versionKind(versionSuffix.find(request.targetTitle()))
         return apple.asSequence().filter { request.acceptsVoiceKind(it.catalogKind) }
             .filter { version == null || versionKind(versionSuffix.find(it.title)) == version }
             .map { item -> Triple(item, encoder.key(item.title), encoder.key(item.artist)) }
+            .filter { (_, _, performer) -> artist == null || performer == artist }
             .filter { (_, name, _) ->
                 // Apple's associations can be useful across scripts. For two Latin names, a
                 // short fragment such as NEON cannot stand in for the complete spoken name.
@@ -168,6 +203,27 @@ internal class VoiceCatalogIndex(
             }
             .distinctBy { (item, name, artist) -> Triple(item.catalogKind, name, artist) }
             .take(NameTuning.CHOICE_LIMIT).map { it.first }.toList()
+    }
+
+    fun fallbackChoices(request: VoiceCommand.Play, apple: List<Track>): VoiceCatalogMatch {
+        if (request.kind == VoiceCommand.Kind.Station) {
+            val station = apple.firstOrNull { it.catalogKind == CatalogKind.Station }
+            if (station != null) return VoiceCatalogMatch(listOf(station), confident = true)
+        }
+        val choices = appleChoices(request, apple)
+        val scores = if (request.targetArtist() != null) choices.associate { it.voiceId() to NameTuning.WEAK_RESULT }
+            else emptyMap()
+        return VoiceCatalogMatch(choices, false, scores = scores)
+    }
+
+    fun sameNameSongsForMissingAlbum(request: VoiceCommand.Play, apple: List<Track>): List<Track> {
+        if (request.kind != VoiceCommand.Kind.Album || !request.kindExplicit) return emptyList()
+        val title = encoder.key(request.targetTitle())
+        val artist = request.artist?.let(encoder::key)
+        return (apple + libraryEntries.map { it.track }).asSequence()
+            .filter { it.catalogKind == CatalogKind.Song && encoder.key(it.title) == title &&
+                (artist == null || encoder.key(it.artist) == artist) }
+            .distinctBy { it.voiceId() }.take(NameTuning.CHOICE_LIMIT).toList()
     }
 
     fun rank(request: VoiceCommand.Play, apple: List<Track> = emptyList()): VoiceCatalogMatch {
@@ -189,6 +245,9 @@ internal class VoiceCatalogIndex(
             if (albumMatch != null && !albumMatch.exact && albumMatch.score < 0.65) return@mapNotNull null
 
             fun compare(name: NameForm): NameEvidence? {
+                if (artist == null && request.kind == VoiceCommand.Kind.Any && title.key in item.artist.aliases) {
+                    return NameEvidence(NameRoute.Alias, 1.0, 0.0, 1.0)
+                }
                 if (artist == null && request.kind == VoiceCommand.Kind.Any && item.artist.key.isNotEmpty() &&
                     (title.key == item.artist.key + name.key || title.key == name.key + item.artist.key)) {
                     return NameEvidence(NameRoute.Literal, 1.0, 0.0, 1.0)
@@ -201,11 +260,16 @@ internal class VoiceCatalogIndex(
             val version = requestedVersion == null && full?.literalExact != true && item.versionBase != null
             val match = if (base != null && base.score > (full?.score ?: 0.0)) base else full
             if (match == null) return@mapNotNull null
+            val appleRank = appleRanks[item.track.voiceId()]
+            val shortArtistPrefix = request.kind == VoiceCommand.Kind.Artist && item.track.catalogKind == CatalogKind.Artist &&
+                title.key.length == 2 && item.title.key.length == 3 && item.title.key.startsWith(title.key) &&
+                (item.inLibrary || (appleRank != null && appleRank < 5))
             val score = match.score + (if (request.kind.name == item.track.catalogKind.name) NameTuning.TYPE_WEIGHT else 0.0) +
                 (artistMatch?.let { it.score * NameTuning.CONTEXT_WEIGHT } ?: 0.0) +
                 (albumMatch?.let { it.score * NameTuning.CONTEXT_WEIGHT } ?: 0.0) +
                 (if (item.inLibrary) NameTuning.LIBRARY_WEIGHT else 0.0) +
-                (appleRanks[item.track.voiceId()]?.let { NameTuning.APPLE_WEIGHT / (it + 1) } ?: 0.0) -
+                (appleRank?.let { NameTuning.APPLE_WEIGHT / (it + 1) } ?: 0.0) +
+                (if (shortArtistPrefix) NameTuning.SHORT_ARTIST_PREFIX_BONUS else 0.0) -
                 (if (version) NameTuning.VERSION_PENALTY else 0.0)
             // Keep context similarity useful for ranking without promoting it to literal evidence.
             val weakContext = artistMatch?.takeUnless { it.literalExact } ?: albumMatch?.takeUnless { it.literalExact }
@@ -231,13 +295,23 @@ internal class VoiceCatalogIndex(
         val shortSoundCollision = target.key.length <= 3 && distinct.drop(1).any {
             it.match.route == NameRoute.Mandarin && it.match.coverage == 1.0 && it.match.cost <= 0.45
         }
-        val strongEvidence = first.match.literalExact && !first.version
+        val nearLatin = distinct.drop(1).any {
+            it.match.route == NameRoute.Latin && it.match.cost in 0.01..1.0 && it.match.coverage >= 0.85
+        }
+        val reading = target.mandarin.firstOrNull()
+        val libraryHomophone = first.entry.inLibrary && first.entry.track.catalogKind == CatalogKind.Song &&
+            first.match.route == NameRoute.Mandarin && first.match.exact && !first.match.alternativeReading &&
+            reading != null && reading.size >= 3 && reading == first.entry.title.mandarin.firstOrNull() &&
+            target.key.any { Character.UnicodeScript.of(it.code) == Character.UnicodeScript.HAN } &&
+            (artist == null || artist.key == first.entry.artist.key) && (album == null || album.key == first.entry.album.key)
+        val strongEvidence = (first.match.literalExact || libraryHomophone) && !first.version
         val confident = first.score >= NameTuning.MIN_AUTOPLAY &&
             (second == null || first.score - second.score >= minimumGap) &&
-            strongEvidence && !typeCollision && !shortSoundCollision
+            strongEvidence && !typeCollision && !shortSoundCollision && !nearLatin
         val display = distinct.filter { !first.match.literalExact || !it.version }
             .take(NameTuning.CHOICE_LIMIT).map { it.entry.track }
-        return VoiceCatalogMatch(display, confident, distinct.take(NameTuning.CHOICE_LIMIT).map { it.entry.track })
+        return VoiceCatalogMatch(display, confident, distinct.take(NameTuning.CHOICE_LIMIT).map { it.entry.track },
+            distinct.take(NameTuning.CHOICE_LIMIT).associate { it.entry.track.voiceId() to it.score })
     }
 }
 

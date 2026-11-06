@@ -57,6 +57,8 @@
     <string name="voice_tts_page_format">Page %1$d</string>
     <string name="voice_tts_item_format">Number %1$d, %2$s</string>
     <string name="voice_tts_which">Say which number</string>
+    <string name="voice_confirm_name">Did you mean %1$s?</string>
+    <string name="voice_repeat_name">I didn’t catch that. Say the song title again, or say the artist and the title.</string>
     <string name="voice_tts_name_format">%2$s by %1$s</string>
     <string name="voice_speak_title">Read prompts aloud</string>
     <string name="voice_speak_all">All</string>
