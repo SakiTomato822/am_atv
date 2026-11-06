@@ -43,6 +43,7 @@ class IntentRouterTest {
             else -> it.toString()
         } })
     private fun context(name: String): Context = when (name) {
+        "followup" -> Context(followUp = true)
         "empty" -> Context()
         "queue" -> Context(hasQueue = true)
         "favorites" -> Context(favorites = Collection("fav", "v1", true))
@@ -54,8 +55,8 @@ class IntentRouterTest {
         "mood" -> Context(awaitingMood = true, pendingMood = "难过", clarificationUsed = true)
         else -> error("Unknown matrix state $name")
     }
-    private fun matrix(): File = generateSequence(File(requireNotNull(System.getProperty("user.dir")))) { it.parentFile }
-        .map { File(it, "work/voice-eval/intent_cases.tsv") }.first { it.isFile }
+    private fun matrix(name: String = "intent_cases.tsv"): File = generateSequence(File(requireNotNull(System.getProperty("user.dir")))) { it.parentFile }
+        .map { File(it, "work/voice-eval/$name") }.first { it.isFile }
 
     @Test fun taskStateMatrixAndBaselineComparison() {
         // Columns count exact intent sequence and exact slots (not merely a substring or top-level class).
@@ -64,7 +65,8 @@ class IntentRouterTest {
         for (line in matrix().readLines(Charsets.UTF_8).drop(1).filter { it.isNotBlank() }) {
             val c = line.split('\t')
             assertEquals("TSV columns: $line", 7, c.size)
-            val expected = Signature(c[4], c[5])
+            val intent = if (c[4] != "Unknown") c[4] else if (c[0] in setOf("80", "81", "82")) "OutOfDomain" else "NotUnderstood"
+            val expected = Signature(intent, c[5])
             val accepted = listOf(expected) + if (c[6] == "-") emptyList() else c[6].split("||").map {
                 val fields = it.split("::", limit = 2)
                 require(fields.size == 2) { "Alternative must be Intent::slots: $it" }
@@ -96,6 +98,39 @@ class IntentRouterTest {
         assertTrue(failures.joinToString("\n"), failures.isEmpty())
     }
 
+    @Test fun secondDevelopmentMatrix() {
+        val original = matrix().readLines().drop(1).map { it.split('\t')[2] }.toSet()
+        val rows = matrix("intent_cases_dev2.tsv").readLines().drop(1).filter { it.isNotBlank() }.map { it.split('\t') }
+        assertEquals(60, rows.size)
+        assertEquals(60, rows.map { it[2] }.toSet().size)
+        val failures = rows.mapNotNull { c ->
+            assertFalse("Repeated wording: " + c[2], c[2] in original)
+            val actual = signature(IntentRouter.route(c[2], context(c[3])).steps.map { it.action })
+            val expected = Signature(c[4], c[5])
+            if (actual == expected) null else "Case " + c[0] + " " + c[2] + ": " + actual + " expected " + expected
+        }
+        assertTrue(failures.joinToString("\n"), failures.isEmpty())
+    }
+
+    @Test fun alternativesAndInvalidInputsNeverProduceExecutableActions() {
+        val ambiguous = IntentRouter.route("播放旅行的歌").steps.single()
+        assertTrue(ambiguous.action is Action.Clarify)
+        assertEquals(2, ambiguous.alternatives.size)
+        assertTrue(ambiguous.alternatives.zipWithNext().all { (a, b) -> a.confidence > b.confidence })
+        for ((input, action) in listOf(
+            "播一下导航去公司" to Action.OutOfDomain(Action.Domain.Other, "我只能帮你放音乐"),
+            "小声点" to Action.OutOfDomain(Action.Domain.VolumeRequest, "请用方向盘或屏幕上的音量键调整"),
+            "呃呃" to Action.NotUnderstood("没听清，请再说一次"),
+        )) {
+            assertEquals(action, IntentRouter.route(input).steps.single().action)
+            val quiet = when (action) {
+                is Action.OutOfDomain -> action.copy(reply = null)
+                else -> Action.NotUnderstood(null)
+            }
+            assertEquals(quiet, IntentRouter.route(input, Context(followUp = true)).steps.single().action)
+        }
+    }
+
     @Test fun dialogueTransitionsAndInterruption() {
         val question = IntentRouter.route("我感觉难过，给我来点歌")
         assertTrue(question.nextContext.awaitingMood)
@@ -103,9 +138,9 @@ class IntentRouterTest {
         assertEquals(Action.Recommend(mood = "难过", energy = "舒缓"), answer.steps.single().action)
         assertFalse(answer.nextContext.awaitingMood)
         val failed = IntentRouter.route("听不懂", question.nextContext)
-        assertEquals(Action.Unknown, failed.steps.single().action)
-        assertEquals(Failure.ClarificationExhausted, failed.steps.single().failure)
-        assertFalse(failed.nextContext.awaitingMood)
+        assertEquals(Action.NotUnderstood(null), failed.steps.single().action)
+        assertEquals(Failure.Unrecognized, failed.steps.single().failure)
+        assertEquals(question.nextContext, failed.nextContext)
         val interrupted = IntentRouter.route("播放我的天空", question.nextContext)
         assertTrue(interrupted.steps.single().action is Action.PlayNamed)
         assertFalse(interrupted.nextContext.awaitingMood)
