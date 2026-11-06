@@ -2221,12 +2221,16 @@ fun AmAtvApp() {
                 }
                 spokenPage = visible
                 askNumber = false
-                if (prompt != null) coroutineScope {
+                if (prompt != null) withTimeoutOrNull(8_000L) { coroutineScope {
                     val talking = async { sayVoice(prompt, choice = true) }
                     select<Unit> {
                         talking.onAwait { }
                         reply.onAwait { voiceSpeaker.stop(); talking.cancel() }
                     }
+                }
+                } ?: run {
+                    voiceSpeaker.stop()
+                    android.util.Log.i("AMATV-Voice", "Choice prompt timeout")
                 }
                 val said = withTimeoutOrNull(8_000L) { coroutineScope {
                     val spoken = if (voiceJob?.isActive == true) async {
@@ -2405,16 +2409,54 @@ fun AmAtvApp() {
     }
 
     suspend fun askForVoiceName(): VoiceCommand.Play? {
-        if (voiceDry || voiceJob?.isActive != true) return null
+        if (voiceDry) return null
+        val reply = CompletableDeferred<String>()
+        voiceChoiceReply = reply
         val prompt = AppText.text(R.string.voice_repeat_name)
         voiceState = VoiceUiState.Message(prompt)
-        sayVoice(prompt, choice = true)
-        voiceState = VoiceUiState.Listening("", ready = false)
-        val heard = withTimeoutOrNull(8_000L) {
-            (voice.listen(speechHotwords()).firstOrNull { it is VoiceEvent.Final || it is VoiceEvent.Failed }
-                as? VoiceEvent.Final)?.text
-        } ?: return null
-        return parseVoiceSteps(heard).singleOrNull() as? VoiceCommand.Play
+        android.util.Log.i("AMATV-Voice", "RepeatName prompt")
+        try {
+            withTimeoutOrNull(8_000L) {
+                coroutineScope {
+                    val talking = async { sayVoice(prompt, choice = true) }
+                    try {
+                        select<Unit> {
+                            talking.onAwait { }
+                            reply.onAwait { voiceSpeaker.stop() }
+                        }
+                    } finally {
+                        talking.cancel()
+                    }
+                }
+            } ?: run {
+                voiceSpeaker.stop()
+                android.util.Log.i("AMATV-Voice", "RepeatName prompt timeout")
+            }
+            val heard = withTimeoutOrNull(8_000L) {
+                coroutineScope {
+                    val spoken = if (voiceJob?.isActive == true) async {
+                        (voice.listen(speechHotwords()).firstOrNull {
+                            it is VoiceEvent.Final || it is VoiceEvent.Failed
+                        } as? VoiceEvent.Final)?.text
+                    } else null
+                    try {
+                        select<String?> {
+                            reply.onAwait { it }
+                            spoken?.onAwait { it ?: reply.await() }
+                        }
+                    } finally {
+                        spoken?.cancel()
+                    }
+                }
+            }
+            android.util.Log.i("AMATV-Voice", "RepeatName " + if (heard == null) "reply timeout" else "reply received")
+            return heard?.let { parseVoiceSteps(it).singleOrNull() as? VoiceCommand.Play }
+        } finally {
+            if (voiceChoiceReply === reply) voiceChoiceReply = null
+            reply.cancel()
+            android.util.Log.i("AMATV-Voice", "RepeatName cleared")
+            if (voiceState == VoiceUiState.Message(prompt)) voiceState = null
+        }
     }
 
     suspend fun runVoiceStep(command: VoiceCommand, allowVoiceRepeat: Boolean = true): String? {
@@ -2649,6 +2691,7 @@ fun AmAtvApp() {
 
     suspend fun actOnSentenceSteps(heard: String, previousTurn: String?): Pair<String?, List<VoiceCommand>> {
         voiceChoiceDismissed = false
+        android.util.Log.i("AMATV-Voice", "Sentence received: " + heard)
         val said = heard
         val followUp = voiceCatalogKey(said)
         val now = android.os.SystemClock.elapsedRealtime()
@@ -2883,8 +2926,15 @@ fun AmAtvApp() {
                         return
                     }
                     val text = intent.getStringExtra("text")?.takeIf { it.isNotBlank() } ?: return
-                    if (voiceChoiceReply?.complete(text) == true) return
-                    if (voiceJob?.isActive == true) return
+                    android.util.Log.i("AMATV-Voice", "Debug voice received: " + text)
+                    if (voiceChoiceReply?.complete(text) == true) {
+                        android.util.Log.i("AMATV-Voice", "Debug voice delivered to pending reply")
+                        return
+                    }
+                    if (voiceJob?.isActive == true) {
+                        android.util.Log.i("AMATV-Voice", "Debug voice ignored: microphone session active")
+                        return
+                    }
                     // `--ez dry true`: decide only. Logs "Outcome ..." (what would play, or which
                     // choices); nothing plays, no bubble waits, nothing is said.
                     voiceDry = intent.getBooleanExtra("dry", false)
