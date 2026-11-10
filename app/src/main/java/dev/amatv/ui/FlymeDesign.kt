@@ -10,6 +10,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -760,8 +763,9 @@ private fun FlymeLoadMoreFooter(page: LibraryShelfPagination, onRetry: () -> Uni
 }
 
 /**
- * Browse header: account on the left, centred section tabs, and a mini player
- * on the right that opens Now Playing and toggles playback in place.
+ * Metro header: the account and app name on top, the sections as a pivot of large light words
+ * (the open one large and full ink, the rest smaller and faint), and a glass mini player on the right
+ * that opens Now Playing and toggles playback in place. In portrait the pivot scrolls sideways.
  */
 @Composable
 internal fun FlymeTopBar(
@@ -780,113 +784,138 @@ internal fun FlymeTopBar(
     /** Only the mini player, for pages that cover the top bar. */
     capsuleOnly: Boolean = false,
 ) {
-    val sideWidth = 267.dp
-    val accountLabel = destinationLabel(Destination.Account)
-    // Pages scroll under the bar: a mostly opaque wash of the page color keeps the capsules
-    // readable over artwork and text, while a little of what passes beneath still shows.
-    val barGlass = LocalFlymePalette.current.scrim.copy(alpha = BAR_GLASS_ALPHA)
+    val portrait = LocalCarPortrait.current
+    Column(modifier.fillMaxWidth().padding(start = if (portrait) 20.dp else 40.dp, end = if (portrait) 16.dp else 40.dp,
+        top = if (portrait) 12.dp else 18.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            if (!capsuleOnly) {
+                val accountLabel = destinationLabel(Destination.Account)
+                val accountOpen = selected == Destination.Account
+                FocusSurface(
+                    onClick = { onDestination(Destination.Account) },
+                    modifier = Modifier.size(44.dp)
+                        .automationId("nav-account")
+                        .focusRequester(focusRequesters.getValue(Destination.Account))
+                        .focusProperties { down = downFocus() }
+                        .semantics { contentDescription = accountLabel }
+                        .border(1.dp, FlymeInk.copy(alpha = 0.20f), CircleShape),
+                    cornerRadius = 22.dp,
+                    focusedScale = 1.06f,
+                    background = if (accountOpen) FlymeInk else FlymeInk.copy(alpha = 0.10f),
+                    focusedBackground = FlymeInk.copy(alpha = 0.24f),
+                ) {
+                    Icon(Icons.Rounded.Person, null, modifier = Modifier.align(Alignment.Center).size(20.dp),
+                        tint = if (accountOpen) FlymeOnInk else FlymeInk)
+                }
+                if (!portrait) Text(stringResource(R.string.flyme_app_wordmark), Modifier.padding(start = 14.dp),
+                    color = FlymeInk.copy(alpha = 0.7f), fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 2.4.sp)
+            }
+            Spacer(Modifier.weight(1f))
+            if (hasCurrentTrack) MetroMiniPlayer(
+                selected, currentTrack, nowPlayingSubtitle, isPlaying, onTogglePlayback, onDestination,
+                focusRequesters, downFocus, onMiniPlayerPlaced,
+                Modifier.padding(start = 12.dp).width(if (portrait) 240.dp else 300.dp),
+            )
+        }
+        if (!capsuleOnly) MetroPivot(selected, onDestination, focusRequesters, downFocus,
+            Modifier.padding(top = if (portrait) 10.dp else 6.dp, bottom = 8.dp))
+    }
+}
+
+private val PivotDestinations = listOf(Destination.Home, Destination.Browse, Destination.Library, Destination.Search)
+
+@Composable
+private fun MetroPivot(
+    selected: Destination,
+    onDestination: (Destination) -> Unit,
+    focusRequesters: Map<Destination, FocusRequester>,
+    downFocus: () -> FocusRequester,
+    modifier: Modifier = Modifier,
+) {
+    val scroll = rememberScrollState()
+    Row(modifier.fillMaxWidth().horizontalScroll(scroll), verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(30.dp)) {
+        PivotDestinations.forEach { destination ->
+            val open = destination == selected
+            val size by animateFloatAsState(if (open) 52f else 28f, tween(280), label = "pivot-size")
+            val ink by animateColorAsState(if (open) FlymeInk else FlymeInk.copy(alpha = 0.34f), tween(280),
+                label = "pivot-ink")
+            var placedX by remember { mutableStateOf(0) }
+            // The open section scrolls into view when the pivot is wider than the screen (portrait).
+            if (open) LaunchedEffect(placedX) { scroll.animateScrollTo((placedX - 40).coerceAtLeast(0)) }
+            Text(
+                destinationLabel(destination),
+                Modifier.onGloballyPositioned { placedX = it.positionInParent().x.toInt() }
+                    .automationId("nav-${destination.name.lowercase()}")
+                    .focusRequester(focusRequesters.getValue(destination))
+                    .focusProperties { down = downFocus() }
+                    .semantics { this.selected = open }
+                    .clickable { onDestination(destination) }
+                    .padding(vertical = 2.dp),
+                color = ink, fontSize = size.sp, lineHeight = (size * 1.1f).sp,
+                fontWeight = FontWeight.Light, letterSpacing = (-1).sp, maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MetroMiniPlayer(
+    selected: Destination,
+    currentTrack: Track,
+    nowPlayingSubtitle: String?,
+    isPlaying: Boolean,
+    onTogglePlayback: () -> Unit,
+    onDestination: (Destination) -> Unit,
+    focusRequesters: Map<Destination, FocusRequester>,
+    downFocus: () -> FocusRequester,
+    onMiniPlayerPlaced: (Offset) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val pill = RoundedCornerShape(28.dp)
     Row(
-        modifier.fillMaxWidth().padding(start = 40.dp, end = 40.dp, top = 17.dp),
+        modifier.height(56.dp)
+            .onGloballyPositioned { onMiniPlayerPlaced(it.boundsInWindow().center) }
+            .clip(pill)
+            .background(LocalFlymePalette.current.scrim.copy(alpha = 0.55f))
+            .background(FlymeInk.copy(alpha = if (selected == Destination.NowPlaying) 0.18f else 0.10f))
+            .border(1.dp, FlymeInk.copy(alpha = 0.20f), pill)
+            .padding(start = 8.dp, end = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (capsuleOnly) Spacer(Modifier.weight(1f)) else Box(Modifier.width(sideWidth)) {
-            FocusSurface(
-                onClick = { onDestination(Destination.Account) },
-                modifier = Modifier.size(37.dp)
-                    .automationId("nav-account")
-                    .focusRequester(focusRequesters.getValue(Destination.Account))
-                    .focusProperties { down = downFocus() }
-                    .semantics { contentDescription = accountLabel },
-                cornerRadius = 19.dp,
-                focusedScale = 1.06f,
-                background = if (selected == Destination.Account) FlymeInk else FlymeInk.copy(alpha = 0.12f),
-                focusedBackground = FlymeInk.copy(alpha = 0.24f),
-            ) {
-                Icon(Icons.Rounded.Person, null, modifier = Modifier.align(Alignment.Center).size(18.dp),
-                    tint = if (selected == Destination.Account) FlymeOnInk else FlymeInk)
-            }
-        }
-        if (!capsuleOnly) Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-            Row(
-                Modifier.clip(RoundedCornerShape(22.dp)).background(barGlass).background(FlymeInk.copy(alpha = 0.09f))
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                listOf(Destination.Home, Destination.Browse, Destination.Library, Destination.Search).forEach { destination ->
-                    val isSelected = destination == selected
-                    FocusSurface(
-                        onClick = { onDestination(destination) },
-                        modifier = Modifier.height(35.dp)
-                            .automationId("nav-${destination.name.lowercase()}")
-                            .focusRequester(focusRequesters.getValue(destination))
-                            .focusProperties { down = downFocus() }
-                            .semantics { this.selected = isSelected },
-                        cornerRadius = 18.dp,
-                        focusedScale = 1.03f,
-                        padding = PaddingValues(horizontal = if (destination == Destination.Search) 9.dp else 17.dp),
-                        background = if (isSelected) FlymeInk else Color.Transparent,
-                        focusedBackground = if (isSelected) FlymeInk else FlymeInk.copy(alpha = 0.14f),
-                    ) {
-                        val tint = if (isSelected) FlymeOnInk else FlymeInk.copy(alpha = 0.78f)
-                        Box(Modifier.align(Alignment.Center)) {
-                            if (destination == Destination.Search) {
-                                Icon(Icons.Rounded.Search, destinationLabel(destination), tint = tint, modifier = Modifier.size(18.dp))
-                            } else {
-                                Text(destinationLabel(destination), fontSize = 14.sp,
-                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium, color = tint)
-                            }
-                        }
-                    }
+        FocusSurface(
+            onClick = { onDestination(Destination.NowPlaying) },
+            modifier = Modifier.weight(1f).fillMaxHeight().padding(vertical = 6.dp)
+                .automationId("nav-nowplaying")
+                .focusRequester(focusRequesters.getValue(Destination.NowPlaying))
+                .focusProperties { down = downFocus() },
+            cornerRadius = 20.dp,
+            focusedScale = 1.02f,
+            background = Color.Transparent,
+            focusedBackground = FlymeInk.copy(alpha = 0.1f),
+        ) {
+            Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                MotionArtwork(track = currentTrack, modifier = Modifier.size(40.dp), animate = false, cornerRadius = 9.dp)
+                // CJK fonts carry tall ascents: trim line boxes so two lines fit the capsule, centered.
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(currentTrack.title, style = CompactLine, fontSize = 15.sp, lineHeight = 18.sp,
+                        fontWeight = FontWeight.SemiBold, color = FlymeInk, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(nowPlayingSubtitle ?: currentTrack.artist, style = CompactLine, fontSize = 13.sp,
+                        lineHeight = 16.sp, color = FlymeInk.copy(alpha = 0.66f), maxLines = 1,
+                        overflow = TextOverflow.Ellipsis)
                 }
             }
         }
-        Box(Modifier.width(sideWidth), contentAlignment = Alignment.CenterEnd) {
-            if (hasCurrentTrack) {
-                Row(
-                    Modifier.fillMaxWidth().height(46.dp)
-                        .onGloballyPositioned { onMiniPlayerPlaced(it.boundsInWindow().center) }
-                        .clip(RoundedCornerShape(23.dp))
-                        .background(barGlass)
-                        .background(FlymeInk.copy(alpha = if (selected == Destination.NowPlaying) 0.18f else 0.09f))
-                        .padding(start = 6.dp, end = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    FocusSurface(
-                        onClick = { onDestination(Destination.NowPlaying) },
-                        modifier = Modifier.weight(1f).fillMaxHeight().padding(vertical = 4.dp)
-                            .automationId("nav-nowplaying")
-                            .focusRequester(focusRequesters.getValue(Destination.NowPlaying))
-                            .focusProperties { down = downFocus() },
-                        cornerRadius = 18.dp,
-                        focusedScale = 1.02f,
-                        background = Color.Transparent,
-                        focusedBackground = FlymeInk.copy(alpha = 0.1f),
-                    ) {
-                        Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                            MotionArtwork(track = currentTrack, modifier = Modifier.size(34.dp), animate = false, cornerRadius = 7.dp)
-                            // CJK fonts carry tall ascents: trim line boxes so two lines fit the capsule, centered.
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(currentTrack.title, style = CompactLine, fontSize = 12.sp, lineHeight = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = FlymeInk, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(nowPlayingSubtitle ?: currentTrack.artist, style = CompactLine, fontSize = 10.sp,
-                                    lineHeight = 12.sp,
-                                    color = FlymeInk.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                        }
-                    }
-                    FlymeGlyphButton(
-                        icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        contentDescription = stringResource(if (isPlaying) R.string.player_pause else R.string.player_play),
-                        onClick = onTogglePlayback,
-                        size = 34.dp,
-                        iconSize = 20.dp,
-                    )
-                }
-            }
-        }
+        FlymeGlyphButton(
+            icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+            contentDescription = stringResource(if (isPlaying) R.string.player_pause else R.string.player_play),
+            onClick = onTogglePlayback,
+            modifier = Modifier.clip(CircleShape).background(FlymeInk.copy(alpha = 0.16f)),
+            size = 44.dp,
+            iconSize = 20.dp,
+        )
     }
 }
 
@@ -902,4 +931,3 @@ internal fun flymeLyricAlpha(alpha: Float): Float =
 
 private const val LIGHT_LYRIC_LIFT = 0.18f
 
-private const val BAR_GLASS_ALPHA = 0.8f

@@ -74,6 +74,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import dev.amatv.integration.MusicConnectionState
 import dev.amatv.integration.GoogleTvPairing
@@ -1169,8 +1171,8 @@ private fun HomeShelvesBody(
         val viewportWidth = columnState.layoutInfo.viewportSize.width.toFloat()
         return estimateShelfRowBounds(
             shelfSizes[shelfIndex], row.firstVisibleItemIndex, row.firstVisibleItemScrollOffset,
-            with(density) { (if (shelf.featured) 210.dp else 168.dp).toPx() },
-            with(density) { (if (shelf.featured) 18.dp else 20.dp).toPx() },
+            with(density) { (if (shelf.featured) MetroFeaturedCard else MetroCard).toPx() },
+            with(density) { MetroCardGap.toPx() },
             with(density) { 14.dp.toPx() }, viewportWidth,
         )
     }
@@ -1304,7 +1306,7 @@ private fun HomeShelvesBody(
             itemsIndexed(shelves, key = { _, shelf -> shelf.id }) { shelfIndex, shelf ->
                 Column(Modifier.automationId("home-row-$shelfIndex-count-${shelf.items.size}")) {
                     SectionHeading(shelf.title)
-                    Spacer(Modifier.height(if (shelf.featured) 12.dp else 8.dp))
+                    Spacer(Modifier.height(4.dp))
                     val remainingVerticalScroll = remember(shelfIndex, columnState) {
                         derivedStateOf {
                             val offset = columnState.layoutInfo.visibleItemsInfo
@@ -1317,12 +1319,10 @@ private fun HomeShelvesBody(
                         verticalScrollOffset = remainingVerticalScroll,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(if (shelf.featured) 320.dp else 260.dp)
+                            .height(if (shelf.featured) MetroFeaturedRowHeight else MetroRowHeight)
                             .focusGroup(),
-                        horizontalArrangement = Arrangement.spacedBy(
-                            if (shelf.featured) 18.dp else 20.dp,
-                        ),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(MetroCardGap),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
                     ) {
                         itemsIndexed(
                             shelf.items,
@@ -1429,8 +1429,8 @@ private fun LibraryLoadMoreCard(
     FocusSurface(
         onClick = onClick,
         modifier = modifier
-            .width(if (featured) 210.dp else 168.dp)
-            .height(if (featured) 280.dp else 220.dp)
+            .width(if (featured) MetroFeaturedCard else MetroCard)
+            .height(if (featured) MetroFeaturedCard else MetroCard)
             .semantics { stateDescription = label },
         cornerRadius = 14.dp,
         focusedScale = 1.035f,
@@ -1466,11 +1466,12 @@ private fun LibraryLoadMoreCard(
 private fun SectionHeading(text: String) {
     Text(
         text = text,
-        color = FlymeInk.copy(alpha = 0.66f),
-        fontSize = 22.sp,
-        lineHeight = 26.sp,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(start = 8.dp),
+        color = FlymeInk,
+        fontSize = 26.sp,
+        lineHeight = 32.sp,
+        fontWeight = FontWeight.Light,
+        letterSpacing = (-0.5).sp,
+        modifier = Modifier.padding(start = 14.dp),
     )
 }
 
@@ -1541,20 +1542,18 @@ private fun HomeCardEyebrow(ready: State<Boolean>, label: String) {
 @Composable
 private fun HomeCardPlaceholder(track: Track, featured: Boolean) {
     val ink = FlymeInk
-    Canvas(Modifier.fillMaxSize().then(if (featured) Modifier.clip(RoundedCornerShape(14.dp)) else Modifier)) {
-        val coverHeight = if (featured) (size.height - 72.dp.toPx()).coerceAtLeast(0f) else 168.dp.toPx()
-        val corner = CornerRadius(14.dp.toPx())
-        if (featured) drawRoundRect(track.palette.last().copy(alpha = 0.58f), cornerRadius = corner)
+    Canvas(Modifier.fillMaxSize()) {
+        val coverHeight = size.width
         drawRoundRect(
             color = track.palette.first(),
             size = Size(size.width, coverHeight),
-            cornerRadius = if (featured) CornerRadius.Zero else corner,
+            cornerRadius = CornerRadius(10.dp.toPx()),
         )
         val titleWidth = size.width * 0.64f
         val artistWidth = size.width * 0.42f
-        val titleY = coverHeight + (if (featured) 20.dp else 13.dp).toPx()
-        val titleX = if (featured) (size.width - titleWidth) / 2f else 0f
-        val artistX = if (featured) (size.width - artistWidth) / 2f else 0f
+        val titleY = coverHeight + 13.dp.toPx()
+        val titleX = 0f
+        val artistX = 0f
         drawRoundRect(
             ink.copy(alpha = 0.12f), Offset(titleX, titleY),
             Size(titleWidth, 8.dp.toPx()), CornerRadius(4.dp.toPx()),
@@ -1576,7 +1575,6 @@ private fun TopPick(
     mountPriority: () -> Int = { 1 },
 ) {
     val contentReady = rememberHomeCardMount(warmup, track.id, mountPriority)
-    val cardShape = RoundedCornerShape(14.dp)
     val genericEyebrows = listOf(
         stringResource(R.string.browse_kind_song), stringResource(R.string.browse_kind_album),
         stringResource(R.string.browse_kind_playlist),
@@ -1588,85 +1586,16 @@ private fun TopPick(
             !it.equals("Song", ignoreCase = true) &&
             genericEyebrows.none { placeholder -> it.equals(placeholder, ignoreCase = true) }
     }
-    Column(Modifier.width(210.dp).height(280.dp)) {
-        Box(Modifier.fillMaxWidth().height(24.dp), contentAlignment = Alignment.TopStart) {
-            HomeCardEyebrow(contentReady, distinctEyebrow.orEmpty())
-        }
-        FocusSurface(
-            onClick = onClick,
-            deferIdleVisuals = warmup != null,
-            modifier = focusModifier
-                .homeCardSemantics(track, contentReady, warmup != null)
-                .fillMaxWidth()
-                .height(256.dp),
-            cornerRadius = 14.dp,
-            focusedScale = 1.03f,
-            focusedLift = 2.dp,
-            restingElevation = 0.dp,
-            focusedElevation = 10.dp,
-            showBorder = false,
-            background = Color.Transparent,
-            focusedBackground = Color.Transparent,
-        ) { focused ->
-            HomeCardContent(contentReady, track, featured = true, staged = warmup != null) {
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .clip(cardShape)
-                        .background(track.palette.last().copy(alpha = 0.58f)),
-                ) {
-                    Box(Modifier.weight(1f)) {
-                        MotionArtwork(
-                            track = track,
-                            modifier = Modifier.fillMaxSize(),
-                            animate = focused,
-                            cornerRadius = 0.dp,
-                        )
-                    }
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(72.dp)
-                            .background(
-                                Brush.verticalGradient(
-                                    listOf(
-                                        Color.Black.copy(alpha = 0.08f),
-                                        Color.Black.copy(alpha = 0.32f),
-                                    ),
-                                ),
-                            )
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        Text(
-                            text = track.title,
-                            color = FlymeInk.copy(alpha = 0.96f),
-                            fontSize = 14.sp,
-                            lineHeight = 18.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        if (track.artist.isNotBlank()) {
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                text = track.artist,
-                                color = FlymeInk.copy(alpha = 0.72f),
-                                fontSize = 12.sp,
-                                lineHeight = 16.sp,
-                                fontWeight = FontWeight.Medium,
-                                textAlign = TextAlign.Center,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
+    MetroCard(
+        track = track,
+        caption = distinctEyebrow ?: track.artist,
+        size = MetroFeaturedCard,
+        onClick = onClick,
+        focusModifier = focusModifier,
+        warmup = warmup,
+        contentReady = contentReady,
+        featured = true,
+    )
 }
 
 @Composable
@@ -1678,12 +1607,34 @@ private fun RecentCard(
     mountPriority: () -> Int = { 1 },
 ) {
     val contentReady = rememberHomeCardMount(warmup, track.id, mountPriority)
+    MetroCard(track, track.artist, MetroCard, onClick, focusModifier, warmup, contentReady, featured = false)
+}
+
+private val MetroFeaturedCard = 150.dp
+private val MetroCard = 120.dp
+private val MetroCardGap = 22.dp
+// Square art, then 8dp and two caption lines (16sp and 14sp), plus the row's 12dp vertical padding.
+private val MetroFeaturedRowHeight = MetroFeaturedCard + 74.dp
+private val MetroRowHeight = MetroCard + 74.dp
+
+/** The H5 Metro card: square art with a soft shadow, the title and one caption line underneath. */
+@Composable
+private fun MetroCard(
+    track: Track,
+    caption: String,
+    size: Dp,
+    onClick: () -> Unit,
+    focusModifier: Modifier,
+    warmup: HomeCardWarmup?,
+    contentReady: State<Boolean>,
+    featured: Boolean,
+) {
     FocusSurface(
         onClick = onClick,
         deferIdleVisuals = warmup != null,
         modifier = focusModifier.homeCardSemantics(track, contentReady, warmup != null)
-            .width(168.dp).height(220.dp),
-        cornerRadius = 14.dp,
+            .width(size).height(size + 50.dp),
+        cornerRadius = 10.dp,
         focusedScale = 1.035f,
         focusedLift = 2.dp,
         restingElevation = 0.dp,
@@ -1692,30 +1643,29 @@ private fun RecentCard(
         background = Color.Transparent,
         focusedBackground = Color.Transparent,
     ) { focused ->
-        HomeCardContent(contentReady, track, featured = false, staged = warmup != null) {
+        HomeCardContent(contentReady, track, featured = featured, staged = warmup != null) {
             Column {
                 MotionArtwork(
                     track = track,
-                    modifier = Modifier.size(168.dp),
+                    modifier = Modifier.size(size).shadow(10.dp, RoundedCornerShape(10.dp)),
                     animate = focused,
-                    cornerRadius = 14.dp,
+                    cornerRadius = 10.dp,
                 )
                 Text(
                     text = track.title,
-                    color = FlymeInk.copy(alpha = 0.92f),
-                    fontSize = 15.sp,
+                    color = FlymeInk,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 9.dp),
+                    modifier = Modifier.padding(top = 8.dp),
                 )
                 Text(
-                    text = track.artist,
-                    color = FlymeInk.copy(alpha = 0.56f),
-                    fontSize = 13.sp,
+                    text = caption,
+                    color = FlymeInk.copy(alpha = 0.62f),
+                    fontSize = 14.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 1.dp),
                 )
             }
         }

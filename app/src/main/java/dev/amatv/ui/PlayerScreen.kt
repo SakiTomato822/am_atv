@@ -702,7 +702,9 @@ fun PlayerScreen(
                     onPrevious = { activateControl(PlayerControl.Previous) },
                     onNext = { activateControl(PlayerControl.Next) },
                     onQueue = { activateControl(PlayerControl.Queue) },
-                    onTranslate = { onLyricTranslationEnabledChange(!lyricTranslationEnabled) },
+                    // The 译 button opens the Flyme.12 lyrics settings: translation, pronunciation and text size,
+                    // with unavailable options marked, rather than a switch that silently does nothing.
+                    onTranslate = { showLyricsSettings = true },
                     onSeek = { target -> if (isActiveScreen) onSeekBy(target - playbackPosition.value) },
                 ) {
                     LyricsUnavailablePanel(lyricsLoading, lyricsLookupFailed, lyricsTransientFailure)
@@ -3372,7 +3374,7 @@ private fun SongwritersFooterRow(text: String) {
  *   (`24sp` SemiBold for main translation, `19sp` SemiBold for background vocal translation).
  */
 @Composable
-private fun KaraokeLyricLine(
+internal fun KaraokeLyricLine(
     line: LyricLine,
     isActive: Boolean,
     retainedPresence: State<Float>,
@@ -3381,6 +3383,8 @@ private fun KaraokeLyricLine(
     isStaticMode: Boolean,
     isUserScrolling: Boolean,
     positionState: State<Long>,
+    /** Alpha of words not yet sung when the line is neither focused nor being scrolled. */
+    restingUnlitAlpha: Float = MotionTokens.KaraokeTertiaryAlpha,
 ) {
     val hasMainPronunciation = !line.pronunciationText.isNullOrBlank() ||
         line.words.any { !it.pronunciationText.isNullOrBlank() }
@@ -3559,7 +3563,7 @@ private fun KaraokeLyricLine(
     } else if (isUserScrolling) {
         MotionTokens.KaraokeSecondaryAlpha
     } else {
-        MotionTokens.KaraokeTertiaryAlpha
+        restingUnlitAlpha
     })
     val fullLineStartPadding = if (alignEnd) 0.dp else 6.dp
     val fullLineEndPadding = if (alignEnd) 6.dp else 0.dp

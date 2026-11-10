@@ -44,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -120,7 +121,7 @@ internal fun PortraitLyrics(
                     else -> Box(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = listTop)) {
                         CarLyricRows(track.lyrics, position, offsetMs, soften = !soak && !lowPerformance,
                             ripple = !soak && !lowPerformance, controlsVisible, canSeek, textScale * 28f / 34f,
-                            anchorFraction = 0.30f, onReveal = onReveal) { time ->
+                            anchorFraction = 0.24f, onReveal = onReveal) { time ->
                             onReveal()
                             onSeek((time - offsetMs).coerceAtLeast(0L))
                         }
@@ -149,16 +150,18 @@ internal fun PortraitLyrics(
 
 @Composable
 private fun PortraitHeader(track: Track, showCover: Boolean, poster: Boolean, onPosterChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 16.dp, bottom = 8.dp),
+    // Large enough to anchor the page, after the H5 portrait Metro board: an 84dp cover beside the title.
+    Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 20.dp, bottom = 16.dp),
         verticalAlignment = Alignment.CenterVertically) {
         if (showCover) {
-            MotionArtwork(track, Modifier.size(48.dp), animate = false, cornerRadius = 6.dp)
-            Box(Modifier.size(12.dp))
+            MotionArtwork(track, Modifier.size(84.dp).shadow(10.dp, RoundedCornerShape(8.dp)), animate = false,
+                cornerRadius = 8.dp)
+            Box(Modifier.size(16.dp))
         }
         Column(Modifier.weight(1f)) {
-            Text(track.title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(track.artist, color = Color.White.copy(alpha = 0.66f), fontSize = 14.sp,
+            Text(track.title, color = Color.White, fontSize = 26.sp, lineHeight = 31.sp,
+                fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(track.artist, Modifier.padding(top = 2.dp), color = Color.White.copy(alpha = 0.66f), fontSize = 16.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         FlymeGlyphButton(
@@ -187,14 +190,14 @@ private fun PortraitPoster(
     val current = active.coerceAtLeast(0)
     Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 28.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)) {
-        Text(if (active > 0) lines[active - 1].text else "", color = Color.White.copy(alpha = 0.38f),
-            fontSize = (18 * textScale).sp, lineHeight = (25 * textScale).sp, maxLines = 2)
+        Text(if (active > 0) lyricDisplayText(lines[active - 1]) else "", color = Color.White.copy(alpha = 0.62f),
+            fontSize = (22 * textScale).sp, lineHeight = (29 * textScale).sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
         AnimatedContent(current, label = "poster-line", transitionSpec = {
             (fadeIn(tween(450)) + slideInVertically(tween(450)) { it / 4 }) togetherWith fadeOut(tween(200))
         }) { index ->
             val line = lines[index]
             Column {
-                Text(posterText(line.text.ifBlank { line.backgroundText }),
+                Text(posterText(lyricDisplayText(line)),
                     color = Color.White.copy(alpha = if (active < 0) 0.45f else 1f),
                     fontSize = (46 * textScale).sp, lineHeight = (53 * textScale).sp, fontWeight = FontWeight.Black)
                 if (translation) line.translation?.let {
@@ -204,10 +207,10 @@ private fun PortraitPoster(
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            for ((step, alpha) in listOf(1 to 0.5f, 2 to 0.28f, 3 to 0.14f)) {
+            for ((step, alpha) in listOf(1 to 0.78f, 2 to 0.58f, 3 to 0.42f)) {
                 val line = lines.getOrNull(current + step) ?: break
-                Text(line.text, color = Color.White.copy(alpha = alpha), fontSize = (20 * textScale).sp,
-                    lineHeight = (28 * textScale).sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
+                Text(lyricDisplayText(line), color = Color.White.copy(alpha = alpha), fontSize = (24 * textScale).sp,
+                    lineHeight = (31 * textScale).sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
             }
         }
     }
@@ -240,7 +243,7 @@ private fun PortraitControls(
 ) {
     LyricControlCard(
         position, durationMs, playWhenReady, canSeek, canSkipPrevious, canSkipNext, translation,
-        onPlayPause, onPrevious, onNext, onQueue, onTranslate, onSeek, compact = true,
+        onPlayPause, onPrevious, onNext, onQueue, onTranslate, onSeek,
         modifier = Modifier.automationId("portrait-lyric-controls").fillMaxWidth()
             .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
     )
@@ -259,4 +262,25 @@ internal fun posterText(text: String): String {
     val trimmed = text.trim()
     val phrased = trimmed.codePoints().anyMatch { Character.UnicodeScript.of(it) in PhraseScripts }
     return if (phrased) trimmed.replace(Regex(" +"), "\n") else trimmed
+}
+
+private fun isPhraseScript(codePoint: Int) = Character.UnicodeScript.of(codePoint) in PhraseScripts
+
+/**
+ * A line's text rebuilt from its timed words. Word-timed lines can arrive with a space between every
+ * Chinese or Japanese unit; those are dropped, while spaces the words themselves carry (phrase gaps)
+ * and spaces between Latin words stay.
+ */
+internal fun lyricDisplayText(line: dev.amatv.model.LyricLine): String {
+    if (line.words.size <= 1) return line.text.ifBlank { line.backgroundText }.trim()
+    val out = StringBuilder()
+    for (word in line.words) {
+        val next = word.text
+        if (out.isNotEmpty() && next.isNotEmpty() && line.joinWithSpaces && !out.last().isWhitespace() &&
+            !next.first().isWhitespace() &&
+            !(isPhraseScript(out.codePointBefore(out.length)) && isPhraseScript(next.codePointAt(0)))
+        ) out.append(' ')
+        out.append(next)
+    }
+    return out.toString().replace(Regex(" +"), " ").trim()
 }

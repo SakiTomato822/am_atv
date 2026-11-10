@@ -8,4 +8,5 @@
     <string name="flyme_lyric_poster">Poster lyrics</string>
     <string name="flyme_lyric_list">Scrolling lyrics</string>
     <string name="flyme_lyric_translate_short">A文</string>
+    <string name="flyme_app_wordmark" translatable="false">AM FOR FLYME</string>
 </resources>

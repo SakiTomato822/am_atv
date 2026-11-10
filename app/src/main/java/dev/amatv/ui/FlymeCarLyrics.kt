@@ -48,6 +48,9 @@ import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.unit.Density
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
@@ -223,12 +226,12 @@ internal fun FlymeCarLyrics(
                         .border(1.dp, Color.White.copy(alpha = 0.24f), circle) else Modifier,
                     size = 56.dp, iconSize = 26.dp, tint = Color.White)
             }
-            val controls = if (soak) Modifier.align(Alignment.BottomStart).padding(start = 40.dp, bottom = 36.dp).width(500.dp)
-                else Modifier.padding(start = (artLeft - 30.dp).coerceAtLeast(0.dp), top = 412.dp).width(400.dp)
+            val controls = if (soak) Modifier.align(Alignment.BottomStart).padding(start = 40.dp, bottom = 36.dp).width(380.dp)
+                else Modifier.padding(start = artLeft, top = 420.dp).width(340.dp)
             AnimatedVisibility(controlsVisible, controls, enter = fadeIn(tween(300)), exit = fadeOut(tween(300))) {
                 LyricControlCard(
                     position, track.durationMs, playWhenReady, canSeek, canSkipPrevious, canSkipNext, translation,
-                    onPlayPause, onPrevious, onNext, onQueue, onTranslate, onSeek, compact = false,
+                    onPlayPause, onPrevious, onNext, onQueue, onTranslate, onSeek,
                     modifier = Modifier.automationId("car-lyric-controls").pointerInput(Unit) {
                         awaitEachGesture {
                             awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -297,13 +300,16 @@ internal fun CarLyricRows(
     if (!timed) {
         LazyColumn(fade, contentPadding = PaddingValues(top = 35.dp, bottom = 48.dp),
             verticalArrangement = Arrangement.spacedBy(LyricGap)) {
-            itemsIndexed(lines) { _, line -> CarLyricLine(line, position, offsetMs, false, fontScale) }
+            itemsIndexed(lines) { _, line -> FlymeKaraokeLine(line, false, position, fontScale, static = true) }
         }
         return
     }
     val schedule = remember(lines) { LyricTimeline.Schedule(lines) }
     val active by remember(schedule, offsetMs, position) {
         derivedStateOf { schedule.snapshotAt(position.value + offsetMs).anchorLineIndex.coerceAtLeast(0) }
+    }
+    val lyricPosition = remember(position, offsetMs) {
+        derivedStateOf { (position.value + offsetMs).coerceAtLeast(0L) }
     }
     BoxWithConstraints(fade) {
         val density = LocalDensity.current
@@ -351,7 +357,7 @@ internal fun CarLyricRows(
                         if (controlsVisible && canSeek && !line.isStatic) onLineSeek(line.startMs) else onReveal()
                     }
                     .blur(blur)) {
-                    CarLyricLine(line, position, offsetMs, distance == 0, fontScale)
+                    FlymeKaraokeLine(line, distance == 0, lyricPosition, fontScale, static = false)
                 }
             }
         }
@@ -359,71 +365,32 @@ internal fun CarLyricRows(
 }
 
 private val LyricGap = 30.dp
-private val LineOpacity = listOf(1f, 0.38f, 0.28f, 0.20f, 0.14f)
-private val LineBlur = listOf(0f, 0.8f, 1.6f, 2.4f, 3f)
+// The Flyme.12 line renderer already dims unsung lines, so distance only fades them a little further.
+private val LineOpacity = listOf(1f, 0.95f, 0.80f, 0.65f, 0.50f)
+private val LineBlur = listOf(0f, 0.4f, 0.8f, 1.2f, 1.6f)
 private val RippleEasing = CubicBezierEasing(0.22f, 0.9f, 0.3f, 1f)
 
+/**
+ * One lyric line drawn by the Flyme.12 karaoke renderer, so word-timed lines get the same smooth sweep,
+ * per-character lift and glow. The new layouts only place, fade and blur the lines around it.
+ */
 @Composable
-private fun CarLyricLine(line: LyricLine, position: State<Long>, offsetMs: Long, highlight: Boolean, fontScale: Float) {
-    Column(Modifier.fillMaxWidth()) {
-        line.pronunciationText?.let { LyricSubtitle(it, fontScale) }
-        CarLyricText(line, position, offsetMs, highlight, fontScale)
-        if (line.text.isNotBlank() && line.backgroundText.isNotBlank()) LyricSubtitle(line.backgroundText, fontScale)
-        line.translation?.let { LyricSubtitle(it, fontScale) }
-        line.backgroundTranslation?.let { LyricSubtitle(it, fontScale) }
-    }
-}
-
-@Composable
-private fun LyricSubtitle(text: String, fontScale: Float) {
-    Text(text, Modifier.padding(top = 4.dp), color = Color.White.copy(alpha = 0.7f),
-        fontSize = (24 * fontScale).sp,
-        lineHeight = (29 * fontScale).sp, fontWeight = FontWeight.SemiBold)
-}
-
-@Composable
-private fun CarLyricText(line: LyricLine, position: State<Long>, offsetMs: Long, highlight: Boolean, fontScale: Float) {
-    val ranges = remember(line) { carLyricHighlights(line) }
-    val sweep = highlight && line.timing == LyricTiming.Word
-    val now = if (sweep) position.value + offsetMs else line.endMs
-    val text = buildAnnotatedString {
-        append(line.text.ifBlank { line.backgroundText })
-        if (sweep) for (range in ranges) {
-            val amount = ((now - range.startMs).toFloat() / (range.endMs - range.startMs).coerceAtLeast(1L))
-                .coerceIn(0f, 1f)
-            addStyle(SpanStyle(color = Color.White.copy(alpha = 0.38f + 0.62f * amount)), range.from, range.until)
-        }
-    }
-    // Same size and weight as the Flyme.12 lyrics panel: 34sp when fontScale is 1.
-    Text(text, color = Color.White, fontSize = (34 * fontScale).sp,
-        lineHeight = (41 * fontScale).sp, fontWeight = FontWeight.ExtraBold)
-}
-
-internal data class CarLyricHighlight(val from: Int, val until: Int, val startMs: Long, val endMs: Long)
-
-internal fun carLyricHighlights(line: LyricLine): List<CarLyricHighlight> {
-    if (line.timing == LyricTiming.Word) {
-        val separator = if (line.joinWithSpaces) 1 else 0
-        var offset = 0
-        return line.words.map { word ->
-            CarLyricHighlight(offset, offset + word.text.length, word.startMs, word.endMs)
-                .also { offset += word.text.length + separator }
-        }
-    }
-    val breaks = BreakIterator.getCharacterInstance().apply { setText(line.text) }
-    val boundaries = buildList {
-        add(breaks.first())
-        while (true) {
-            val next = breaks.next()
-            if (next == BreakIterator.DONE) break
-            add(next)
-        }
-    }
-    val count = boundaries.lastIndex
-    val duration = line.endMs - line.startMs
-    return List(count) { index ->
-        CarLyricHighlight(boundaries[index], boundaries[index + 1],
-            line.startMs + duration * index / count, line.startMs + duration * (index + 1) / count)
+private fun FlymeKaraokeLine(line: LyricLine, active: Boolean, position: State<Long>, textScale: Float, static: Boolean) {
+    val density = LocalDensity.current
+    val noRetention = remember { mutableFloatStateOf(0f) }
+    CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * textScale)) {
+        KaraokeLyricLine(
+            line = line,
+            isActive = active,
+            retainedPresence = noRetention,
+            retainedBackgroundPresence = noRetention,
+            isStaticMode = static,
+            isUserScrolling = false,
+            positionState = position,
+            // Unsung text at Apple Music's secondary level; the Flyme.12 tertiary 18% was too faint to read
+            // in a car, especially for the lines around the current one.
+            restingUnlitAlpha = MotionTokens.KaraokeSecondaryAlpha,
+        )
     }
 }
 
@@ -465,28 +432,28 @@ internal fun LyricControlCard(
     onQueue: () -> Unit,
     onTranslate: () -> Unit,
     onSeek: (Long) -> Unit,
-    compact: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val panel = RoundedCornerShape(if (compact) 26.dp else 30.dp)
-    val play = if (compact) 76.dp else 88.dp
-    val skip = if (compact) 60.dp else 72.dp
-    val side = if (compact) 48.dp else 56.dp
+    val panel = RoundedCornerShape(26.dp)
+    val play = 72.dp
+    val skip = 56.dp
+    val side = 48.dp
     Column(modifier.clip(panel)
         .background(Color.Black.copy(alpha = 0.22f))
         .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.18f), Color.White.copy(alpha = 0.06f))))
         .border(1.dp, Color.White.copy(alpha = 0.26f), panel)
-        .padding(horizontal = if (compact) 20.dp else 26.dp, vertical = if (compact) 16.dp else 20.dp)) {
+        .padding(horizontal = 20.dp, vertical = 16.dp)) {
         FlymeSeekBar(position, durationMs, canSeek, onSeek)
-        Spacer(Modifier.height(if (compact) 6.dp else 8.dp))
+        Spacer(Modifier.height(6.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween) {
+            // On and off show as full and faint ink, so translate stays as plain as the queue glyph opposite it.
             Box(Modifier.size(side).clip(CircleShape)
-                .background(if (translation) Color.White.copy(alpha = 0.20f) else Color.Transparent)
                 .clickable(onClickLabel = stringResource(R.string.player_lyrics_translation), onClick = onTranslate)
                 .automationId("car-lyric-translate"), contentAlignment = Alignment.Center) {
-                Text(stringResource(R.string.flyme_lyric_translate_short), color = Color.White,
-                    fontSize = if (compact) 18.sp else 21.sp, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.flyme_lyric_translate_short),
+                    color = Color.White.copy(alpha = if (translation) 1f else 0.5f),
+                    fontSize = 18.sp, fontWeight = FontWeight.Bold)
             }
             FlymeGlyphButton(Icons.Rounded.SkipPrevious, stringResource(R.string.player_previous_track), onPrevious,
                 Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.14f)),
