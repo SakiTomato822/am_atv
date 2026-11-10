@@ -4,6 +4,7 @@ import dev.amatv.R
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -60,6 +61,38 @@ class CollectionBrowserTest {
         refresh.completeExceptionally(IllegalStateException("offline"))
         assertEquals(cached, browser.state.value.tracks)
         assertNull(browser.state.value.error)
+        scope.cancel()
+    }
+
+    @Test fun diskSnapshotAppearsBeforeRefreshAndWinsOverPartialNetworkResults() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val saved = listOf(collection("saved"))
+        val request = CompletableDeferred<List<Track>>()
+        val progress = MutableStateFlow<List<Track>?>(null)
+        val browser = CollectionBrowser(scope, readSaved = { saved }, partials = { progress }) { request.await() }
+        browser.open(collection("playlist"))
+        progress.value = listOf(collection("incomplete"))
+        assertEquals(saved, browser.state.value.tracks)
+        request.completeExceptionally(IllegalStateException("offline"))
+        assertEquals(saved, browser.state.value.tracks)
+        assertNull(browser.state.value.error)
+        scope.cancel()
+    }
+
+    @Test fun coldPaginationShowsFirstPageWhileWaitingForFullQueue() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val request = CompletableDeferred<List<Track>>()
+        val progress = MutableStateFlow<List<Track>?>(null)
+        val browser = CollectionBrowser(scope, partials = { progress }) { request.await() }
+        browser.open(collection("playlist"))
+        val first = listOf(collection("first"))
+        progress.value = first
+        assertEquals(first, browser.state.value.tracks)
+        assertTrue(browser.state.value.partial)
+        val full = first + collection("second")
+        request.complete(full)
+        assertEquals(full, browser.state.value.tracks)
+        assertFalse(browser.state.value.partial)
         scope.cancel()
     }
 }

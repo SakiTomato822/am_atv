@@ -1355,6 +1355,13 @@ fun AmAtvApp() {
             saveCurrentSession(false)
         }
     }
+
+    LaunchedEffect(services, connectionState, playWhenReady) {
+        if (BuildConfig.FLYME_AUTO && connectionState == MusicConnectionState.SignedIn && !playWhenReady) {
+            delay(5_000L)
+            services.prefetchLibraryDetails()
+        }
+    }
     LaunchedEffect(queueState.source) {
         shelvesByDestination = shelvesByDestination - Destination.Home
         reloadNonce++
@@ -1611,6 +1618,14 @@ fun AmAtvApp() {
                     savedShelfDestinations = savedShelfDestinations + target
                 }
         }
+        if (target == Destination.Library && shelvesByDestination[target].isNullOrEmpty()) {
+            services.savedPlaylistIndex()?.takeIf { it.isNotEmpty() }?.let { playlists ->
+                shelvesByDestination = shelvesByDestination + (target to listOf(
+                    ContentShelf("lib-playlists", AppText.text(R.string.app_library_playlists), playlists),
+                ))
+                savedShelfDestinations = savedShelfDestinations + target
+            }
+        }
         val shelfKey = listOf(target, connectionState, reloadNonce, contentLanguageTag, queueState.source)
         val (loadedShelves, errors) = shelfLoads.load(shelfKey) {
         val errors = mutableListOf<Throwable>()
@@ -1832,7 +1847,9 @@ fun AmAtvApp() {
                             onFailure = { error ->
                                 errors += error
                                 libraryFailedShelves = libraryFailedShelves + "lib-playlists"
-                                add(ContentShelf("lib-playlists", AppText.text(R.string.app_library_playlists), emptyList()))
+                                add(shelvesByDestination[Destination.Library].orEmpty()
+                                    .firstOrNull { it.id == "lib-playlists" }
+                                    ?: ContentShelf("lib-playlists", AppText.text(R.string.app_library_playlists), emptyList()))
                             },
                         )
                         songs.await().fold(
@@ -2143,10 +2160,14 @@ fun AmAtvApp() {
                         onOpenTrack = { item, q -> playTrack(item, contextQueue = q) },
                         loadCollection = services::collectionTracks,
                         cachedCollection = services::cachedCollectionTracks,
+                        savedCollection = services::savedCollectionTracks,
+                        collectionPartials = services::collectionPartials,
                         loadArtistAlbums = services::libraryArtistAlbumsPage,
                         cachedArtistAlbums = services::cachedArtistAlbums,
+                        savedArtistAlbums = services::savedArtistAlbums,
                         loadArtistCatalog = services::catalogArtistPage,
                         cachedArtistCatalog = services::cachedArtistPage,
+                        savedArtistCatalog = services::savedArtistPage,
                         loadArtistViewMore = services::catalogArtistViewMore,
                         onPlayCollection = ::playCollection,
                         lyricOffsetMs = lyricOffsetMs,
@@ -2358,10 +2379,14 @@ private fun BrowseShell(
     onOpenTrack: (Track, List<Track>) -> Unit,
     loadCollection: suspend (Track) -> List<Track>,
     cachedCollection: (Track) -> List<Track>? = { null },
+    savedCollection: suspend (Track) -> List<Track>?,
+    collectionPartials: (Track) -> kotlinx.coroutines.flow.Flow<List<Track>?>,
     loadArtistAlbums: suspend (Track, String?) -> LibraryPage,
     cachedArtistAlbums: (Track) -> LibraryPage? = { null },
+    savedArtistAlbums: suspend (Track) -> List<Track>?,
     loadArtistCatalog: suspend (Track) -> dev.amatv.integration.CatalogArtistPage = { dev.amatv.integration.CatalogArtistPage() },
     cachedArtistCatalog: (Track) -> dev.amatv.integration.CatalogArtistPage? = { null },
+    savedArtistCatalog: suspend (Track) -> dev.amatv.integration.CatalogArtistPage?,
     loadArtistViewMore: suspend (String) -> List<Track> = { emptyList() },
     onPlayCollection: (Track, List<Track>, Int, Boolean) -> Unit,
     detailRequest: Track? = null,
@@ -2391,16 +2416,24 @@ private fun BrowseShell(
     val scope = rememberCoroutineScope()
     val currentLoader by rememberUpdatedState(loadCollection)
     val currentCachedCollection by rememberUpdatedState(cachedCollection)
-    val browser = remember(destination) { CollectionBrowser(scope, { currentCachedCollection(it) }) { currentLoader(it) } }
+    val currentSavedCollection by rememberUpdatedState(savedCollection)
+    val currentCollectionPartials by rememberUpdatedState(collectionPartials)
+    val browser = remember(destination) {
+        CollectionBrowser(scope, { currentCachedCollection(it) }, { currentSavedCollection(it) },
+            { currentCollectionPartials(it) }) { currentLoader(it) }
+    }
     val collectionState by browser.state.collectAsState()
     val collection = collectionState.collection
     val currentArtistLoader by rememberUpdatedState(loadArtistAlbums)
     val currentArtistCatalogLoader by rememberUpdatedState(loadArtistCatalog)
     val currentCachedArtistCatalog by rememberUpdatedState(cachedArtistCatalog)
     val currentCachedArtistAlbums by rememberUpdatedState(cachedArtistAlbums)
+    val currentSavedArtistCatalog by rememberUpdatedState(savedArtistCatalog)
+    val currentSavedArtistAlbums by rememberUpdatedState(savedArtistAlbums)
     val artistBrowser = remember(destination) {
         LibraryArtistBrowser(scope, { currentArtistCatalogLoader(it) },
-            { currentCachedArtistCatalog(it) }, { currentCachedArtistAlbums(it) }) { item, next ->
+            { currentCachedArtistCatalog(it) }, { currentCachedArtistAlbums(it) },
+            { currentSavedArtistCatalog(it) }, { currentSavedArtistAlbums(it) }) { item, next ->
             currentArtistLoader(item, next)
         }
     }

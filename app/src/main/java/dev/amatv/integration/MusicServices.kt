@@ -18,6 +18,14 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -63,13 +71,19 @@ class MusicServices(context: Context) : RecommendationProvider {
     val nativeMediaStatus get() = flymeMediaSource?.status
     private val playbackPreparation = Mutex()
     private val shelfSnapshots = ShelfSnapshots(appContext)
+    private val detailSnapshots = DetailSnapshots(java.io.File(appContext.noBackupFilesDir, "detail-snapshots-v1"))
     private val detailPageScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val collectionPages = DetailPageCache<DetailKey, List<Track>>(detailPageScope, maxEntries = 32)
-    private val artistPages = DetailPageCache<DetailKey, CatalogArtistPage>(detailPageScope, maxEntries = 32)
-    private val artistLibraryPages = DetailPageCache<Pair<DetailKey, String?>, LibraryPage>(detailPageScope, maxEntries = 64)
+    private val collectionPages = DetailPageCache<DetailKey, List<Track>>(detailPageScope, 32, DETAIL_REFRESH_MS)
+    private val firstTrackPages = DetailPageCache<DetailKey, CollectionTrackPage>(detailPageScope, 8, DETAIL_REFRESH_MS)
+    private val playlistIndex = DetailPageCache<Unit, LibraryPage>(detailPageScope, 1, DETAIL_REFRESH_MS)
+    private val artistPages = DetailPageCache<DetailKey, CatalogArtistPage>(detailPageScope, 32, DETAIL_REFRESH_MS)
+    private val artistLibraryPages = DetailPageCache<Pair<DetailKey, String?>, LibraryPage>(detailPageScope, 64, DETAIL_REFRESH_MS)
     private val artistViewPages = DetailPageCache<String, List<Track>>(detailPageScope, maxEntries = 16)
+    private val collectionProgress = MutableStateFlow<Map<DetailKey, CollectionProgress>>(emptyMap())
+    private var prefetchCompleted = false
 
     private data class DetailKey(val type: String, val id: String)
+    private data class CollectionProgress(val owner: Any, val items: List<Track>)
     private fun Track.detailKey() = DetailKey(resourceType ?: catalogKind.name, resourceId ?: catalogId ?: id)
     private val api = AppleMusicApi(
         storefront = BuildConfig.APPLE_MUSIC_STOREFRONT,
@@ -202,7 +216,7 @@ class MusicServices(context: Context) : RecommendationProvider {
             data.getStringExtra(MusicKitWebAuthActivity.EXTRA_USER_TOKEN),
         ) { AppText.text(R.string.services_auth_invalid_user_token) }
         tokenStore.writeUserToken(userToken)
-        clearDetailPages()
+        clearDetailPages(dropSnapshots = true)
         mediaSession.clear()
         flymeMediaSource?.clear()
         bridge.release()
@@ -230,7 +244,7 @@ class MusicServices(context: Context) : RecommendationProvider {
         bridge.release()
         releaseStationEngine()
         tokenStore.clear()
-        clearDetailPages()
+        clearDetailPages(dropSnapshots = true)
     }
 
     suspend fun recommendations(): List<Track> = api.recommendations()
@@ -244,11 +258,23 @@ class MusicServices(context: Context) : RecommendationProvider {
     suspend fun librarySongs(): List<Track> = api.librarySongs()
     suspend fun libraryAlbumsPage(nextPage: String? = null): LibraryPage = api.libraryAlbumsPage(nextPage)
     suspend fun libraryArtistsPage(nextPage: String? = null): LibraryPage = api.libraryArtistsPage(nextPage)
-    suspend fun libraryPlaylistsPage(nextPage: String? = null): LibraryPage = api.libraryPlaylistsPage(nextPage)
+    suspend fun libraryPlaylistsPage(nextPage: String? = null): LibraryPage =
+        if (nextPage == null) playlistIndex.getOrLoad(Unit) {
+            saveDetail("playlist-index", { encodeDetailTracks(it.items) }) { api.libraryPlaylistsPage() }
+        }
+        else api.libraryPlaylistsPage(nextPage)
+    internal suspend fun savedPlaylistIndex(): List<Track>? = readDetail("playlist-index", ::decodeDetailTracks)
     suspend fun librarySongsPage(nextPage: String? = null): LibraryPage = api.librarySongsPage(nextPage)
     suspend fun libraryArtistAlbumsPage(artist: Track, nextPage: String? = null): LibraryPage =
-        artistLibraryPages.getOrLoad(artist.detailKey() to nextPage) { api.libraryArtistAlbumsPage(artist, nextPage) }
+        artistLibraryPages.getOrLoad(artist.detailKey() to nextPage) {
+            if (nextPage != null) api.libraryArtistAlbumsPage(artist, nextPage)
+            else saveDetail("artist-albums/${artist.detailKey()}", { encodeDetailTracks(it.items) }) {
+                api.libraryArtistAlbumsPage(artist)
+            }
+        }
     fun cachedArtistAlbums(artist: Track): LibraryPage? = artistLibraryPages.peek(artist.detailKey() to null)
+    internal suspend fun savedArtistAlbums(artist: Track): List<Track>? =
+        readDetail("artist-albums/${artist.detailKey()}", ::decodeDetailTracks)
     suspend fun charts(types: String = "albums,songs,playlists"): List<Track> =
         api.charts(types)
     suspend fun liveRadio(): List<Track> = api.liveRadio()
@@ -257,22 +283,112 @@ class MusicServices(context: Context) : RecommendationProvider {
         api.createContinuousStation(songId)
     override suspend fun amStationNextTracks(stationId: String): List<Track> =
         api.stationNextTracks(stationId)
-    suspend fun collectionTracks(collection: Track): List<Track> =
-        collectionPages.getOrLoad(collection.detailKey()) { api.collectionTracks(collection) }
+    suspend fun collectionTracks(collection: Track): List<Track> {
+        val key = collection.detailKey()
+        return collectionPages.getOrLoad(key) {
+            val owner = Any()
+            try {
+                saveDetail("tracks/$key", ::encodeDetailTracks) {
+                    val first = firstTrackPage(collection)
+                    api.collectionTracks(collection, onPartial = { items ->
+                        collectionProgress.update { it + (key to CollectionProgress(owner, items)) }
+                    }, initialPage = first)
+                }
+            } finally {
+                collectionProgress.update { if (it[key]?.owner === owner) it - key else it }
+            }
+        }
+    }
+
+    internal fun collectionPartials(collection: Track): Flow<List<Track>?> =
+        collectionProgress.map { it[collection.detailKey()]?.items }.distinctUntilChanged()
+
     fun cachedCollectionTracks(collection: Track): List<Track>? = collectionPages.peek(collection.detailKey())
 
+    internal suspend fun savedCollectionTracks(collection: Track): List<Track>? =
+        readDetail("tracks/${collection.detailKey()}", ::decodeDetailTracks)
+
+    private suspend fun firstTrackPage(collection: Track): CollectionTrackPage =
+        firstTrackPages.getOrLoad(collection.detailKey()) { api.firstCollectionTrackPage(collection) }
+
     suspend fun catalogArtistPage(artist: Track): CatalogArtistPage =
-        artistPages.getOrLoad(artist.detailKey()) { api.catalogArtistPage(artist) }
+        artistPages.getOrLoad(artist.detailKey()) {
+            val fresh = saveDetail("artist/${artist.detailKey()}", { page ->
+                page.takeIf { it.complete }?.let(::encodeDetailArtist)
+            }) { api.catalogArtistPage(artist) }
+            if (fresh.complete) fresh else cachedArtistPage(artist)?.takeIf { it.complete } ?: savedArtistPage(artist) ?: fresh
+        }
     fun cachedArtistPage(artist: Track): CatalogArtistPage? = artistPages.peek(artist.detailKey())
+    internal suspend fun savedArtistPage(artist: Track): CatalogArtistPage? =
+        readDetail("artist/${artist.detailKey()}", ::decodeDetailArtist)
 
     suspend fun catalogArtistViewMore(moreHref: String): List<Track> =
         artistViewPages.getOrLoad(moreHref) { api.catalogArtistViewMore(moreHref) }
 
-    fun clearDetailPages() {
+    fun clearDetailPages(dropSnapshots: Boolean = false) {
+        if (dropSnapshots) detailSnapshots.clear() else detailSnapshots.invalidateWrites()
         collectionPages.clear()
+        firstTrackPages.clear()
+        playlistIndex.clear()
         artistPages.clear()
         artistLibraryPages.clear()
         artistViewPages.clear()
+        if (dropSnapshots) prefetchCompleted = false
+    }
+
+    private suspend fun <T> readDetail(key: String, decode: (org.json.JSONObject) -> T): T? =
+        withContext(Dispatchers.IO) {
+            val token = tokenStore.readUserToken() ?: return@withContext null
+            val storefront = api.cachedUserStorefront(token) ?: return@withContext null
+            detailSnapshots.read(DetailSnapshots.scope(token, storefront), key, decode)
+                ?.takeIf { token == tokenStore.readUserToken() }
+        }
+
+    private suspend fun <T> saveDetail(
+        key: String,
+        encode: (T) -> org.json.JSONObject?,
+        load: suspend () -> T,
+    ): T = withContext(Dispatchers.IO) {
+        val revision = detailSnapshots.revision()
+        val token = tokenStore.readUserToken()
+        val value = load()
+        if (token != null && token == tokenStore.readUserToken()) {
+            val storefront = api.cachedUserStorefront(token)
+            if (storefront != null) {
+                encode(value)?.let { detailSnapshots.write(revision, DetailSnapshots.scope(token, storefront), key, it) }
+            }
+        }
+        value
+    }
+
+    internal suspend fun prefetchLibraryDetails() {
+        if (prefetchCompleted || connectionState != MusicConnectionState.SignedIn) return
+        val first = prefetchOrNull { libraryPlaylistsPage() } ?: return
+        val favorites = first.items.firstOrNull { it.title.trim().lowercase() in favoritePlaylistNames }
+            ?: first.nextPage?.let { next ->
+                delay(750L)
+                prefetchOrNull { libraryPlaylistsPage(next) }?.items
+                    ?.firstOrNull { it.title.trim().lowercase() in favoritePlaylistNames }
+            }
+        (listOfNotNull(favorites) + first.items.take(3)).distinctBy { it.detailKey() }.take(3)
+            .forEach { playlist ->
+                delay(750L)
+                prefetchOrNull {
+                    // Bound speculative work to one page per collection. A foreground
+                    // open can reuse that request, then continue loading the remaining pages.
+                    saveDetail("tracks/${playlist.detailKey()}", { page ->
+                        page.takeIf { it.next == null }?.let { encodeDetailTracks(it.items) }
+                    }) { firstTrackPage(playlist) }
+                }
+            }
+        prefetchCompleted = true
+    }
+
+    private suspend fun <T> prefetchOrNull(load: suspend () -> T): T? = try {
+        load()
+    } catch (_: Exception) {
+        currentCoroutineContext().ensureActive()
+        null
     }
 
     suspend fun catalogArtistOf(item: Track): Track? = api.catalogArtistOf(item)
@@ -281,7 +397,9 @@ class MusicServices(context: Context) : RecommendationProvider {
 
     suspend fun addFavorite(catalogSongId: String) {
         api.addFavorite(catalogSongId)
+        detailSnapshots.invalidateWrites()
         collectionPages.clear()
+        firstTrackPages.clear()
     }
 
     suspend fun catalogAlbumOf(song: Track): Track? = api.catalogAlbumOf(song)
@@ -387,3 +505,7 @@ class MusicServices(context: Context) : RecommendationProvider {
         stationEngine?.release()
     }
 }
+
+private const val DETAIL_REFRESH_MS = 30_000L
+private val favoritePlaylistNames = setOf("favorite songs", "favourite songs", "喜好歌曲",
+    "喜爱歌曲", "喜愛歌曲", "最爱歌曲", "最愛歌曲", "お気に入りの曲")

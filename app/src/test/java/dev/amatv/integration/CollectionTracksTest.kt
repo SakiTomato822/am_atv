@@ -30,6 +30,19 @@ class CollectionTracksTest {
         assertEquals(2, requested.size)
     }
 
+    @Test fun publishesFirstTracksBeforeRequestingContinuation() = runBlocking {
+        var partial = emptyList<Track>()
+        val full = api.collectionTracks(collection(), onPartial = { partial = it }) { path, _ ->
+            if ("offset=" in path) {
+                assertEquals(listOf("1"), partial.map { it.catalogId })
+                JSONObject("""{"data":[${song("2")}]}""")
+            } else {
+                JSONObject("""{"data":[${song("1")}],"next":"/v1/catalog/tw/playlists/pl.test/tracks?offset=1"}""")
+            }
+        }
+        assertEquals(listOf("1", "2"), full.map { it.catalogId })
+    }
+
     @Test fun libraryIdentityWinsOverDifferentCatalogPlaybackId() = runBlocking {
         val item = collection().copy(resourceId = "p.own", resourceType = "library-playlists")
         val requested = mutableListOf<String>()

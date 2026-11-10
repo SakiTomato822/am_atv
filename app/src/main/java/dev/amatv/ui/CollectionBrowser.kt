@@ -9,6 +9,9 @@ import dev.amatv.model.openAction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -20,6 +23,7 @@ internal data class CollectionBrowserState(
     val error: Int? = null,
     /** Showing the catalog release instead of only the songs saved to the library. */
     val fullAlbum: Boolean = false,
+    val partial: Boolean = false,
 ) {
     /** Like Apple Music: a saved album lists saved songs and offers the complete release. */
     val canShowFullAlbum: Boolean
@@ -38,6 +42,8 @@ internal fun Track.catalogAlbum(): Track = copy(resourceId = null, resourceType 
 internal class CollectionBrowser(
     private val scope: CoroutineScope,
     private val peek: (Track) -> List<Track>? = { null },
+    private val readSaved: suspend (Track) -> List<Track>? = { null },
+    private val partials: (Track) -> Flow<List<Track>?> = { emptyFlow() },
     private val load: suspend (Track) -> List<Track>,
 ) {
     private val mutableState = MutableStateFlow(CollectionBrowserState())
@@ -72,18 +78,41 @@ internal class CollectionBrowser(
             collection, cached.orEmpty(), loading = cached == null, fullAlbum = fullAlbum,
         )
         job = scope.launch {
+            var hasComplete = cached != null
+            var progress: Job? = null
             try {
+                if (!hasComplete) {
+                    val saved = readSaved(target)
+                    ensureActive()
+                    if (request != generation) return@launch
+                    if (saved != null) {
+                        hasComplete = true
+                        mutableState.value = CollectionBrowserState(collection, saved, fullAlbum = fullAlbum)
+                    }
+                }
+                if (!hasComplete) {
+                    progress = launch(start = CoroutineStart.UNDISPATCHED) {
+                        partials(target).collect { items ->
+                            if (items != null && request == generation) {
+                                mutableState.value = CollectionBrowserState(
+                                    collection, items, fullAlbum = fullAlbum, partial = true,
+                                )
+                            }
+                        }
+                    }
+                }
                 val tracks = load(target)
+                progress?.cancel()
                 if (request == generation) {
                     mutableState.value = CollectionBrowserState(collection, tracks, fullAlbum = fullAlbum)
                 }
             } catch (_: Exception) {
+                progress?.cancel()
                 ensureActive()
                 if (request == generation) {
-                    mutableState.value = CollectionBrowserState(
-                        collection, cached.orEmpty(),
-                        error = if (cached == null) R.string.browse_tracks_error_detail else null,
-                        fullAlbum = fullAlbum,
+                    mutableState.value = mutableState.value.copy(
+                        loading = false,
+                        error = if (hasComplete) null else R.string.browse_tracks_error_detail,
                     )
                 }
             }

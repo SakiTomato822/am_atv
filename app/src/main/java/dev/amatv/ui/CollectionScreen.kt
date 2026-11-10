@@ -51,10 +51,12 @@ internal fun CollectionScreen(
 ) {
     val collection = state.collection ?: return
     val listState = rememberLazyListState()
-    val songFocus = remember(state.tracks) { List(state.tracks.size) { FocusRequester() } }
+    val focusByIndex = remember { mutableListOf<FocusRequester>() }
+    while (focusByIndex.size < state.tracks.size) focusByIndex.add(FocusRequester())
+    val songFocus = focusByIndex
     val scope = rememberCoroutineScope()
     var focusJob by remember { mutableStateOf<Job?>(null) }
-    var requestedIndex by remember(state.tracks) { mutableIntStateOf(0) }
+    var requestedIndex by remember(state.fullAlbum) { mutableIntStateOf(0) }
     fun moveToSong(index: Int) {
         if (index !in songFocus.indices) return
         requestedIndex = index
@@ -73,7 +75,7 @@ internal fun CollectionScreen(
     val playFocus = firstFocus
     val shuffleFocus = remember { FocusRequester() }
     val retryFocus = remember { FocusRequester() }
-    val ready = !state.loading && state.error == null && state.tracks.isNotEmpty()
+    val ready = !state.loading && !state.partial && state.error == null && state.tracks.isNotEmpty()
     val duration = remember(state.tracks) { state.tracks.sumOf { it.durationMs }.coerceAtLeast(0L) }
 
     Column(Modifier.fillMaxSize().automationId("collection-screen").padding(bottom = 20.dp)) {
@@ -109,7 +111,7 @@ internal fun CollectionScreen(
                 )
                 Text(
                     when {
-                        state.loading -> stringResource(R.string.browse_tracks_loading)
+                        state.loading || (state.partial && state.error == null) -> stringResource(R.string.browse_tracks_loading)
                         state.error != null -> stringResource(R.string.browse_tracks_unavailable)
                         else -> stringResource(
                             R.string.browse_collection_summary,
@@ -173,7 +175,7 @@ internal fun CollectionScreen(
                             modifier = Modifier.size(26.dp))
                         Text(stringResource(R.string.browse_tracks_loading), color = FlymeInk.copy(alpha = 0.6f), fontSize = 15.sp)
                     }
-                    state.error != null -> Column(
+                    state.error != null && state.tracks.isEmpty() -> Column(
                         Modifier.align(Alignment.Center).padding(20.dp),
                         verticalArrangement = Arrangement.spacedBy(18.dp),
                     ) {
@@ -199,7 +201,7 @@ internal fun CollectionScreen(
                             contentType = { _, _ -> "song" }) { index, song ->
                             val selected = song.catalogId == currentTrack.catalogId && song.catalogId != null
                             FocusSurface(
-                                onClick = { onPlay(index, false) },
+                                onClick = { if (ready) onPlay(index, false) },
                                 modifier = Modifier.automationId("collection-song-$index").fillMaxWidth().height(64.dp)
                                     .focusRequester(songFocus[index])
                                     .onFocusChanged { if (it.isFocused) requestedIndex = index }
@@ -253,6 +255,10 @@ internal fun CollectionScreen(
                             }
                             HorizontalDivider(Modifier.padding(start = 42.dp, end = 12.dp),
                                 color = FlymeInk.copy(alpha = 0.07f))
+                        }
+                        if (state.partial && state.error != null) item(key = "retry-tracks") {
+                            CollectionAction(stringResource(R.string.browse_reload), null, onRetry,
+                                modifier = Modifier.width(150.dp).height(42.dp))
                         }
                         if (state.canShowFullAlbum) item(key = "full-album", contentType = "full-album") {
                             CollectionAction(

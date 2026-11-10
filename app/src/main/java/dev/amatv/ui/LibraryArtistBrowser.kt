@@ -37,6 +37,8 @@ internal class LibraryArtistBrowser(
     private val loadCatalog: suspend (Track) -> CatalogArtistPage = { CatalogArtistPage() },
     private val peekCatalog: (Track) -> CatalogArtistPage? = { null },
     private val peekAlbums: (Track) -> LibraryPage? = { null },
+    private val readCatalog: suspend (Track) -> CatalogArtistPage? = { null },
+    private val readAlbums: suspend (Track) -> List<Track>? = { null },
     private val load: suspend (Track, String?) -> LibraryPage,
 ) {
     private val mutableState = MutableStateFlow(LibraryArtistState())
@@ -60,12 +62,18 @@ internal class LibraryArtistBrowser(
         if (artist.isLibraryArtist) request(null)
         val requestGeneration = generation
         catalogJob = scope.launch {
+            if (catalog == null) {
+                val saved = readCatalog(artist)
+                ensureActive()
+                if (requestGeneration != generation) return@launch
+                if (saved != null) mutableState.value = mutableState.value.copy(catalog = saved, catalogLoading = false)
+            }
             val page = try {
                 loadCatalog(artist)
             } catch (_: Exception) {
                 ensureActive()
                 // A network error must not erase a previously displayed artist page.
-                catalog ?: CatalogArtistPage()
+                mutableState.value.catalog
             }
             if (requestGeneration == generation) {
                 mutableState.value = mutableState.value.copy(catalog = page, catalogLoading = false)
@@ -90,6 +98,12 @@ internal class LibraryArtistBrowser(
         mutableState.value = before.copy(loading = true, failed = false)
         job = scope.launch {
             try {
+                if (next == null && before.albums.isEmpty()) {
+                    val saved = readAlbums(artist)
+                    ensureActive()
+                    if (requestGeneration != generation) return@launch
+                    if (saved != null) mutableState.value = mutableState.value.copy(albums = saved)
+                }
                 val page = load(artist, next)
                 if (requestGeneration != generation) return@launch
                 check(page.requestedPage !in visited) { "Repeated artist albums page" }

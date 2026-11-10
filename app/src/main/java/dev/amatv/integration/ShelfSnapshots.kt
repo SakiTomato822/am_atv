@@ -3,6 +3,7 @@ package dev.amatv.integration
 import android.content.Context
 import android.util.Log
 import dev.amatv.model.ContentShelf
+import dev.amatv.model.Track
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -74,11 +75,10 @@ internal fun encodeShelves(shelves: List<ContentShelf>): JSONArray = JSONArray()
             .put("id", shelf.id)
             .put("title", shelf.title)
             .put("featured", shelf.featured)
+            .put("moreHref", shelf.moreHref)
             .put("items", JSONArray().apply {
                 shelf.items.forEach { track ->
-                    put(track.toSessionJson()
-                        .put("dateAddedMs", track.dateAddedMs)
-                        .put("pickReason", track.pickReason))
+                    put(track.toContentSnapshot())
                 }
             }))
     }
@@ -91,12 +91,18 @@ internal fun decodeShelves(array: JSONArray): List<ContentShelf> = (0 until arra
         id = shelf.getString("id"),
         title = shelf.getString("title"),
         featured = shelf.optBoolean("featured"),
+        moreHref = shelf.optString("moreHref").takeIf { it.startsWith("/v1/catalog/") },
         items = (0 until items.length()).map { itemIndex ->
-            val item = items.getJSONObject(itemIndex)
-            item.toSessionTrack().copy(
-                dateAddedMs = item.optLong("dateAddedMs", 0L).takeIf { item.has("dateAddedMs") && it > 0L },
-                pickReason = item.optString("pickReason").takeIf { it.isNotBlank() && it != "null" },
-            )
+            items.getJSONObject(itemIndex).toContentTrack()
         },
     )
 }
+
+internal fun Track.toContentSnapshot(): JSONObject = toSessionJson()
+    .put("dateAddedMs", dateAddedMs)
+    .put("pickReason", pickReason)
+
+internal fun JSONObject.toContentTrack(): Track = toSessionTrack().copy(
+    dateAddedMs = optLong("dateAddedMs", 0L).takeIf { it > 0L },
+    pickReason = optString("pickReason").takeIf { it.isNotBlank() && it != "null" },
+)

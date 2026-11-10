@@ -9,6 +9,7 @@ import dev.amatv.BuildConfig
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.Track
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -116,6 +117,13 @@ class AppleMusicApi(
     @Volatile
     private var userStorefrontCache: UserStorefrontCache? = null
 
+    internal fun cachedUserStorefront(currentUserToken: String): String? {
+        userStorefrontCache?.takeIf { it.userToken == currentUserToken }?.let { return it.storefront }
+        val digest = storefrontTokenDigest(currentUserToken)
+        return storefrontPreferences?.takeIf { it.getString(KEY_STOREFRONT_TOKEN, null) == digest }
+            ?.getString(KEY_STOREFRONT, null)?.takeIf { it.matches(Regex("[a-z]{2}")) }
+    }
+
     suspend fun userStorefront(): String {
         val currentUserToken = userToken()?.takeIf(String::isNotBlank)
             ?: throw CatalogRequestException(CatalogFailureReason.Authorization,
@@ -125,9 +133,7 @@ class AppleMusicApi(
             userStorefrontCache?.takeIf { it.userToken == currentUserToken }?.let { return@withLock it.storefront }
             // The token is stored only as a digest; a new sign-in therefore asks Apple again.
             val tokenDigest = storefrontTokenDigest(currentUserToken)
-            storefrontPreferences?.takeIf { it.getString(KEY_STOREFRONT_TOKEN, null) == tokenDigest }
-                ?.getString(KEY_STOREFRONT, null)?.takeIf { it.matches(Regex("[a-z]{2}")) }
-                ?.let { saved ->
+            cachedUserStorefront(currentUserToken)?.let { saved ->
                     userStorefrontCache = UserStorefrontCache(currentUserToken, saved)
                     return@withLock saved
                 }
@@ -355,14 +361,21 @@ class AppleMusicApi(
         var next = root.optJSONArray("data")?.optJSONObject(0)?.optJSONObject("views")
             ?.optJSONObject("top-songs")?.optString("next")?.takeIf { it.startsWith("/v1/") }
         val more = mutableListOf<Track>()
-        repeat(2) {
-            val href = next ?: return@repeat
-            val pageRoot = runCatching { requestRoot(href, needsUserToken = false) }.getOrNull() ?: return@repeat
+        var complete = true
+        for (index in 0 until 2) {
+            val href = next ?: break
+            val pageRoot = try {
+                requestRoot(href, needsUserToken = false)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                complete = false
+                break
+            }
             more += withContext(parseDispatcher) { parseResources(pageRoot) }
             next = pageRoot.optString("next").takeIf { it.startsWith("/v1/") }
         }
-        return if (more.isEmpty()) page
-        else page.copy(topSongs = (page.topSongs + more).distinctBy { it.id })
+        return page.copy(topSongs = (page.topSongs + more).distinctBy { it.id }, complete = complete)
     }
 
     /**
@@ -609,11 +622,26 @@ class AppleMusicApi(
 
     internal fun parseStationTracks(root: JSONObject): List<Track> = parseAllTracks(root, songsOnly = true)
 
-    suspend fun collectionTracks(collection: Track): List<Track> =
-        collectionTracks(collection) { path, needsUserToken -> requestRoot(path, needsUserToken) }
+    internal suspend fun collectionTracks(
+        collection: Track,
+        onPartial: (List<Track>) -> Unit = {},
+        initialPage: CollectionTrackPage? = null,
+    ): List<Track> = collectionTracks(collection, onPartial, initialPage) { path, needsUserToken ->
+        requestRoot(path, needsUserToken)
+    }
+
+    internal suspend fun firstCollectionTrackPage(collection: Track): CollectionTrackPage =
+        withContext(parseDispatcher) {
+            val request = collection.collectionRequest(effectiveStorefront())
+            readCollectionTrackPage(request, request.firstPage) { path, needsUserToken ->
+                requestRoot(path, needsUserToken)
+            }
+        }
 
     internal suspend fun collectionTracks(
         collection: Track,
+        onPartial: (List<Track>) -> Unit = {},
+        initialPage: CollectionTrackPage? = null,
         fetchPage: suspend (String, Boolean) -> JSONObject,
     ): List<Track> = withContext(parseDispatcher) {
         val request = collection.collectionRequest(effectiveStorefront())
@@ -623,10 +651,25 @@ class AppleMusicApi(
         while (path != null) {
             currentCoroutineContext().ensureActive()
             check(visited.add(path)) { AppText.text(R.string.services_playlist_page_repeated) }
-            val root = fetchPage(path, request.needsUserToken)
-            val data = root.optJSONArray("data") ?: error(AppText.text(R.string.services_playlist_tracks_unavailable))
-            // Read only this relationship, in order. Nested catalog resources are metadata,
-            // and repeated songs are separate playlist entries, not duplicates to remove.
+            val page = initialPage?.takeIf { path == request.firstPage }
+                ?: readCollectionTrackPage(request, path, fetchPage)
+            currentCoroutineContext().ensureActive()
+            tracks += page.items
+            path = page.next
+            if (path != null && tracks.isNotEmpty()) onPartial(tracks.toList())
+        }
+        tracks
+    }
+
+    private suspend fun readCollectionTrackPage(
+        request: CollectionRequest,
+        path: String,
+        fetchPage: suspend (String, Boolean) -> JSONObject,
+    ): CollectionTrackPage {
+        val root = fetchPage(path, request.needsUserToken)
+        val data = root.optJSONArray("data") ?: error(AppText.text(R.string.services_playlist_tracks_unavailable))
+        // Nested catalog resources are metadata. Keep the relationship's order and repeats.
+        val tracks = buildList {
             for (index in 0 until data.length()) {
                 val item = data.optJSONObject(index) ?: continue
                 val type = item.optString("type")
@@ -634,12 +677,11 @@ class AppleMusicApi(
                 val attributes = item.optJSONObject("attributes") ?: continue
                 val linked = item.optJSONObject("relationships")?.optJSONObject("catalog")
                     ?.optJSONArray("data")?.optJSONObject(0)
-                attributes.toTrack(item.getString("id"), CatalogKind.Song, linked, type)?.let(tracks::add)
+                attributes.toTrack(item.getString("id"), CatalogKind.Song, linked, type)?.let(::add)
             }
-            path = root.optString("next").takeIf { it.isNotBlank() && it != "null" }
-                ?.let(request::nextPage)
         }
-        tracks
+        val next = root.optString("next").takeIf { it.isNotBlank() && it != "null" }?.let(request::nextPage)
+        return CollectionTrackPage(tracks, next)
     }
 
     private suspend fun request(path: String, needsUserToken: Boolean): List<Track> {
@@ -976,11 +1018,14 @@ class AppleMusicApi(
     }
 }
 
+internal data class CollectionTrackPage(val items: List<Track>, val next: String?)
+
 /** Apple Music's own artist page: the artist (for its artwork), top songs and release shelves. */
 data class CatalogArtistPage(
     val artist: Track? = null,
     val topSongs: List<Track> = emptyList(),
     val shelves: List<ContentShelf> = emptyList(),
+    val complete: Boolean = true,
 )
 
 private const val ARTIST_VIEW_MAX_PAGES = 15
