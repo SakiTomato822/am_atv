@@ -3,4 +3,6 @@
     <string name="flyme_lyric_style">車機歌詞風格</string>
     <string name="flyme_lyric_flow">流光</string>
     <string name="flyme_lyric_soak">取色漸隱</string>
+    <string name="flyme_lyric_poster">海報歌詞</string>
+    <string name="flyme_lyric_list">滾動歌詞</string>
 </resources>

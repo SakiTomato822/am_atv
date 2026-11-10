@@ -684,6 +684,8 @@ fun PlayerScreen(
                 FlymeCarLyrics(
                     track = displayedTrack,
                     style = settings.lyricStyle,
+                    poster = settings.portraitPoster,
+                    onPosterChange = { poster -> options.update { it.copy(portraitPoster = poster) } },
                     position = playbackPosition,
                     offsetMs = lyricOffsetMs,
                     playWhenReady = playWhenReady,

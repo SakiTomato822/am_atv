@@ -17,6 +17,8 @@ data class FlymePlaybackSettings(
     val lightFromMinute: Int = 7 * 60,
     val lightUntilMinute: Int = 19 * 60,
     val lyricStyle: LyricStyle = LyricStyle.Flow,
+    /** Portrait lyrics as one large poster line instead of the scrolling list. */
+    val portraitPoster: Boolean = false,
 ) {
     enum class Appearance { Light, Dark, System, Time }
     enum class LyricStyle { Flow, Soak }
@@ -49,6 +51,7 @@ class FlymePlaybackOptions private constructor(context: Context) {
         lightUntilMinute = preferences.getInt(KEY_LIGHT_UNTIL, 19 * 60),
         lyricStyle = if (preferences.getBoolean(KEY_LYRIC_SOAK, false)) FlymePlaybackSettings.LyricStyle.Soak
             else FlymePlaybackSettings.LyricStyle.Flow,
+        portraitPoster = preferences.getBoolean(KEY_PORTRAIT_POSTER, false),
     ))
     val settings: StateFlow<FlymePlaybackSettings> = mutableSettings.asStateFlow()
 
@@ -64,6 +67,7 @@ class FlymePlaybackOptions private constructor(context: Context) {
             .putInt(KEY_LIGHT_FROM, next.lightFromMinute)
             .putInt(KEY_LIGHT_UNTIL, next.lightUntilMinute)
             .putBoolean(KEY_LYRIC_SOAK, next.lyricStyle == FlymePlaybackSettings.LyricStyle.Soak)
+            .putBoolean(KEY_PORTRAIT_POSTER, next.portraitPoster)
             .apply()
     }
 
@@ -82,5 +86,6 @@ class FlymePlaybackOptions private constructor(context: Context) {
         private const val KEY_FADE_PLAYLISTS = "fade_playlists"
         private const val KEY_STATIONS_AS_SONGS = "stations_as_songs"
         private const val KEY_LYRIC_SOAK = "lyric_style_soak"
+        private const val KEY_PORTRAIT_POSTER = "lyric_portrait_poster"
     }
 }

@@ -5,4 +5,6 @@
     <string name="flyme_lyric_soak">Artwork fade</string>
     <string name="flyme_lyric_style_selected">✓ %1$s</string>
     <string name="flyme_lyric_style_option">%1$s</string>
+    <string name="flyme_lyric_poster">Poster lyrics</string>
+    <string name="flyme_lyric_list">Scrolling lyrics</string>
 </resources>

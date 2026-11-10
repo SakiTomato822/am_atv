@@ -101,6 +101,8 @@ import kotlin.math.sin
 internal fun FlymeCarLyrics(
     track: Track,
     style: LyricStyle,
+    poster: Boolean,
+    onPosterChange: (Boolean) -> Unit,
     position: State<Long>,
     offsetMs: Long,
     playWhenReady: Boolean,
@@ -142,6 +144,14 @@ internal fun FlymeCarLyrics(
     }
     val controlsVisible = open || !playWhenReady
     val soak = style == LyricStyle.Soak
+    if (LocalCarPortrait.current) {
+        PortraitLyrics(
+            track, soak, poster, position, offsetMs, playWhenReady, controlsVisible, visible, lowPerformance,
+            canSeek, canSkipPrevious, canSkipNext, translation, fontScale, ::reveal, onBack, onPlayPause, onPrevious,
+            onNext, onQueue, onTranslate, onPosterChange, onSeek, emptyContent,
+        )
+        return
+    }
     FitDesign(Modifier.fillMaxSize().automationId("car-lyrics-${style.name.lowercase()}")) {
         BoxWithConstraints(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { reveal() } }) {
             val lyricsLeft = maxWidth * if (soak) 0.484f else 0.422f
@@ -164,6 +174,7 @@ internal fun FlymeCarLyrics(
                     0f to Color.Black.copy(alpha = 0.18f), 0.3f to Color.Transparent,
                     1f to Color.Black.copy(alpha = 0.25f),
                 )))
+                SoakGlow(palette)
             } else {
                 CarLyricFlow(track, palette, visible && !lowPerformance)
                 MotionArtwork(
@@ -188,7 +199,8 @@ internal fun FlymeCarLyrics(
             )) {
                 if (track.lyrics.isEmpty()) emptyContent()
                 else CarLyricRows(track.lyrics, position, offsetMs, soften = !soak && !lowPerformance,
-                    ripple = !soak && !lowPerformance, controlsVisible, canSeek, fontScale, onReveal = ::reveal) { time ->
+                    ripple = !soak && !lowPerformance, controlsVisible, canSeek, carTextScale(fontScale),
+                    anchorFraction = 0.40f, onReveal = ::reveal) { time ->
                     reveal()
                     onSeek((time - offsetMs).coerceAtLeast(0L))
                 }
@@ -256,7 +268,7 @@ internal fun FlymeCarLyrics(
 }
 
 @Composable
-private fun CarLyricFlow(track: Track, palette: List<Color>, animate: Boolean) {
+internal fun CarLyricFlow(track: Track, palette: List<Color>, animate: Boolean) {
     Box(Modifier.fillMaxSize().clip(RoundedCornerShape(0.dp)).background(palette.first())) {
         if (track.artworkUrl != null) MotionArtwork(track,
             Modifier.fillMaxSize().blur(80.dp, BlurredEdgeTreatment.Unbounded).graphicsLayer { alpha = 0.48f },
@@ -287,7 +299,7 @@ private fun CarLyricFlow(track: Track, palette: List<Color>, animate: Boolean) {
 }
 
 @Composable
-private fun CarLyricRows(
+internal fun CarLyricRows(
     lines: List<LyricLine>,
     position: State<Long>,
     offsetMs: Long,
@@ -296,6 +308,7 @@ private fun CarLyricRows(
     controlsVisible: Boolean,
     canSeek: Boolean,
     fontScale: Float,
+    anchorFraction: Float,
     onReveal: () -> Unit,
     onLineSeek: (Long) -> Unit,
 ) {
@@ -320,7 +333,7 @@ private fun CarLyricRows(
     }
     BoxWithConstraints(fade) {
         val density = LocalDensity.current
-        val anchor = with(density) { maxHeight.toPx() } * 0.40f
+        val anchor = with(density) { maxHeight.toPx() } * anchorFraction
         val gap = with(density) { LyricGap.toPx() }
         val heights = remember(lines) { mutableStateListOf(*Array(lines.size) { 0 }) }
         val measured by remember(heights) { derivedStateOf { heights.none { it == 0 } } }
@@ -390,8 +403,8 @@ private fun CarLyricLine(line: LyricLine, position: State<Long>, offsetMs: Long,
 @Composable
 private fun LyricSubtitle(text: String, fontScale: Float) {
     Text(text, Modifier.padding(top = 4.dp), color = Color.White.copy(alpha = 0.7f),
-        fontSize = (24 * fontScale / LyricTextSize.Standard.scale).sp,
-        lineHeight = (29 * fontScale / LyricTextSize.Standard.scale).sp, fontWeight = FontWeight.SemiBold)
+        fontSize = (24 * fontScale).sp,
+        lineHeight = (29 * fontScale).sp, fontWeight = FontWeight.SemiBold)
 }
 
 @Composable
@@ -407,9 +420,9 @@ private fun CarLyricText(line: LyricLine, position: State<Long>, offsetMs: Long,
             addStyle(SpanStyle(color = Color.White.copy(alpha = 0.38f + 0.62f * amount)), range.from, range.until)
         }
     }
-    // Same size and weight as the Flyme.12 lyrics panel: 34sp at the Standard text size.
-    Text(text, color = Color.White, fontSize = (34 * fontScale / LyricTextSize.Standard.scale).sp,
-        lineHeight = (41 * fontScale / LyricTextSize.Standard.scale).sp, fontWeight = FontWeight.ExtraBold)
+    // Same size and weight as the Flyme.12 lyrics panel: 34sp when fontScale is 1.
+    Text(text, color = Color.White, fontSize = (34 * fontScale).sp,
+        lineHeight = (41 * fontScale).sp, fontWeight = FontWeight.ExtraBold)
 }
 
 internal data class CarLyricHighlight(val from: Int, val until: Int, val startMs: Long, val endMs: Long)
@@ -437,5 +450,24 @@ internal fun carLyricHighlights(line: LyricLine): List<CarLyricHighlight> {
     return List(count) { index ->
         CarLyricHighlight(boundaries[index], boundaries[index + 1],
             line.startMs + duration * index / count, line.startMs + duration * (index + 1) / count)
+    }
+}
+
+/** The lyrics page's text size setting, as a multiplier where 1 is the Flyme.12 34sp line. */
+internal fun carTextScale(fontScale: Float) = fontScale / LyricTextSize.Standard.scale
+
+/**
+ * Two faint glows in the cover's secondary colours over the flat background, so the side away from the
+ * cover is not one solid block. Drawn over everything, so there is nothing for them to seam against.
+ */
+@Composable
+internal fun SoakGlow(palette: List<Color>) {
+    Canvas(Modifier.fillMaxSize()) {
+        val warm = palette[1 % palette.size]
+        val cool = palette[2 % palette.size]
+        drawRect(Brush.radialGradient(listOf(warm.copy(alpha = 0.30f), Color.Transparent),
+            center = Offset(size.width * 0.86f, size.height * 0.80f), radius = size.width * 0.42f))
+        drawRect(Brush.radialGradient(listOf(cool.copy(alpha = 0.20f), Color.Transparent),
+            center = Offset(size.width * 0.74f, size.height * 0.08f), radius = size.width * 0.34f))
     }
 }
