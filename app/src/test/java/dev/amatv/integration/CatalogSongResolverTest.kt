@@ -6,6 +6,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -96,6 +97,26 @@ class CatalogSongResolverTest {
             assertEquals("current-second", resolver.resolve("old"))
         }
         assertEquals(2, calls)
+    }
+
+    @Test fun anotherRecordingDoesNotWaitBehindAnUnrelatedNetworkLookup() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        val resolver = resolver { _, id ->
+            if (id == "background") {
+                started.complete(Unit)
+                finish.await()
+            }
+            id
+        }
+        val background = async { resolver.resolve("background") }
+        started.await()
+        try {
+            assertEquals("selected", withTimeout(1_000L) { resolver.resolve("selected") })
+        } finally {
+            finish.complete(Unit)
+        }
+        assertEquals("background", background.await())
     }
 
     @Test fun confirmedFailuresKeepTheirTypeAndAreNotMemoized() = runBlocking {

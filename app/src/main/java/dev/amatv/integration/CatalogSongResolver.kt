@@ -19,7 +19,12 @@ internal class CatalogSongResolver(
 ) {
     private data class Scope(val accountToken: String, val storefront: String)
 
-    private val mutex = Mutex()
+    private class Flight {
+        val mutex = Mutex()
+        var users = 0
+    }
+    private val lock = Any()
+    private val flights = mutableMapOf<Pair<Scope, String>, Flight>()
     private var scope: Scope? = null
     private val resolvedIds = LinkedHashMap<String, String>(64, 0.75f, true)
 
@@ -31,25 +36,49 @@ internal class CatalogSongResolver(
         val account = accountToken()?.takeIf(String::isNotBlank)
             ?: throw CatalogRequestException(CatalogFailureReason.Authorization, authorizationMessage())
         val currentScope = Scope(account, storefront())
-        return mutex.withLock {
-            ensureCurrentAccount(account)
+        ensureCurrentAccount(account)
+        synchronized(lock) {
             if (scope != currentScope) {
                 resolvedIds.clear()
                 scope = currentScope
             }
-            resolvedIds[id]?.let { return@withLock it }
-            val catalogId = if (id.startsWith("i.")) libraryCatalogId(id) else id
-            val playable = resolvedIds[catalogId]
-                ?: equivalentCatalogId(currentScope.storefront, catalogId)
-            ensureCurrentAccount(account)
-            // Keep aliases and the canonical ID together. The lyrics/prepare
-            // callers and a re-keyed current track therefore share one lookup.
-            resolvedIds[id] = playable
-            resolvedIds[catalogId] = playable
-            resolvedIds[playable] = playable
-            while (resolvedIds.size > maxEntries) resolvedIds.remove(resolvedIds.keys.first())
-            playable
         }
+        return resolve(currentScope, id)
+    }
+
+    private suspend fun resolve(currentScope: Scope, id: String): String {
+        val key = currentScope to id
+        val flight = synchronized(lock) {
+            flights.getOrPut(key, ::Flight).also { it.users++ }
+        }
+        try {
+            return flight.mutex.withLock {
+                ensureCurrentAccount(currentScope.accountToken)
+                synchronized(lock) {
+                    checkScope(currentScope)
+                    resolvedIds[id]?.let { return@withLock it }
+                }
+                val catalogId = if (id.startsWith("i.")) libraryCatalogId(id) else id
+                val playable = if (catalogId == id) equivalentCatalogId(currentScope.storefront, id)
+                    else resolve(currentScope, catalogId)
+                ensureCurrentAccount(currentScope.accountToken)
+                synchronized(lock) {
+                    checkScope(currentScope)
+                    resolvedIds[id] = playable
+                    resolvedIds[playable] = playable
+                    while (resolvedIds.size > maxEntries) resolvedIds.remove(resolvedIds.keys.first())
+                }
+                playable
+            }
+        } finally {
+            synchronized(lock) {
+                if (--flight.users == 0) flights.remove(key)
+            }
+        }
+    }
+
+    private fun checkScope(expected: Scope) {
+        if (scope != expected) throw CancellationException("Catalog storefront changed during song resolution")
     }
 
     private suspend fun ensureCurrentAccount(expected: String) {

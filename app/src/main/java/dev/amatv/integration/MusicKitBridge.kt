@@ -12,6 +12,7 @@ import android.os.Process
 import android.os.SystemClock
 import android.util.Log
 import androidx.compose.ui.graphics.Color
+import dev.amatv.BuildConfig
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
 import java.lang.reflect.InvocationTargetException
@@ -95,6 +96,7 @@ class MusicKitBridge(private val context: Context) {
     private val playbackIntent = NativePlaybackIntent()
     private var lastLoggedPlaybackState: Int? = null
     private var lastLoggedTrackId: String? = null
+    private var lastStartupState: Triple<Boolean, Boolean, Boolean>? = null
     private var playbackDeveloperToken: String? = null
     private var playbackUserToken: String? = null
     private val prepareGeneration = AtomicLong(0L)
@@ -237,6 +239,7 @@ class MusicKitBridge(private val context: Context) {
         postPlaybackAction("prepare") {
             if (generation != prepareGeneration.get()) return@postPlaybackAction
             activeGeneration = generation
+            lastStartupState = null
             installRequestListener(currentController, generation)
             playbackIntent.begin(track.catalogId, requestedPosition, desiredPlaying, SystemClock.elapsedRealtime())
             val builderClass = Class.forName(QUEUE_BUILDER)
@@ -726,11 +729,22 @@ class MusicKitBridge(private val context: Context) {
             ended = nativeEnded,
             nowMs = SystemClock.elapsedRealtime(),
         ))
+        if (BuildConfig.FLYME_UI_PREVIEW && requestedTrack?.catalogKind == CatalogKind.Song) {
+            val startupState = Triple(currentQueueItem != null, buffering, decision.prepared)
+            if (startupState != lastStartupState) {
+                lastStartupState = startupState
+                Log.d(TAG, "Startup generation=$generation hasItem=${startupState.first} " +
+                    "buffering=$buffering ready=${decision.prepared}")
+            }
+        }
         if (pendingPlaybackError == null) {
             for (command in decision.commands) {
                 runCatching {
                     when (command) {
-                        NativePlaybackCommand.Play -> currentController.callVoid("play")
+                        NativePlaybackCommand.Play -> {
+                            if (BuildConfig.FLYME_UI_PREVIEW) Log.d(TAG, "Play command generation=$generation")
+                            currentController.callVoid("play")
+                        }
                         NativePlaybackCommand.Pause -> currentController.callVoid("pause")
                         is NativePlaybackCommand.Seek -> currentController.javaClass.getMethod(
                             "seekToPosition", Long::class.javaPrimitiveType,
