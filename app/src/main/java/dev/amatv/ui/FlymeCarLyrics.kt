@@ -85,6 +85,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.amatv.R
 import dev.amatv.integration.FlymePlaybackSettings.LyricStyle
+import dev.amatv.integration.LyricTextSize
 import dev.amatv.model.LyricLine
 import dev.amatv.model.LyricTimeline
 import dev.amatv.model.LyricTiming
@@ -147,24 +148,18 @@ internal fun FlymeCarLyrics(
             val artLeft = maxWidth * 0.078f
             val palette = rememberArtworkPalette(track.artworkUrl, track.palette)
             if (soak) {
-                // The background is the cover's own dominant colour, darkened, so the fade has nothing to seam against.
+                // The background is the cover's own dominant colour, darkened. The cover fades by painting
+                // that same colour over it (a DstIn mask did not reach the decoded cover bitmap), so the
+                // fade always ends exactly on the background with no seam.
                 val base = lerp(palette.first(), Color.Black, 0.55f)
                 Box(Modifier.fillMaxSize().background(base))
-                MotionArtwork(
-                    track,
-                    Modifier.fillMaxWidth(0.62f).fillMaxHeight().graphicsLayer {
-                        compositingStrategy = CompositingStrategy.Offscreen
-                    }.drawWithContent {
-                        drawContent()
-                        drawRect(Brush.horizontalGradient(
-                            0f to Color.Black, 0.40f to Color.Black, 0.62f to Color.Black.copy(alpha = 0.72f),
-                            0.80f to Color.Black.copy(alpha = 0.32f), 0.92f to Color.Black.copy(alpha = 0.08f),
-                            1f to Color.Transparent,
-                        ), blendMode = BlendMode.DstIn)
-                    },
-                    animate = false,
-                    cornerRadius = 0.dp,
-                )
+                Box(Modifier.fillMaxWidth(0.62f).fillMaxHeight().automationId("car-lyrics-soak-cover")) {
+                    MotionArtwork(track, Modifier.fillMaxSize(), animate = false, cornerRadius = 0.dp)
+                    Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(
+                        0f to Color.Transparent, 0.40f to Color.Transparent, 0.62f to base.copy(alpha = 0.28f),
+                        0.80f to base.copy(alpha = 0.68f), 0.92f to base.copy(alpha = 0.92f), 1f to base,
+                    )))
+                }
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
                     0f to Color.Black.copy(alpha = 0.18f), 0.3f to Color.Transparent,
                     1f to Color.Black.copy(alpha = 0.25f),
@@ -193,7 +188,7 @@ internal fun FlymeCarLyrics(
             )) {
                 if (track.lyrics.isEmpty()) emptyContent()
                 else CarLyricRows(track.lyrics, position, offsetMs, soften = !soak && !lowPerformance,
-                    ripple = !soak && !lowPerformance, controlsVisible, canSeek, fontScale) { time ->
+                    ripple = !soak && !lowPerformance, controlsVisible, canSeek, fontScale, onReveal = ::reveal) { time ->
                     reveal()
                     onSeek((time - offsetMs).coerceAtLeast(0L))
                 }
@@ -301,6 +296,7 @@ private fun CarLyricRows(
     controlsVisible: Boolean,
     canSeek: Boolean,
     fontScale: Float,
+    onReveal: () -> Unit,
     onLineSeek: (Long) -> Unit,
 ) {
     val timed = remember(lines) { lines.any { !it.isStatic } }
@@ -363,7 +359,10 @@ private fun CarLyricRows(
                 Box(Modifier.fillMaxWidth().onSizeChanged { heights[index] = it.height }
                     .graphicsLayer { translationY = shift.value; alpha = opacity }
                     .automationId("car-lyric-line-$index")
-                    .clickable(enabled = controlsVisible && canSeek && !line.isStatic) { onLineSeek(line.startMs) }
+                    .clickable(interactionSource = null, indication = null) {
+                        // A tap on a line while the controls are hidden only brings them back, like a tap anywhere else.
+                        if (controlsVisible && canSeek && !line.isStatic) onLineSeek(line.startMs) else onReveal()
+                    }
                     .blur(blur)) {
                     CarLyricLine(line, position, offsetMs, distance == 0, fontScale)
                 }
@@ -372,7 +371,7 @@ private fun CarLyricRows(
     }
 }
 
-private val LyricGap = 22.dp
+private val LyricGap = 30.dp
 private val LineOpacity = listOf(1f, 0.38f, 0.28f, 0.20f, 0.14f)
 private val LineBlur = listOf(0f, 0.8f, 1.6f, 2.4f, 3f)
 private val RippleEasing = CubicBezierEasing(0.22f, 0.9f, 0.3f, 1f)
@@ -391,23 +390,26 @@ private fun CarLyricLine(line: LyricLine, position: State<Long>, offsetMs: Long,
 @Composable
 private fun LyricSubtitle(text: String, fontScale: Float) {
     Text(text, Modifier.padding(top = 4.dp), color = Color.White.copy(alpha = 0.7f),
-        fontSize = (19 * fontScale).sp, lineHeight = (25 * fontScale).sp, fontWeight = FontWeight.SemiBold)
+        fontSize = (24 * fontScale / LyricTextSize.Standard.scale).sp,
+        lineHeight = (29 * fontScale / LyricTextSize.Standard.scale).sp, fontWeight = FontWeight.SemiBold)
 }
 
 @Composable
 private fun CarLyricText(line: LyricLine, position: State<Long>, offsetMs: Long, highlight: Boolean, fontScale: Float) {
     val ranges = remember(line) { carLyricHighlights(line) }
-    val now = if (highlight) position.value + offsetMs else line.endMs
+    val sweep = highlight && line.timing == LyricTiming.Word
+    val now = if (sweep) position.value + offsetMs else line.endMs
     val text = buildAnnotatedString {
         append(line.text.ifBlank { line.backgroundText })
-        if (highlight) for (range in ranges) {
+        if (sweep) for (range in ranges) {
             val amount = ((now - range.startMs).toFloat() / (range.endMs - range.startMs).coerceAtLeast(1L))
                 .coerceIn(0f, 1f)
             addStyle(SpanStyle(color = Color.White.copy(alpha = 0.38f + 0.62f * amount)), range.from, range.until)
         }
     }
-    Text(text, color = Color.White, fontSize = (34 * fontScale).sp,
-        lineHeight = (43 * fontScale).sp, fontWeight = FontWeight.ExtraBold)
+    // Same size and weight as the Flyme.12 lyrics panel: 34sp at the Standard text size.
+    Text(text, color = Color.White, fontSize = (34 * fontScale / LyricTextSize.Standard.scale).sp,
+        lineHeight = (41 * fontScale / LyricTextSize.Standard.scale).sp, fontWeight = FontWeight.ExtraBold)
 }
 
 internal data class CarLyricHighlight(val from: Int, val until: Int, val startMs: Long, val endMs: Long)
