@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="flyme_lyric_style">Car lyrics style</string>
+    <string name="flyme_lyric_flow">Flowing color</string>
+    <string name="flyme_lyric_soak">Artwork fade</string>
+    <string name="flyme_lyric_style_selected">✓ %1$s</string>
+    <string name="flyme_lyric_style_option">%1$s</string>
+</resources>

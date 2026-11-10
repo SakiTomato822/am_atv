@@ -117,6 +117,21 @@ internal fun FlymePlaybackOptionsSettings(options: FlymePlaybackOptions) {
     Spacer(Modifier.height(6.dp))
     CacheButton(stringResource(if (settings.stationsAsSongs) R.string.playback_station_mode_songs else R.string.playback_station_mode_auto),
         onClick = { options.update { it.copy(stationsAsSongs = !it.stationsAsSongs) } }, modifier = Modifier.width(420.dp))
+    Spacer(Modifier.height(16.dp))
+    Text(stringResource(R.string.flyme_lyric_style), color = FlymeInk, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        for ((style, label) in listOf(
+            FlymePlaybackSettings.LyricStyle.Flow to R.string.flyme_lyric_flow,
+            FlymePlaybackSettings.LyricStyle.Soak to R.string.flyme_lyric_soak,
+        )) {
+            CacheButton(
+                stringResource(if (settings.lyricStyle == style) R.string.flyme_lyric_style_selected else R.string.flyme_lyric_style_option,
+                    stringResource(label)),
+                onClick = { options.update { it.copy(lyricStyle = style) } },
+                modifier = Modifier.width(170.dp).automationId("lyric-style-${style.name.lowercase()}"),
+            )
+        }
+    }
 }
 
 /** Light / dark / system / by time of day, with the light hours chosen in 30-minute steps. */

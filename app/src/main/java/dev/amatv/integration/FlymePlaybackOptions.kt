@@ -16,8 +16,10 @@ data class FlymePlaybackSettings(
     val appearance: Appearance = Appearance.System,
     val lightFromMinute: Int = 7 * 60,
     val lightUntilMinute: Int = 19 * 60,
+    val lyricStyle: LyricStyle = LyricStyle.Flow,
 ) {
     enum class Appearance { Light, Dark, System, Time }
+    enum class LyricStyle { Flow, Soak }
 
     /** Whether the UI is light now, given the system night mode and the minute of the day. */
     fun isLight(systemDark: Boolean, minuteOfDay: Int): Boolean = when (appearance) {
@@ -45,6 +47,8 @@ class FlymePlaybackOptions private constructor(context: Context) {
         }.getOrDefault(FlymePlaybackSettings.Appearance.System),
         lightFromMinute = preferences.getInt(KEY_LIGHT_FROM, 7 * 60),
         lightUntilMinute = preferences.getInt(KEY_LIGHT_UNTIL, 19 * 60),
+        lyricStyle = if (preferences.getBoolean(KEY_LYRIC_SOAK, false)) FlymePlaybackSettings.LyricStyle.Soak
+            else FlymePlaybackSettings.LyricStyle.Flow,
     ))
     val settings: StateFlow<FlymePlaybackSettings> = mutableSettings.asStateFlow()
 
@@ -59,6 +63,7 @@ class FlymePlaybackOptions private constructor(context: Context) {
             .putString(KEY_APPEARANCE, next.appearance.name)
             .putInt(KEY_LIGHT_FROM, next.lightFromMinute)
             .putInt(KEY_LIGHT_UNTIL, next.lightUntilMinute)
+            .putBoolean(KEY_LYRIC_SOAK, next.lyricStyle == FlymePlaybackSettings.LyricStyle.Soak)
             .apply()
     }
 
@@ -76,5 +81,6 @@ class FlymePlaybackOptions private constructor(context: Context) {
         private const val KEY_FADE_STATIONS = "fade_stations"
         private const val KEY_FADE_PLAYLISTS = "fade_playlists"
         private const val KEY_STATIONS_AS_SONGS = "stations_as_songs"
+        private const val KEY_LYRIC_SOAK = "lyric_style_soak"
     }
 }

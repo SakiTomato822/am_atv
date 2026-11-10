@@ -80,6 +80,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
@@ -123,6 +124,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextDecoration
@@ -363,6 +365,7 @@ fun PlayerScreen(
         showLyrics && supportsLyrics -> PlayerPresentation.Lyrics
         else -> PlayerPresentation.Artwork
     }
+    val carLyrics = BuildConfig.FLYME_AUTO && presentation == PlayerPresentation.Lyrics
     val displayedLyrics = remember(
         track.lyrics, lyricTranslationEnabled, lyricPronunciationEnabled, lyricsEnhancementsReady,
     ) {
@@ -667,13 +670,44 @@ fun PlayerScreen(
             .focusRequester(playerFocusRequester)
             .focusable(enabled = isActiveScreen),
     ) {
-        PlayerBackdrop(
+        if (!carLyrics) PlayerBackdrop(
             track = track,
             animate = isVisibleOnScreen && isPlaying && !lowPerformanceMode,
             audioSpectrum = audioSpectrum,
             modifier = Modifier.fillMaxSize(),
         )
-        if (BuildConfig.FLYME_AUTO) FlymePlayerStage(
+        if (carLyrics) {
+            val context = LocalContext.current
+            val options = remember(context) { dev.amatv.integration.FlymePlaybackOptions.get(context) }
+            val settings by options.settings.collectAsState()
+            val noOffset = remember { mutableFloatStateOf(0f) }
+            CompositionLocalProvider(LocalFlymePalette provides DarkFlymePalette) {
+                FlymeCarLyrics(
+                    track = displayedTrack,
+                    style = settings.lyricStyle,
+                    position = playbackPosition,
+                    offsetMs = lyricOffsetMs,
+                    playWhenReady = playWhenReady,
+                    visible = isVisibleOnScreen,
+                    lowPerformance = lowPerformanceMode,
+                    canSeek = isActiveScreen && canSeek && !isLiveStream,
+                    canSkipPrevious = canSkipPrevious,
+                    canSkipNext = canSkipNext,
+                    translation = lyricTranslationEnabled,
+                    fontScale = lyricTextSize.scale,
+                    remoteActivity = controlsActivity,
+                    onBack = onBack,
+                    onPlayPause = { activateControl(PlayerControl.PlayPause) },
+                    onPrevious = { activateControl(PlayerControl.Previous) },
+                    onNext = { activateControl(PlayerControl.Next) },
+                    onQueue = { activateControl(PlayerControl.Queue) },
+                    onTranslate = { onLyricTranslationEnabledChange(!lyricTranslationEnabled) },
+                    onSeek = { target -> if (isActiveScreen) onSeekBy(target - playbackPosition.value) },
+                ) {
+                    LyricsUnavailablePanel(lyricsLoading, lyricsLookupFailed, lyricsTransientFailure, noOffset)
+                }
+            }
+        } else if (BuildConfig.FLYME_AUTO) FlymePlayerStage(
             onSwipeBack = { if (isActiveScreen) onBack() },
             track = displayedTrack,
             presentation = presentation,
@@ -776,7 +810,7 @@ fun PlayerScreen(
             },
             modifier = Modifier.fillMaxSize(),
         )
-        if (BuildConfig.FLYME_AUTO && isActiveScreen) {
+        if (BuildConfig.FLYME_AUTO && isActiveScreen && !carLyrics) {
             FlymeBackButton(
                 onClick = {
                     // The queue covers the controls column, so back closes it first.
