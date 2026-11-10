@@ -6,9 +6,9 @@ import dev.amatv.model.CatalogKind
 import dev.amatv.model.CatalogOpenAction
 import dev.amatv.model.Track
 import dev.amatv.model.openAction
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -37,6 +37,7 @@ internal fun Track.catalogAlbum(): Track = copy(resourceId = null, resourceType 
 /** Browsing never touches the playback queue. A dismissed request cannot reopen the page. */
 internal class CollectionBrowser(
     private val scope: CoroutineScope,
+    private val peek: (Track) -> List<Track>? = { null },
     private val load: suspend (Track) -> List<Track>,
 ) {
     private val mutableState = MutableStateFlow(CollectionBrowserState())
@@ -65,19 +66,24 @@ internal class CollectionBrowser(
     private fun load(collection: Track, fullAlbum: Boolean) {
         val request = ++generation
         job?.cancel()
-        mutableState.value = CollectionBrowserState(collection, loading = true, fullAlbum = fullAlbum)
+        val target = if (fullAlbum) collection.catalogAlbum() else collection
+        val cached = peek(target)
+        mutableState.value = CollectionBrowserState(
+            collection, cached.orEmpty(), loading = cached == null, fullAlbum = fullAlbum,
+        )
         job = scope.launch {
             try {
-                val tracks = load(if (fullAlbum) collection.catalogAlbum() else collection)
+                val tracks = load(target)
                 if (request == generation) {
                     mutableState.value = CollectionBrowserState(collection, tracks, fullAlbum = fullAlbum)
                 }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
             } catch (_: Exception) {
+                ensureActive()
                 if (request == generation) {
                     mutableState.value = CollectionBrowserState(
-                        collection, error = R.string.browse_tracks_error_detail, fullAlbum = fullAlbum,
+                        collection, cached.orEmpty(),
+                        error = if (cached == null) R.string.browse_tracks_error_detail else null,
+                        fullAlbum = fullAlbum,
                     )
                 }
             }

@@ -7,9 +7,9 @@ import dev.amatv.model.ContentShelf
 import dev.amatv.model.CatalogOpenAction
 import dev.amatv.model.Track
 import dev.amatv.model.openAction
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -35,6 +35,8 @@ internal data class LibraryArtistState(
 internal class LibraryArtistBrowser(
     private val scope: CoroutineScope,
     private val loadCatalog: suspend (Track) -> CatalogArtistPage = { CatalogArtistPage() },
+    private val peekCatalog: (Track) -> CatalogArtistPage? = { null },
+    private val peekAlbums: (Track) -> LibraryPage? = { null },
     private val load: suspend (Track, String?) -> LibraryPage,
 ) {
     private val mutableState = MutableStateFlow(LibraryArtistState())
@@ -47,17 +49,23 @@ internal class LibraryArtistBrowser(
     fun open(artist: Track) {
         require(artist.openAction == CatalogOpenAction.OpenArtist)
         close()
-        mutableState.value = LibraryArtistState(artist = artist, catalogLoading = true)
+        val catalog = peekCatalog(artist)
+        val savedAlbums = if (artist.isLibraryArtist) peekAlbums(artist) else null
+        mutableState.value = LibraryArtistState(
+            artist = artist,
+            albums = savedAlbums?.items.orEmpty(),
+            catalog = catalog ?: CatalogArtistPage(),
+            catalogLoading = catalog == null,
+        )
         if (artist.isLibraryArtist) request(null)
         val requestGeneration = generation
         catalogJob = scope.launch {
             val page = try {
                 loadCatalog(artist)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
             } catch (_: Exception) {
-                // The saved albums still work; the catalog part simply stays absent.
-                CatalogArtistPage()
+                ensureActive()
+                // A network error must not erase a previously displayed artist page.
+                catalog ?: CatalogArtistPage()
             }
             if (requestGeneration == generation) {
                 mutableState.value = mutableState.value.copy(catalog = page, catalogLoading = false)
@@ -90,11 +98,11 @@ internal class LibraryArtistBrowser(
                 }
                 visited += page.requestedPage
                 mutableState.value = mutableState.value.copy(
-                    albums = mergeLibraryPage(before.albums, page.items), nextPage = page.nextPage,
+                    albums = mergeLibraryPage(if (next == null) emptyList() else before.albums, page.items),
+                    nextPage = page.nextPage,
                     loading = false, failed = false)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
             } catch (_: Exception) {
+                ensureActive()
                 if (requestGeneration == generation) {
                     mutableState.value = mutableState.value.copy(loading = false, failed = true)
                 }

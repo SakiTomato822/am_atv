@@ -449,6 +449,7 @@ fun AmAtvApp() {
     }
 
     fun refreshAllContent() {
+        services.clearDetailPages()
         resetLibraryPagination()
         connectionState = services.connectionState
         shelvesByDestination = emptyMap()
@@ -2141,8 +2142,11 @@ fun AmAtvApp() {
                         },
                         onOpenTrack = { item, q -> playTrack(item, contextQueue = q) },
                         loadCollection = services::collectionTracks,
+                        cachedCollection = services::cachedCollectionTracks,
                         loadArtistAlbums = services::libraryArtistAlbumsPage,
+                        cachedArtistAlbums = services::cachedArtistAlbums,
                         loadArtistCatalog = services::catalogArtistPage,
+                        cachedArtistCatalog = services::cachedArtistPage,
                         loadArtistViewMore = services::catalogArtistViewMore,
                         onPlayCollection = ::playCollection,
                         lyricOffsetMs = lyricOffsetMs,
@@ -2353,8 +2357,11 @@ private fun BrowseShell(
     onSearch: (String) -> Unit,
     onOpenTrack: (Track, List<Track>) -> Unit,
     loadCollection: suspend (Track) -> List<Track>,
+    cachedCollection: (Track) -> List<Track>? = { null },
     loadArtistAlbums: suspend (Track, String?) -> LibraryPage,
+    cachedArtistAlbums: (Track) -> LibraryPage? = { null },
     loadArtistCatalog: suspend (Track) -> dev.amatv.integration.CatalogArtistPage = { dev.amatv.integration.CatalogArtistPage() },
+    cachedArtistCatalog: (Track) -> dev.amatv.integration.CatalogArtistPage? = { null },
     loadArtistViewMore: suspend (String) -> List<Track> = { emptyList() },
     onPlayCollection: (Track, List<Track>, Int, Boolean) -> Unit,
     detailRequest: Track? = null,
@@ -2383,13 +2390,19 @@ private fun BrowseShell(
     }
     val scope = rememberCoroutineScope()
     val currentLoader by rememberUpdatedState(loadCollection)
-    val browser = remember(destination) { CollectionBrowser(scope) { currentLoader(it) } }
+    val currentCachedCollection by rememberUpdatedState(cachedCollection)
+    val browser = remember(destination) { CollectionBrowser(scope, { currentCachedCollection(it) }) { currentLoader(it) } }
     val collectionState by browser.state.collectAsState()
     val collection = collectionState.collection
     val currentArtistLoader by rememberUpdatedState(loadArtistAlbums)
     val currentArtistCatalogLoader by rememberUpdatedState(loadArtistCatalog)
+    val currentCachedArtistCatalog by rememberUpdatedState(cachedArtistCatalog)
+    val currentCachedArtistAlbums by rememberUpdatedState(cachedArtistAlbums)
     val artistBrowser = remember(destination) {
-        LibraryArtistBrowser(scope, { currentArtistCatalogLoader(it) }) { item, next -> currentArtistLoader(item, next) }
+        LibraryArtistBrowser(scope, { currentArtistCatalogLoader(it) },
+            { currentCachedArtistCatalog(it) }, { currentCachedArtistAlbums(it) }) { item, next ->
+            currentArtistLoader(item, next)
+        }
     }
     val artistState by artistBrowser.state.collectAsState()
     val artist = artistState.artist

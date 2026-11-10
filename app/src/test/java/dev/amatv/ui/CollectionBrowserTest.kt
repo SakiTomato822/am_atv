@@ -47,4 +47,19 @@ class CollectionBrowserTest {
         assertEquals("loaded", browser.state.value.tracks.single().id)
         scope.cancel()
     }
+
+    @Test fun cachedTracksAreUsableDuringRefreshAndRemainOnFailure() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val cached = listOf(collection("cached"))
+        val refresh = CompletableDeferred<List<Track>>()
+        val browser = CollectionBrowser(scope, peek = { cached }) { refresh.await() }
+
+        browser.open(collection("playlist"))
+        assertEquals(cached, browser.state.value.tracks)
+        assertFalse(browser.state.value.loading)
+        refresh.completeExceptionally(IllegalStateException("offline"))
+        assertEquals(cached, browser.state.value.tracks)
+        assertNull(browser.state.value.error)
+        scope.cancel()
+    }
 }

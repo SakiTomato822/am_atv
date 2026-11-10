@@ -12,8 +12,11 @@ import dev.amatv.model.LyricLine
 import dev.amatv.model.Track
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
@@ -60,6 +63,14 @@ class MusicServices(context: Context) : RecommendationProvider {
     val nativeMediaStatus get() = flymeMediaSource?.status
     private val playbackPreparation = Mutex()
     private val shelfSnapshots = ShelfSnapshots(appContext)
+    private val detailPageScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val collectionPages = DetailPageCache<DetailKey, List<Track>>(detailPageScope, maxEntries = 32)
+    private val artistPages = DetailPageCache<DetailKey, CatalogArtistPage>(detailPageScope, maxEntries = 32)
+    private val artistLibraryPages = DetailPageCache<Pair<DetailKey, String?>, LibraryPage>(detailPageScope, maxEntries = 64)
+    private val artistViewPages = DetailPageCache<String, List<Track>>(detailPageScope, maxEntries = 16)
+
+    private data class DetailKey(val type: String, val id: String)
+    private fun Track.detailKey() = DetailKey(resourceType ?: catalogKind.name, resourceId ?: catalogId ?: id)
     private val api = AppleMusicApi(
         storefront = BuildConfig.APPLE_MUSIC_STOREFRONT,
         developerTokens = developerTokens,
@@ -191,6 +202,7 @@ class MusicServices(context: Context) : RecommendationProvider {
             data.getStringExtra(MusicKitWebAuthActivity.EXTRA_USER_TOKEN),
         ) { AppText.text(R.string.services_auth_invalid_user_token) }
         tokenStore.writeUserToken(userToken)
+        clearDetailPages()
         mediaSession.clear()
         flymeMediaSource?.clear()
         bridge.release()
@@ -218,6 +230,7 @@ class MusicServices(context: Context) : RecommendationProvider {
         bridge.release()
         releaseStationEngine()
         tokenStore.clear()
+        clearDetailPages()
     }
 
     suspend fun recommendations(): List<Track> = api.recommendations()
@@ -234,7 +247,8 @@ class MusicServices(context: Context) : RecommendationProvider {
     suspend fun libraryPlaylistsPage(nextPage: String? = null): LibraryPage = api.libraryPlaylistsPage(nextPage)
     suspend fun librarySongsPage(nextPage: String? = null): LibraryPage = api.librarySongsPage(nextPage)
     suspend fun libraryArtistAlbumsPage(artist: Track, nextPage: String? = null): LibraryPage =
-        api.libraryArtistAlbumsPage(artist, nextPage)
+        artistLibraryPages.getOrLoad(artist.detailKey() to nextPage) { api.libraryArtistAlbumsPage(artist, nextPage) }
+    fun cachedArtistAlbums(artist: Track): LibraryPage? = artistLibraryPages.peek(artist.detailKey() to null)
     suspend fun charts(types: String = "albums,songs,playlists"): List<Track> =
         api.charts(types)
     suspend fun liveRadio(): List<Track> = api.liveRadio()
@@ -243,17 +257,32 @@ class MusicServices(context: Context) : RecommendationProvider {
         api.createContinuousStation(songId)
     override suspend fun amStationNextTracks(stationId: String): List<Track> =
         api.stationNextTracks(stationId)
-    suspend fun collectionTracks(collection: Track): List<Track> = api.collectionTracks(collection)
+    suspend fun collectionTracks(collection: Track): List<Track> =
+        collectionPages.getOrLoad(collection.detailKey()) { api.collectionTracks(collection) }
+    fun cachedCollectionTracks(collection: Track): List<Track>? = collectionPages.peek(collection.detailKey())
 
-    suspend fun catalogArtistPage(artist: Track): CatalogArtistPage = api.catalogArtistPage(artist)
+    suspend fun catalogArtistPage(artist: Track): CatalogArtistPage =
+        artistPages.getOrLoad(artist.detailKey()) { api.catalogArtistPage(artist) }
+    fun cachedArtistPage(artist: Track): CatalogArtistPage? = artistPages.peek(artist.detailKey())
 
-    suspend fun catalogArtistViewMore(moreHref: String): List<Track> = api.catalogArtistViewMore(moreHref)
+    suspend fun catalogArtistViewMore(moreHref: String): List<Track> =
+        artistViewPages.getOrLoad(moreHref) { api.catalogArtistViewMore(moreHref) }
+
+    fun clearDetailPages() {
+        collectionPages.clear()
+        artistPages.clear()
+        artistLibraryPages.clear()
+        artistViewPages.clear()
+    }
 
     suspend fun catalogArtistOf(item: Track): Track? = api.catalogArtistOf(item)
 
     suspend fun isFavorite(catalogSongId: String): Boolean? = api.isFavorite(catalogSongId)
 
-    suspend fun addFavorite(catalogSongId: String) = api.addFavorite(catalogSongId)
+    suspend fun addFavorite(catalogSongId: String) {
+        api.addFavorite(catalogSongId)
+        collectionPages.clear()
+    }
 
     suspend fun catalogAlbumOf(song: Track): Track? = api.catalogAlbumOf(song)
 
@@ -344,6 +373,8 @@ class MusicServices(context: Context) : RecommendationProvider {
         flymeMediaSource?.publish(snapshot.copy(canSkipNext = canSkipNext, canSkipPrevious = canSkipPrevious))
     }
     fun release() {
+        clearDetailPages()
+        detailPageScope.cancel()
         songSpectrum.release()
         mediaSession.release()
         flymeMediaSource?.release()
