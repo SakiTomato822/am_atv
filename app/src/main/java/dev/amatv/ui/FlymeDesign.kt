@@ -782,6 +782,9 @@ internal fun FlymeTopBar(
 ) {
     val sideWidth = 267.dp
     val accountLabel = destinationLabel(Destination.Account)
+    // Pages scroll under the bar: a mostly opaque wash of the page color keeps the capsules
+    // readable over artwork and text, while a little of what passes beneath still shows.
+    val barGlass = LocalFlymePalette.current.scrim.copy(alpha = BAR_GLASS_ALPHA)
     Row(
         modifier.fillMaxWidth().padding(start = 40.dp, end = 40.dp, top = 17.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -805,7 +808,8 @@ internal fun FlymeTopBar(
         }
         if (!capsuleOnly) Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             Row(
-                Modifier.clip(RoundedCornerShape(22.dp)).background(FlymeInk.copy(alpha = 0.09f)).padding(4.dp),
+                Modifier.clip(RoundedCornerShape(22.dp)).background(barGlass).background(FlymeInk.copy(alpha = 0.09f))
+                    .padding(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -843,6 +847,7 @@ internal fun FlymeTopBar(
                     Modifier.fillMaxWidth().height(46.dp)
                         .onGloballyPositioned { onMiniPlayerPlaced(it.boundsInWindow().center) }
                         .clip(RoundedCornerShape(23.dp))
+                        .background(barGlass)
                         .background(FlymeInk.copy(alpha = if (selected == Destination.NowPlaying) 0.18f else 0.09f))
                         .padding(start = 6.dp, end = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -896,3 +901,5 @@ internal fun flymeLyricAlpha(alpha: Float): Float =
     if (LocalFlymePalette.current.light) alpha + (1f - alpha) * LIGHT_LYRIC_LIFT else alpha
 
 private const val LIGHT_LYRIC_LIFT = 0.18f
+
+private const val BAR_GLASS_ALPHA = 0.8f

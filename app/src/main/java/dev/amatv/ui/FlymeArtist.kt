@@ -1,5 +1,14 @@
 package dev.amatv.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import dev.amatv.model.ContentShelf
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -63,8 +72,12 @@ internal fun FlymeArtistScreen(
     onLoadMoreLibrary: () -> Unit,
     onOpenAlbum: (Track) -> Unit,
     onOpenTrack: (Track, List<Track>) -> Unit,
+    loadShelfMore: suspend (String) -> List<Track> = { emptyList() },
 ) {
     val artist = state.artist ?: return
+    // "See All" on a shelf replaces the shelves with that shelf's full grid; Back returns.
+    var seeAll by remember(artist.id) { mutableStateOf<ContentShelf?>(null) }
+    BackHandler(enabled = seeAll != null) { seeAll = null }
     val hero = state.catalog.artist?.takeIf { it.artworkUrl != null } ?: artist
     val topSongs = state.catalog.topSongs
     val open: (Track, List<Track>) -> Unit = { item, queue ->
@@ -94,10 +107,16 @@ internal fun FlymeArtistScreen(
                     }
                 }
             }
-            FlymeArtistShelves(state, topSongs, onLoadMoreLibrary, open, Modifier.weight(1f))
+            val shown = seeAll
+            if (shown != null) {
+                FlymeArtistSeeAll(shown, loadShelfMore, open, Modifier.weight(1f))
+            } else {
+                FlymeArtistShelves(state, topSongs, onLoadMoreLibrary, open, { seeAll = it }, Modifier.weight(1f))
+            }
         }
     }
-        FlymeBackButton(onBack, Modifier.padding(start = 24.dp, top = 22.dp).focusRequester(firstFocus))
+        FlymeBackButton({ if (seeAll != null) seeAll = null else onBack() },
+            Modifier.padding(start = 24.dp, top = 22.dp).focusRequester(firstFocus))
     }
 }
 
@@ -107,6 +126,7 @@ private fun FlymeArtistShelves(
     topSongs: List<Track>,
     onLoadMoreLibrary: () -> Unit,
     open: (Track, List<Track>) -> Unit,
+    onSeeAll: (ContentShelf) -> Unit,
     modifier: Modifier,
 ) {
     val artist = state.artist ?: return
@@ -137,7 +157,11 @@ private fun FlymeArtistShelves(
         state.catalogShelves.forEach { shelf ->
             if (shelf.items.isEmpty()) return@forEach
             item(key = "shelf-${shelf.id}") {
-                ArtistHeading(shelf.title, Modifier.padding(top = 24.dp))
+                if (shelf.moreHref != null) {
+                    ArtistSeeAllHeading(shelf.title, Modifier.padding(top = 24.dp)) { onSeeAll(shelf) }
+                } else {
+                    ArtistHeading(shelf.title, Modifier.padding(top = 24.dp))
+                }
                 ArtistCardRow(shelf.items) { open(it, shelf.items) }
             }
         }
@@ -171,6 +195,66 @@ private val TOP_SONG_HEIGHT = 56.dp
 private val TOP_SONG_GAP = 4.dp
 private val TOP_SONG_WIDTH = 340.dp
 private val EDGE_GAP = 40.dp
+
+/** A shelf title with Apple Music's chevron: tapping it opens the whole shelf. */
+@Composable
+private fun ArtistSeeAllHeading(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    FocusSurface(
+        onClick = onClick,
+        modifier = modifier.padding(bottom = 4.dp),
+        cornerRadius = 8.dp,
+        focusedScale = 1.02f,
+        padding = PaddingValues(end = 6.dp),
+        background = Color.Transparent,
+        focusedBackground = FlymeInk.copy(alpha = 0.08f),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(text, color = FlymeInk, fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp)
+            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = FlymeInk.copy(alpha = 0.55f),
+                modifier = Modifier.size(26.dp))
+        }
+    }
+    Spacer(Modifier.height(6.dp))
+}
+
+/**
+ * One shelf in full: the items already shown, then the rest from Apple, as a grid of cards.
+ * The rest loads once per shelf; a failed load keeps what is there.
+ */
+@Composable
+private fun FlymeArtistSeeAll(
+    shelf: ContentShelf,
+    loadMore: suspend (String) -> List<Track>,
+    open: (Track, List<Track>) -> Unit,
+    modifier: Modifier,
+) {
+    var items by remember(shelf.id) { mutableStateOf(shelf.items) }
+    var loading by remember(shelf.id) { mutableStateOf(shelf.moreHref != null) }
+    LaunchedEffect(shelf.id) {
+        val href = shelf.moreHref ?: return@LaunchedEffect
+        val more = runCatching { loadMore(href) }.getOrDefault(emptyList())
+        items = (items + more).distinctBy { it.id }
+        loading = false
+    }
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(150.dp),
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 12.dp, end = EDGE_GAP, top = 54.dp, bottom = 40.dp),
+        horizontalArrangement = Arrangement.spacedBy(18.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        item(key = "title", span = { GridItemSpan(maxLineSpan) }) {
+            Text(shelf.title, color = FlymeInk, fontSize = 26.sp, fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.4).sp)
+        }
+        gridItemsIndexed(items, key = { index, item -> "${item.id}#$index" }) { _, item ->
+            ArtistCard(item, Modifier.fillMaxWidth()) { open(item, items) }
+        }
+        if (loading) item(key = "loading", span = { GridItemSpan(maxLineSpan) }) {
+            Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), Alignment.Center) { AppleLoadingIndicator() }
+        }
+    }
+}
 
 @Composable
 private fun ArtistHeading(text: String, modifier: Modifier = Modifier) {
@@ -212,29 +296,34 @@ private fun ArtistCardRow(items: List<Track>, onNearEnd: () -> Unit = {}, onOpen
     }
     LazyRow(state = state, horizontalArrangement = Arrangement.spacedBy(18.dp), contentPadding = PaddingValues(end = EDGE_GAP)) {
         itemsIndexed(items, key = { index, item -> "${item.id}#$index" }) { _, item ->
-            FocusSurface(
-                onClick = { onOpen(item) },
-                modifier = Modifier.width(150.dp),
-                cornerRadius = 10.dp,
-                focusedScale = 1.04f,
-                background = Color.Transparent,
-                focusedBackground = Color.Transparent,
-            ) {
-                Column {
-                    MotionArtwork(track = item, modifier = Modifier.size(150.dp), animate = false,
-                        cornerRadius = if (item.catalogKind == CatalogKind.Artist) 75.dp else 9.dp)
-                    ExplicitTitle(item.title, item.isExplicit,
-                        TextStyle(color = FlymeInk, fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
-                        modifier = Modifier.padding(top = 8.dp), badgeSize = 12.dp)
-                    // Albums carry only their kind in this field; songs show their album.
-                    val detail = if (item.catalogKind == CatalogKind.Song) {
-                        item.album.takeIf { it.isNotBlank() && it != item.title }
-                    } else null
-                    if (detail != null) {
-                        Text(detail, color = FlymeInk.copy(alpha = 0.5f), fontSize = 11.sp, maxLines = 1,
-                            overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
-                    }
-                }
+            ArtistCard(item, Modifier.width(150.dp)) { onOpen(item) }
+        }
+    }
+}
+
+@Composable
+private fun ArtistCard(item: Track, modifier: Modifier, onClick: () -> Unit) {
+    FocusSurface(
+        onClick = onClick,
+        modifier = modifier,
+        cornerRadius = 10.dp,
+        focusedScale = 1.04f,
+        background = Color.Transparent,
+        focusedBackground = Color.Transparent,
+    ) {
+        Column {
+            MotionArtwork(track = item, modifier = Modifier.fillMaxWidth().aspectRatio(1f), animate = false,
+                cornerRadius = if (item.catalogKind == CatalogKind.Artist) 500.dp else 9.dp)
+            ExplicitTitle(item.title, item.isExplicit,
+                TextStyle(color = FlymeInk, fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                modifier = Modifier.padding(top = 8.dp), badgeSize = 12.dp)
+            // Albums carry only their kind in this field; songs show their album.
+            val detail = if (item.catalogKind == CatalogKind.Song) {
+                item.album.takeIf { it.isNotBlank() && it != item.title }
+            } else null
+            if (detail != null) {
+                Text(detail, color = FlymeInk.copy(alpha = 0.5f), fontSize = 11.sp, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
             }
         }
     }

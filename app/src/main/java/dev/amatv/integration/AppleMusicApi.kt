@@ -399,6 +399,25 @@ class AppleMusicApi(
         return CatalogArtistPage(hero, topSongs, shelves.filterNot { it.id.endsWith("-top-songs") })
     }
 
+    /**
+     * The rest of an artist page shelf (Apple Music's "See All"), following [moreHref] page by page.
+     * Only catalog artist views are followed; at most [ARTIST_VIEW_MAX_PAGES] pages.
+     */
+    suspend fun catalogArtistViewMore(moreHref: String): List<Track> {
+        require(moreHref.startsWith("/v1/catalog/") && "/artists/" in moreHref && "/view/" in moreHref) {
+            "Not an artist view page"
+        }
+        val items = mutableListOf<Track>()
+        var next: String? = moreHref
+        repeat(ARTIST_VIEW_MAX_PAGES) {
+            val href = next ?: return items
+            val root = requestRoot(href, needsUserToken = false)
+            items += withContext(parseDispatcher) { parseResources(root) }
+            next = root.optString("next").takeIf { it.startsWith("/v1/catalog/") }
+        }
+        return items
+    }
+
     /** The catalog artist of a song or album, so the player and album pages can open it. */
     suspend fun catalogArtistOf(item: Track): Track? = catalogRelation(item, "artists", CatalogKind.Artist)
 
@@ -438,7 +457,8 @@ class AppleMusicApi(
             // Apple names each view in the storefront's language (e.g. 參與作品, 相似藝人).
             val title = viewObject.optJSONObject("attributes")?.optString("title")?.takeIf { it.isNotBlank() }
                 ?: AppText.text(fallbackTitle)
-            items.takeIf { it.isNotEmpty() }?.let { ContentShelf("artist-$catalogId-$view", title, it) }
+            val more = viewObject.optString("next").takeIf { it.startsWith("/v1/catalog/") }
+            items.takeIf { it.isNotEmpty() }?.let { ContentShelf("artist-$catalogId-$view", title, it, moreHref = more) }
         }
     }
 
@@ -962,6 +982,8 @@ data class CatalogArtistPage(
     val topSongs: List<Track> = emptyList(),
     val shelves: List<ContentShelf> = emptyList(),
 )
+
+private const val ARTIST_VIEW_MAX_PAGES = 15
 
 /** Apple Music Web's artist page sections, in its order. Music videos are left out: the SDK plays audio. */
 private val ARTIST_VIEWS = listOf(

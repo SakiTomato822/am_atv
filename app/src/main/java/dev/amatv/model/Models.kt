@@ -82,6 +82,8 @@ data class ContentShelf(
     val title: String,
     val items: List<Track>,
     val featured: Boolean = false,
+    /** Where the rest of this shelf continues, when Apple has more than it sent. */
+    val moreHref: String? = null,
 )
 
 enum class CatalogKind {

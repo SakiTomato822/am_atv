@@ -247,6 +247,8 @@ class MusicServices(context: Context) : RecommendationProvider {
 
     suspend fun catalogArtistPage(artist: Track): CatalogArtistPage = api.catalogArtistPage(artist)
 
+    suspend fun catalogArtistViewMore(moreHref: String): List<Track> = api.catalogArtistViewMore(moreHref)
+
     suspend fun catalogArtistOf(item: Track): Track? = api.catalogArtistOf(item)
 
     suspend fun isFavorite(catalogSongId: String): Boolean? = api.isFavorite(catalogSongId)
