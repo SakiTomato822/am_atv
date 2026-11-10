@@ -13,7 +13,6 @@
         android:networkSecurityConfig="@xml/gecko_auth_network_security"
         tools:replace="android:label">
         <activity android:name=".MainActivity"
-            android:screenOrientation="userLandscape"
             android:resizeableActivity="true"
             android:windowSoftInputMode="adjustResize" />
         <activity android:name=".integration.GeckoMusicKitAuthActivity"
@@ -24,7 +23,6 @@
             android:enabled="${flymeRadioProbeEnabled}"
             android:exported="true" android:permission="android.permission.DUMP"
             android:process=":gecko_auth"
-            android:screenOrientation="userLandscape"
             android:theme="@style/Theme.AmAtv" />
     </application>
 </manifest>

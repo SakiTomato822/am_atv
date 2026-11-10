@@ -4,6 +4,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class CarLayoutTest {
+    @Test fun portraitUsesTheAvailableWidthInsteadOfTheLandscapeFloor() {
+        assertEquals(0.9f, carContentScale(360f, 800f), 0.0001f)
+        assertEquals(1.5f, carContentScale(800f, 1_440f), 0.0001f)
+    }
     @Test fun fuelDesignViewport() {
         assertEquals(1.5f, carContentScale(1920f, 968f), 0.0001f)
     }

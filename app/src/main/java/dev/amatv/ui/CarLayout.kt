@@ -35,6 +35,7 @@ import dev.amatv.BuildConfig
 
 /** How much of the bottom of the car layout the on-screen keyboard covers, in layout dp. */
 val LocalCarKeyboardOverlap = staticCompositionLocalOf { 0.dp }
+internal val LocalCarPortrait = staticCompositionLocalOf { false }
 
 /** Scale the app's content, never change the head unit's global wm density. */
 @Composable
@@ -48,9 +49,10 @@ fun CarLayout(content: @Composable () -> Unit) {
         val keyboardVisible = ViewCompat.getRootWindowInsets(view)
             ?.isVisible(WindowInsetsCompat.Type.ime()) == true
         val fullHeight = window.fullHeight(maxWidth, maxHeight, keyboardVisible)
+        val portrait = fullHeight > maxWidth
         // Match autoenergy-fuel-mod's 1920x968 design reference and fit both axes.
         // Insets can reduce this to 1920x896; use the actual content window.
-        val scale = if (BuildConfig.FLYME_UI_PREVIEW) {
+        val scale = if (BuildConfig.FLYME_UI_PREVIEW && !portrait) {
             // Preview the car viewport on a high-density Xiaomi phone as well.
             (1.5f * minOf(maxWidth.value / 1920f, fullHeight.value / 968f)).coerceIn(0.4f, 1.5f)
         } else carContentScale(maxWidth.value, fullHeight.value)
@@ -59,6 +61,7 @@ fun CarLayout(content: @Composable () -> Unit) {
                 LocalFlymePalette provides if (light) LightFlymePalette else DarkFlymePalette,
                 LocalDensity provides Density(systemDensity.density * scale, systemDensity.fontScale),
                 LocalCarKeyboardOverlap provides (fullHeight - maxHeight) / scale,
+                LocalCarPortrait provides portrait,
             ) {
                 Box(
                     Modifier.fillMaxWidth().wrapContentHeight(Alignment.Top, unbounded = true)
@@ -84,7 +87,8 @@ private class CarWindowSize {
 }
 
 internal fun carContentScale(widthDp: Float, heightDp: Float): Float =
-    (1.5f * minOf(widthDp / 1920f, heightDp / 968f)).coerceIn(1f, 1.5f)
+    if (heightDp > widthDp) (widthDp / 400f).coerceIn(0.65f, 1.5f)
+    else (1.5f * minOf(widthDp / 1920f, heightDp / 968f)).coerceIn(1f, 1.5f)
 
 /** Light or dark, from Settings: fixed, the system night mode, or the chosen hours of the day. */
 @Composable
