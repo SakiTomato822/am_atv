@@ -238,25 +238,12 @@ private fun PortraitControls(
     onTranslate: () -> Unit,
     onSeek: (Long) -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth().automationId("portrait-lyric-controls")
-        .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 20.dp)) {
-        FlymeSeekBar(position, durationMs, canSeek, onSeek)
-        Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween) {
-            FlymeGlyphButton(Icons.Rounded.Translate, stringResource(R.string.player_lyrics_translation), onTranslate,
-                size = 52.dp, iconSize = 22.dp, selected = translation, tint = Color.White)
-            FlymeGlyphButton(Icons.Rounded.SkipPrevious, stringResource(R.string.player_previous_track), onPrevious,
-                size = 60.dp, iconSize = 34.dp, enabled = canSkipPrevious, tint = Color.White)
-            FlymeGlyphButton(if (playWhenReady) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                stringResource(if (playWhenReady) R.string.player_pause else R.string.player_play), onPlayPause,
-                Modifier.automationId("portrait-lyric-play").clip(CircleShape).background(Color.White.copy(alpha = 0.16f)),
-                size = 72.dp, iconSize = 40.dp, tint = Color.White)
-            FlymeGlyphButton(Icons.Rounded.SkipNext, stringResource(R.string.player_next_track), onNext,
-                size = 60.dp, iconSize = 34.dp, enabled = canSkipNext, tint = Color.White)
-            FlymeGlyphButton(Icons.AutoMirrored.Rounded.QueueMusic, stringResource(R.string.player_queue), onQueue,
-                size = 52.dp, iconSize = 24.dp, tint = Color.White)
-        }
-    }
+    LyricControlCard(
+        position, durationMs, playWhenReady, canSeek, canSkipPrevious, canSkipNext, translation,
+        onPlayPause, onPrevious, onNext, onQueue, onTranslate, onSeek, compact = true,
+        modifier = Modifier.automationId("portrait-lyric-controls").fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
+    )
 }
 
 private val PhraseScripts = setOf(

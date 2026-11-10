@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -223,45 +224,18 @@ internal fun FlymeCarLyrics(
                     size = 56.dp, iconSize = 26.dp, tint = Color.White)
             }
             val controls = if (soak) Modifier.align(Alignment.BottomStart).padding(start = 40.dp, bottom = 36.dp).width(500.dp)
-                else Modifier.padding(start = (artLeft - 20.dp).coerceAtLeast(0.dp), top = 414.dp).width(380.dp)
+                else Modifier.padding(start = (artLeft - 30.dp).coerceAtLeast(0.dp), top = 412.dp).width(400.dp)
             AnimatedVisibility(controlsVisible, controls, enter = fadeIn(tween(300)), exit = fadeOut(tween(300))) {
-                val panel = RoundedCornerShape(30.dp)
-                Box(Modifier.automationId("car-lyric-controls").clip(panel).pointerInput(Unit) {
-                    awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                        reveal()
-                    }
-                }) {
-                    if (soak) {
-                        if (!lowPerformance) MotionArtwork(track, Modifier.matchParentSize().blur(28.dp)
-                            .graphicsLayer { alpha = 0.35f }, animate = false, cornerRadius = 30.dp)
-                        Box(Modifier.matchParentSize().background(Brush.verticalGradient(
-                            listOf(Color.White.copy(alpha = 0.20f), Color.White.copy(alpha = 0.08f)),
-                        )).border(1.dp, Color.White.copy(alpha = 0.28f), panel))
-                    }
-                    Column(Modifier.padding(horizontal = if (soak) 26.dp else 8.dp,
-                        vertical = if (soak) 20.dp else 6.dp)) {
-                        FlymeSeekBar(position, track.durationMs, canSeek, onSeek)
-                        Spacer(Modifier.height(8.dp))
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween) {
-                            FlymeGlyphButton(Icons.Rounded.Translate, stringResource(R.string.player_lyrics_translation),
-                                onTranslate, Modifier.automationId("car-lyric-translate"), size = 56.dp, iconSize = 24.dp,
-                                selected = translation, tint = Color.White)
-                            FlymeGlyphButton(Icons.Rounded.SkipPrevious, stringResource(R.string.player_previous_track),
-                                onPrevious, size = 72.dp, iconSize = 38.dp, enabled = canSkipPrevious, tint = Color.White)
-                            FlymeGlyphButton(if (playWhenReady) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                stringResource(if (playWhenReady) R.string.player_pause else R.string.player_play),
-                                onPlayPause, Modifier.automationId("car-lyric-play").then(
-                                    if (soak) Modifier.background(Color.White, RoundedCornerShape(44.dp)) else Modifier,
-                                ), size = 88.dp, iconSize = 52.dp, tint = if (soak) Color(0xFF141218) else Color.White)
-                            FlymeGlyphButton(Icons.Rounded.SkipNext, stringResource(R.string.player_next_track),
-                                onNext, size = 72.dp, iconSize = 38.dp, enabled = canSkipNext, tint = Color.White)
-                            FlymeGlyphButton(Icons.AutoMirrored.Rounded.QueueMusic, stringResource(R.string.player_queue),
-                                onQueue, size = 56.dp, iconSize = 25.dp, tint = Color.White)
+                LyricControlCard(
+                    position, track.durationMs, playWhenReady, canSeek, canSkipPrevious, canSkipNext, translation,
+                    onPlayPause, onPrevious, onNext, onQueue, onTranslate, onSeek, compact = false,
+                    modifier = Modifier.automationId("car-lyric-controls").pointerInput(Unit) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            reveal()
                         }
-                    }
-                }
+                    },
+                )
             }
         }
     }
@@ -469,5 +443,63 @@ internal fun SoakGlow(palette: List<Color>) {
             center = Offset(size.width * 0.86f, size.height * 0.80f), radius = size.width * 0.42f))
         drawRect(Brush.radialGradient(listOf(cool.copy(alpha = 0.20f), Color.Transparent),
             center = Offset(size.width * 0.74f, size.height * 0.08f), radius = size.width * 0.34f))
+    }
+}
+
+/**
+ * The glass transport card from the H5 design: progress with times, then translate, previous and next
+ * in soft circles, play in a white circle, and the queue. Shared by every lyrics layout.
+ */
+@Composable
+internal fun LyricControlCard(
+    position: State<Long>,
+    durationMs: Long,
+    playWhenReady: Boolean,
+    canSeek: Boolean,
+    canSkipPrevious: Boolean,
+    canSkipNext: Boolean,
+    translation: Boolean,
+    onPlayPause: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onQueue: () -> Unit,
+    onTranslate: () -> Unit,
+    onSeek: (Long) -> Unit,
+    compact: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val panel = RoundedCornerShape(if (compact) 26.dp else 30.dp)
+    val play = if (compact) 76.dp else 88.dp
+    val skip = if (compact) 60.dp else 72.dp
+    val side = if (compact) 48.dp else 56.dp
+    Column(modifier.clip(panel)
+        .background(Color.Black.copy(alpha = 0.22f))
+        .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.18f), Color.White.copy(alpha = 0.06f))))
+        .border(1.dp, Color.White.copy(alpha = 0.26f), panel)
+        .padding(horizontal = if (compact) 20.dp else 26.dp, vertical = if (compact) 16.dp else 20.dp)) {
+        FlymeSeekBar(position, durationMs, canSeek, onSeek)
+        Spacer(Modifier.height(if (compact) 6.dp else 8.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween) {
+            Box(Modifier.size(side).clip(CircleShape)
+                .background(if (translation) Color.White.copy(alpha = 0.20f) else Color.Transparent)
+                .clickable(onClickLabel = stringResource(R.string.player_lyrics_translation), onClick = onTranslate)
+                .automationId("car-lyric-translate"), contentAlignment = Alignment.Center) {
+                Text(stringResource(R.string.flyme_lyric_translate_short), color = Color.White,
+                    fontSize = if (compact) 18.sp else 21.sp, fontWeight = FontWeight.Bold)
+            }
+            FlymeGlyphButton(Icons.Rounded.SkipPrevious, stringResource(R.string.player_previous_track), onPrevious,
+                Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.14f)),
+                size = skip, iconSize = skip * 0.5f, enabled = canSkipPrevious, tint = Color.White)
+            FlymeGlyphButton(if (playWhenReady) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                stringResource(if (playWhenReady) R.string.player_pause else R.string.player_play), onPlayPause,
+                Modifier.automationId("car-lyric-play").clip(CircleShape).background(Color.White),
+                size = play, iconSize = play * 0.5f, tint = Color(0xFF141218))
+            FlymeGlyphButton(Icons.Rounded.SkipNext, stringResource(R.string.player_next_track), onNext,
+                Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.14f)),
+                size = skip, iconSize = skip * 0.5f, enabled = canSkipNext, tint = Color.White)
+            FlymeGlyphButton(Icons.AutoMirrored.Rounded.QueueMusic, stringResource(R.string.player_queue), onQueue,
+                size = side, iconSize = side * 0.45f, tint = Color.White)
+        }
     }
 }

@@ -5,4 +5,5 @@
     <string name="flyme_lyric_soak">取色渐隐</string>
     <string name="flyme_lyric_poster">海报歌词</string>
     <string name="flyme_lyric_list">滚动歌词</string>
+    <string name="flyme_lyric_translate_short">译</string>
 </resources>
