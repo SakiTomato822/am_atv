@@ -1,6 +1,8 @@
 package dev.amatv.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -31,9 +33,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -50,6 +52,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -58,6 +61,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -70,6 +74,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -141,16 +147,20 @@ internal fun FlymeCarLyrics(
             val artLeft = maxWidth * 0.078f
             val palette = rememberArtworkPalette(track.artworkUrl, track.palette)
             if (soak) {
-                val base = lerp(palette.first(), Color(0xFF100D18), 0.72f)
+                // The background is the cover's own dominant colour, darkened, so the fade has nothing to seam against.
+                val base = lerp(palette.first(), Color.Black, 0.55f)
                 Box(Modifier.fillMaxSize().background(base))
                 MotionArtwork(
                     track,
-                    Modifier.fillMaxWidth(0.60f).fillMaxHeight().graphicsLayer {
+                    Modifier.fillMaxWidth(0.62f).fillMaxHeight().graphicsLayer {
                         compositingStrategy = CompositingStrategy.Offscreen
                     }.drawWithContent {
                         drawContent()
-                        drawRect(Brush.horizontalGradient(0f to Color.Black, 0.45f to Color.Black,
-                            1f to Color.Transparent), blendMode = BlendMode.DstIn)
+                        drawRect(Brush.horizontalGradient(
+                            0f to Color.Black, 0.40f to Color.Black, 0.62f to Color.Black.copy(alpha = 0.72f),
+                            0.80f to Color.Black.copy(alpha = 0.32f), 0.92f to Color.Black.copy(alpha = 0.08f),
+                            1f to Color.Transparent,
+                        ), blendMode = BlendMode.DstIn)
                     },
                     animate = false,
                     cornerRadius = 0.dp,
@@ -167,7 +177,7 @@ internal fun FlymeCarLyrics(
                     animate = false, cornerRadius = 14.dp,
                 )
             }
-            if (soak || !controlsVisible) {
+            AnimatedVisibility(soak || !controlsVisible, enter = fadeIn(tween(300)), exit = fadeOut(tween(300))) {
                 Column(Modifier.padding(start = if (soak) lyricsLeft else artLeft, top = if (soak) 40.dp else 426.dp)
                     .padding(end = 58.dp)) {
                     Text(track.title, color = Color.White, fontSize = if (soak) 20.sp else 22.sp,
@@ -183,15 +193,15 @@ internal fun FlymeCarLyrics(
             )) {
                 if (track.lyrics.isEmpty()) emptyContent()
                 else CarLyricRows(track.lyrics, position, offsetMs, soften = !soak && !lowPerformance,
-                    controlsVisible, canSeek, fontScale) { time ->
+                    ripple = !soak && !lowPerformance, controlsVisible, canSeek, fontScale) { time ->
                     reveal()
                     onSeek((time - offsetMs).coerceAtLeast(0L))
                 }
             }
-            if (!controlsVisible && canSeek) {
-                val rail = if (soak) Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                    else Modifier.padding(start = artLeft, top = 494.dp).width(340.dp)
-                Canvas(rail.height(4.dp)) {
+            val rail = if (soak) Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                else Modifier.padding(start = artLeft, top = 494.dp).width(340.dp)
+            AnimatedVisibility(!controlsVisible && canSeek, rail, enter = fadeIn(tween(300)), exit = fadeOut(tween(300))) {
+                Canvas(Modifier.fillMaxWidth().height(4.dp)) {
                     drawRect(Color.White.copy(alpha = 0.16f))
                     val fraction = (position.value.toFloat() / track.durationMs.coerceAtLeast(1L)).coerceIn(0f, 1f)
                     drawRect(Color.White.copy(alpha = 0.85f), size = Size(size.width * fraction, size.height))
@@ -287,54 +297,94 @@ private fun CarLyricRows(
     position: State<Long>,
     offsetMs: Long,
     soften: Boolean,
+    ripple: Boolean,
     controlsVisible: Boolean,
     canSeek: Boolean,
     fontScale: Float,
     onLineSeek: (Long) -> Unit,
-) = BoxWithConstraints(Modifier.fillMaxSize()) {
-    val schedule = remember(lines) { LyricTimeline.Schedule(lines) }
-    val list = rememberLazyListState()
+) {
     val timed = remember(lines) { lines.any { !it.isStatic } }
+    val fade = Modifier.fillMaxSize().clipToBounds()
+        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            drawRect(Brush.verticalGradient(0f to Color.Transparent, 0.12f to Color.Black,
+                0.82f to Color.Black, 1f to Color.Transparent), blendMode = BlendMode.DstIn)
+        }
+    if (!timed) {
+        LazyColumn(fade, contentPadding = PaddingValues(top = 35.dp, bottom = 48.dp),
+            verticalArrangement = Arrangement.spacedBy(LyricGap)) {
+            itemsIndexed(lines) { _, line -> CarLyricLine(line, position, offsetMs, false, fontScale) }
+        }
+        return
+    }
+    val schedule = remember(lines) { LyricTimeline.Schedule(lines) }
     val active by remember(schedule, offsetMs, position) {
         derivedStateOf { schedule.snapshotAt(position.value + offsetMs).anchorLineIndex.coerceAtLeast(0) }
     }
-    LaunchedEffect(active, timed) {
-        if (timed) list.animateScrollToItem(active)
-    }
-    LazyColumn(
-        Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-            .drawWithContent {
-                drawContent()
-                drawRect(Brush.verticalGradient(0f to Color.Transparent, 0.12f to Color.Black,
-                    0.82f to Color.Black, 1f to Color.Transparent), blendMode = BlendMode.DstIn)
-            },
-        state = list, contentPadding = if (timed) PaddingValues(top = maxHeight * 0.36f, bottom = maxHeight * 0.53f)
-            else PaddingValues(top = 35.dp, bottom = 48.dp),
-        verticalArrangement = Arrangement.spacedBy(22.dp),
-    ) {
-        itemsIndexed(lines) { index, line ->
-            val distance = if (timed) abs(active - index).coerceAtMost(4) else 0
-            val stagger = (index - (active - 2)).coerceIn(0, 6) * 45
-            val opacity by animateFloatAsState(
-                targetValue = listOf(1f, 0.38f, 0.28f, 0.20f, 0.14f)[distance],
-                animationSpec = tween(360, delayMillis = stagger), label = "lyric-opacity",
-            )
-            val nudge by animateFloatAsState(
-                targetValue = (index - active).coerceIn(-4, 4) * 5f,
-                animationSpec = tween(430, delayMillis = stagger), label = "lyric-stagger",
-            )
-            val blur = if (soften) listOf(0f, 0.8f, 1.6f, 2.4f, 3f)[distance].dp else 0.dp
-            Column(Modifier.fillMaxWidth().automationId("car-lyric-line-$index")
-                .clickable(enabled = controlsVisible && canSeek && !line.isStatic) { onLineSeek(line.startMs) }
-                .graphicsLayer { alpha = opacity; translationY = nudge.dp.toPx() }
-                .blur(blur)) {
-                line.pronunciationText?.let { LyricSubtitle(it, fontScale) }
-                CarLyricText(line, position, offsetMs, timed && distance == 0, fontScale)
-                if (line.text.isNotBlank() && line.backgroundText.isNotBlank()) LyricSubtitle(line.backgroundText, fontScale)
-                line.translation?.let { LyricSubtitle(it, fontScale) }
-                line.backgroundTranslation?.let { LyricSubtitle(it, fontScale) }
+    BoxWithConstraints(fade) {
+        val density = LocalDensity.current
+        val anchor = with(density) { maxHeight.toPx() } * 0.40f
+        val gap = with(density) { LyricGap.toPx() }
+        val heights = remember(lines) { mutableStateListOf(*Array(lines.size) { 0 }) }
+        val measured by remember(heights) { derivedStateOf { heights.none { it == 0 } } }
+        // Every line moves by the same amount, placing the active line's centre on the anchor.
+        val target by remember(heights, active, anchor, gap) {
+            derivedStateOf {
+                var top = 0f
+                for (i in 0 until active) top += heights[i] + gap
+                anchor - (top + heights[active] / 2f)
             }
         }
+        Column(Modifier.fillMaxWidth().wrapContentHeight(Alignment.Top, unbounded = true),
+            verticalArrangement = Arrangement.spacedBy(LyricGap)) {
+            lines.forEachIndexed { index, line ->
+                val distance = abs(active - index).coerceAtMost(4)
+                // Lines below the active one follow one after another, so the list ripples instead of sliding as a block.
+                val stagger = if (ripple) (index - active + 1).coerceIn(0, 8) * 45 else 0
+                val shift = remember { Animatable(0f) }
+                var placed by remember { mutableStateOf(false) }
+                LaunchedEffect(target, measured) {
+                    if (!measured) return@LaunchedEffect
+                    if (!placed) {
+                        shift.snapTo(target)
+                        placed = true
+                        return@LaunchedEffect
+                    }
+                    delay(stagger.toLong())
+                    shift.animateTo(target, tween(750, easing = RippleEasing))
+                }
+                val opacity by animateFloatAsState(
+                    targetValue = LineOpacity[distance],
+                    animationSpec = tween(360, delayMillis = stagger), label = "lyric-opacity",
+                )
+                // Lines more than a screen away are not visible; skip their blur layers.
+                val blur = if (soften && abs(active - index) <= 6) LineBlur[distance].dp else 0.dp
+                Box(Modifier.fillMaxWidth().onSizeChanged { heights[index] = it.height }
+                    .graphicsLayer { translationY = shift.value; alpha = opacity }
+                    .automationId("car-lyric-line-$index")
+                    .clickable(enabled = controlsVisible && canSeek && !line.isStatic) { onLineSeek(line.startMs) }
+                    .blur(blur)) {
+                    CarLyricLine(line, position, offsetMs, distance == 0, fontScale)
+                }
+            }
+        }
+    }
+}
+
+private val LyricGap = 22.dp
+private val LineOpacity = listOf(1f, 0.38f, 0.28f, 0.20f, 0.14f)
+private val LineBlur = listOf(0f, 0.8f, 1.6f, 2.4f, 3f)
+private val RippleEasing = CubicBezierEasing(0.22f, 0.9f, 0.3f, 1f)
+
+@Composable
+private fun CarLyricLine(line: LyricLine, position: State<Long>, offsetMs: Long, highlight: Boolean, fontScale: Float) {
+    Column(Modifier.fillMaxWidth()) {
+        line.pronunciationText?.let { LyricSubtitle(it, fontScale) }
+        CarLyricText(line, position, offsetMs, highlight, fontScale)
+        if (line.text.isNotBlank() && line.backgroundText.isNotBlank()) LyricSubtitle(line.backgroundText, fontScale)
+        line.translation?.let { LyricSubtitle(it, fontScale) }
+        line.backgroundTranslation?.let { LyricSubtitle(it, fontScale) }
     }
 }
 

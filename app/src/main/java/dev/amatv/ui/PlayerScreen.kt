@@ -680,7 +680,6 @@ fun PlayerScreen(
             val context = LocalContext.current
             val options = remember(context) { dev.amatv.integration.FlymePlaybackOptions.get(context) }
             val settings by options.settings.collectAsState()
-            val noOffset = remember { mutableFloatStateOf(0f) }
             CompositionLocalProvider(LocalFlymePalette provides DarkFlymePalette) {
                 FlymeCarLyrics(
                     track = displayedTrack,
@@ -704,7 +703,7 @@ fun PlayerScreen(
                     onTranslate = { onLyricTranslationEnabledChange(!lyricTranslationEnabled) },
                     onSeek = { target -> if (isActiveScreen) onSeekBy(target - playbackPosition.value) },
                 ) {
-                    LyricsUnavailablePanel(lyricsLoading, lyricsLookupFailed, lyricsTransientFailure, noOffset)
+                    LyricsUnavailablePanel(lyricsLoading, lyricsLookupFailed, lyricsTransientFailure)
                 }
             }
         } else if (BuildConfig.FLYME_AUTO) FlymePlayerStage(
@@ -1953,7 +1952,7 @@ private fun FlymePlayerStage(
                             }
                         }
                     } else if (presentation == PlayerPresentation.Lyrics) {
-                        LyricsUnavailablePanel(lyricsLoading, lyricsLookupFailed, lyricsTransientFailure, noOffset)
+                        LyricsUnavailablePanel(lyricsLoading, lyricsLookupFailed, lyricsTransientFailure)
                     }
                 }
             }
@@ -2214,12 +2213,14 @@ private fun FlymeLiveLayout(
     }
 }
 
+private val NoStageOffset: State<Float> = mutableFloatStateOf(0f)
+
 @Composable
 private fun LyricsUnavailablePanel(
     isLoading: Boolean,
     confirmedUnavailable: Boolean,
     hasFailed: Boolean,
-    stageOffsetPx: State<Float>,
+    stageOffsetPx: State<Float> = NoStageOffset,
 ) {
     Box(
         modifier = Modifier
