@@ -2543,6 +2543,7 @@ private fun BrowseShell(
             Box(
                 modifier = Modifier
                     .weight(1f)
+                    .then(if (BuildConfig.FLYME_AUTO) Modifier.metroPivotSwipe(destination, onDestination) else Modifier)
                     .fillMaxSize()
                     .padding(start = 40.dp, end = 40.dp, top = 20.dp),
             ) {

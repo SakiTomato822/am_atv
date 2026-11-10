@@ -763,9 +763,10 @@ private fun FlymeLoadMoreFooter(page: LibraryShelfPagination, onRetry: () -> Uni
 }
 
 /**
- * Metro header: the account and app name on top, the sections as a pivot of large light words
- * (the open one large and full ink, the rest smaller and faint), and a glass mini player on the right
- * that opens Now Playing and toggles playback in place. In portrait the pivot scrolls sideways.
+ * Metro header: the account and app name on top, the sections as a Windows Phone pivot of large light
+ * words, all the same size with the open one in full ink and the rest faint, and a glass mini player on
+ * the right that opens Now Playing and toggles playback in place. Words that do not fit run off the
+ * edge and the pivot slides sideways, as on Windows Phone.
  */
 @Composable
 internal fun FlymeTopBar(
@@ -823,6 +824,32 @@ internal fun FlymeTopBar(
     }
 }
 
+/**
+ * Windows Phone pivot swipe: a horizontal swipe across the page moves to the next or previous section.
+ * Shelves and other horizontal scrollers consume their own drags first, so this only fires on a swipe
+ * that nothing inside the page took.
+ */
+internal fun Modifier.metroPivotSwipe(selected: Destination, onDestination: (Destination) -> Unit): Modifier =
+    pointerInput(selected) {
+        val threshold = 96.dp.toPx()
+        var travel = 0f
+        detectHorizontalDragGestures(
+            onDragStart = { travel = 0f },
+            onDragEnd = {
+                val index = PivotDestinations.indexOf(selected)
+                val target = when {
+                    index < 0 -> null
+                    travel < -threshold -> PivotDestinations.getOrNull(index + 1)
+                    travel > threshold -> PivotDestinations.getOrNull(index - 1)
+                    else -> null
+                }
+                if (target != null) onDestination(target)
+            },
+        ) { _, dragAmount -> travel += dragAmount }
+    }
+
+private val PivotSize = 48.sp
+private val PivotLineHeight = 53.sp
 private val PivotDestinations = listOf(Destination.Home, Destination.Browse, Destination.Library, Destination.Search)
 
 @Composable
@@ -834,11 +861,10 @@ private fun MetroPivot(
     modifier: Modifier = Modifier,
 ) {
     val scroll = rememberScrollState()
-    Row(modifier.fillMaxWidth().horizontalScroll(scroll), verticalAlignment = Alignment.Bottom,
+    Row(modifier.fillMaxWidth().horizontalScroll(scroll), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(30.dp)) {
         PivotDestinations.forEach { destination ->
             val open = destination == selected
-            val size by animateFloatAsState(if (open) 52f else 28f, tween(280), label = "pivot-size")
             val ink by animateColorAsState(if (open) FlymeInk else FlymeInk.copy(alpha = 0.34f), tween(280),
                 label = "pivot-ink")
             var placedX by remember { mutableStateOf(0) }
@@ -853,7 +879,7 @@ private fun MetroPivot(
                     .semantics { this.selected = open }
                     .clickable { onDestination(destination) }
                     .padding(vertical = 2.dp),
-                color = ink, fontSize = size.sp, lineHeight = (size * 1.1f).sp,
+                color = ink, fontSize = PivotSize, lineHeight = PivotLineHeight,
                 fontWeight = FontWeight.Light, letterSpacing = (-1).sp, maxLines = 1,
             )
         }
