@@ -148,25 +148,20 @@ jobs:
           PY
           (cd dist && sha256sum AMATV-FlymeAuto-Gecko-arm64.apk > SHA256SUMS.txt)
           cat > dist/release-notes.md <<'EOF'
-          Flyme Auto 非官方适配版（ARM64，Android 9+）首个正式版，基于 Sam 的 AM for TV。
+          Flyme Auto 非官方适配版（ARM64，Android 9+）Flyme.14 Beta 测试版，基于 Sam 的 AM for TV。
 
-          本版为 Flyme.12（versionCode 30），包含此前全部测试版的内容。与测试版使用同一固定签名，可直接覆盖安装并保留登录与应用数据。
+          versionCode 32，与之前的版本使用同一固定签名，可直接覆盖安装并保留登录与应用数据。这是测试版，界面改动较大，遇到问题请反馈。
 
-          Flyme.12 的新变化：
-          - 歌曲间淡入淡出更自然：不再把音量压到静音，只在最后 2 秒内轻轻降低（最多约 9 dB），下一首在 0.8 秒内回到原音量；曲线按分贝计算，听起来不像在调音量。
-          - 歌手页的热门歌曲改为每列 4 首、左右滑动的横排，右侧延伸到屏幕边缘，松手后停在整列开头；下方的卡片排也延伸到边缘。
-          - 浅色模式修复：状态栏与导航栏不再发黑，改为跟随页面的浅色底与深色图标；「刷新 Apple Music 内容」等深色按钮上的文字恢复可见；白天歌词不再过淡。
+          Flyme.14 Beta 的新变化：
+          - 主页改为 Metro 风格：现在收听 / 最新发行 / 资料库 / 搜索 以同样大小的细体大字排在顶部，当前页为白色、其余变灰；在页面上左右滑动即可切换。分区标题改为细体大字，卡片改为方形封面、标题写在下方。
+          - 新的车机歌词页，可在设置里选择两种风格：流光（封面模糊后缓慢流动的背景，左侧封面卡片）和取色渐隐（封面铺满左侧并渐隐进封面主色）。平时只显示歌词，点一下屏幕出现玻璃控制卡片，5 秒后自动收起，暂停时常驻；控制显示时点某一句可跳转。
+          - 歌词沿用 Flyme.12 的逐字效果（平滑扫光、逐字微放大），换句时逐行波浪式滚动；没唱到的行更亮、更容易看清。
+          - 「译」按钮打开歌词设置：翻译、发音、翻译语言与歌词字号；没有翻译的歌曲会直接注明。
+          - 支持竖屏，旋转屏幕不重新加载、不打断播放。竖屏歌词有两种：滚动列表（类似 Apple Music 手机歌词页）和海报模式（当前一句以超大字显示），右上角切换。
+          - 喜好歌曲、歌单等详情页会缓存在本机，再次打开基本立即显示，长歌单逐页显示。
+          - 顶栏改为玻璃质感的迷你播放器；歌手页的分区支持「查看全部」。
 
-          主要功能（Flyme.6 至 Flyme.12 累计）：
-          - 车机横屏布局与触控：首页、搜索、资料库、专辑页、歌手页（Apple Music 网页版布局）、播放页与胶囊播放器。
-          - 原生 MusicKit 播放，不需要 Widevine；无缝播放，手动下一首也直接使用已排好的歌。
-          - 没有 Widevine 的车机也能完整收听个人电台与歌曲电台（逐首播放）；电台历史可在播放队列中查看。
-          - 歌曲间淡入淡出，专辑、电台、播放列表可分别开关。
-          - 浅色 / 深色 / 跟随系统 / 按时间（时间可自选）外观，切换时有毛玻璃翻页动画。
-          - 系统媒体控制：通知栏、锁屏与车机桌面媒体卡片，带封面与上一首 / 播放暂停 / 下一首。
-          - 歌词跟唱、点击跳转、手指拖动查看；中文歌词不再重复显示简繁「翻译」。
-          - 播放页加入喜好歌曲、跑马灯标题、可点击的歌手与专辑。
-          - 启动先显示上次的首页，断网时也能浏览；设置页提供播放诊断与完整日志导出（凭证已遮蔽）。
+          已知情况：主页尚未加入左侧「最近播放」列表；首页以外的页面在竖屏下仍沿用横屏排版。
 
           本版沿用上游 APK 的内置开发者 Token，有效期字段为 2027-04-22，到期前会随新版本更新；不包含签名私钥或任何用户登录凭证。
 
@@ -189,7 +184,7 @@ jobs:
           elif [ "${{ inputs.stable }}" = "true" ]; then
             gh release create "flyme-auto-v${version}" dist/AMATV-FlymeAuto-Gecko-arm64.apk dist/SHA256SUMS.txt --target "$(git rev-parse HEAD)" --latest --title "Flyme Auto · Flyme.${version}" --notes-file dist/release-notes.md
           else
-            gh release create "$tag" dist/AMATV-FlymeAuto-Gecko-arm64.apk dist/SHA256SUMS.txt --target "$(git rev-parse HEAD)" --prerelease --latest=false --title "Flyme Auto 测试版 · Flyme.${version}" --notes-file dist/release-notes.md
+            gh release create "$tag" dist/AMATV-FlymeAuto-Gecko-arm64.apk dist/SHA256SUMS.txt --target "$(git rev-parse HEAD)" --prerelease --latest=false --title "Flyme Auto · Flyme ${version} Beta" --notes-file dist/release-notes.md
           fi
 
       - name: Remove private build inputs
