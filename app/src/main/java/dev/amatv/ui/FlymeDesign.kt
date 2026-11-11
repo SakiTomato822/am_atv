@@ -61,6 +61,8 @@ import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PictureInPictureAlt
+import dev.amatv.LocalHostWindow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
@@ -978,6 +980,17 @@ private fun MetroMiniPlayer(
                         overflow = TextOverflow.Ellipsis)
                 }
             }
+        }
+        // Opens Now Playing in the Flyme small window (portrait), handing playback over.
+        LocalHostWindow.current?.takeIf { !it.mini && it.canOpenMini }?.let { host ->
+            FlymeGlyphButton(
+                icon = Icons.Rounded.PictureInPictureAlt,
+                contentDescription = stringResource(R.string.flyme_open_mini_window),
+                onClick = { host.switchTo(mini = true, resume = isPlaying) },
+                modifier = Modifier.padding(end = 4.dp).automationId("nav-mini-window"),
+                size = 44.dp,
+                iconSize = 20.dp,
+            )
         }
         FlymeGlyphButton(
             icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,

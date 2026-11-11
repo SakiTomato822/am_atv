@@ -68,6 +68,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.amatv.R
 import dev.amatv.BuildConfig
+import dev.amatv.LocalHostWindow
+import dev.amatv.WindowHosts
 import dev.amatv.integration.toSessionTrack
 import dev.amatv.integration.toSessionJson
 import dev.amatv.data.MockCatalog
@@ -162,6 +164,9 @@ fun AmAtvApp() {
     val services = remember(context) { MusicServices(context) }
     val cacheSettings by services.contentCache.settings.collectAsState()
     val playbackPrefs = remember(context) { PlaybackPreferences(context) }
+    // Flyme small window: shows only Now Playing; see dev.amatv.HostWindow.
+    val hostWindow = LocalHostWindow.current
+    val miniWindow = hostWindow?.mini == true
     var lyricsPreferred by remember(playbackPrefs) { mutableStateOf(playbackPrefs.lyricsPreferred) }
     val startupCheckpoint = remember(playbackPrefs) {
         playbackPrefs.restoreCheckpointSession()?.copy(wasPlaying = false)
@@ -170,7 +175,7 @@ fun AmAtvApp() {
     var startupCursorEdited by remember { mutableStateOf(false) }
     val startupQueueActions = remember { StartupQueueActions() }
     var destination by remember {
-        mutableStateOf(startupCheckpoint?.destination ?: playbackPrefs.activeTab)
+        mutableStateOf(if (miniWindow) Destination.NowPlaying else startupCheckpoint?.destination ?: playbackPrefs.activeTab)
     }
     var previousDestination by remember {
         mutableStateOf(startupCheckpoint?.previousDestination ?: playbackPrefs.activeTab)
@@ -188,9 +193,10 @@ fun AmAtvApp() {
     var playStartedRealtimeMs by remember {
         mutableLongStateOf(android.os.SystemClock.elapsedRealtime())
     }
-    // Startup restores metadata and cursor only. An explicit user action owns playback.
+    // Startup restores metadata and cursor only. An explicit user action owns playback; moving
+    // between the full-screen app and the small window is one, so it carries playback on.
     var isPlaying by remember { mutableStateOf(false) }
-    var playWhenReady by remember { mutableStateOf(false) }
+    var playWhenReady by remember { mutableStateOf(hostWindow?.resume == true) }
 
     val currentView = androidx.compose.ui.platform.LocalView.current
     val shouldKeepScreenOn = !BuildConfig.FLYME_AUTO && (isPlaying || playWhenReady)
@@ -1336,7 +1342,9 @@ fun AmAtvApp() {
             if (event == Lifecycle.Event.ON_STOP) saveCurrentSession(true)
         }
         lifecycleOwner.lifecycle.addObserver(observer)
+        hostWindow?.saveNow = { saveCurrentSession(true) }
         onDispose {
+            hostWindow?.saveNow = null
             saveCurrentSession(true)
             lifecycleOwner.lifecycle.removeObserver(observer)
         }
@@ -1347,6 +1355,12 @@ fun AmAtvApp() {
     ) {
         delay(350L)
         saveCurrentSession(false)
+    }
+    LaunchedEffect(playWhenReady) { if (hostWindow != null) WindowHosts.playing = playWhenReady }
+    // The small window shows only Now Playing: leaving it there (back, pull-down, opening the
+    // album or artist) moves playback back to the full-screen app.
+    if (miniWindow) LaunchedEffect(destination) {
+        if (destination != Destination.NowPlaying) hostWindow?.switchTo(mini = false, resume = playWhenReady)
     }
     LaunchedEffect(isPlaying, track.id) {
         if (!isPlaying) return@LaunchedEffect
