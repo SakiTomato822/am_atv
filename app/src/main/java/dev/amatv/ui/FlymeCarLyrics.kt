@@ -313,9 +313,11 @@ internal fun CarLyricRows(
         return
     }
     val schedule = remember(lines) { LyricTimeline.Schedule(lines) }
-    val active by remember(schedule, offsetMs, position) {
-        derivedStateOf { schedule.snapshotAt(position.value + offsetMs).anchorLineIndex.coerceAtLeast(0) }
+    val snapshot by remember(schedule, offsetMs, position) {
+        derivedStateOf { schedule.snapshotAt(position.value + offsetMs) }
     }
+    val active = snapshot.focusLineIndex.coerceAtLeast(0)
+    val singing = snapshot.activeLineIndices
     val lyricPosition = remember(position, offsetMs) {
         derivedStateOf { (position.value + offsetMs).coerceAtLeast(0L) }
     }
@@ -355,7 +357,8 @@ internal fun CarLyricRows(
         Column(Modifier.fillMaxWidth().wrapContentHeight(Alignment.Top, unbounded = true),
             verticalArrangement = Arrangement.spacedBy(LyricGap)) {
             lines.forEachIndexed { index, line ->
-                val distance = abs(active - index).coerceAtMost(4)
+                // Every line being sung is lit, not only the one the list is centred on.
+                val distance = if (index in singing) 0 else abs(active - index).coerceAtMost(4)
                 // Lines below the active one follow one after another, so the list ripples instead of sliding as a block.
                 val stagger = if (ripple) (index - active + 1).coerceIn(0, 8) * 45 else 0
                 val shift = remember { Animatable(0f) }

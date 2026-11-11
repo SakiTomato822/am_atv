@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -174,6 +175,7 @@ internal fun FlymeBackButton(onClick: () -> Unit, modifier: Modifier = Modifier)
         spring(dampingRatio = 0.7f, stiffness = 600f), label = "flyme-back-scale")
     Box(
         modifier
+            .statusBarsPadding()
             .size(44.dp)
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(CircleShape)
@@ -797,7 +799,7 @@ internal fun FlymeTopBar(
 ) {
     val portrait = LocalCarPortrait.current
     // The pivot and account share the left edge of the page content below them (page inset + card inset).
-    Column(modifier.fillMaxWidth().padding(start = flymePageInset(portrait) + 14.dp,
+    Column(modifier.fillMaxWidth().statusBarsPadding().padding(start = flymePageInset(portrait) + 14.dp,
         end = if (portrait) 16.dp else 40.dp, top = if (portrait) 12.dp else 18.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             if (!capsuleOnly) {

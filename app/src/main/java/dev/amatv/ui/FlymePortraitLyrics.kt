@@ -55,6 +55,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.amatv.R
@@ -97,21 +98,23 @@ internal fun PortraitLyrics(
     val textScale = carTextScale(fontScale)
     val pullDown = rememberPullDownToClose(onBack)
     val noLyrics = track.lyrics.isEmpty()
-    Box(Modifier.fillMaxSize().automationId(if (poster) "portrait-lyrics-poster" else "portrait-lyrics-list")
+    BoxWithConstraints(Modifier.fillMaxSize().automationId(if (poster) "portrait-lyrics-poster" else "portrait-lyrics-list")
         .then(pullDown.layer)
         .pointerInput(poster) { detectTapGestures { if (!poster) onReveal() } }) {
+        // Soak in portrait: the cover is a hero on the top 46% and has fully faded into a dark base
+        // before the lyrics begin, so no text ever sits on busy artwork.
+        val coverHeight = maxHeight * 0.46f
         if (soak) {
-            val base = lerp(palette.first(), Color.Black, 0.55f)
+            val base = lerp(palette.first(), Color.Black, 0.70f)
             Box(Modifier.fillMaxSize().background(base))
-            Box(Modifier.fillMaxWidth().fillMaxHeight(if (poster) 0.62f else 0.48f)) {
+            Box(Modifier.fillMaxWidth().height(coverHeight)) {
                 MotionArtwork(track, Modifier.fillMaxSize(), animate = false, cornerRadius = 0.dp)
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
-                    0f to Color.Black.copy(alpha = 0.50f), 0.16f to Color.Black.copy(alpha = 0.12f), 0.30f to Color.Transparent,
-                    0.55f to base.copy(alpha = 0.35f),
-                    0.80f to base.copy(alpha = 0.80f), 1f to base,
+                    0f to Color.Black.copy(alpha = 0.55f), 0.22f to Color.Black.copy(alpha = 0.15f),
+                    0.50f to base.copy(alpha = 0.10f), 0.72f to base.copy(alpha = 0.62f),
+                    0.90f to base.copy(alpha = 0.95f), 1f to base,
                 )))
             }
-            SoakGlow(palette)
         } else {
             CarLyricFlow(track, palette, visible && !lowPerformance)
         }
@@ -124,11 +127,11 @@ internal fun PortraitLyrics(
                     Modifier.padding(start = 8.dp, top = 20.dp).automationId("portrait-lyrics-back"),
                     size = 44.dp, iconSize = 30.dp, tint = Color.White)
             } else {
-                PortraitHeader(track, showCover = !soak || poster, poster, onPosterChange, onBack, pullDown.handle)
+                PortraitHeader(track, compact = soak, poster, onPosterChange, onBack, pullDown.handle)
             }
-            BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
-                // Over the Soak cover the list starts where the cover has faded, so no line sits on bright art.
-                val listTop = if (soak) maxHeight * 0.34f else 0.dp
+            Box(Modifier.fillMaxWidth().weight(1f)) {
+                // Under Soak the lyrics start where the cover has faded (its lower edge, less the header above).
+                val listTop = if (soak) (coverHeight * 0.92f - SoakHeaderHeight).coerceAtLeast(0.dp) else 0.dp
                 when {
                     // No lyrics: the cover fills the page, Apple Music style, with the loading or
                     // unavailable note under it.
@@ -146,7 +149,7 @@ internal fun PortraitLyrics(
                             emptyContent()
                         }
                     }
-                    poster -> PortraitPoster(track, position, offsetMs, translation, textScale)
+                    poster -> PortraitPoster(track, position, offsetMs, translation, textScale, topInset = listTop)
                     else -> Box(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = listTop)) {
                         CarLyricRows(track.lyrics, position, offsetMs, soften = !soak && !lowPerformance,
                             ripple = !soak && !lowPerformance, controlsVisible, canSeek, textScale * 28f / 34f,
@@ -180,28 +183,30 @@ internal fun PortraitLyrics(
 @Composable
 private fun PortraitHeader(
     track: Track,
-    showCover: Boolean,
+    /** Soak: the cover is already the page, so no thumbnail and a small one-line title. */
+    compact: Boolean,
     poster: Boolean,
     onPosterChange: (Boolean) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // Large enough to anchor the page, after the H5 portrait Metro board: an 84dp cover beside the title.
-    Row(modifier.fillMaxWidth().padding(start = 8.dp, end = 12.dp, top = 20.dp, bottom = 16.dp),
+    Row(modifier.fillMaxWidth().padding(start = 8.dp, end = 12.dp, top = if (compact) 12.dp else 20.dp, bottom = 16.dp),
         verticalAlignment = Alignment.CenterVertically) {
         FlymeGlyphButton(Icons.Rounded.KeyboardArrowDown, stringResource(R.string.browse_back), onBack,
             Modifier.automationId("portrait-lyrics-back"), size = 44.dp, iconSize = 30.dp, tint = Color.White)
         Box(Modifier.size(4.dp))
-        if (showCover) {
+        if (!compact) {
             MotionArtwork(track, Modifier.size(84.dp).shadow(10.dp, RoundedCornerShape(8.dp)), animate = false,
                 cornerRadius = 8.dp)
             Box(Modifier.size(16.dp))
         }
         Column(Modifier.weight(1f)) {
-            Text(track.title, color = Color.White, fontSize = 26.sp, lineHeight = 31.sp,
-                fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(track.artist, Modifier.padding(top = 2.dp), color = Color.White.copy(alpha = 0.66f), fontSize = 16.sp,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(track.title, color = Color.White, fontSize = if (compact) 19.sp else 26.sp,
+                lineHeight = if (compact) 24.sp else 31.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis)
+            Text(track.artist, Modifier.padding(top = 2.dp), color = Color.White.copy(alpha = 0.70f),
+                fontSize = if (compact) 14.sp else 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         FlymeGlyphButton(
             if (poster) Icons.Rounded.FormatListBulleted else Icons.Rounded.TextFields,
@@ -220,15 +225,18 @@ private fun PortraitPoster(
     offsetMs: Long,
     translation: Boolean,
     textScale: Float,
+    /** Soak: where the cover has faded; the poster starts here rather than centring over the art. */
+    topInset: Dp,
 ) {
     val lines = track.lyrics
     val schedule = remember(lines) { LyricTimeline.Schedule(lines) }
     val active by remember(schedule, offsetMs, position) {
-        derivedStateOf { schedule.snapshotAt(position.value + offsetMs).anchorLineIndex }
+        derivedStateOf { schedule.snapshotAt(position.value + offsetMs).focusLineIndex }
     }
     val current = active.coerceAtLeast(0)
-    Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)) {
+    val pinned = topInset > 0.dp
+    Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 28.dp, top = topInset),
+        verticalArrangement = Arrangement.spacedBy(14.dp, if (pinned) Alignment.Top else Alignment.CenterVertically)) {
         Text(if (active > 0) lines[active - 1].renderedText else "", color = Color.White.copy(alpha = 0.62f),
             fontSize = (22 * textScale).sp, lineHeight = (29 * textScale).sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
         AnimatedContent(current, label = "poster-line", transitionSpec = {
@@ -238,7 +246,8 @@ private fun PortraitPoster(
             Column {
                 Text(posterText(line.renderedText),
                     color = Color.White.copy(alpha = if (active < 0) 0.45f else 1f),
-                    fontSize = (46 * textScale).sp, lineHeight = (53 * textScale).sp, fontWeight = FontWeight.Black)
+                    fontSize = ((if (pinned) 40 else 46) * textScale).sp,
+                    lineHeight = ((if (pinned) 47 else 53) * textScale).sp, fontWeight = FontWeight.Black)
                 if (translation) line.translation?.let {
                     Text(it, Modifier.padding(top = 6.dp), color = Color.White.copy(alpha = 0.72f),
                         fontSize = (17 * textScale).sp, lineHeight = (22 * textScale).sp, fontWeight = FontWeight.SemiBold)
@@ -287,6 +296,9 @@ private fun PortraitControls(
             .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
     )
 }
+
+/** Height of the compact Soak header (padding, back button, two text lines). */
+private val SoakHeaderHeight = 76.dp
 
 private val PhraseScripts = setOf(
     Character.UnicodeScript.HAN, Character.UnicodeScript.HIRAGANA,

@@ -423,6 +423,14 @@ object LyricTimeline {
         val instrumentalScrollAnchor: InstrumentalGap?
             get() = instrumentalGap?.takeIf { anchorLineIndex < it.beforeLineIndex }
 
+        /**
+         * The line to keep in view: the most recently started line still being sung, else the anchor.
+         * Overlapping lines (a lead and its answering vocals) share one anchor for the whole overlap,
+         * so following the anchor alone leaves the list still while later lines of the group are sung.
+         */
+        val focusLineIndex: Int
+            get() = maxOf(anchorLineIndex, activeLineIndices.maxOrNull() ?: anchorLineIndex)
+
         /** Visual scrolling is independent of which lyric is currently being sung. */
         val scrollAnchorLineIndex: Int
             get() = instrumentalScrollAnchor?.beforeLineIndex ?: anchorLineIndex

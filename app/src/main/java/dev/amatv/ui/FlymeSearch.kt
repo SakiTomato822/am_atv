@@ -301,7 +301,17 @@ private fun FlymeGroupedResults(results: List<Track>, onOpen: (Track) -> Unit) {
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 40.dp)) {
         item(key = "top") {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+            // A narrow portrait screen cannot fit the top result beside the songs: stack them.
+            if (LocalCarPortrait.current) Column(Modifier.fillMaxWidth()) {
+                FlymeSearchHeading(stringResource(R.string.browse_search_top))
+                FlymeTopResult(top, onOpen)
+                if (songs.isNotEmpty()) {
+                    FlymeSearchHeading(stringResource(R.string.browse_search_songs))
+                    songs.forEach { song ->
+                        FlymeResultRow(song, showKind = false, onOpen = onOpen, modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            } else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
                 Column(Modifier.width(330.dp)) {
                     FlymeSearchHeading(stringResource(R.string.browse_search_top))
                     FlymeTopResult(top, onOpen)
