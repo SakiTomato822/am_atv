@@ -96,6 +96,7 @@ internal fun PortraitLyrics(
     val palette = rememberArtworkPalette(track.artworkUrl, track.palette)
     val textScale = carTextScale(fontScale)
     Box(Modifier.fillMaxSize().automationId(if (poster) "portrait-lyrics-poster" else "portrait-lyrics-list")
+        .then(rememberPullDownToClose(onBack))
         .pointerInput(poster) { detectTapGestures { if (!poster) onReveal() } }) {
         if (soak) {
             val base = lerp(palette.first(), Color.Black, 0.55f)
@@ -114,7 +115,13 @@ internal fun PortraitLyrics(
         }
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
             val noLyrics = track.lyrics.isEmpty()
-            PortraitHeader(track, showCover = (!soak || poster) && !noLyrics, poster, onPosterChange, onBack)
+            if (noLyrics) {
+                FlymeGlyphButton(Icons.Rounded.KeyboardArrowDown, stringResource(R.string.browse_back), onBack,
+                    Modifier.padding(start = 8.dp, top = 20.dp).automationId("portrait-lyrics-back"),
+                    size = 44.dp, iconSize = 30.dp, tint = Color.White)
+            } else {
+                PortraitHeader(track, showCover = !soak || poster, poster, onPosterChange, onBack)
+            }
             BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                 // Over the Soak cover the list starts where the cover has faded, so no line sits on bright art.
                 val listTop = if (soak) maxHeight * 0.34f else 0.dp
@@ -122,11 +129,18 @@ internal fun PortraitLyrics(
                     // No lyrics: the cover fills the page, Apple Music style, with the loading or
                     // unavailable note under it.
                     noLyrics -> Column(Modifier.fillMaxSize().padding(horizontal = 28.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                        verticalArrangement = Arrangement.Center) {
                         MotionArtwork(track, Modifier.fillMaxWidth().aspectRatio(1f)
                             .shadow(18.dp, RoundedCornerShape(12.dp)), animate = visible && !lowPerformance,
                             cornerRadius = 12.dp)
-                        Box(Modifier.fillMaxWidth().height(72.dp)) { emptyContent() }
+                        Text(track.title, Modifier.padding(top = 28.dp), color = Color.White, fontSize = 26.sp,
+                            lineHeight = 31.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(track.artist, Modifier.padding(top = 4.dp), color = Color.White.copy(alpha = 0.66f),
+                            fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        // The loading or "no lyrics" note, kept small under the title.
+                        Box(Modifier.fillMaxWidth().height(40.dp).padding(top = 8.dp)) {
+                            emptyContent()
+                        }
                     }
                     poster -> PortraitPoster(track, position, offsetMs, translation, textScale)
                     else -> Box(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = listTop)) {
@@ -287,20 +301,16 @@ internal fun posterText(text: String): String {
 private fun isPhraseScript(codePoint: Int) = Character.UnicodeScript.of(codePoint) in PhraseScripts
 
 /**
- * A line's text rebuilt from its timed words. Word-timed lines can arrive with a space between every
- * Chinese or Japanese unit; those are dropped, while spaces the words themselves carry (phrase gaps)
- * and spaces between Latin words stay.
+ * A line's text as Apple sent it, so its spaces still mark phrase breaks for the poster. The one
+ * exception is a line whose every space-separated piece is a single CJK character: those spaces come
+ * from joining character-timed units, not from the lyric, and would stack the poster one character a
+ * line, so they are dropped.
  */
 internal fun lyricDisplayText(line: dev.amatv.model.LyricLine): String {
-    if (line.words.size <= 1) return line.text.ifBlank { line.backgroundText }.trim()
-    val out = StringBuilder()
-    for (word in line.words) {
-        val next = word.text
-        if (out.isNotEmpty() && next.isNotEmpty() && line.joinWithSpaces && !out.last().isWhitespace() &&
-            !next.first().isWhitespace() &&
-            !(isPhraseScript(out.codePointBefore(out.length)) && isPhraseScript(next.codePointAt(0)))
-        ) out.append(' ')
-        out.append(next)
+    val text = line.text.ifBlank { line.backgroundText }.trim()
+    val pieces = text.split(Regex(" +"))
+    val characterTimed = pieces.size > 2 && pieces.all { piece ->
+        piece.codePointCount(0, piece.length) == 1 && isPhraseScript(piece.codePointAt(0))
     }
-    return out.toString().replace(Regex(" +"), " ").trim()
+    return if (characterTimed) pieces.joinToString("") else text
 }

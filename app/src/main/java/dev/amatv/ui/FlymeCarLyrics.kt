@@ -48,6 +48,8 @@ import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.core.spring
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.unit.Density
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableFloatStateOf
@@ -159,7 +161,8 @@ internal fun FlymeCarLyrics(
         )
         return
     }
-    FitDesign(Modifier.fillMaxSize().automationId("car-lyrics-${style.name.lowercase()}")) {
+    FitDesign(Modifier.fillMaxSize().automationId("car-lyrics-${style.name.lowercase()}")
+        .then(rememberPullDownToClose(onBack))) {
         BoxWithConstraints(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { reveal() } }) {
             val lyricsLeft = maxWidth * if (soak) 0.484f else 0.422f
             val artLeft = maxWidth * 0.078f
@@ -336,7 +339,9 @@ internal fun CarLyricRows(
         val anchor = with(density) { maxHeight.toPx() } * anchorFraction
         val gap = with(density) { LyricGap.toPx() }
         val heights = remember(lines) { mutableStateListOf(*Array(lines.size) { 0 }) }
-        val measured by remember(heights) { derivedStateOf { heights.none { it == 0 } } }
+        // Only the first placement waits for measurement. Some lines (background vocals alone) are 0 tall
+        // until they are sung and collapse again after, so waiting on every line froze the list mid-song.
+        val measured by remember(heights, active) { derivedStateOf { heights.getOrElse(active) { 0 } > 0 } }
         // Every line moves by the same amount, placing the active line's centre on the anchor.
         val target by remember(heights, active, anchor, gap) {
             derivedStateOf {
@@ -354,8 +359,8 @@ internal fun CarLyricRows(
                 val shift = remember { Animatable(0f) }
                 var placed by remember { mutableStateOf(false) }
                 LaunchedEffect(target, measured) {
-                    if (!measured) return@LaunchedEffect
                     if (!placed) {
+                        if (!measured) return@LaunchedEffect
                         shift.snapTo(target)
                         placed = true
                         return@LaunchedEffect
@@ -489,4 +494,42 @@ internal fun LyricControlCard(
                 size = side, iconSize = side * 0.45f, tint = Color.White)
         }
     }
+}
+
+/**
+ * Pull down to close Now Playing. The page follows the finger, shrinking and fading a little; past
+ * 120dp it closes on release, otherwise it springs back. Upward drags meet resistance. The lyrics list
+ * consumes its own drags, so this only acts on the cover, the title and empty space.
+ */
+@Composable
+internal fun rememberPullDownToClose(onClose: () -> Unit): Modifier {
+    val scope = rememberCoroutineScope()
+    val pull = remember { Animatable(0f) }
+    val close by rememberUpdatedState(onClose)
+    return Modifier
+        .pointerInput(Unit) {
+            val distance = 120.dp.toPx()
+            detectVerticalDragGestures(
+                onDragEnd = {
+                    scope.launch {
+                        if (pull.value > distance) close()
+                        pull.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 400f))
+                    }
+                },
+                onDragCancel = { scope.launch { pull.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 400f)) } },
+            ) { change, dragAmount ->
+                change.consume()
+                scope.launch {
+                    val next = pull.value + dragAmount
+                    pull.snapTo(if (next < 0f) next * 0.25f else next)
+                }
+            }
+        }
+        .graphicsLayer {
+            val fraction = (pull.value / size.height).coerceIn(0f, 1f)
+            translationY = pull.value
+            scaleX = 1f - 0.08f * fraction
+            scaleY = 1f - 0.08f * fraction
+            alpha = 1f - 0.6f * fraction
+        }
 }

@@ -18,11 +18,15 @@ class LyricDisplayTextTest {
     private fun line(vararg words: String) = dev.amatv.model.LyricLine(
         words.mapIndexed { i, w -> dev.amatv.model.LyricWord(w, i * 100L, i * 100L + 90) })
 
-    @Test fun cjkUnitsJoinWithoutSpacesButKeepTheirOwnGaps() {
-        assertEquals("還有多少回憶 藏著", lyricDisplayText(line("還", "有", "多少", "回憶 ", "藏", "著")))
+    @Test fun phraseSpacesStayAsTheySent() {
+        assertEquals("還有多少回憶 藏著", lyricDisplayText(line("還有多少回憶", "藏著")))
     }
 
-    @Test fun latinWordsKeepSingleSpaces() {
+    @Test fun characterTimedSpacesAreDropped() {
+        assertEquals("空蕩的房間", lyricDisplayText(line("空", "蕩", "的", "房", "間")))
+    }
+
+    @Test fun latinWordsKeepTheirSpaces() {
         assertEquals("night drive home", lyricDisplayText(line("night", "drive", "home")))
     }
 }

@@ -690,8 +690,14 @@ fun PlayerScreen(
                 FlymeCarLyrics(
                     track = displayedTrack,
                     style = flymeSettings.lyricStyle,
-                    poster = flymeSettings.portraitPoster,
-                    onPosterChange = { poster -> flymeOptions.update { it.copy(portraitPoster = poster) } },
+                    // In portrait the Soak style is the poster; Flow keeps the Apple Music list.
+                    poster = flymeSettings.lyricStyle == dev.amatv.integration.FlymePlaybackSettings.LyricStyle.Soak,
+                    onPosterChange = { poster ->
+                        flymeOptions.update {
+                            it.copy(lyricStyle = if (poster) dev.amatv.integration.FlymePlaybackSettings.LyricStyle.Soak
+                                else dev.amatv.integration.FlymePlaybackSettings.LyricStyle.Flow)
+                        }
+                    },
                     position = playbackPosition,
                     offsetMs = lyricOffsetMs,
                     playWhenReady = playWhenReady,
@@ -713,7 +719,7 @@ fun PlayerScreen(
                     onTranslate = { showLyricsSettings = true },
                     onSeek = { target -> if (isActiveScreen) onSeekBy(target - playbackPosition.value) },
                 ) {
-                    LyricsUnavailablePanel(lyricsLoading, lyricsLookupFailed, lyricsTransientFailure)
+                    LyricsUnavailablePanel(lyricsLoading, lyricsLookupFailed, lyricsTransientFailure, noteSize = 15.sp)
                 }
             }
         } else if (BuildConfig.FLYME_AUTO) FlymePlayerStage(
@@ -1997,8 +2003,8 @@ private fun FlymePlayerStage(
                     track = track,
                     modifier = Modifier.size(if (stationName != null) 307.dp else columnWidth)
                         .graphicsLayer {
-                            // The cover follows an upward drag and eases smaller, hinting where it goes.
-                            val pull = (-coverDrag.value / closeDistance).coerceIn(0f, 1.5f)
+                            // The cover follows a downward pull and eases smaller, hinting that it closes.
+                            val pull = (coverDrag.value / closeDistance).coerceIn(0f, 1.5f)
                             translationY = coverDrag.value
                             scaleX = artScale.value * (1f - 0.08f * pull)
                             scaleY = artScale.value * (1f - 0.08f * pull)
@@ -2006,7 +2012,7 @@ private fun FlymePlayerStage(
                         .pointerInput(onSwipeBack) {
                             detectVerticalDragGestures(
                                 onDragEnd = {
-                                    val close = coverDrag.value < -closeDistance
+                                    val close = coverDrag.value > closeDistance
                                     swipeScope.launch {
                                         if (close) onSwipeBack()
                                         coverDrag.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 400f))
@@ -2016,9 +2022,9 @@ private fun FlymePlayerStage(
                             ) { change, dragAmount ->
                                 change.consume()
                                 swipeScope.launch {
-                                    // Up only; a downward pull meets growing resistance.
+                                    // Down only; an upward drag meets resistance.
                                     val next = coverDrag.value + dragAmount
-                                    coverDrag.snapTo(if (next > 0f) next * 0.25f else next)
+                                    coverDrag.snapTo(if (next < 0f) next * 0.25f else next)
                                 }
                             }
                         }
@@ -2214,6 +2220,7 @@ private fun LyricsUnavailablePanel(
     confirmedUnavailable: Boolean,
     hasFailed: Boolean,
     stageOffsetPx: State<Float> = NoStageOffset,
+    noteSize: TextUnit = 24.sp,
 ) {
     Box(
         modifier = Modifier
@@ -2230,8 +2237,8 @@ private fun LyricsUnavailablePanel(
                     R.string.player_lyrics_unavailable
                 } else R.string.player_lyrics_load_failed),
                 color = FlymeInk.copy(alpha = 0.72f),
-                fontSize = 24.sp,
-                lineHeight = 32.sp,
+                fontSize = noteSize,
+                lineHeight = noteSize * 1.33f,
                 fontWeight = FontWeight.Medium,
             )
         }
