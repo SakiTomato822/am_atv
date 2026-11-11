@@ -15,7 +15,7 @@ import java.lang.ref.WeakReference
 /**
  * Which window this copy of the app is running in, and how to move to the other one.
  *
- * The small window shows only Now Playing. The player lives inside the activity, so moving between
+ * The small window runs the whole app in a portrait window. The player lives inside the activity, so moving between
  * the full-screen app and the small window hands the session over: the leaving host saves it
  * synchronously ([saveNow]), the arriving host restores it and, when [resume] is set, plays on.
  */

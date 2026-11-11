@@ -15,7 +15,7 @@
         <activity android:name=".MainActivity"
             android:resizeableActivity="true"
             android:windowSoftInputMode="adjustResize" />
-        <!-- The small window: its own task showing only Now Playing (see WindowHosts). -->
+        <!-- The small window: the whole app in its own task (see WindowHosts). -->
         <activity android:name=".MiniWindowActivity"
             android:exported="false"
             android:taskAffinity="${applicationId}.mini"

@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="flyme_open_mini_window">小視窗播放</string>
+    <string name="flyme_open_full_screen">回到全螢幕</string>
 </resources>

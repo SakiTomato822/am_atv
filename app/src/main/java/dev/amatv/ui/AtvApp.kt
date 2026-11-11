@@ -164,9 +164,8 @@ fun AmAtvApp() {
     val services = remember(context) { MusicServices(context) }
     val cacheSettings by services.contentCache.settings.collectAsState()
     val playbackPrefs = remember(context) { PlaybackPreferences(context) }
-    // Flyme small window: shows only Now Playing; see dev.amatv.HostWindow.
+    // Full screen or the Flyme small window; see dev.amatv.HostWindow.
     val hostWindow = LocalHostWindow.current
-    val miniWindow = hostWindow?.mini == true
     var lyricsPreferred by remember(playbackPrefs) { mutableStateOf(playbackPrefs.lyricsPreferred) }
     val startupCheckpoint = remember(playbackPrefs) {
         playbackPrefs.restoreCheckpointSession()?.copy(wasPlaying = false)
@@ -175,7 +174,7 @@ fun AmAtvApp() {
     var startupCursorEdited by remember { mutableStateOf(false) }
     val startupQueueActions = remember { StartupQueueActions() }
     var destination by remember {
-        mutableStateOf(if (miniWindow) Destination.NowPlaying else startupCheckpoint?.destination ?: playbackPrefs.activeTab)
+        mutableStateOf(startupCheckpoint?.destination ?: playbackPrefs.activeTab)
     }
     var previousDestination by remember {
         mutableStateOf(startupCheckpoint?.previousDestination ?: playbackPrefs.activeTab)
@@ -1357,11 +1356,6 @@ fun AmAtvApp() {
         saveCurrentSession(false)
     }
     LaunchedEffect(playWhenReady) { if (hostWindow != null) WindowHosts.playing = playWhenReady }
-    // The small window shows only Now Playing: leaving it there (back, pull-down, opening the
-    // album or artist) moves playback back to the full-screen app.
-    if (miniWindow) LaunchedEffect(destination) {
-        if (destination != Destination.NowPlaying) hostWindow?.switchTo(mini = false, resume = playWhenReady)
-    }
     LaunchedEffect(isPlaying, track.id) {
         if (!isPlaying) return@LaunchedEffect
         while (true) {

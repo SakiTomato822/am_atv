@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="flyme_open_mini_window">Open in small window</string>
+    <string name="flyme_open_full_screen">Back to full screen</string>
 </resources>

@@ -62,6 +62,7 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PictureInPictureAlt
+import androidx.compose.material.icons.rounded.OpenInFull
 import dev.amatv.LocalHostWindow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
@@ -981,17 +982,7 @@ private fun MetroMiniPlayer(
                 }
             }
         }
-        // Opens Now Playing in the Flyme small window (portrait), handing playback over.
-        LocalHostWindow.current?.takeIf { !it.mini && it.canOpenMini }?.let { host ->
-            FlymeGlyphButton(
-                icon = Icons.Rounded.PictureInPictureAlt,
-                contentDescription = stringResource(R.string.flyme_open_mini_window),
-                onClick = { host.switchTo(mini = true, resume = isPlaying) },
-                modifier = Modifier.padding(end = 4.dp).automationId("nav-mini-window"),
-                size = 44.dp,
-                iconSize = 20.dp,
-            )
-        }
+        FlymeWindowButton(isPlaying, Modifier.padding(end = 4.dp), size = 44.dp, iconSize = 20.dp)
         FlymeGlyphButton(
             icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
             contentDescription = stringResource(if (isPlaying) R.string.player_pause else R.string.player_play),
@@ -1001,6 +992,30 @@ private fun MetroMiniPlayer(
             iconSize = 20.dp,
         )
     }
+}
+
+/**
+ * Moves the app into the Flyme small window (portrait), or from it back to full screen, handing the
+ * playback session over. Shows nothing where no small window can be opened.
+ */
+@Composable
+internal fun FlymeWindowButton(
+    playing: Boolean,
+    modifier: Modifier = Modifier,
+    size: Dp = 48.dp,
+    iconSize: Dp = 22.dp,
+    tint: Color = FlymeInk,
+) {
+    val host = LocalHostWindow.current?.takeIf { it.canOpenMini } ?: return
+    FlymeGlyphButton(
+        icon = if (host.mini) Icons.Rounded.OpenInFull else Icons.Rounded.PictureInPictureAlt,
+        contentDescription = stringResource(if (host.mini) R.string.flyme_open_full_screen else R.string.flyme_open_mini_window),
+        onClick = { host.switchTo(mini = !host.mini, resume = playing) },
+        modifier = modifier.automationId(if (host.mini) "window-full-screen" else "window-mini"),
+        size = size,
+        iconSize = iconSize,
+        tint = tint,
+    )
 }
 
 /**

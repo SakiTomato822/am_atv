@@ -16,7 +16,7 @@ import dev.amatv.ui.AmAtvApp
 import dev.amatv.ui.CarLayout
 
 open class MainActivity : AppCompatActivity() {
-    /** True in the Flyme small window, which shows only Now Playing. */
+    /** True in the Flyme small window, which runs the whole app in a portrait window. */
     protected open val miniWindow: Boolean get() = false
 
     override fun onNewIntent(intent: Intent) {
