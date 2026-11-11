@@ -365,7 +365,16 @@ fun PlayerScreen(
         showLyrics && supportsLyrics -> PlayerPresentation.Lyrics
         else -> PlayerPresentation.Artwork
     }
-    val carLyrics = BuildConfig.FLYME_AUTO && presentation == PlayerPresentation.Lyrics
+    val flymeContext = LocalContext.current
+    val flymeOptions = remember(flymeContext) { dev.amatv.integration.FlymePlaybackOptions.get(flymeContext) }
+    val flymeSettings by flymeOptions.settings.collectAsState()
+    // The new lyrics page serves portrait and the Soak style; landscape Flow keeps the Flyme.12 stage
+    // (cover, title and lyrics side by side) with only its controls replaced.
+    val carLyrics = BuildConfig.FLYME_AUTO && presentation != PlayerPresentation.Queue && (
+        LocalCarPortrait.current ||
+            (presentation == PlayerPresentation.Lyrics &&
+                flymeSettings.lyricStyle == dev.amatv.integration.FlymePlaybackSettings.LyricStyle.Soak)
+        )
     val displayedLyrics = remember(
         track.lyrics, lyricTranslationEnabled, lyricPronunciationEnabled, lyricsEnhancementsReady,
     ) {
@@ -677,15 +686,12 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxSize(),
         )
         if (carLyrics) {
-            val context = LocalContext.current
-            val options = remember(context) { dev.amatv.integration.FlymePlaybackOptions.get(context) }
-            val settings by options.settings.collectAsState()
             CompositionLocalProvider(LocalFlymePalette provides DarkFlymePalette) {
                 FlymeCarLyrics(
                     track = displayedTrack,
-                    style = settings.lyricStyle,
-                    poster = settings.portraitPoster,
-                    onPosterChange = { poster -> options.update { it.copy(portraitPoster = poster) } },
+                    style = flymeSettings.lyricStyle,
+                    poster = flymeSettings.portraitPoster,
+                    onPosterChange = { poster -> flymeOptions.update { it.copy(portraitPoster = poster) } },
                     position = playbackPosition,
                     offsetMs = lyricOffsetMs,
                     playWhenReady = playWhenReady,
@@ -2065,50 +2071,33 @@ private fun FlymePlayerStage(
                     style = TextStyle(fontSize = 16.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold,
                         letterSpacing = (-0.1).sp, color = lineColor),
                     modifier = Modifier.padding(top = 2.dp).flymeMarquee().automationId("player-artist-album"))
-                Spacer(Modifier.height(18.dp))
-                FlymeSeekBar(
-                    positionState = positionState,
+                Spacer(Modifier.height(16.dp))
+                LyricControlCard(
+                    position = positionState,
                     durationMs = track.durationMs,
-                    enabled = canSeek,
-                    onSeekTo = onSeekTo,
-                    focused = progressFocused,
-                    scrubPositionMs = scrubPositionMs,
+                    playWhenReady = playWhenReady,
+                    canSeek = canSeek,
+                    canSkipPrevious = canSkipPrevious,
+                    canSkipNext = canSkipNext,
+                    translation = lyricDisplayActive,
+                    onPlayPause = { onControl(PlayerControl.PlayPause) },
+                    onPrevious = { onControl(PlayerControl.Previous) },
+                    onNext = { onControl(PlayerControl.Next) },
+                    onQueue = { onControl(PlayerControl.Queue) },
+                    onTranslate = { onControl(PlayerControl.LyricsDisplay) },
+                    onSeek = onSeekTo,
+                    modifier = Modifier.fillMaxWidth().automationId("player-controls"),
                 )
-                Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(37.dp, Alignment.CenterHorizontally),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    FlymeGlyphButton(FlymeGlyphs.Backward, stringResource(R.string.player_previous_track),
-                        onClick = { onControl(PlayerControl.Previous) }, size = 52.dp, iconSize = 38.dp,
-                        enabled = canSkipPrevious, focused = focusedControl == PlayerControl.Previous,
-                        modifier = Modifier.automationId("player-previous"))
-                    FlymeGlyphButton(if (playWhenReady) FlymeGlyphs.Pause else FlymeGlyphs.Play,
-                        stringResource(if (playWhenReady) R.string.player_pause else R.string.player_play),
-                        onClick = { onControl(PlayerControl.PlayPause) }, size = 64.dp, iconSize = 48.dp,
-                        focused = focusedControl == PlayerControl.PlayPause,
-                        modifier = Modifier.automationId("player-play-pause"))
-                    FlymeGlyphButton(FlymeGlyphs.Forward, stringResource(R.string.player_next_track),
-                        onClick = { onControl(PlayerControl.Next) }, size = 52.dp, iconSize = 38.dp,
-                        enabled = canSkipNext, focused = focusedControl == PlayerControl.Next,
-                        modifier = Modifier.automationId("player-next"))
-                }
                 Spacer(Modifier.height(6.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(22.dp, Alignment.CenterHorizontally),
                     verticalAlignment = Alignment.CenterVertically) {
                     val secondary = FlymeInk.copy(alpha = 0.72f)
                     if (supportsLyrics) {
-                        FlymeGlyphButton(Icons.Rounded.Translate, stringResource(R.string.player_lyrics_display_settings),
-                            onClick = { onControl(PlayerControl.LyricsDisplay) }, size = 36.dp, iconSize = 19.dp,
-                            selected = lyricDisplayActive, focused = focusedControl == PlayerControl.LyricsDisplay, tint = secondary,
-                            modifier = Modifier.automationId("player-lyrics-display"))
                         FlymeGlyphButton(Icons.Rounded.Lyrics, stringResource(R.string.player_lyrics),
                             onClick = { onControl(PlayerControl.Lyrics) }, size = 36.dp, iconSize = 19.dp,
                             selected = showLyrics, focused = focusedControl == PlayerControl.Lyrics, tint = secondary,
                             modifier = Modifier.automationId("player-lyrics"))
                     }
-                    FlymeGlyphButton(Icons.AutoMirrored.Rounded.QueueMusic, stringResource(R.string.player_queue),
-                        onClick = { onControl(PlayerControl.Queue) }, size = 36.dp, iconSize = 19.dp,
-                        selected = showQueue, focused = focusedControl == PlayerControl.Queue, tint = secondary,
-                        modifier = Modifier.automationId("player-queue"))
                     if (canSetAutoplay) {
                         FlymeGlyphButton(Icons.Rounded.AllInclusive, stringResource(R.string.player_radio),
                             onClick = { onControl(PlayerControl.Radio) }, size = 36.dp, iconSize = 20.dp,

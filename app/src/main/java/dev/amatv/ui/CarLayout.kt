@@ -31,7 +31,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import dev.amatv.BuildConfig
 
 /** How much of the bottom of the car layout the on-screen keyboard covers, in layout dp. */
 val LocalCarKeyboardOverlap = staticCompositionLocalOf { 0.dp }
@@ -52,10 +51,7 @@ fun CarLayout(content: @Composable () -> Unit) {
         val portrait = fullHeight > maxWidth
         // Match autoenergy-fuel-mod's 1920x968 design reference and fit both axes.
         // Insets can reduce this to 1920x896; use the actual content window.
-        val scale = if (BuildConfig.FLYME_UI_PREVIEW && !portrait) {
-            // Preview the car viewport on a high-density Xiaomi phone as well.
-            (1.5f * minOf(maxWidth.value / 1920f, fullHeight.value / 968f)).coerceIn(0.4f, 1.5f)
-        } else carContentScale(maxWidth.value, fullHeight.value)
+        val scale = carContentScale(maxWidth.value, fullHeight.value, systemDensity.density)
         FlymeThemeFlip(rememberFlymeLight()) { light ->
             CompositionLocalProvider(
                 LocalFlymePalette provides if (light) LightFlymePalette else DarkFlymePalette,
@@ -86,9 +82,15 @@ private class CarWindowSize {
     }
 }
 
-internal fun carContentScale(widthDp: Float, heightDp: Float): Float =
+/**
+ * Scale from the window to the design: 400dp wide in portrait, 1920x968 at 1.5 in landscape.
+ * A low-density head unit never goes below its native size, so a split-screen window keeps its touch
+ * targets; a high-density phone or tablet may shrink, so a short landscape window (a Xiaomi phone is
+ * about 1128x521dp) still fits the whole design instead of overflowing it.
+ */
+internal fun carContentScale(widthDp: Float, heightDp: Float, systemDensity: Float = 1f): Float =
     if (heightDp > widthDp) (widthDp / 400f).coerceIn(0.65f, 1.5f)
-    else (1.5f * minOf(widthDp / 1920f, heightDp / 968f)).coerceIn(1f, 1.5f)
+    else (1.5f * minOf(widthDp / 1920f, heightDp / 968f)).coerceIn(if (systemDensity < 1.5f) 1f else 0.5f, 1.5f)
 
 /** Light or dark, from Settings: fixed, the system night mode, or the chosen hours of the day. */
 @Composable

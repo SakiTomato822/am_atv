@@ -3,6 +3,11 @@ package dev.amatv.ui
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -22,6 +27,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -472,6 +479,7 @@ internal fun sortLibrary(items: List<Track>, sort: LibrarySort, descending: Bool
  * grid (or list), instead of a single horizontal shelf per category.
  * Tapping the selected sort again reverses it.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun FlymeLibrary(
     shelves: List<ContentShelf>,
@@ -494,14 +502,15 @@ internal fun FlymeLibrary(
     val showList = category == LibraryCategory.Songs || (supportsViewToggle && !gridView)
 
     Column(Modifier.fillMaxSize()) {
-        Row(
+        // Categories and sorting share one line in landscape; on a narrow portrait screen the sort
+        // controls wrap onto a second line instead of running off the edge.
+        FlowRow(
             Modifier.fillMaxWidth().padding(start = 13.dp, end = 13.dp, top = 6.dp, bottom = 16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Bottom,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(destinationLabel(Destination.Library), fontSize = 31.sp, fontWeight = FontWeight.Bold,
-                    color = FlymeInk, lineHeight = 34.sp)
                 FlymePillGroup {
                     LibraryCategory.entries.forEach { entry ->
                         FlymePill(
@@ -628,7 +637,8 @@ private fun FlymeLibraryGrid(
             .collect { if (it) latestNearEnd() }
     }
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(132.dp),
+        // Three covers a row on a portrait screen rather than two oversized ones.
+        columns = GridCells.Adaptive(if (LocalCarPortrait.current) 100.dp else 132.dp),
         state = state,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 13.dp, end = 13.dp, bottom = 40.dp),
@@ -786,8 +796,9 @@ internal fun FlymeTopBar(
     capsuleOnly: Boolean = false,
 ) {
     val portrait = LocalCarPortrait.current
-    Column(modifier.fillMaxWidth().padding(start = if (portrait) 20.dp else 40.dp, end = if (portrait) 16.dp else 40.dp,
-        top = if (portrait) 12.dp else 18.dp)) {
+    // The pivot and account share the left edge of the page content below them (page inset + card inset).
+    Column(modifier.fillMaxWidth().padding(start = flymePageInset(portrait) + 14.dp,
+        end = if (portrait) 16.dp else 40.dp, top = if (portrait) 12.dp else 18.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             if (!capsuleOnly) {
                 val accountLabel = destinationLabel(Destination.Account)
@@ -825,28 +836,60 @@ internal fun FlymeTopBar(
 }
 
 /**
- * Windows Phone pivot swipe: a horizontal swipe across the page moves to the next or previous section.
- * Shelves and other horizontal scrollers consume their own drags first, so this only fires on a swipe
- * that nothing inside the page took.
+ * Windows Phone pivot swipe. The page follows the finger and fades a little; past a fifth of the width
+ * it slides out, the next section is opened and slides in from the other side, otherwise it springs
+ * back. At the first or last section the drag meets resistance. Shelves and other horizontal scrollers
+ * consume their own drags first, so this only moves on a swipe nothing inside the page took.
  */
-internal fun Modifier.metroPivotSwipe(selected: Destination, onDestination: (Destination) -> Unit): Modifier =
-    pointerInput(selected) {
-        val threshold = 96.dp.toPx()
-        var travel = 0f
-        detectHorizontalDragGestures(
-            onDragStart = { travel = 0f },
-            onDragEnd = {
-                val index = PivotDestinations.indexOf(selected)
-                val target = when {
-                    index < 0 -> null
-                    travel < -threshold -> PivotDestinations.getOrNull(index + 1)
-                    travel > threshold -> PivotDestinations.getOrNull(index - 1)
-                    else -> null
-                }
-                if (target != null) onDestination(target)
-            },
-        ) { _, dragAmount -> travel += dragAmount }
-    }
+@Composable
+internal fun rememberMetroPivotSwipe(selected: Destination, onDestination: (Destination) -> Unit): Modifier {
+    val scope = rememberCoroutineScope()
+    val shift = remember { Animatable(0f) }
+    val current by rememberUpdatedState(selected)
+    val open by rememberUpdatedState(onDestination)
+    return Modifier
+        .pointerInput(Unit) {
+            fun neighbour(direction: Int): Destination? =
+                PivotDestinations.indexOf(current).takeIf { it >= 0 }?.let { PivotDestinations.getOrNull(it + direction) }
+            detectHorizontalDragGestures(
+                onDragEnd = {
+                    scope.launch {
+                        val width = size.width.toFloat()
+                        val direction = when {
+                            shift.value < -width * 0.2f -> 1
+                            shift.value > width * 0.2f -> -1
+                            else -> 0
+                        }
+                        val target = if (direction != 0) neighbour(direction) else null
+                        if (target == null) {
+                            shift.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 500f))
+                            return@launch
+                        }
+                        shift.animateTo(-direction * width * 0.45f, tween(140, easing = LinearOutSlowInEasing))
+                        open(target)
+                        shift.snapTo(direction * width * 0.45f)
+                        shift.animateTo(0f, tween(320, easing = MetroEnterEasing))
+                    }
+                },
+                onDragCancel = { scope.launch { shift.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 500f)) } },
+            ) { change, dragAmount ->
+                change.consume()
+                val direction = if (shift.value + dragAmount < 0f) 1 else -1
+                val resistance = if (neighbour(direction) == null) 0.3f else 1f
+                scope.launch { shift.snapTo(shift.value + dragAmount * resistance) }
+            }
+        }
+        .graphicsLayer {
+            translationX = shift.value
+            alpha = (1f - kotlin.math.abs(shift.value) / (size.width * 0.9f)).coerceIn(0.35f, 1f)
+        }
+}
+
+/** Windows Phone's entrance curve: quick start, long gentle settle. */
+private val MetroEnterEasing = CubicBezierEasing(0.1f, 0.9f, 0.2f, 1f)
+
+/** Side inset of the pages under the header: narrower in portrait, where width is scarce. */
+internal fun flymePageInset(portrait: Boolean): Dp = if (portrait) 10.dp else 40.dp
 
 private val PivotSize = 48.sp
 private val PivotLineHeight = 53.sp

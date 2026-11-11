@@ -95,6 +95,9 @@ import dev.amatv.model.LyricTimeline
 import dev.amatv.model.LyricTiming
 import dev.amatv.model.Track
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import java.text.BreakIterator
 import kotlin.math.PI
 import kotlin.math.abs
@@ -311,7 +314,24 @@ internal fun CarLyricRows(
     val lyricPosition = remember(position, offsetMs) {
         derivedStateOf { (position.value + offsetMs).coerceAtLeast(0L) }
     }
-    BoxWithConstraints(fade) {
+    val browse = remember { Animatable(0f) }
+    val browseScope = rememberCoroutineScope()
+    var settle by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    BoxWithConstraints(fade.pointerInput(Unit) {
+        // A finger drag browses the lyrics; three seconds after letting go they glide back to the current line.
+        detectVerticalDragGestures(
+            onDragStart = { settle?.cancel() },
+            onDragEnd = {
+                settle = browseScope.launch {
+                    delay(3_000)
+                    browse.animateTo(0f, tween(600, easing = RippleEasing))
+                }
+            },
+        ) { change, dy ->
+            change.consume()
+            browseScope.launch { browse.snapTo(browse.value + dy) }
+        }
+    }) {
         val density = LocalDensity.current
         val anchor = with(density) { maxHeight.toPx() } * anchorFraction
         val gap = with(density) { LyricGap.toPx() }
@@ -350,7 +370,7 @@ internal fun CarLyricRows(
                 // Lines more than a screen away are not visible; skip their blur layers.
                 val blur = if (soften && abs(active - index) <= 6) LineBlur[distance].dp else 0.dp
                 Box(Modifier.fillMaxWidth().onSizeChanged { heights[index] = it.height }
-                    .graphicsLayer { translationY = shift.value; alpha = opacity }
+                    .graphicsLayer { translationY = shift.value + browse.value; alpha = opacity }
                     .automationId("car-lyric-line-$index")
                     .clickable(interactionSource = null, indication = null) {
                         // A tap on a line while the controls are hidden only brings them back, like a tap anywhere else.

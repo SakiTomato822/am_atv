@@ -12,6 +12,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -111,12 +113,21 @@ internal fun PortraitLyrics(
             CarLyricFlow(track, palette, visible && !lowPerformance)
         }
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-            PortraitHeader(track, showCover = !soak || poster, poster, onPosterChange)
+            val noLyrics = track.lyrics.isEmpty()
+            PortraitHeader(track, showCover = (!soak || poster) && !noLyrics, poster, onPosterChange, onBack)
             BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                 // Over the Soak cover the list starts where the cover has faded, so no line sits on bright art.
                 val listTop = if (soak) maxHeight * 0.34f else 0.dp
                 when {
-                    track.lyrics.isEmpty() -> emptyContent()
+                    // No lyrics: the cover fills the page, Apple Music style, with the loading or
+                    // unavailable note under it.
+                    noLyrics -> Column(Modifier.fillMaxSize().padding(horizontal = 28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                        MotionArtwork(track, Modifier.fillMaxWidth().aspectRatio(1f)
+                            .shadow(18.dp, RoundedCornerShape(12.dp)), animate = visible && !lowPerformance,
+                            cornerRadius = 12.dp)
+                        Box(Modifier.fillMaxWidth().height(72.dp)) { emptyContent() }
+                    }
                     poster -> PortraitPoster(track, position, offsetMs, translation, textScale)
                     else -> Box(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = listTop)) {
                         CarLyricRows(track.lyrics, position, offsetMs, soften = !soak && !lowPerformance,
@@ -128,7 +139,7 @@ internal fun PortraitLyrics(
                     }
                 }
             }
-            if (poster) {
+            if (poster || noLyrics) {
                 PortraitControls(position, track.durationMs, playWhenReady, canSeek, canSkipPrevious, canSkipNext,
                     translation, onPlayPause, onPrevious, onNext, onQueue, onTranslate, onSeek)
             } else {
@@ -149,10 +160,19 @@ internal fun PortraitLyrics(
 }
 
 @Composable
-private fun PortraitHeader(track: Track, showCover: Boolean, poster: Boolean, onPosterChange: (Boolean) -> Unit) {
+private fun PortraitHeader(
+    track: Track,
+    showCover: Boolean,
+    poster: Boolean,
+    onPosterChange: (Boolean) -> Unit,
+    onBack: () -> Unit,
+) {
     // Large enough to anchor the page, after the H5 portrait Metro board: an 84dp cover beside the title.
-    Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 20.dp, bottom = 16.dp),
+    Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 12.dp, top = 20.dp, bottom = 16.dp),
         verticalAlignment = Alignment.CenterVertically) {
+        FlymeGlyphButton(Icons.Rounded.KeyboardArrowDown, stringResource(R.string.browse_back), onBack,
+            Modifier.automationId("portrait-lyrics-back"), size = 44.dp, iconSize = 30.dp, tint = Color.White)
+        Box(Modifier.size(4.dp))
         if (showCover) {
             MotionArtwork(track, Modifier.size(84.dp).shadow(10.dp, RoundedCornerShape(8.dp)), animate = false,
                 cornerRadius = 8.dp)

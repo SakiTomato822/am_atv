@@ -1606,8 +1606,9 @@ fun AmAtvApp() {
         }
 
         loadingDestinations = loadingDestinations + target
-        // Show the last session's shelves at once; the network load below replaces them.
-        val snapshotName = target.name.takeIf { target == Destination.Home || target == Destination.Browse }
+        // Show the last session's shelves at once; the network load below replaces them. The library
+        // is kept whole too: its playlist index alone left an old, partial list on screen every launch.
+        val snapshotName = target.name
         if (snapshotName != null && shelvesByDestination[target].isNullOrEmpty() &&
             connectionState == MusicConnectionState.SignedIn
         ) {
@@ -2543,9 +2544,13 @@ private fun BrowseShell(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .then(if (BuildConfig.FLYME_AUTO) Modifier.metroPivotSwipe(destination, onDestination) else Modifier)
+                    .then(if (BuildConfig.FLYME_AUTO) rememberMetroPivotSwipe(destination, onDestination) else Modifier)
                     .fillMaxSize()
-                    .padding(start = 40.dp, end = 40.dp, top = 20.dp),
+                    .padding(
+                        start = if (BuildConfig.FLYME_AUTO) flymePageInset(LocalCarPortrait.current) else 40.dp,
+                        end = if (BuildConfig.FLYME_AUTO) flymePageInset(LocalCarPortrait.current) else 40.dp,
+                        top = 20.dp,
+                    ),
             ) {
                 CompositionLocalProvider(LocalContentFocusEntry provides contentFocusEntry) {
                     BrowseContentMotion(
