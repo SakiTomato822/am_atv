@@ -161,8 +161,8 @@ internal fun FlymeCarLyrics(
         )
         return
     }
-    FitDesign(Modifier.fillMaxSize().automationId("car-lyrics-${style.name.lowercase()}")
-        .then(rememberPullDownToClose(onBack))) {
+    val pullDown = rememberPullDownToClose(onBack)
+    FitDesign(Modifier.fillMaxSize().automationId("car-lyrics-${style.name.lowercase()}").then(pullDown.layer)) {
         BoxWithConstraints(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { reveal() } }) {
             val lyricsLeft = maxWidth * if (soak) 0.484f else 0.422f
             val artLeft = maxWidth * 0.078f
@@ -173,7 +173,9 @@ internal fun FlymeCarLyrics(
                 // fade always ends exactly on the background with no seam.
                 val base = lerp(palette.first(), Color.Black, 0.55f)
                 Box(Modifier.fillMaxSize().background(base))
-                Box(Modifier.fillMaxWidth(0.62f).fillMaxHeight().automationId("car-lyrics-soak-cover")) {
+                // The cover is the handle for pull-down-to-close; the lyrics beside it keep their own drags.
+                Box(Modifier.fillMaxWidth(0.62f).fillMaxHeight().automationId("car-lyrics-soak-cover")
+                    .then(pullDown.handle)) {
                     MotionArtwork(track, Modifier.fillMaxSize(), animate = false, cornerRadius = 0.dp)
                     Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(
                         0f to Color.Transparent, 0.40f to Color.Transparent, 0.62f to base.copy(alpha = 0.28f),
@@ -497,17 +499,22 @@ internal fun LyricControlCard(
 }
 
 /**
- * Pull down to close Now Playing. The page follows the finger, shrinking and fading a little; past
- * 120dp it closes on release, otherwise it springs back. Upward drags meet resistance. The lyrics list
- * consumes its own drags, so this only acts on the cover, the title and empty space.
+ * Pull down to close Now Playing, split by zone so it never competes with the lyrics: [handle] goes on
+ * the area that takes the drag (the header or the cover) and [layer] on the page that moves with it.
+ */
+internal class PullDownToClose(val handle: Modifier, val layer: Modifier)
+
+/**
+ * The page follows the finger, shrinking and fading a little; past 120dp it closes on release,
+ * otherwise it springs back. Upward drags meet resistance.
  */
 @Composable
-internal fun rememberPullDownToClose(onClose: () -> Unit): Modifier {
+internal fun rememberPullDownToClose(onClose: () -> Unit): PullDownToClose {
     val scope = rememberCoroutineScope()
     val pull = remember { Animatable(0f) }
     val close by rememberUpdatedState(onClose)
-    return Modifier
-        .pointerInput(Unit) {
+    return remember(scope, pull) {
+        PullDownToClose(handle = Modifier.pointerInput(Unit) {
             val distance = 120.dp.toPx()
             detectVerticalDragGestures(
                 onDragEnd = {
@@ -524,12 +531,12 @@ internal fun rememberPullDownToClose(onClose: () -> Unit): Modifier {
                     pull.snapTo(if (next < 0f) next * 0.25f else next)
                 }
             }
-        }
-        .graphicsLayer {
+        }, layer = Modifier.graphicsLayer {
             val fraction = (pull.value / size.height).coerceIn(0f, 1f)
             translationY = pull.value
             scaleX = 1f - 0.08f * fraction
             scaleY = 1f - 0.08f * fraction
             alpha = 1f - 0.6f * fraction
-        }
+        })
+    }
 }

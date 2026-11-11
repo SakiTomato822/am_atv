@@ -201,7 +201,30 @@ data class LyricLine(
     val text: String = words.joinToString(if (joinWithSpaces) " " else "") { it.text }
 
     val backgroundText: String = backgroundWords.joinToString(if (joinWithSpaces) " " else "") { it.text }
+
+    /**
+     * The line as the karaoke renderer shows it. Unlike [text], which puts a space between every
+     * timed unit, this keeps only the spaces the lyric really has, so character-timed Chinese or
+     * Japanese reads as running text and its phrase gaps survive.
+     */
+    val renderedText: String
+        get() = renderLyricWords(words, joinWithSpaces).ifBlank { renderLyricWords(backgroundWords, joinWithSpaces) }.trim()
 }
+
+/** Mirrors KaraokeWordItem's renderedString rules when producing a whole lyric line. */
+fun renderLyricWords(words: List<LyricWord>, joinWithSpaces: Boolean): String =
+    buildString {
+        words.forEachIndexed { index, word ->
+            when {
+                word.displayText != word.text -> append(word.displayText)
+                joinWithSpaces && word.hasTrailingWhitespace && index < words.lastIndex -> {
+                    append(word.text)
+                    append(' ')
+                }
+                else -> append(word.text)
+            }
+        }
+    }
 
 object LyricTimeline {
     /**

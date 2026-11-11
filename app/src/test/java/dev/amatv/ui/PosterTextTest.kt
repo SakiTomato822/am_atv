@@ -14,19 +14,21 @@ class PosterTextTest {
     }
 }
 
-class LyricDisplayTextTest {
-    private fun line(vararg words: String) = dev.amatv.model.LyricLine(
-        words.mapIndexed { i, w -> dev.amatv.model.LyricWord(w, i * 100L, i * 100L + 90) })
+class RenderedLyricTextTest {
+    private fun unit(text: String, space: Boolean) =
+        dev.amatv.model.LyricWord(text, 0L, 90L, hasTrailingWhitespace = space)
 
-    @Test fun phraseSpacesStayAsTheySent() {
-        assertEquals("還有多少回憶 藏著", lyricDisplayText(line("還有多少回憶", "藏著")))
-    }
-
-    @Test fun characterTimedSpacesAreDropped() {
-        assertEquals("空蕩的房間", lyricDisplayText(line("空", "蕩", "的", "房", "間")))
+    @Test fun characterTimedCjkKeepsOnlyRealPhraseGaps() {
+        val line = dev.amatv.model.LyricLine(listOf(
+            unit("我", false), unit("一", false), unit("大早", false), unit("起", false), unit("不", false),
+            unit("来", true), unit("我的", false), unit("眼", false), unit("睛", false),
+        ))
+        assertEquals("我一大早起不来 我的眼睛", line.renderedText)
+        assertEquals("我一大早起不来\n我的眼睛", posterText(line.renderedText))
     }
 
     @Test fun latinWordsKeepTheirSpaces() {
-        assertEquals("night drive home", lyricDisplayText(line("night", "drive", "home")))
+        val line = dev.amatv.model.LyricLine(listOf(unit("night", true), unit("drive", true), unit("home", true)))
+        assertEquals("night drive home", line.renderedText)
     }
 }

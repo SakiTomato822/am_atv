@@ -3,6 +3,7 @@ package dev.amatv.integration
 import dev.amatv.model.LyricLine
 import dev.amatv.model.LyricTiming
 import dev.amatv.model.LyricWord
+import dev.amatv.model.renderLyricWords
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -196,21 +197,6 @@ class PlaybackLyricExport private constructor(
             if (words.any { it.startMs < 0L }) return null
             return words.minOfOrNull(LyricWord::startMs)
         }
-
-        /** Mirrors KaraokeWordItem's renderedString rules when producing a whole lyric line. */
-        private fun renderLyricWords(words: List<LyricWord>, joinWithSpaces: Boolean): String =
-            buildString {
-                words.forEachIndexed { index, word ->
-                    when {
-                        word.displayText != word.text -> append(word.displayText)
-                        joinWithSpaces && word.hasTrailingWhitespace && index < words.lastIndex -> {
-                            append(word.text)
-                            append(' ')
-                        }
-                        else -> append(word.text)
-                    }
-                }
-            }
 
         private fun cleanLyricText(text: String): String = text
             .replace(Regex("[\\r\\n\\u0085\\u2028\\u2029]+"), " ")

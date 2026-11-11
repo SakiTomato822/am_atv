@@ -95,8 +95,10 @@ internal fun PortraitLyrics(
 ) {
     val palette = rememberArtworkPalette(track.artworkUrl, track.palette)
     val textScale = carTextScale(fontScale)
+    val pullDown = rememberPullDownToClose(onBack)
+    val noLyrics = track.lyrics.isEmpty()
     Box(Modifier.fillMaxSize().automationId(if (poster) "portrait-lyrics-poster" else "portrait-lyrics-list")
-        .then(rememberPullDownToClose(onBack))
+        .then(pullDown.layer)
         .pointerInput(poster) { detectTapGestures { if (!poster) onReveal() } }) {
         if (soak) {
             val base = lerp(palette.first(), Color.Black, 0.55f)
@@ -113,14 +115,16 @@ internal fun PortraitLyrics(
         } else {
             CarLyricFlow(track, palette, visible && !lowPerformance)
         }
-        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-            val noLyrics = track.lyrics.isEmpty()
+        // The header is the handle for pull-down-to-close; the lyrics below it keep their own drags.
+        // A page with no lyrics has nothing to scroll, so the whole page is the handle.
+        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()
+            .then(if (noLyrics) pullDown.handle else Modifier)) {
             if (noLyrics) {
                 FlymeGlyphButton(Icons.Rounded.KeyboardArrowDown, stringResource(R.string.browse_back), onBack,
                     Modifier.padding(start = 8.dp, top = 20.dp).automationId("portrait-lyrics-back"),
                     size = 44.dp, iconSize = 30.dp, tint = Color.White)
             } else {
-                PortraitHeader(track, showCover = !soak || poster, poster, onPosterChange, onBack)
+                PortraitHeader(track, showCover = !soak || poster, poster, onPosterChange, onBack, pullDown.handle)
             }
             BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                 // Over the Soak cover the list starts where the cover has faded, so no line sits on bright art.
@@ -180,9 +184,10 @@ private fun PortraitHeader(
     poster: Boolean,
     onPosterChange: (Boolean) -> Unit,
     onBack: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     // Large enough to anchor the page, after the H5 portrait Metro board: an 84dp cover beside the title.
-    Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 12.dp, top = 20.dp, bottom = 16.dp),
+    Row(modifier.fillMaxWidth().padding(start = 8.dp, end = 12.dp, top = 20.dp, bottom = 16.dp),
         verticalAlignment = Alignment.CenterVertically) {
         FlymeGlyphButton(Icons.Rounded.KeyboardArrowDown, stringResource(R.string.browse_back), onBack,
             Modifier.automationId("portrait-lyrics-back"), size = 44.dp, iconSize = 30.dp, tint = Color.White)
@@ -224,14 +229,14 @@ private fun PortraitPoster(
     val current = active.coerceAtLeast(0)
     Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 28.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)) {
-        Text(if (active > 0) lyricDisplayText(lines[active - 1]) else "", color = Color.White.copy(alpha = 0.62f),
+        Text(if (active > 0) lines[active - 1].renderedText else "", color = Color.White.copy(alpha = 0.62f),
             fontSize = (22 * textScale).sp, lineHeight = (29 * textScale).sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
         AnimatedContent(current, label = "poster-line", transitionSpec = {
             (fadeIn(tween(450)) + slideInVertically(tween(450)) { it / 4 }) togetherWith fadeOut(tween(200))
         }) { index ->
             val line = lines[index]
             Column {
-                Text(posterText(lyricDisplayText(line)),
+                Text(posterText(line.renderedText),
                     color = Color.White.copy(alpha = if (active < 0) 0.45f else 1f),
                     fontSize = (46 * textScale).sp, lineHeight = (53 * textScale).sp, fontWeight = FontWeight.Black)
                 if (translation) line.translation?.let {
@@ -243,7 +248,7 @@ private fun PortraitPoster(
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             for ((step, alpha) in listOf(1 to 0.78f, 2 to 0.58f, 3 to 0.42f)) {
                 val line = lines.getOrNull(current + step) ?: break
-                Text(lyricDisplayText(line), color = Color.White.copy(alpha = alpha), fontSize = (24 * textScale).sp,
+                Text(line.renderedText, color = Color.White.copy(alpha = alpha), fontSize = (24 * textScale).sp,
                     lineHeight = (31 * textScale).sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
             }
         }
@@ -298,19 +303,4 @@ internal fun posterText(text: String): String {
     return if (phrased) trimmed.replace(Regex(" +"), "\n") else trimmed
 }
 
-private fun isPhraseScript(codePoint: Int) = Character.UnicodeScript.of(codePoint) in PhraseScripts
 
-/**
- * A line's text as Apple sent it, so its spaces still mark phrase breaks for the poster. The one
- * exception is a line whose every space-separated piece is a single CJK character: those spaces come
- * from joining character-timed units, not from the lyric, and would stack the poster one character a
- * line, so they are dropped.
- */
-internal fun lyricDisplayText(line: dev.amatv.model.LyricLine): String {
-    val text = line.text.ifBlank { line.backgroundText }.trim()
-    val pieces = text.split(Regex(" +"))
-    val characterTimed = pieces.size > 2 && pieces.all { piece ->
-        piece.codePointCount(0, piece.length) == 1 && isPhraseScript(piece.codePointAt(0))
-    }
-    return if (characterTimed) pieces.joinToString("") else text
-}
