@@ -127,7 +127,7 @@ android {
                 }
             }
             applicationIdSuffix = ".flyme"
-            versionNameSuffix = "-flyme.14.3"
+            versionNameSuffix = "-flyme.14.4"
             manifestPlaceholders["flymeApplicationLabel"] = "@string/flyme_app_name"
             manifestPlaceholders["flymeRadioProbeEnabled"] = "false"
             matchingFallbacks += listOf("standaloneGecko", "standalone", "release")
@@ -203,7 +203,7 @@ val musicKitFrameRepairClasses = providers.provider {
 androidComponents {
     onVariants(selector().all()) { variant ->
         if (variant.name == "flymeGecko") {
-            variant.outputs.forEach { it.versionCode.set(35) }
+            variant.outputs.forEach { it.versionCode.set(36) }
         }
         if (variant.name == "standaloneGecko" || variant.name == "flymeGecko") {
             // Direct APK distribution benefits from compressed browser binaries.
