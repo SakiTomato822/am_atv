@@ -12,6 +12,10 @@
     <application android:label="${flymeApplicationLabel}"
         android:networkSecurityConfig="@xml/gecko_auth_network_security"
         tools:replace="android:label">
+        <!-- Flyme small window: draw it like a phone screen (720 px at 320 dpi = 360 dp wide) instead of
+             a whole 1080-wide screen shrunk to fit, which made every text and button too small. -->
+        <meta-data android:name="com.android.app.windowmode.resolution.width" android:value="720" />
+        <meta-data android:name="com.android.app.windowmode.dpi" android:value="320" />
         <activity android:name=".MainActivity"
             android:resizeableActivity="true"
             android:windowSoftInputMode="adjustResize" />

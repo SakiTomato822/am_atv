@@ -104,7 +104,10 @@ internal fun PortraitLyrics(
         // Soak in portrait: the cover is a hero on the top 46% and has fully faded into a dark base
         // before the lyrics begin, so no text ever sits on busy artwork.
         val coverHeight = maxHeight * 0.46f
-        if (soak) {
+        if (soak && noLyrics) {
+            // The big cover below is the page; a second, faded copy behind it only adds clutter.
+            Box(Modifier.fillMaxSize().background(lerp(palette.first(), Color.Black, 0.72f)))
+        } else if (soak) {
             val base = lerp(palette.first(), Color.Black, 0.70f)
             Box(Modifier.fillMaxSize().background(base))
             Box(Modifier.fillMaxWidth().height(coverHeight)) {
@@ -117,6 +120,8 @@ internal fun PortraitLyrics(
             }
         } else {
             CarLyricFlow(track, palette, visible && !lowPerformance)
+            // A light cover leaves the flowing background pale; keep white lyrics readable on it.
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.34f)))
         }
         // The header is the handle for pull-down-to-close; the lyrics below it keep their own drags.
         // A page with no lyrics has nothing to scroll, so the whole page is the handle.
@@ -131,7 +136,7 @@ internal fun PortraitLyrics(
             }
             Box(Modifier.fillMaxWidth().weight(1f)) {
                 // Under Soak the lyrics start where the cover has faded (its lower edge, less the header above).
-                val listTop = if (soak) (coverHeight * 0.92f - SoakHeaderHeight).coerceAtLeast(0.dp) else 0.dp
+                val listTop = if (soak && !noLyrics) (coverHeight * 0.92f - SoakHeaderHeight).coerceAtLeast(0.dp) else 0.dp
                 when {
                     // No lyrics: the cover fills the page, Apple Music style, with the loading or
                     // unavailable note under it.
@@ -235,19 +240,22 @@ private fun PortraitPoster(
     }
     val current = active.coerceAtLeast(0)
     val pinned = topInset > 0.dp
-    Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 28.dp, top = topInset),
-        verticalArrangement = Arrangement.spacedBy(14.dp, if (pinned) Alignment.Top else Alignment.CenterVertically)) {
+    BoxWithConstraints(Modifier.fillMaxSize().padding(start = 24.dp, end = 28.dp, top = topInset)) {
+    val width = maxWidth.value
+    // Centred in the space below the cover, so a short poster does not leave a hole under it.
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically)) {
         Text(if (active > 0) lines[active - 1].renderedText else "", color = Color.White.copy(alpha = 0.62f),
             fontSize = (22 * textScale).sp, lineHeight = (29 * textScale).sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
         AnimatedContent(current, label = "poster-line", transitionSpec = {
             (fadeIn(tween(450)) + slideInVertically(tween(450)) { it / 4 }) togetherWith fadeOut(tween(200))
         }) { index ->
             val line = lines[index]
+            val text = posterText(line.renderedText)
+            val size = posterFontSize(text, width, (if (pinned) 40 else 46) * textScale)
             Column {
-                Text(posterText(line.renderedText),
+                Text(text,
                     color = Color.White.copy(alpha = if (active < 0) 0.45f else 1f),
-                    fontSize = ((if (pinned) 40 else 46) * textScale).sp,
-                    lineHeight = ((if (pinned) 47 else 53) * textScale).sp, fontWeight = FontWeight.Black)
+                    fontSize = size.sp, lineHeight = (size * 1.17f).sp, fontWeight = FontWeight.Black)
                 if (translation) line.translation?.let {
                     Text(it, Modifier.padding(top = 6.dp), color = Color.White.copy(alpha = 0.72f),
                         fontSize = (17 * textScale).sp, lineHeight = (22 * textScale).sp, fontWeight = FontWeight.SemiBold)
@@ -262,6 +270,18 @@ private fun PortraitPoster(
             }
         }
     }
+    }
+}
+
+/**
+ * Poster type size: [base] at least, and a short line grows until its longest row fills the width,
+ * up to 1.6x. Latin letters count as a little over half a CJK character.
+ */
+internal fun posterFontSize(text: String, widthDp: Float, base: Float): Float {
+    val longest = text.split('\n').maxOfOrNull { row ->
+        row.sumOf { ch -> if (ch.code < 0x2E80) 0.56 else 1.0 }
+    }?.toFloat()?.coerceAtLeast(1f) ?: 1f
+    return (widthDp * 0.92f / longest).coerceIn(base, base * 1.6f)
 }
 
 @Composable
