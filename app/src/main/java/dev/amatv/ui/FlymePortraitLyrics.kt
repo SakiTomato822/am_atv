@@ -255,6 +255,11 @@ private fun PortraitPoster(
     val pinned = topInset > 0.dp
     BoxWithConstraints(Modifier.fillMaxSize().padding(start = 24.dp, end = 28.dp, top = topInset)) {
     val width = maxWidth.value
+    // One size for the whole song, set by its longest line: sized per line, the poster jumped between big
+    // and small from one line to the next. A song of only short lines still gets the larger type.
+    val size = remember(lines, width, textScale, pinned) {
+        lines.minOf { posterFontSize(posterText(it.renderedText), width, (if (pinned) 40 else 46) * textScale) }
+    }
     // Centred in the space below the cover, so a short poster does not leave a hole under it.
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically)) {
         Text(if (active > 0) lines[active - 1].renderedText else "", color = Color.White.copy(alpha = 0.62f),
@@ -272,7 +277,6 @@ private fun PortraitPoster(
             }
             val line = shown as LyricLine
             val text = posterText(line.renderedText)
-            val size = posterFontSize(text, width, (if (pinned) 40 else 46) * textScale)
             Column {
                 Text(text,
                     color = Color.White.copy(alpha = if (active < 0) 0.45f else 1f),
