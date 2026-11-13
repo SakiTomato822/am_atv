@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.amatv.R
+import dev.amatv.model.LyricLine
 import dev.amatv.model.LyricTimeline
 import dev.amatv.model.Track
 
@@ -253,7 +254,9 @@ private fun PortraitPoster(
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically)) {
         Text(if (active > 0) lines[active - 1].renderedText else "", color = Color.White.copy(alpha = 0.62f),
             fontSize = (22 * textScale).sp, lineHeight = (29 * textScale).sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
-        AnimatedContent(waiting ?: current, label = "poster-line", transitionSpec = {
+        // The target is the line itself, not its index: the outgoing content outlives a change of song,
+        // and an old index into the new song's (shorter) lyrics crashed the app on next track.
+        AnimatedContent(waiting ?: lines[current], label = "poster-line", transitionSpec = {
             (fadeIn(tween(450)) + slideInVertically(tween(450)) { it / 4 }) togetherWith fadeOut(tween(200))
         }) { shown ->
             if (shown is LyricTimeline.InstrumentalGap) {
@@ -262,8 +265,7 @@ private fun PortraitPoster(
                 }
                 return@AnimatedContent
             }
-            val index = shown as Int
-            val line = lines[index]
+            val line = shown as LyricLine
             val text = posterText(line.renderedText)
             val size = posterFontSize(text, width, (if (pinned) 40 else 46) * textScale)
             Column {
