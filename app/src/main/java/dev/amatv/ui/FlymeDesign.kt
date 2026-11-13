@@ -982,7 +982,6 @@ private fun MetroMiniPlayer(
                 }
             }
         }
-        FlymeWindowButton(isPlaying, Modifier.padding(end = 4.dp), size = 44.dp, iconSize = 20.dp)
         FlymeGlyphButton(
             icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
             contentDescription = stringResource(if (isPlaying) R.string.player_pause else R.string.player_play),
