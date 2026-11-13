@@ -74,7 +74,7 @@ import dev.amatv.model.Track
 internal fun PortraitLyrics(
     track: Track,
     soak: Boolean,
-    poster: Boolean,
+    posterChosen: Boolean,
     position: State<Long>,
     offsetMs: Long,
     playWhenReady: Boolean,
@@ -101,6 +101,10 @@ internal fun PortraitLyrics(
     val textScale = carTextScale(fontScale)
     val pullDown = rememberPullDownToClose(onBack)
     val noLyrics = track.lyrics.isEmpty()
+    // Lyrics without timing have no current line, so the poster would stay on the first one; they always
+    // show as the plain scrolling list and offer no poster.
+    val timed = remember(track.lyrics) { track.lyrics.any { !it.isStatic } }
+    val poster = posterChosen && timed
     BoxWithConstraints(Modifier.fillMaxSize().automationId(if (poster) "portrait-lyrics-poster" else "portrait-lyrics-list")
         .then(pullDown.layer)
         .pointerInput(poster) { detectTapGestures { if (!poster) onReveal() } }) {
@@ -135,7 +139,7 @@ internal fun PortraitLyrics(
                     Modifier.padding(start = 8.dp, top = 20.dp).automationId("portrait-lyrics-back"),
                     size = 44.dp, iconSize = 30.dp, tint = Color.White)
             } else {
-                PortraitHeader(track, compact = soak, poster, onPosterChange, onBack, pullDown.handle)
+                PortraitHeader(track, compact = soak, poster, onPosterChange.takeIf { timed }, onBack, pullDown.handle)
             }
             Box(Modifier.fillMaxWidth().weight(1f)) {
                 // Under Soak the lyrics start where the cover has faded (its lower edge, less the header above).
@@ -194,7 +198,8 @@ private fun PortraitHeader(
     /** Soak: the cover is already the page, so no thumbnail and a small one-line title. */
     compact: Boolean,
     poster: Boolean,
-    onPosterChange: (Boolean) -> Unit,
+    /** Null when the lyrics have no timing and there is no poster to switch to. */
+    onPosterChange: ((Boolean) -> Unit)?,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -216,7 +221,7 @@ private fun PortraitHeader(
             Text(track.artist, Modifier.padding(top = 2.dp), color = Color.White.copy(alpha = 0.70f),
                 fontSize = if (compact) 14.sp else 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        FlymeGlyphButton(
+        if (onPosterChange != null) FlymeGlyphButton(
             if (poster) Icons.Rounded.FormatListBulleted else Icons.Rounded.TextFields,
             stringResource(if (poster) R.string.flyme_lyric_list else R.string.flyme_lyric_poster),
             { onPosterChange(!poster) },
