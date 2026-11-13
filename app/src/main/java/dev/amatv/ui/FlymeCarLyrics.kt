@@ -316,7 +316,14 @@ internal fun CarLyricRows(
     val snapshot by remember(schedule, offsetMs, position) {
         derivedStateOf { schedule.snapshotAt(position.value + offsetMs) }
     }
-    val active = snapshot.focusLineIndex.coerceAtLeast(0)
+    // Before the first line and in breaks of 7 s or more the list opens a slot for the waiting dots: the
+    // next line and those below it move down, and the slot takes the anchor until that line starts.
+    val waiting = snapshot.instrumentalScrollAnchor
+    val shownGap = remember(lines) { mutableStateOf<LyricTimeline.InstrumentalGap?>(null) }
+    LaunchedEffect(waiting) { if (waiting != null) shownGap.value = waiting }
+    val open by animateFloatAsState(if (waiting != null) 1f else 0f, tween(600, easing = RippleEasing),
+        label = "interlude-open")
+    val active = waiting?.beforeLineIndex ?: snapshot.focusLineIndex.coerceAtLeast(0)
     val singing = snapshot.activeLineIndices
     val lyricPosition = remember(position, offsetMs) {
         derivedStateOf { (position.value + offsetMs).coerceAtLeast(0L) }
@@ -343,16 +350,16 @@ internal fun CarLyricRows(
         val anchor = with(density) { maxHeight.toPx() } * anchorFraction
         val gap = with(density) { LyricGap.toPx() }
         val heights = remember(lines) { mutableStateListOf(*Array(lines.size) { 0 }) }
+        val shifts = remember(lines) { List(lines.size) { Animatable(0f) } }
+        var dotsHeight by remember { mutableIntStateOf(0) }
+        val slot = dotsHeight + gap
+        val topOf = { index: Int -> var top = 0f; for (i in 0 until index) top += heights[i] + gap; top }
         // Only the first placement waits for measurement. Some lines (background vocals alone) are 0 tall
         // until they are sung and collapse again after, so waiting on every line froze the list mid-song.
         val measured by remember(heights, active) { derivedStateOf { heights.getOrElse(active) { 0 } > 0 } }
-        // Every line moves by the same amount, placing the active line's centre on the anchor.
-        val target by remember(heights, active, anchor, gap) {
-            derivedStateOf {
-                var top = 0f
-                for (i in 0 until active) top += heights[i] + gap
-                anchor - (top + heights[active] / 2f)
-            }
+        // Every line moves by the same amount, placing the active line's centre (or the dots') on the anchor.
+        val target by remember(heights, active, anchor, gap, waiting) {
+            derivedStateOf { anchor - (topOf(active) + (if (waiting != null) dotsHeight else heights[active]) / 2f) }
         }
         Column(Modifier.fillMaxWidth().wrapContentHeight(Alignment.Top, unbounded = true),
             verticalArrangement = Arrangement.spacedBy(LyricGap)) {
@@ -361,7 +368,7 @@ internal fun CarLyricRows(
                 val distance = if (index in singing) 0 else abs(active - index).coerceAtMost(4)
                 // Lines below the active one follow one after another, so the list ripples instead of sliding as a block.
                 val stagger = if (ripple) (index - active + 1).coerceIn(0, 8) * 45 else 0
-                val shift = remember { Animatable(0f) }
+                val shift = shifts[index]
                 var placed by remember { mutableStateOf(false) }
                 LaunchedEffect(target, measured) {
                     if (!placed) {
@@ -380,7 +387,11 @@ internal fun CarLyricRows(
                 // Lines more than a screen away are not visible; skip their blur layers.
                 val blur = if (soften && abs(active - index) <= 6) LineBlur[distance].dp else 0.dp
                 Box(Modifier.fillMaxWidth().onSizeChanged { heights[index] = it.height }
-                    .graphicsLayer { translationY = shift.value + browse.value; alpha = opacity }
+                    .graphicsLayer {
+                        val opened = shownGap.value?.takeIf { index >= it.beforeLineIndex }?.let { slot * open } ?: 0f
+                        translationY = shift.value + browse.value + opened
+                        alpha = opacity
+                    }
                     .automationId("car-lyric-line-$index")
                     .clickable(interactionSource = null, indication = null) {
                         // A tap on a line while the controls are hidden only brings them back, like a tap anywhere else.
@@ -389,6 +400,16 @@ internal fun CarLyricRows(
                     .blur(blur)) {
                     FlymeKaraokeLine(line, distance == 0, lyricPosition, fontScale, static = false)
                 }
+            }
+        }
+        // The dots sit in the slot just above the line they wait for, and fade with it as it closes.
+        shownGap.value?.let { interlude ->
+            val next = interlude.beforeLineIndex
+            Box(Modifier.fillMaxWidth().onSizeChanged { dotsHeight = it.height }.graphicsLayer {
+                translationY = topOf(next) + shifts[next].value + browse.value + slot * open - slot
+                alpha = open
+            }) {
+                InstrumentalInterludeRow(interlude, lyricPosition, isUserScrolling = false)
             }
         }
     }

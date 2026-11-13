@@ -3287,7 +3287,7 @@ private fun LyricsScrollLayout(
 
 /** Three gradually lit dots, with a continuous pulse-to-exit handoff. */
 @Composable
-private fun InstrumentalInterludeRow(
+internal fun InstrumentalInterludeRow(
     gap: LyricTimeline.InstrumentalGap,
     positionState: State<Long>,
     isUserScrolling: Boolean,

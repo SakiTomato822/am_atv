@@ -50,6 +50,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
@@ -235,10 +237,15 @@ private fun PortraitPoster(
 ) {
     val lines = track.lyrics
     val schedule = remember(lines) { LyricTimeline.Schedule(lines) }
-    val active by remember(schedule, offsetMs, position) {
-        derivedStateOf { schedule.snapshotAt(position.value + offsetMs).focusLineIndex }
+    val snapshot by remember(schedule, offsetMs, position) {
+        derivedStateOf { schedule.snapshotAt(position.value + offsetMs) }
     }
+    val lyricPosition = remember(position, offsetMs) { derivedStateOf { position.value + offsetMs } }
+    val active = snapshot.focusLineIndex
+    // Before the first line and in long breaks the waiting dots take the big line's place.
+    val waiting = snapshot.instrumentalScrollAnchor
     val current = active.coerceAtLeast(0)
+    val upcoming = waiting?.let { it.beforeLineIndex - 1 } ?: current
     val pinned = topInset > 0.dp
     BoxWithConstraints(Modifier.fillMaxSize().padding(start = 24.dp, end = 28.dp, top = topInset)) {
     val width = maxWidth.value
@@ -246,9 +253,16 @@ private fun PortraitPoster(
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically)) {
         Text(if (active > 0) lines[active - 1].renderedText else "", color = Color.White.copy(alpha = 0.62f),
             fontSize = (22 * textScale).sp, lineHeight = (29 * textScale).sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
-        AnimatedContent(current, label = "poster-line", transitionSpec = {
+        AnimatedContent(waiting ?: current, label = "poster-line", transitionSpec = {
             (fadeIn(tween(450)) + slideInVertically(tween(450)) { it / 4 }) togetherWith fadeOut(tween(200))
-        }) { index ->
+        }) { shown ->
+            if (shown is LyricTimeline.InstrumentalGap) {
+                Box(Modifier.graphicsLayer { scaleX = 1.8f; scaleY = 1.8f; transformOrigin = TransformOrigin(0f, 0.5f) }) {
+                    InstrumentalInterludeRow(shown, lyricPosition, isUserScrolling = false)
+                }
+                return@AnimatedContent
+            }
+            val index = shown as Int
             val line = lines[index]
             val text = posterText(line.renderedText)
             val size = posterFontSize(text, width, (if (pinned) 40 else 46) * textScale)
@@ -264,7 +278,7 @@ private fun PortraitPoster(
         }
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             for ((step, alpha) in listOf(1 to 0.78f, 2 to 0.58f, 3 to 0.42f)) {
-                val line = lines.getOrNull(current + step) ?: break
+                val line = lines.getOrNull(upcoming + step) ?: break
                 Text(line.renderedText, color = Color.White.copy(alpha = alpha), fontSize = (24 * textScale).sp,
                     lineHeight = (31 * textScale).sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
             }

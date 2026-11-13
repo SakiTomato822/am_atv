@@ -255,6 +255,20 @@ class LyricTimelineTest {
     }
 
     @Test
+    fun waitingDotsBeforeTheFirstLineAndFromSevenSeconds() {
+        // The new lyrics pages show the waiting dots exactly while instrumentalScrollAnchor is set: before
+        // a first line at 7 s or later, and in breaks of 7 s or more.
+        val intro = LyricTimeline.Schedule(listOf(LyricLine(listOf(LyricWord("first", 8_000, 9_000)))))
+        assertEquals(0, intro.snapshotAt(1_000).instrumentalScrollAnchor?.beforeLineIndex)
+        fun breakOf(ms: Long) = LyricTimeline.Schedule(listOf(
+            LyricLine(listOf(LyricWord("previous", 1_000, 2_000))),
+            LyricLine(listOf(LyricWord("next", 2_000 + ms, 3_000 + ms))),
+        )).snapshotAt(4_000).instrumentalScrollAnchor
+        assertNull(breakOf(6_999))
+        assertEquals(1, breakOf(7_000)?.beforeLineIndex)
+    }
+
+    @Test
     fun ordinarySilentGapDoesNotGainTheInterludeScrollException() {
         val schedule = LyricTimeline.Schedule(listOf(
             LyricLine(listOf(LyricWord("previous", 1_000, 2_000))),
