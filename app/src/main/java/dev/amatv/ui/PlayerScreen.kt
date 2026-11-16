@@ -2820,17 +2820,7 @@ private fun LyricsPanel(
             isStaticMode = isStaticMode,
             initialAnchorItemIndex = anchorDisplayIndex,
             bootstrapVisible = isVisible,
-            modifier = Modifier
-                .fillMaxSize()
-                .semantics {
-                    if (dev.amatv.BuildConfig.BUILD_TYPE == "benchmark") {
-                        stateDescription = when {
-                            isStaticMode -> "static"
-                            activeInstrumentalGap != null -> "interlude:$anchorDisplayIndex"
-                            else -> "line:$anchorDisplayIndex"
-                        }
-                    }
-                },
+            modifier = Modifier.fillMaxSize(),
         ) {
             LyricsRows(
                 displayItems = displayItems,

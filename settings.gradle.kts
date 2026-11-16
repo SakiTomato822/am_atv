@@ -19,5 +19,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "AM for TV"
 include(":app")
-include(":benchmark")
 
