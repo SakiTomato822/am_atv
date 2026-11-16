@@ -162,9 +162,10 @@ fun AmAtvApp() {
     val services = remember(context) { MusicServices(context) }
     val cacheSettings by services.contentCache.settings.collectAsState()
     val playbackPrefs = remember(context) { PlaybackPreferences(context) }
+    val settingsStore = remember(context) { (context.applicationContext as dev.amatv.AmAtvApplication).settingsStore }
+    val settingsState by settingsStore.state.collectAsState()
     // Full screen or the Flyme small window; see dev.amatv.HostWindow.
     val hostWindow = LocalHostWindow.current
-    var lyricsPreferred by remember(playbackPrefs) { mutableStateOf(playbackPrefs.lyricsPreferred) }
     val startupCheckpoint = remember(playbackPrefs) {
         playbackPrefs.restoreCheckpointSession()?.copy(wasPlaying = false)
     }
@@ -205,7 +206,6 @@ fun AmAtvApp() {
     }
     var playbackPrepared by remember { mutableStateOf(false) }
     var hasUserPlaybackRequest by remember { mutableStateOf(false) }
-    var lowPerformanceMode by remember { mutableStateOf(playbackPrefs.lowPerformanceMode) }
     var playbackMessage by remember { mutableStateOf<String?>(null) }
     var waitingQueueEntryId by remember { mutableStateOf<Long?>(null) }
     var expectedPlaybackGeneration by remember { mutableLongStateOf(0L) }
@@ -268,33 +268,16 @@ fun AmAtvApp() {
         )
     }
     var advancingEndedTrackId by remember { mutableStateOf<String?>(null) }
-    var repeatMode by remember { mutableStateOf(playbackPrefs.repeatMode) }
-    var shuffleEnabled by remember { mutableStateOf(playbackPrefs.shuffleEnabled) }
-    var autoplayEnabled by remember { mutableStateOf(playbackPrefs.autoplayEnabled) }
-    var lyricOffsetMs by remember { mutableLongStateOf(playbackPrefs.lyricOffsetMs) }
-    var lyricTextSize by remember { mutableStateOf(playbackPrefs.lyricTextSize) }
-    var lyricTranslationEnabled by remember {
-        mutableStateOf(playbackPrefs.lyricTranslationEnabled)
-    }
-    var lyricPronunciationEnabled by remember {
-        mutableStateOf(playbackPrefs.lyricPronunciationEnabled)
-    }
-    var lyricTranslationLanguageTag by remember {
-        mutableStateOf(playbackPrefs.lyricTranslationLanguageTag)
-    }
-    var lyricPronunciationLanguageTag by remember {
-        mutableStateOf(playbackPrefs.lyricPronunciationLanguageTag)
-    }
-    val effectiveLyricsLanguageTag = lyricTranslationLanguageTag.ifBlank { lyricsLanguageTag }
+    val effectiveLyricsLanguageTag = settingsState.lyricTranslationLanguageTag.ifBlank { lyricsLanguageTag }
     val lyricsLocalization = remember(
-        effectiveLyricsLanguageTag, lyricPronunciationLanguageTag,
-        lyricTranslationEnabled, lyricPronunciationEnabled,
+        effectiveLyricsLanguageTag, settingsState.lyricPronunciationLanguageTag,
+        settingsState.lyricTranslationEnabled, settingsState.lyricPronunciationEnabled,
     ) {
         LyricsLocalizationRequest(
             languageTag = effectiveLyricsLanguageTag,
-            pronunciationLanguageTag = lyricPronunciationLanguageTag,
-            includeTranslations = lyricTranslationEnabled,
-            includePronunciations = lyricPronunciationEnabled,
+            pronunciationLanguageTag = settingsState.lyricPronunciationLanguageTag,
+            includeTranslations = settingsState.lyricTranslationEnabled,
+            includePronunciations = settingsState.lyricPronunciationEnabled,
         )
     }
     val lyricsVariant = remember(lyricsLocalization) {
@@ -689,7 +672,7 @@ fun AmAtvApp() {
         PlaybackQueueController(
             scope = scope,
             services = services,
-            playbackPrefs = playbackPrefs,
+            playbackPrefs = settingsStore,
             onPlayTrack = { nextTrack ->
                 latestTrackPlayback(nextTrack)
             },
@@ -718,13 +701,12 @@ fun AmAtvApp() {
     }
 
     // Fade at gapless song changes, chosen per kind of queue in Settings.
-    val playbackOptionSettings by services.playbackOptions.settings.collectAsState()
-    LaunchedEffect(queueState.context?.kind, queueState.stationFeed, playbackOptionSettings) {
+    LaunchedEffect(queueState.context?.kind, queueState.stationFeed, settingsState.fadeStations, settingsState.fadeAlbums, settingsState.fadePlaylists) {
         if (!BuildConfig.FLYME_AUTO) return@LaunchedEffect
         services.setFadeEnabled(when {
-            queueState.stationFeed != null -> playbackOptionSettings.fadeStations
-            queueState.context?.kind == ContextKind.Album -> playbackOptionSettings.fadeAlbums
-            else -> playbackOptionSettings.fadePlaylists
+            queueState.stationFeed != null -> settingsState.fadeStations
+            queueState.context?.kind == ContextKind.Album -> settingsState.fadeAlbums
+            else -> settingsState.fadePlaylists
         })
     }
 
@@ -883,7 +865,7 @@ fun AmAtvApp() {
         val stationId = nextTrack.catalogId
         if (isStation && BuildConfig.FLYME_AUTO && !webStation && stationId != null) {
             scope.launch {
-                val asSongs = services.playbackOptions.settings.value.stationsAsSongs ||
+                val asSongs = settingsState.stationsAsSongs ||
                     !kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { services.widevineReady }
                 val songs = if (asSongs) {
                     cancellableResult { services.stationSongs(stationId) }.getOrNull().orEmpty()
@@ -2114,23 +2096,17 @@ fun AmAtvApp() {
                         savedArtistCatalog = services::savedArtistPage,
                         loadArtistViewMore = services::catalogArtistViewMore,
                         onPlayCollection = ::playCollection,
-                        lyricOffsetMs = lyricOffsetMs,
-                        onLyricOffsetChange = { offset: Long ->
-                            lyricOffsetMs = offset
-                            playbackPrefs.lyricOffsetMs = offset
-                        },
-                        lowPerformanceMode = lowPerformanceMode,
-                        onLowPerformanceModeChange = {
-                            lowPerformanceMode = it
-                            playbackPrefs.lowPerformanceMode = it
-                        },
+                        lyricOffsetMs = settingsState.lyricOffsetMs,
+                        onLyricOffsetChange = settingsStore::setLyricOffsetMs,
+                        lowPerformanceMode = settingsState.lowPerformanceMode,
+                        onLowPerformanceModeChange = { settingsStore.lowPerformanceMode = it },
                         cacheSettingsContent = {
                             LanguageSettings()
                             FlymeMediaSettings(services)
-                            if (BuildConfig.FLYME_AUTO) FlymeAppearanceSettings(services.playbackOptions)
-                            if (BuildConfig.FLYME_AUTO) FlymePlaybackOptionsSettings(services.playbackOptions)
+                            if (BuildConfig.FLYME_AUTO) FlymeAppearanceSettings(settingsStore)
+                            if (BuildConfig.FLYME_AUTO) FlymePlaybackOptionsSettings(settingsStore)
                             if (BuildConfig.FLYME_AUTO) FlymePlaybackDiagnostics(services.playbackDiagnostics)
-                            ContentCacheSettings(services.contentCache)
+                            ContentCacheSettings(services.contentCache, settingsStore)
                         },
                     )
                 }
@@ -2146,11 +2122,8 @@ fun AmAtvApp() {
                     ) {
                     PlayerScreen(
                         track = track.copy(lyrics = currentLyricsLines),
-                        lyricsPreferred = lyricsPreferred,
-                        onLyricsPreferredChange = {
-                            lyricsPreferred = it
-                            playbackPrefs.lyricsPreferred = it
-                        },
+                        lyricsPreferred = settingsState.lyricsPreferred,
+                        onLyricsPreferredChange = settingsStore::setLyricsPreferred,
                         positionAnchorMs = positionAnchorMs,
                         playStartedRealtimeMs = playStartedRealtimeMs,
                         isPlaying = isPlaying,
@@ -2186,7 +2159,7 @@ fun AmAtvApp() {
                         lyricsTransientFailure = activeLyrics.trackIdentity == currentLyricsIdentity &&
                             activeLyrics.phase == LyricsLoadPhase.Failed,
                         onRetryLyrics = ::retryCurrentLyrics,
-                        lyricOffsetMs = lyricOffsetMs,
+                        lyricOffsetMs = settingsState.lyricOffsetMs,
                         statusMessage = playerNotice ?: playbackMessage ?: if (queueState.awaitingNext) {
                             (queueState.autoplayStatus as? dev.amatv.playback.AutoplayStatus.Error)?.message
                         } else null,
@@ -2210,37 +2183,22 @@ fun AmAtvApp() {
                             ?.takeIf { favoriteCatalogId == track.catalogId },
                         onToggleFavorite = ::toggleFavorite,
                         onOpenAlbum = { openFromPlayer(services::catalogAlbumOf) },
-                        lyricTextSize = lyricTextSize,
-                        onLyricTextSizeChange = {
-                            lyricTextSize = it
-                            playbackPrefs.lyricTextSize = it
-                        },
-                        lowPerformanceMode = lowPerformanceMode,
-                        lyricTranslationEnabled = lyricTranslationEnabled,
-                        lyricPronunciationEnabled = lyricPronunciationEnabled,
-                        lyricTranslationLanguageTag = lyricTranslationLanguageTag,
-                        lyricPronunciationLanguageTag = lyricPronunciationLanguageTag,
+                        lyricTextSize = settingsState.lyricTextSize,
+                        onLyricTextSizeChange = settingsStore::setLyricTextSize,
+                        lowPerformanceMode = settingsState.lowPerformanceMode,
+                        lyricTranslationEnabled = settingsState.lyricTranslationEnabled,
+                        lyricPronunciationEnabled = settingsState.lyricPronunciationEnabled,
+                        lyricTranslationLanguageTag = settingsState.lyricTranslationLanguageTag,
+                        lyricPronunciationLanguageTag = settingsState.lyricPronunciationLanguageTag,
                         appLanguageTag = lyricsLanguageTag,
                         lyricsEnhancementsReady = !lyricsLocalization.enabled ||
                             (activeLyrics.trackIdentity == currentLyricsIdentity &&
                                 activeLyrics.resolvedVariant == lyricsVariant &&
                                 activeLyrics.phase == LyricsLoadPhase.Ready),
-                        onLyricTranslationEnabledChange = { enabled ->
-                            lyricTranslationEnabled = enabled
-                            playbackPrefs.lyricTranslationEnabled = enabled
-                        },
-                        onLyricPronunciationEnabledChange = { enabled ->
-                            lyricPronunciationEnabled = enabled
-                            playbackPrefs.lyricPronunciationEnabled = enabled
-                        },
-                        onLyricTranslationLanguageChange = { languageTag ->
-                            lyricTranslationLanguageTag = languageTag
-                            playbackPrefs.lyricTranslationLanguageTag = languageTag
-                        },
-                        onLyricPronunciationLanguageChange = { languageTag ->
-                            lyricPronunciationLanguageTag = languageTag
-                            playbackPrefs.lyricPronunciationLanguageTag = languageTag
-                        },
+                        onLyricTranslationEnabledChange = settingsStore::setLyricTranslationEnabled,
+                        onLyricPronunciationEnabledChange = settingsStore::setLyricPronunciationEnabled,
+                        onLyricTranslationLanguageChange = settingsStore::setLyricTranslationLanguageTag,
+                        onLyricPronunciationLanguageChange = settingsStore::setLyricPronunciationLanguageTag,
                         onCycleRepeat = {
                             if (!stationQueueContext) dispatchQueueAction(StartupQueueAction.CycleRepeat)
                         },

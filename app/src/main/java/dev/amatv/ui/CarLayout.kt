@@ -10,7 +10,8 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.runtime.Composable
 import kotlinx.coroutines.delay
 import dev.amatv.integration.FlymePlaybackSettings
-import dev.amatv.integration.FlymePlaybackOptions
+import dev.amatv.AmAtvApplication
+import dev.amatv.core.AppearanceMode
 import androidx.core.view.WindowCompat
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.setValue
@@ -96,12 +97,12 @@ internal fun carContentScale(widthDp: Float, heightDp: Float, systemDensity: Flo
 @Composable
 private fun rememberFlymeLight(): Boolean {
     val context = LocalContext.current
-    val options = remember(context) { FlymePlaybackOptions.get(context) }
-    val settings by options.settings.collectAsState()
+    val settingsStore = remember(context) { (context.applicationContext as AmAtvApplication).settingsStore }
+    val settings by settingsStore.state.collectAsState()
     val systemDark = isSystemInDarkTheme()
     var minuteOfDay by remember { mutableIntStateOf(currentMinuteOfDay()) }
     LaunchedEffect(settings.appearance) {
-        while (settings.appearance == FlymePlaybackSettings.Appearance.Time) {
+        while (settings.appearance == AppearanceMode.Time) {
             minuteOfDay = currentMinuteOfDay()
             delay(30_000L)
         }

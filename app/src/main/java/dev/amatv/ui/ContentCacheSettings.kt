@@ -23,8 +23,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-internal fun ContentCacheSettings(cache: ContentCache) {
+internal fun ContentCacheSettings(
+    cache: ContentCache,
+    settingsStore: dev.amatv.core.SettingsStore? = null,
+) {
     val context = LocalContext.current.applicationContext
+    val store = settingsStore ?: remember(context) { (context as dev.amatv.AmAtvApplication).settingsStore }
     val settings by cache.settings.collectAsState()
     val scope = rememberCoroutineScope()
     var storage by remember { mutableStateOf<ContentCacheStorage?>(null) }
@@ -51,14 +55,14 @@ internal fun ContentCacheSettings(cache: ContentCache) {
     Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         CacheButton(
             label = stringResource(if (settings.enabled) R.string.browse_cache_disk_on else R.string.browse_cache_disk_off),
-            onClick = { cache.setEnabled(!settings.enabled) },
+            onClick = { store.setCacheDiskEnabled(!settings.enabled) },
             modifier = Modifier.width(240.dp).focusRequester(diskFocus).focusProperties {
                 left = FocusRequester.Cancel; right = prefetchFocus; down = clearFocus
             },
         )
         CacheButton(
             label = stringResource(if (settings.prefetchNextTwo) R.string.browse_cache_prefetch_on else R.string.browse_cache_prefetch_off),
-            onClick = { cache.setPrefetch(!settings.prefetchNextTwo) },
+            onClick = { store.setCachePrefetchNextTwo(!settings.prefetchNextTwo) },
             modifier = Modifier.width(360.dp).focusRequester(prefetchFocus).focusProperties {
                 left = diskFocus; right = FocusRequester.Cancel; down = clearFocus
             },

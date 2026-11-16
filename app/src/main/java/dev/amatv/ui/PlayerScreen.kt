@@ -362,14 +362,14 @@ fun PlayerScreen(
         else -> PlayerPresentation.Artwork
     }
     val flymeContext = LocalContext.current
-    val flymeOptions = remember(flymeContext) { dev.amatv.integration.FlymePlaybackOptions.get(flymeContext) }
-    val flymeSettings by flymeOptions.settings.collectAsState()
+    val settingsStore = remember(flymeContext) { (flymeContext.applicationContext as dev.amatv.AmAtvApplication).settingsStore }
+    val settingsState by settingsStore.state.collectAsState()
     // The new lyrics page serves portrait and the Soak style; landscape Flow keeps the Flyme.12 stage
     // (cover, title and lyrics side by side) with only its controls replaced.
     val carLyrics = BuildConfig.FLYME_AUTO && presentation != PlayerPresentation.Queue && (
         LocalCarPortrait.current ||
             (presentation == PlayerPresentation.Lyrics &&
-                flymeSettings.lyricStyle == dev.amatv.integration.FlymePlaybackSettings.LyricStyle.Soak)
+                settingsState.lyricStyle == dev.amatv.core.LyricBackgroundStyle.Soak)
         )
     val displayedLyrics = remember(
         track.lyrics, lyricTranslationEnabled, lyricPronunciationEnabled, lyricsEnhancementsReady,
@@ -684,14 +684,13 @@ fun PlayerScreen(
             CompositionLocalProvider(LocalFlymePalette provides DarkFlymePalette) {
                 FlymeCarLyrics(
                     track = displayedTrack,
-                    style = flymeSettings.lyricStyle,
+                    style = if (settingsState.lyricStyle == dev.amatv.core.LyricBackgroundStyle.Soak)
+                        dev.amatv.integration.FlymePlaybackSettings.LyricStyle.Soak
+                    else dev.amatv.integration.FlymePlaybackSettings.LyricStyle.Flow,
                     // In portrait the Soak style is the poster; Flow keeps the Apple Music list.
-                    poster = flymeSettings.lyricStyle == dev.amatv.integration.FlymePlaybackSettings.LyricStyle.Soak,
+                    poster = settingsState.lyricStyle == dev.amatv.core.LyricBackgroundStyle.Soak,
                     onPosterChange = { poster ->
-                        flymeOptions.update {
-                            it.copy(lyricStyle = if (poster) dev.amatv.integration.FlymePlaybackSettings.LyricStyle.Soak
-                                else dev.amatv.integration.FlymePlaybackSettings.LyricStyle.Flow)
-                        }
+                        settingsStore.setLyricStyle(if (poster) dev.amatv.core.LyricBackgroundStyle.Soak else dev.amatv.core.LyricBackgroundStyle.Flow)
                     },
                     position = playbackPosition,
                     offsetMs = lyricOffsetMs,

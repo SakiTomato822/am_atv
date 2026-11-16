@@ -16,8 +16,9 @@ import dev.amatv.R
 import dev.amatv.integration.MusicServices
 import dev.amatv.integration.PlaybackDiagnostics
 import dev.amatv.integration.LogRecorder
-import dev.amatv.integration.FlymePlaybackOptions
-import dev.amatv.integration.FlymePlaybackSettings
+import dev.amatv.core.AppearanceMode
+import dev.amatv.core.LyricBackgroundStyle
+import dev.amatv.core.SettingsStore
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -95,8 +96,8 @@ internal fun FlymePlaybackDiagnostics(diagnostics: PlaybackDiagnostics) {
 
 /** Fade per kind of queue, and how stations play (web player with Widevine, or song by song). */
 @Composable
-internal fun FlymePlaybackOptionsSettings(options: FlymePlaybackOptions) {
-    val settings by options.settings.collectAsState()
+internal fun FlymePlaybackOptionsSettings(settingsStore: SettingsStore) {
+    val settings by settingsStore.state.collectAsState()
     val on = stringResource(R.string.playback_option_on)
     val off = stringResource(R.string.playback_option_off)
     Spacer(Modifier.height(16.dp))
@@ -105,29 +106,29 @@ internal fun FlymePlaybackOptionsSettings(options: FlymePlaybackOptions) {
     Spacer(Modifier.height(6.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         CacheButton(stringResource(R.string.playback_fade_albums, if (settings.fadeAlbums) on else off),
-            onClick = { options.update { it.copy(fadeAlbums = !it.fadeAlbums) } }, modifier = Modifier.width(200.dp))
+            onClick = { settingsStore.setFadeAlbums(!settings.fadeAlbums) }, modifier = Modifier.width(200.dp))
         CacheButton(stringResource(R.string.playback_fade_stations, if (settings.fadeStations) on else off),
-            onClick = { options.update { it.copy(fadeStations = !it.fadeStations) } }, modifier = Modifier.width(200.dp))
+            onClick = { settingsStore.setFadeStations(!settings.fadeStations) }, modifier = Modifier.width(200.dp))
         CacheButton(stringResource(R.string.playback_fade_playlists, if (settings.fadePlaylists) on else off),
-            onClick = { options.update { it.copy(fadePlaylists = !it.fadePlaylists) } }, modifier = Modifier.width(220.dp))
+            onClick = { settingsStore.setFadePlaylists(!settings.fadePlaylists) }, modifier = Modifier.width(220.dp))
     }
     Spacer(Modifier.height(16.dp))
     Text(stringResource(R.string.playback_station_mode_title), color = FlymeInk, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
     Text(stringResource(R.string.playback_station_mode_summary), color = FlymeInk.copy(alpha = 0.6f), fontSize = 14.sp)
     Spacer(Modifier.height(6.dp))
     CacheButton(stringResource(if (settings.stationsAsSongs) R.string.playback_station_mode_songs else R.string.playback_station_mode_auto),
-        onClick = { options.update { it.copy(stationsAsSongs = !it.stationsAsSongs) } }, modifier = Modifier.width(420.dp))
+        onClick = { settingsStore.setStationsAsSongs(!settings.stationsAsSongs) }, modifier = Modifier.width(420.dp))
     Spacer(Modifier.height(16.dp))
     Text(stringResource(R.string.flyme_lyric_style), color = FlymeInk, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
     Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         for ((style, label) in listOf(
-            FlymePlaybackSettings.LyricStyle.Flow to R.string.flyme_lyric_flow,
-            FlymePlaybackSettings.LyricStyle.Soak to R.string.flyme_lyric_soak,
+            LyricBackgroundStyle.Flow to R.string.flyme_lyric_flow,
+            LyricBackgroundStyle.Soak to R.string.flyme_lyric_soak,
         )) {
             CacheButton(
                 stringResource(if (settings.lyricStyle == style) R.string.flyme_lyric_style_selected else R.string.flyme_lyric_style_option,
                     stringResource(label)),
-                onClick = { options.update { it.copy(lyricStyle = style) } },
+                onClick = { settingsStore.setLyricStyle(style) },
                 modifier = Modifier.width(170.dp).automationId("lyric-style-${style.name.lowercase()}"),
             )
         }
@@ -136,24 +137,24 @@ internal fun FlymePlaybackOptionsSettings(options: FlymePlaybackOptions) {
 
 /** Light / dark / system / by time of day, with the light hours chosen in 30-minute steps. */
 @Composable
-internal fun FlymeAppearanceSettings(options: FlymePlaybackOptions) {
-    val settings by options.settings.collectAsState()
+internal fun FlymeAppearanceSettings(settingsStore: SettingsStore) {
+    val settings by settingsStore.state.collectAsState()
     Spacer(Modifier.height(16.dp))
     Text(stringResource(R.string.appearance_title), color = FlymeInk, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
     Spacer(Modifier.height(6.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         listOf(
-            FlymePlaybackSettings.Appearance.Light to R.string.appearance_light,
-            FlymePlaybackSettings.Appearance.Dark to R.string.appearance_dark,
-            FlymePlaybackSettings.Appearance.System to R.string.appearance_system,
-            FlymePlaybackSettings.Appearance.Time to R.string.appearance_time,
+            AppearanceMode.Light to R.string.appearance_light,
+            AppearanceMode.Dark to R.string.appearance_dark,
+            AppearanceMode.System to R.string.appearance_system,
+            AppearanceMode.Time to R.string.appearance_time,
         ).forEach { (mode, label) ->
             val selected = settings.appearance == mode
             CacheButton((if (selected) "✓ " else "") + stringResource(label),
-                onClick = { options.update { it.copy(appearance = mode) } }, modifier = Modifier.width(170.dp))
+                onClick = { settingsStore.setAppearance(mode) }, modifier = Modifier.width(170.dp))
         }
     }
-    if (settings.appearance == FlymePlaybackSettings.Appearance.Time) {
+    if (settings.appearance == AppearanceMode.Time) {
         Spacer(Modifier.height(10.dp))
         fun clock(minute: Int) = "%02d:%02d".format(minute / 60, minute % 60)
         fun step(minute: Int, by: Int) = Math.floorMod(minute + by, 24 * 60)
@@ -164,8 +165,8 @@ internal fun FlymeAppearanceSettings(options: FlymePlaybackOptions) {
                 CacheButton("+30", onClick = { change(step(minute, 30)) }, modifier = Modifier.width(90.dp))
             }
         }
-        hours(R.string.appearance_light_from, settings.lightFromMinute) { value -> options.update { it.copy(lightFromMinute = value) } }
+        hours(R.string.appearance_light_from, settings.lightFromMinute) { value -> settingsStore.setLightSchedule(value, settings.lightUntilMinute) }
         Spacer(Modifier.height(8.dp))
-        hours(R.string.appearance_light_until, settings.lightUntilMinute) { value -> options.update { it.copy(lightUntilMinute = value) } }
+        hours(R.string.appearance_light_until, settings.lightUntilMinute) { value -> settingsStore.setLightSchedule(settings.lightFromMinute, value) }
     }
 }
