@@ -14,7 +14,7 @@ class PlaybackSessionCodecTest {
     private fun session(count: Int, current: Int = count - 1): PlaybackSession = PlaybackSession(
         queue = (1..count).map { track("$it") }, currentIndex = current, positionMs = 42_000,
         wasPlaying = true, destination = Destination.NowPlaying, previousDestination = Destination.Home,
-        radioActive = true, radioSeed = track("1"), radioContinuation = "cursor",
+        radioActive = true, radioSeed = track("1"),
         autoplayEntryIndices = (count - 10 until count).filter { it >= 0 }.toSet(),
         queueEntryIds = (1..count).map { it.toLong() }, playedEntryIds = (1..current).map { it.toLong() }.toSet(),
         contextQueue = listOf(track("1")), contextEntryIds = listOf(1), sessionId = 3,
@@ -88,31 +88,5 @@ class PlaybackSessionCodecTest {
         assertEquals(1, restored.currentIndex)
         assertEquals(45_000L, restored.positionMs)
         assertEquals(setOf(1L), restored.playedEntryIds)
-    }
-
-    @Test fun currentSessionMissingOrInvalidSourceUsesAppleWithoutErasingExplicitYtmProvenance() {
-        for (raw in listOf(null, "", "invalid-provider", "YouTubeMusic", "AppleMusic")) {
-            val root = JSONObject(PlaybackSessionCodec.encode(session(2)))
-            if (raw == null) root.remove("autoplaySource") else root.put("autoplaySource", raw)
-            val decoded = PlaybackSessionCodec.decode(root.toString())!!
-            val expected = if (raw == "YouTubeMusic") AutoplaySource.YouTubeMusic else AutoplaySource.AppleMusic
-            assertEquals(expected, decoded.autoplaySource)
-            assertEquals(2, decoded.queue.size)
-            assertEquals(listOf(1L, 2L), decoded.queueEntryIds)
-        }
-    }
-
-    @Test fun legacySessionMissingOrInvalidSourceAlsoUsesAppleMusic() {
-        for (raw in listOf(null, "", "invalid-provider", "YouTubeMusic", "AppleMusic")) {
-            val root = JSONObject().put("version", 1)
-                .put("queue", org.json.JSONArray(listOf(track("1").toSessionJson())))
-                .put("currentIndex", 0).put("positionMs", 25_000)
-            if (raw != null) root.put("autoplaySource", raw)
-            val decoded = PlaybackSessionCodec.decode(root.toString())!!
-            val expected = if (raw == "YouTubeMusic") AutoplaySource.YouTubeMusic else AutoplaySource.AppleMusic
-            assertEquals(expected, decoded.autoplaySource)
-            assertEquals("1", decoded.queue.single().id)
-            assertEquals(25_000L, decoded.positionMs)
-        }
     }
 }

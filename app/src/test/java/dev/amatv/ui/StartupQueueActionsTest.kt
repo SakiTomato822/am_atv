@@ -1,6 +1,5 @@
 package dev.amatv.ui
 
-import dev.amatv.integration.AutoplaySource
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -41,12 +40,12 @@ class StartupQueueActionsTest {
     @Test fun catalogContextReplacementKeepsModeChoicesButDiscardsOldTimelineActions() {
         val pending = StartupQueueActions()
         pending.enqueue(StartupQueueAction.Next)
-        pending.enqueue(StartupQueueAction.SetSource(AutoplaySource.AppleMusic))
+        pending.enqueue(StartupQueueAction.ToggleInfinite)
         pending.enqueue(StartupQueueAction.ClearUpcoming)
         pending.enqueue(StartupQueueAction.ToggleShuffle)
         pending.enqueue(StartupQueueAction.Select(9001L))
         assertEquals(listOf(
-            StartupQueueAction.SetSource(AutoplaySource.AppleMusic), StartupQueueAction.ToggleShuffle,
+            StartupQueueAction.ToggleInfinite, StartupQueueAction.ToggleShuffle,
         ), pending.preferencesForNewContext())
         assertTrue(pending.drain().isEmpty())
     }

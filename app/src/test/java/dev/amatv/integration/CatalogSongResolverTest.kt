@@ -149,7 +149,6 @@ class CatalogSongResolverTest {
         id = "apple:$catalogId", title = "Same recording", artist = "Artist", album = "Album",
         durationMs = 297_600L, palette = emptyList(), lyrics = emptyList(), catalogId = catalogId,
         resourceId = resourceId, resourceType = if (resourceId?.startsWith("i.") == true) "library-songs" else "songs",
-        recommendedByYtm = true, ytmVideoId = "original-video",
     )
 
     @Test fun catalogTrackRepairPreservesOriginalResourceAndRecommendationProvenance() = runBlocking {

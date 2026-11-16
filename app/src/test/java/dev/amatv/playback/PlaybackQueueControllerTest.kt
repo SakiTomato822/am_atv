@@ -1,10 +1,7 @@
 package dev.amatv.playback
 
-import dev.amatv.integration.AutoplaySource
-import dev.amatv.integration.MusicServices
 import dev.amatv.integration.PlaybackRepeatMode
 import dev.amatv.integration.PlaybackSession
-import dev.amatv.integration.autoplaySourceFromStoredValue
 import dev.amatv.model.Destination
 import dev.amatv.integration.QueuePreferences
 import dev.amatv.integration.RecommendationProvider
@@ -31,49 +28,31 @@ class PlaybackQueueControllerTest {
         override var repeatMode: PlaybackRepeatMode = PlaybackRepeatMode.Off
         override var shuffleEnabled: Boolean = false
         override var autoplayEnabled: Boolean = false
-        // Existing radio scenarios exercise an explicitly chosen YTM provider.
-        override var autoplaySource: AutoplaySource = AutoplaySource.YouTubeMusic
         override var lowPerformanceMode: Boolean = false
     }
 
     private class FakeRecommendationProvider : RecommendationProvider {
         var amStationTracks: List<Track> = emptyList()
-        var ytmRadioTracks: List<Track> = emptyList()
-        var deferredPage: CompletableDeferred<MusicServices.ResolvedRadioPage>? = null
-        val pages = mutableListOf<MusicServices.ResolvedRadioPage>()
-        val requests = mutableListOf<Pair<String?, String?>>()
-        val seeds = mutableListOf<String>()
+        var deferredPage: CompletableDeferred<Pair<String?, List<Track>>>? = null
+        val pages = mutableListOf<Pair<String?, List<Track>>>()
         val appleSeeds = mutableListOf<String>()
+        val stationRequests = mutableListOf<String>()
         var timeOut = false
 
         override suspend fun createAmStation(songId: String): Pair<String?, List<Track>> {
             appleSeeds += songId
-            return Pair("fake-station-$songId", amStationTracks)
-        }
-
-        val stationRequests = mutableListOf<String>()
-
-        override suspend fun amStationNextTracks(stationId: String): List<Track> {
-            stationRequests += stationId
-            return amStationTracks
-        }
-
-        override suspend fun ytmRadio(
-            seed: Track,
-            continuation: String?,
-            excludedCatalogIds: Set<String>,
-            continuationSeedVideoId: String?,
-        ): MusicServices.ResolvedRadioPage {
-            requests += continuation to continuationSeedVideoId
-            seeds += seed.id
             if (timeOut) withTimeout(1) { delay(10_000) }
             deferredPage?.let { return it.await() }
             if (pages.isNotEmpty()) return pages.removeAt(0)
-            return MusicServices.ResolvedRadioPage(
-                tracks = ytmRadioTracks,
-                continuation = "fake-continuation",
-                seedVideoId = "fake-video-id",
-            )
+            return Pair("fake-station-$songId", amStationTracks)
+        }
+
+        override suspend fun amStationNextTracks(stationId: String): List<Track> {
+            stationRequests += stationId
+            if (timeOut) withTimeout(1) { delay(10_000) }
+            deferredPage?.let { return it.await().second }
+            if (pages.isNotEmpty()) return pages.removeAt(0).second
+            return amStationTracks
         }
     }
 
@@ -259,19 +238,6 @@ class PlaybackQueueControllerTest {
     }
 
     @Test
-    fun testSwitchingAutoplaySourceDropsAutoplayAndResetsStation() {
-        val controller = createController()
-        controller.setAutoplaySource(AutoplaySource.YouTubeMusic)
-
-        controller.setAutoplaySource(AutoplaySource.AppleMusic)
-        val state = controller.state.value
-        assertEquals(AutoplaySource.AppleMusic, state.source)
-        assertTrue(state.autoplay.isEmpty())
-        assertNull(state.amStationId)
-        assertNull(state.ytmContinuation)
-    }
-
-    @Test
     fun testShuffleAndUnshuffleRestoresOrder() {
         val controller = createController()
         val tracks = (1..20).map { testTrack(it.toString(), "Track $it", "Artist") }
@@ -329,7 +295,7 @@ class PlaybackQueueControllerTest {
         )
         assertEquals("ra.u-personal", controller.state.value.stationFeed)
         assertEquals(listOf("ra.u-personal"), fakeRecommendations.stationRequests)
-        assertTrue(fakeRecommendations.seeds.isEmpty())
+        assertTrue(fakeRecommendations.appleSeeds.isEmpty())
         assertEquals(listOf("s2"), controller.state.value.autoplay.map { it.track.id })
 
         controller.playContext(listOf(testTrack("3", "Other", "Artist")), 0)
@@ -339,7 +305,7 @@ class PlaybackQueueControllerTest {
     @Test
     fun repeatAllTakesPrecedenceOverAlreadyFetchedAutoplay() {
         prefs.autoplayEnabled = true
-        fakeRecommendations.ytmRadioTracks = listOf(testTrack("2", "Radio song", "Other"))
+        fakeRecommendations.amStationTracks = listOf(testTrack("2", "Radio song", "Other"))
         val controller = createController()
         controller.playContext(listOf(testTrack("1", "Selected", "Artist")), 0)
         assertEquals(1, controller.state.value.autoplay.size)
@@ -373,7 +339,7 @@ class PlaybackQueueControllerTest {
     @Test
     fun pendingNextAdvancesOnceWhenRecommendationsArrive() {
         prefs.autoplayEnabled = true
-        val page = CompletableDeferred<MusicServices.ResolvedRadioPage>()
+        val page = CompletableDeferred<Pair<String?, List<Track>>>()
         fakeRecommendations.deferredPage = page
         val controller = createController()
         controller.playContext(listOf(testTrack("1", "Current", "Artist")), 0)
@@ -382,28 +348,25 @@ class PlaybackQueueControllerTest {
         assertTrue(controller.state.value.awaitingNext)
         assertEquals(1, playedTracks.size)
 
-        page.complete(MusicServices.ResolvedRadioPage(
-            listOf(testTrack("2", "Next", "Other")), "continuation", "dQw4w9WgXcQ",
-        ))
+        page.complete("station-1" to listOf(testTrack("2", "Next", "Other")))
 
         assertEquals("2", controller.state.value.current?.track?.id)
         assertFalse(controller.state.value.awaitingNext)
         assertEquals(listOf("1", "2"), playedTracks.map { it.id })
-        assertEquals("continuation" to "dQw4w9WgXcQ", fakeRecommendations.requests.last())
+        assertEquals(listOf("1"), fakeRecommendations.appleSeeds)
+        assertEquals("station-1", fakeRecommendations.stationRequests.last())
     }
 
     @Test
     fun previousCancelsPendingNextWithoutDroppingForwardHistory() {
         prefs.autoplayEnabled = true
-        val page = CompletableDeferred<MusicServices.ResolvedRadioPage>()
+        val page = CompletableDeferred<Pair<String?, List<Track>>>()
         fakeRecommendations.deferredPage = page
         val controller = createController()
         controller.playContext((1..2).map { testTrack("$it", "Track $it", "Artist") }, 1)
         controller.advanceNext()
         controller.advancePrevious()
-        page.complete(MusicServices.ResolvedRadioPage(
-            listOf(testTrack("3", "Radio", "Other")), null, "dQw4w9WgXcQ",
-        ))
+        page.complete("station-1" to listOf(testTrack("3", "Radio", "Other")))
 
         assertEquals("1", controller.state.value.current?.track?.id)
         assertEquals("2", controller.state.value.upNext.first().track.id)
@@ -413,16 +376,14 @@ class PlaybackQueueControllerTest {
     @Test
     fun startingAnotherContextDiscardsDelayedRecommendation() {
         prefs.autoplayEnabled = true
-        val page = CompletableDeferred<MusicServices.ResolvedRadioPage>()
+        val page = CompletableDeferred<Pair<String?, List<Track>>>()
         fakeRecommendations.deferredPage = page
         val controller = createController()
         controller.playContext(listOf(testTrack("1", "Old", "Artist")), 0)
         controller.advanceNext()
         controller.setInfinite(false)
         controller.playContext(listOf(testTrack("2", "New", "Other")), 0)
-        page.complete(MusicServices.ResolvedRadioPage(
-            listOf(testTrack("3", "Stale", "Artist")), null, "dQw4w9WgXcQ",
-        ))
+        page.complete("station-1" to listOf(testTrack("3", "Stale", "Artist")))
 
         assertEquals("2", controller.state.value.current?.track?.id)
         assertTrue(controller.state.value.autoplay.isEmpty())
@@ -434,38 +395,35 @@ class PlaybackQueueControllerTest {
         prefs.autoplayEnabled = true
         val original = testTrack("1", "Song", "Artist")
         fakeRecommendations.pages += listOf(
-            MusicServices.ResolvedRadioPage(
-                listOf(testTrack("2", "Song (Remastered)", "Artist")), "page-two", "dQw4w9WgXcQ",
-            ),
-            MusicServices.ResolvedRadioPage(
-                listOf(testTrack("3", "Fresh", "Other")), null, "dQw4w9WgXcQ",
-            ),
+            "station-1" to listOf(testTrack("2", "Song (Remastered)", "Artist")),
+            "station-1" to listOf(testTrack("3", "Fresh", "Other")),
         )
         val controller = createController()
         controller.playContext(listOf(original), 0)
 
         assertEquals(listOf("3"), controller.state.value.autoplay.map { it.track.id })
-        assertEquals(listOf(null to null, "page-two" to "dQw4w9WgXcQ"), fakeRecommendations.requests.take(2))
+        assertEquals(listOf("1"), fakeRecommendations.appleSeeds)
+        assertEquals("station-1", fakeRecommendations.stationRequests.first())
     }
 
     @Test
     fun duplicateOnlyRadioPagesHaveBoundedRetries() {
         prefs.autoplayEnabled = true
         val original = testTrack("1", "Song", "Artist")
-        fakeRecommendations.pages += (1..8).map { page ->
-            MusicServices.ResolvedRadioPage(listOf(original), "page-$page", "dQw4w9WgXcQ")
+        fakeRecommendations.pages += (1..8).map {
+            "station-1" to listOf(original)
         }
         val controller = createController()
         controller.playContext(listOf(original), 0)
 
-        assertEquals(3, fakeRecommendations.requests.size)
+        assertEquals(1, fakeRecommendations.appleSeeds.size)
+        assertEquals(2, fakeRecommendations.stationRequests.size)
         assertTrue(controller.state.value.autoplayStatus is AutoplayStatus.Error)
         assertTrue(controller.state.value.autoplay.isEmpty())
     }
     @Test
     fun appleStationMetadataCannotPolluteManualNextOrReplaceExplicitQueue() {
         prefs.autoplayEnabled = true
-        prefs.autoplaySource = AutoplaySource.AppleMusic
         fakeRecommendations.amStationTracks = CatalogKind.entries
             .filter { it != CatalogKind.Song }.map { kind ->
                 testTrack(kind.name, kind.name, "Provider").copy(catalogKind = kind)
@@ -492,8 +450,7 @@ class PlaybackQueueControllerTest {
             queue = listOf(first, bad, next), currentIndex = 0, positionMs = 0L,
             wasPlaying = false, destination = Destination.NowPlaying,
             previousDestination = Destination.Home, radioActive = true,
-            radioSeed = first, radioContinuation = null, autoplayEntryIndices = setOf(1, 2),
-            autoplaySource = AutoplaySource.YouTubeMusic,
+            radioSeed = first, autoplayEntryIndices = setOf(1, 2),
         ))
 
         assertTrue(controller.state.value.upNext.isEmpty())
@@ -509,35 +466,18 @@ class PlaybackQueueControllerTest {
         prefs.autoplayEnabled = true
         val controller = createController()
         val first = testTrack("1", "Earlier", "Artist")
-        val current = testTrack("2", "Current", "Artist").copy(ytmVideoId = "new-video-id")
+        val current = testTrack("2", "Current", "Artist")
         controller.restoreFromSession(PlaybackSession(
             queue = listOf(first, current), currentIndex = 1, positionMs = 10_000L,
             wasPlaying = true, destination = Destination.NowPlaying,
             previousDestination = Destination.Home, radioActive = true,
-            radioSeed = current, radioContinuation = "station-page",
-            radioSeedVideoId = "original-id",
-            autoplaySource = AutoplaySource.YouTubeMusic,
+            radioSeed = first,
         ))
-        assertTrue(fakeRecommendations.requests.isEmpty())
+        assertTrue(fakeRecommendations.appleSeeds.isEmpty())
         controller.activatePlaybackSession()
-        assertEquals("station-page" to "original-id", fakeRecommendations.requests.first())
+        assertEquals(listOf("1"), fakeRecommendations.appleSeeds)
         assertEquals(first.id, controller.state.value.history.single().track.id)
         assertEquals(current.id, controller.state.value.current?.track?.id)
-    }
-
-
-    @Test fun generatedSongsNeverBecomeTheSeedWhenChangingProvider() {
-        prefs.autoplayEnabled = true
-        val anchor = testTrack("1", "Selected", "Artist")
-        fakeRecommendations.ytmRadioTracks = (2..22).map { testTrack("$it", "Candidate $it", "Other $it") }
-        fakeRecommendations.amStationTracks = (30..50).map { testTrack("$it", "Apple $it", "Other $it") }
-        val controller = createController()
-        controller.playContext(listOf(anchor), 0)
-        controller.advanceNext()
-        assertEquals("2", controller.state.value.current?.track?.id)
-        controller.setAutoplaySource(AutoplaySource.AppleMusic)
-        assertEquals(listOf("1"), fakeRecommendations.appleSeeds)
-        assertEquals("1", controller.state.value.recommendationSeed?.id)
     }
 
     @Test fun timelineSelectionAndNextKeepTheRadioSeed() {
@@ -596,7 +536,7 @@ class PlaybackQueueControllerTest {
 
     @Test fun failedAutoplayCannotReturnThroughAnotherProviderPage() {
         prefs.autoplayEnabled = true
-        fakeRecommendations.ytmRadioTracks = (2..22).map { testTrack("$it", "Candidate $it", "Artist $it") }
+        fakeRecommendations.amStationTracks = (2..22).map { testTrack("$it", "Candidate $it", "Artist $it") }
         val controller = createController()
         controller.playContext(listOf(testTrack("1", "Anchor", "Original")), 0)
         controller.advanceNext()
@@ -609,7 +549,7 @@ class PlaybackQueueControllerTest {
 
     @Test fun failedSingleSeedCanStillWaitForItsOriginalRadioWithoutReplayingIt() {
         prefs.autoplayEnabled = true
-        val pending = CompletableDeferred<MusicServices.ResolvedRadioPage>()
+        val pending = CompletableDeferred<Pair<String?, List<Track>>>()
         fakeRecommendations.deferredPage = pending
         val controller = createController()
         val anchor = testTrack("1", "Unavailable audio", "Artist")
@@ -618,9 +558,7 @@ class PlaybackQueueControllerTest {
         assertNull(controller.skipFailedCurrent(failed))
         assertTrue(controller.state.value.awaitingNext)
         assertEquals("1", controller.state.value.recommendationSeed?.id)
-        pending.complete(MusicServices.ResolvedRadioPage(
-            listOf(anchor, testTrack("2", "Playable next", "Other")), null, "dQw4w9WgXcQ",
-        ))
+        pending.complete("station-1" to listOf(anchor, testTrack("2", "Playable next", "Other")))
         assertEquals("2", controller.state.value.current?.track?.id)
         assertEquals(listOf("1", "2"), playedTracks.map { it.id })
         assertFalse(controller.state.value.awaitingNext)
@@ -652,16 +590,16 @@ class PlaybackQueueControllerTest {
 
     @Test fun unavailableAnchorUsesAHealthyQueuedFallbackRatherThanRecreatingItsBrokenStation() {
         prefs.autoplayEnabled = true
-        fakeRecommendations.ytmRadioTracks = (2..22).map { testTrack("$it", "Candidate $it", "Artist $it") }
-        fakeRecommendations.amStationTracks = (30..50).map { testTrack("$it", "Apple $it", "Artist $it") }
+        fakeRecommendations.amStationTracks = (2..22).map { testTrack("$it", "Candidate $it", "Artist $it") }
         val controller = createController()
         controller.playContext(listOf(testTrack("1", "Removed anchor", "Original")), 0)
+        fakeRecommendations.amStationTracks = (30..50).map { testTrack("$it", "Apple $it", "Artist $it") }
         controller.skipFailedCurrent(controller.state.value.current!!.entryId)
         assertEquals("2", controller.state.value.current?.track?.id)
         assertEquals("2", controller.state.value.recommendationSeed?.id)
-        assertNull(controller.state.value.ytmContinuation)
-        controller.setAutoplaySource(AutoplaySource.AppleMusic)
-        assertEquals(listOf("2"), fakeRecommendations.appleSeeds)
+        assertNull(controller.state.value.amStationId)
+        controller.clearUpcoming()
+        assertEquals(listOf("1", "2"), fakeRecommendations.appleSeeds)
     }
 
     @Test fun recommendationTimeoutLeavesRetryableStateRatherThanPermanentLoading() = runBlocking {
@@ -673,7 +611,7 @@ class PlaybackQueueControllerTest {
         withTimeout(1_000) { controller.state.first { it.autoplayStatus is AutoplayStatus.Error } }
         assertFalse(controller.state.value.awaitingNext)
         fakeRecommendations.timeOut = false
-        fakeRecommendations.ytmRadioTracks = (2..22).map { testTrack("$it", "Fresh $it", "Other $it") }
+        fakeRecommendations.amStationTracks = (2..22).map { testTrack("$it", "Fresh $it", "Other $it") }
         controller.advanceNext()
         assertEquals("2", controller.state.value.current?.track?.id)
     }
@@ -705,7 +643,7 @@ class PlaybackQueueControllerTest {
 
     @Test fun tappingPlayedHistoryPreservesFutureRailSeedContextAndSessionIdentity() {
         prefs.autoplayEnabled = true
-        fakeRecommendations.ytmRadioTracks = (2..22).map { testTrack("$it", "Candidate $it", "Artist $it") }
+        fakeRecommendations.amStationTracks = (2..22).map { testTrack("$it", "Candidate $it", "Artist $it") }
         val controller = createController()
         controller.playContext(listOf(testTrack("1", "Anchor", "Original")), 0)
         controller.markCurrentPlaybackStarted(controller.state.value.current!!.entryId)
@@ -720,7 +658,7 @@ class PlaybackQueueControllerTest {
         assertEquals(before.persistenceId, after.persistenceId)
         assertEquals(before.contextEntries, after.contextEntries)
         assertEquals(before.recommendationSeed, after.recommendationSeed)
-        assertEquals(before.ytmContinuation, after.ytmContinuation)
+        assertEquals(before.amStationId, after.amStationId)
         assertEquals(future, after.autoplay.map { it.entryId })
         assertEquals(listOf("2", "3"), after.upNext.map { it.track.id })
     }
@@ -746,13 +684,11 @@ class PlaybackQueueControllerTest {
         val anchor = testTrack("1", "Anchor", "Artist")
         controller.restoreFromSession(PlaybackSession(
             listOf(anchor), 0, 10_000, true, Destination.NowPlaying, Destination.Home,
-            true, anchor, null,
+            true, anchor,
         ))
         controller.setInfinite(false)
-        controller.setAutoplaySource(AutoplaySource.AppleMusic)
         controller.setInfinite(true)
         controller.triggerRefillIfNeeded()
-        assertTrue(fakeRecommendations.requests.isEmpty())
         assertTrue(fakeRecommendations.appleSeeds.isEmpty())
         controller.activatePlaybackSession()
         assertEquals(listOf("1"), fakeRecommendations.appleSeeds)
@@ -788,115 +724,12 @@ class PlaybackQueueControllerTest {
         val anchor = testTrack("1", "Saved paused session", "Artist")
         controller.restoreFromSession(PlaybackSession(
             listOf(anchor), 0, 30_000, false, Destination.NowPlaying, Destination.Home,
-            false, anchor, null,
+            false, anchor,
         ))
         assertFalse(controller.state.value.infinite)
-        assertTrue(fakeRecommendations.requests.isEmpty())
         assertTrue(fakeRecommendations.appleSeeds.isEmpty())
         controller.activatePlaybackSession()
-        assertTrue(fakeRecommendations.requests.isEmpty())
         assertTrue(fakeRecommendations.appleSeeds.isEmpty())
-    }
-
-    @Test fun defaultSourceMakesNoYtmRequestUntilTheUserSelectsYtm() {
-        prefs.autoplaySource = autoplaySourceFromStoredValue(null)
-        prefs.autoplayEnabled = true
-        fakeRecommendations.amStationTracks = listOf(testTrack("2", "Apple suggestion", "Second"))
-        fakeRecommendations.ytmRadioTracks = listOf(testTrack("3", "YTM suggestion", "Third"))
-        val controller = createController()
-        assertEquals(AutoplaySource.AppleMusic, controller.state.value.source)
-        assertTrue(fakeRecommendations.requests.isEmpty())
-        controller.playContext(listOf(testTrack("1", "Selected", "First")), 0)
-        assertEquals(listOf("1"), fakeRecommendations.appleSeeds)
-        assertTrue(fakeRecommendations.requests.isEmpty())
-        controller.advanceNext(manual = false)
-        assertTrue(fakeRecommendations.requests.isEmpty())
-
-        controller.setAutoplaySource(AutoplaySource.YouTubeMusic)
-        assertEquals(AutoplaySource.YouTubeMusic, prefs.autoplaySource)
-        assertEquals(AutoplaySource.YouTubeMusic, controller.state.value.source)
-        assertTrue(fakeRecommendations.requests.isNotEmpty())
-        assertEquals(null to null, fakeRecommendations.requests.first())
-    }
-
-    @Test fun staleYtmCheckpointAndFullSessionCannotOverrideApplePreference() {
-        prefs.autoplaySource = AutoplaySource.AppleMusic
-        prefs.autoplayEnabled = true
-        val controller = createController()
-        val earlier = testTrack("1", "Earlier", "First")
-        val current = testTrack("2", "Current", "Second")
-        val explicitNext = testTrack("3", "Playlist next", "Third")
-        val pendingRecommendation = testTrack("4", "Old YTM suggestion", "Fourth")
-        val saved = PlaybackSession(
-            queue = listOf(earlier, current, explicitNext, pendingRecommendation),
-            currentIndex = 1, positionMs = 42_000, wasPlaying = false,
-            destination = Destination.NowPlaying, previousDestination = Destination.Home,
-            radioActive = true, radioSeed = earlier, radioContinuation = "old-ytm-cursor",
-            autoplaySource = AutoplaySource.YouTubeMusic, radioSeedVideoId = "old-video",
-            autoplayEntryIndices = setOf(1, 3), queueEntryIds = listOf(11L, 12L, 13L, 14L),
-            playedEntryIds = setOf(11L, 12L), contextQueue = listOf(earlier, explicitNext),
-            contextEntryIds = listOf(11L, 13L), persistenceId = "saved-session",
-        )
-        controller.restoreFromSession(saved)
-        controller.restoreFromSession(saved.copy(radioContinuation = "full-session-ytm-cursor"))
-        val state = controller.state.value
-        assertEquals(AutoplaySource.AppleMusic, state.source)
-        assertEquals(AutoplaySource.AppleMusic, prefs.autoplaySource)
-        assertEquals(listOf(11L), state.history.map { it.entryId })
-        assertEquals(12L, state.current?.entryId)
-        assertEquals(listOf(13L), state.upNext.map { it.entryId })
-        assertEquals(listOf(11L, 13L), state.contextEntries.map { it.entryId })
-        assertEquals("saved-session", state.persistenceId)
-        assertTrue(state.autoplay.isEmpty())
-        assertNull(state.ytmContinuation)
-        assertNull(state.ytmSeedVideoId)
-        assertTrue(fakeRecommendations.requests.isEmpty())
-        assertTrue(fakeRecommendations.appleSeeds.isEmpty())
-        assertTrue(playedTracks.isEmpty())
-        controller.activatePlaybackSession()
-        assertEquals(listOf("1"), fakeRecommendations.appleSeeds)
-        assertTrue(fakeRecommendations.requests.isEmpty())
-    }
-
-    @Test fun explicitYtmPreferenceSurvivesAppleSessionAndStartsWithAFreshCursor() {
-        prefs.autoplaySource = AutoplaySource.YouTubeMusic
-        prefs.autoplayEnabled = true
-        val controller = createController()
-        val current = testTrack("1", "Current", "First")
-        controller.restoreFromSession(PlaybackSession(
-            queue = listOf(current, testTrack("2", "Old Apple suggestion", "Second")),
-            currentIndex = 0, positionMs = 0, wasPlaying = false,
-            destination = Destination.NowPlaying, previousDestination = Destination.Home,
-            radioActive = true, radioSeed = current, radioContinuation = "foreign-cursor",
-            autoplaySource = AutoplaySource.AppleMusic, radioSeedVideoId = "foreign-video",
-            autoplayEntryIndices = setOf(1), queueEntryIds = listOf(21L, 22L),
-        ))
-        assertEquals(AutoplaySource.YouTubeMusic, controller.state.value.source)
-        assertTrue(controller.state.value.autoplay.isEmpty())
-        assertNull(controller.state.value.ytmContinuation)
-        assertNull(controller.state.value.ytmSeedVideoId)
-        assertTrue(fakeRecommendations.requests.isEmpty())
-        controller.activatePlaybackSession()
-        assertEquals(null to null, fakeRecommendations.requests.first())
-        assertTrue(fakeRecommendations.appleSeeds.isEmpty())
-    }
-
-    @Test fun providerChangeKeepsPreviouslyPlayedForwardEntriesAndDropsOnlyNewRecommendations() {
-        prefs.autoplaySource = AutoplaySource.AppleMusic
-        val controller = createController()
-        val current = testTrack("1", "Current", "First")
-        controller.restoreFromSession(PlaybackSession(
-            queue = listOf(current, testTrack("2", "Already played", "Second"), testTrack("3", "Unplayed", "Third")),
-            currentIndex = 0, positionMs = 0, wasPlaying = false,
-            destination = Destination.NowPlaying, previousDestination = Destination.Home,
-            radioActive = true, radioSeed = current, radioContinuation = "old-cursor",
-            autoplaySource = AutoplaySource.YouTubeMusic, autoplayEntryIndices = setOf(1, 2),
-            queueEntryIds = listOf(31L, 32L, 33L), playedEntryIds = setOf(32L),
-        ))
-        assertEquals(31L, controller.state.value.current?.entryId)
-        assertEquals(listOf(32L), controller.state.value.autoplay.map { it.entryId })
-        assertTrue(controller.state.value.autoplay.single().wasPlayed)
-        assertTrue(fakeRecommendations.requests.isEmpty())
     }
 
     @Test fun resetClearsAllQueuesAndRestoresDefaultState() {

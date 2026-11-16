@@ -16,7 +16,7 @@ class PlaybackSessionSanitizationTest {
     private fun session(queue: List<Track>, index: Int, autoplay: Set<Int>) = PlaybackSession(
         queue = queue, currentIndex = index, positionMs = 18_000L, wasPlaying = true,
         destination = Destination.NowPlaying, previousDestination = Destination.Home,
-        radioActive = true, radioSeed = queue[index], radioContinuation = "old-continuation",
+        radioActive = true, radioSeed = queue[index],
         autoplayEntryIndices = autoplay,
     )
 
@@ -44,7 +44,6 @@ class PlaybackSessionSanitizationTest {
         assertEquals(1, restored.currentIndex)
         assertEquals(0L, restored.positionMs)
         assertEquals(next, restored.radioSeed)
-        assertNull(restored.radioContinuation)
         assertEquals(setOf(1), restored.autoplayEntryIndices)
     }
 
