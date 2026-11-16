@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.amatv.R
 import dev.amatv.BuildConfig
+import dev.amatv.core.LibraryNotice
 import dev.amatv.LocalHostWindow
 import dev.amatv.WindowHosts
 import dev.amatv.integration.toSessionTrack
@@ -159,11 +160,13 @@ fun AmAtvApp() {
     val lyricsLanguageTag = LocalConfiguration.current.locales[0].toLanguageTag()
     val scope = rememberCoroutineScope()
     val shelfLoads = remember(scope) { ShelfLoads(scope) }
-    val services = remember(context) { MusicServices(context) }
+    val services = remember(context) { (context.applicationContext as? dev.amatv.AmAtvApplication)?.musicServices ?: MusicServices(context) }
     val cacheSettings by services.contentCache.settings.collectAsState()
     val playbackPrefs = remember(context) { PlaybackPreferences(context) }
     val settingsStore = remember(context) { (context.applicationContext as dev.amatv.AmAtvApplication).settingsStore }
     val settingsState by settingsStore.state.collectAsState()
+    val libraryActions = remember(context) { (context.applicationContext as dev.amatv.AmAtvApplication).libraryActions }
+    val libraryState by libraryActions.state.collectAsState()
     // Full screen or the Flyme small window; see dev.amatv.HostWindow.
     val hostWindow = LocalHostWindow.current
     val startupCheckpoint = remember(playbackPrefs) {
@@ -219,15 +222,34 @@ fun AmAtvApp() {
     var serviceMessage by remember { mutableStateOf<String?>(null) }
     var lastPlaybackNotice by remember { mutableStateOf<String?>(null) }
     var stationHistory by remember { mutableStateOf(loadStationHistory(context)) }
-    // Favorite Songs (Apple's "love" rating) for the songs seen on Now Playing.
-    var favoriteState by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
-    var favoriteCatalogId by remember { mutableStateOf<String?>(null) }
     // A short Now Playing notice (favorites); playback snapshots clear playbackMessage too often.
     var playerNotice by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(playerNotice) {
         if (playerNotice != null) {
             delay(3_000L)
             playerNotice = null
+        }
+    }
+    LaunchedEffect(libraryState.notice) {
+        when (libraryState.notice) {
+            is LibraryNotice.FavoriteRemoveUnsupported -> {
+                playerNotice = AppText.text(R.string.player_favorite_remove_unsupported)
+                libraryActions.dismissNotice()
+            }
+            is LibraryNotice.FavoriteFailed -> {
+                playerNotice = AppText.text(R.string.player_favorite_failed)
+                libraryActions.dismissNotice()
+            }
+            is LibraryNotice.RemoveFromLibraryUnsupported -> {
+                libraryActions.dismissNotice()
+            }
+            is LibraryNotice.AddToLibraryFailed -> {
+                libraryActions.dismissNotice()
+            }
+            is LibraryNotice.AddedToLibrary,
+            is LibraryNotice.AddedToFavorites,
+            null -> {
+            }
         }
     }
     // Gapless: the queue entry preloaded into MusicKit, and the entry being adopted without a prepare.
@@ -688,16 +710,9 @@ fun AmAtvApp() {
 
     // Gapless (Flyme): once the current song is ready, mirror the app's next song into MusicKit so it
     // can preload it and continue without a gap. Any change of current or next replaces it.
-    // Load the Favorite Songs state of each song shown on Now Playing (Flyme star button).
+    // Load the Favorite Songs / Library state of each song shown on Now Playing (Flyme star button).
     LaunchedEffect(track.catalogId, connectionState) {
-        val catalogId = track.catalogId?.takeIf { it.matches(Regex("[0-9]+")) }
-        favoriteCatalogId = catalogId
-        if (!BuildConfig.FLYME_AUTO || catalogId == null || track.catalogKind != CatalogKind.Song ||
-            connectionState != MusicConnectionState.SignedIn || catalogId in favoriteState
-        ) return@LaunchedEffect
-        cancellableResult { services.isFavorite(catalogId) }.getOrNull()?.let {
-            favoriteState = favoriteState + (catalogId to it)
-        }
+        libraryActions.onCurrentTrackChanged(track, connectionState == MusicConnectionState.SignedIn)
     }
 
     // Fade at gapless song changes, chosen per kind of queue in Settings.
@@ -918,26 +933,7 @@ fun AmAtvApp() {
         }
     }
 
-    /**
-     * The star on Now Playing adds to Favorite Songs (optimistic, reverted if Apple refuses).
-     * Apple lets only its own apps remove a favorite, so a filled star explains that instead.
-     */
-    fun toggleFavorite() {
-        val catalogId = track.catalogId?.takeIf { it.matches(Regex("[0-9]+")) } ?: return
-        if (favoriteState[catalogId] == true) {
-            playerNotice = AppText.text(R.string.player_favorite_remove_unsupported)
-            return
-        }
-        favoriteState = favoriteState + (catalogId to true)
-        scope.launch {
-            cancellableResult { services.addFavorite(catalogId) }.onFailure {
-                android.util.Log.w("AMATV-Favorite", "Favorite add failed: ${it.javaClass.simpleName} " +
-                    "status=${(it as? dev.amatv.integration.CatalogRequestException)?.httpStatus}")
-                favoriteState = favoriteState + (catalogId to false)
-                playerNotice = AppText.text(R.string.player_favorite_failed)
-            }
-        }
-    }
+
 
     fun playCollection(collection: Track, tracks: List<Track>, index: Int, shuffle: Boolean) {
         if (tracks.isEmpty() || index !in tracks.indices) return
@@ -2179,9 +2175,10 @@ fun AmAtvApp() {
                         },
                         onBack = { destination = previousDestination },
                         onOpenArtist = { openFromPlayer(services::catalogArtistOf) },
-                        isFavorite = favoriteState.takeIf { BuildConfig.FLYME_AUTO }?.get(track.catalogId)
-                            ?.takeIf { favoriteCatalogId == track.catalogId },
-                        onToggleFavorite = ::toggleFavorite,
+                        isFavorite = libraryState.current.isFavorite
+                            ?.takeIf { BuildConfig.FLYME_AUTO }
+                            ?.takeIf { libraryState.current.catalogId == track.catalogId },
+                        onToggleFavorite = libraryActions::toggleFavorite,
                         onOpenAlbum = { openFromPlayer(services::catalogAlbumOf) },
                         lyricTextSize = settingsState.lyricTextSize,
                         onLyricTextSizeChange = settingsStore::setLyricTextSize,

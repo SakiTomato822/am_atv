@@ -74,7 +74,7 @@ class MusicServices(context: Context) : RecommendationProvider {
     private data class DetailKey(val type: String, val id: String)
     private data class CollectionProgress(val owner: Any, val items: List<Track>)
     private fun Track.detailKey() = DetailKey(resourceType ?: catalogKind.name, resourceId ?: catalogId ?: id)
-    private val api = AppleMusicApi(
+    internal val api = AppleMusicApi(
         storefront = BuildConfig.APPLE_MUSIC_STOREFRONT,
         developerTokens = developerTokens,
         userToken = tokenStore::readUserToken,

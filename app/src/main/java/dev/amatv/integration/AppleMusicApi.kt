@@ -101,7 +101,7 @@ class AppleMusicApi(
     /** Keeps the account storefront across launches, so cold-start catalog requests need not wait for it. */
     private val storefrontPreferences: android.content.SharedPreferences? = null,
     private val userToken: () -> String?,
-) {
+) : dev.amatv.core.LibraryActionsApi {
     private data class UserStorefrontCache(val userToken: String, val storefront: String)
 
     private val parseDispatcher = Dispatchers.Default.limitedParallelism(2)
@@ -382,7 +382,7 @@ class AppleMusicApi(
      * Whether a catalog song is in Favorite Songs; null when unknown. Favorites are their own list
      * since iOS 17.1 (not the old "love" rating), read through the song's inFavorites attribute.
      */
-    suspend fun isFavorite(catalogSongId: String): Boolean? {
+    override suspend fun isFavorite(catalogSongId: String): Boolean? {
         require(catalogSongId.matches(Regex("[0-9]+"))) { "Catalog song ID is invalid" }
         val root = runCatching {
             requestRoot("/v1/catalog/${effectiveStorefront()}/songs/$catalogSongId?extend=inFavorites",
@@ -397,10 +397,48 @@ class AppleMusicApi(
      * the public API answers DELETE /v1/me/favorites with 40012 "Insufficient Permissions"
      * ('Favorites:DELETE:IdsQuery'); only Apple's own apps may unfavorite.
      */
-    suspend fun addFavorite(catalogSongId: String) {
+    override suspend fun addFavorite(catalogSongId: String) {
         require(catalogSongId.matches(Regex("[0-9]+"))) { "Catalog song ID is invalid" }
         requestRoot("/v1/me/favorites?ids%5Bsongs%5D=$catalogSongId", needsUserToken = true,
             method = "POST", postBody = "")
+    }
+
+    /**
+     * Adds the catalog song to the user's personal iCloud Music Library.
+     * POST /v1/me/library?ids[songs]=<id>
+     */
+    override suspend fun addToLibrary(catalogSongId: String) {
+        require(catalogSongId.matches(Regex("[0-9]+"))) { "Catalog song ID is invalid" }
+        requestRoot("/v1/me/library?ids%5Bsongs%5D=$catalogSongId", needsUserToken = true,
+            method = "POST", postBody = "")
+    }
+
+    /**
+     * Checks if a catalog song is present in the user's library using include=library.
+     * Logs response status and library-related keys for verification.
+     * Returns true if in library, false if definitively absent, or null if unknown.
+     */
+    override suspend fun isSongInLibrary(catalogSongId: String): Boolean? {
+        require(catalogSongId.matches(Regex("[0-9]+"))) { "Catalog song ID is invalid" }
+        val root = runCatching {
+            requestRoot("/v1/catalog/${effectiveStorefront()}/songs/$catalogSongId?include=library",
+                needsUserToken = true)
+        }.getOrNull() ?: return null
+
+        val data0 = root.optJSONArray("data")?.optJSONObject(0) ?: return null
+        val relationships = data0.optJSONObject("relationships")
+        val attributes = data0.optJSONObject("attributes")
+
+        val relKeys = relationships?.keys()?.asSequence()?.toList()?.filter { "library" in it.lowercase() }
+        val attrKeys = attributes?.keys()?.asSequence()?.toList()?.filter { "library" in it.lowercase() }
+        android.util.Log.i("AMATV-Library", "isSongInLibrary catalogId=$catalogSongId relKeys=$relKeys attrKeys=$attrKeys")
+
+        if (relationships == null || !relationships.has("library")) {
+            return null
+        }
+        val libraryObj = relationships.optJSONObject("library") ?: return null
+        val libraryData = libraryObj.optJSONArray("data") ?: return null
+        return libraryData.length() > 0
     }
 
     internal fun parseArtistPage(root: JSONObject, catalogId: String): CatalogArtistPage {
