@@ -67,16 +67,6 @@ android {
             "APPLE_MUSIC_STOREFRONT",
             quotedBuildConfig(localSetting("AM_STOREFRONT", "tw")),
         )
-        buildConfigField(
-            "String",
-            "YTM_OAUTH_CLIENT_ID",
-            quotedBuildConfig(localSetting("YTM_OAUTH_CLIENT_ID")),
-        )
-        buildConfigField(
-            "String",
-            "YTM_OAUTH_CLIENT_SECRET",
-            quotedBuildConfig(localSetting("YTM_OAUTH_CLIENT_SECRET")),
-        )
     }
 
     buildTypes {

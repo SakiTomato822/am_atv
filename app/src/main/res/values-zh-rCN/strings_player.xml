@@ -43,7 +43,6 @@
     <string name="player_repeat_one">单曲重复</string>
     <string name="player_repeat_all">全部重复</string>
     <string name="player_autoplay">无限播放</string>
-    <string name="player_source_format">来源：%1$s</string>
     <string name="player_clear_queue">清除</string>
     <string name="player_artwork_transitioning">切换中</string>
     <string name="player_artwork_loaded">已加载</string>

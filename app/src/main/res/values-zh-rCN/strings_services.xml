@@ -20,12 +20,6 @@
     <string name="services_collection_next_page_failed">无法读取歌单的下一页，请重试。</string>
     <string name="services_collection_required">此项目不是歌单或专辑。</string>
     <string name="services_collection_unrecognized">无法识别此歌单。</string>
-    <string name="services_google_not_configured">此版本尚未设置 Google 登录。</string>
-    <string name="services_google_pairing_start_failed">Google 配对启动失败（HTTP %1$d）。</string>
-    <string name="services_google_refresh_token_missing">Google 未返回有效的刷新令牌。</string>
-    <string name="services_google_access_denied">Google 账号授权已被拒绝。</string>
-    <string name="services_google_pairing_expired">Google 配对码已过期。</string>
-    <string name="services_google_pairing_failed">Google 配对失败（HTTP %1$d）。</string>
     <string name="services_lyrics_auth_expired">歌词授权已失效，请重新登录。</string>
     <string name="services_lyrics_restricted">此账号、订阅或地区目前无法读取同步歌词。</string>
     <string name="services_lyrics_unavailable">这首歌暂时没有同步歌词。</string>
@@ -55,9 +49,6 @@
     <string name="services_playback_thread_unavailable">Apple Music 播放功能尚未启动。</string>
     <string name="services_developer_token_invalid">Apple Music 连接凭证无效。</string>
     <string name="services_cache_clear_failed">部分缓存无法清除，请重试。</string>
-    <string name="services_ytm_video_invalid">无法识别这首 YouTube Music 歌曲。</string>
-    <string name="services_ytm_playlist_invalid">无法识别此 YouTube Music 歌单。</string>
-    <string name="services_ytm_http_error">YouTube Music 请求失败（HTTP %1$d）。</string>
     <string name="services_unknown_title">未命名</string>
     <string name="services_kind_album">专辑</string>
     <string name="services_kind_artist">艺人</string>

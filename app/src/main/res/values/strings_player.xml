@@ -43,10 +43,7 @@
     <string name="player_repeat_one">Repeat One</string>
     <string name="player_repeat_all">Repeat All</string>
     <string name="player_autoplay">Autoplay</string>
-    <string name="player_source_format">Source: %1$s</string>
     <string name="player_clear_queue">Clear</string>
-    <string name="player_provider_ytm" translatable="false">YTM</string>
-    <string name="player_provider_apple_music" translatable="false">AM</string>
     <string name="player_artwork_transitioning">Transitioning</string>
     <string name="player_artwork_loaded">Loaded</string>
     <string name="player_loading">Loading</string>

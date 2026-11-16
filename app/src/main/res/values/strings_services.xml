@@ -20,12 +20,6 @@
     <string name="services_collection_next_page_failed">Unable to load the next playlist page. Please try again.</string>
     <string name="services_collection_required">This item is not a playlist or album.</string>
     <string name="services_collection_unrecognized">This playlist could not be identified.</string>
-    <string name="services_google_not_configured">Google sign-in is not configured in this version.</string>
-    <string name="services_google_pairing_start_failed">Unable to start Google pairing (HTTP %1$d).</string>
-    <string name="services_google_refresh_token_missing">Google did not return a refresh token.</string>
-    <string name="services_google_access_denied">Google account authorization was denied.</string>
-    <string name="services_google_pairing_expired">The Google pairing code has expired.</string>
-    <string name="services_google_pairing_failed">Google pairing failed (HTTP %1$d).</string>
     <string name="services_lyrics_auth_expired">Lyrics authorization has expired. Please sign in again.</string>
     <string name="services_lyrics_restricted">Synchronized lyrics are unavailable for this account, subscription, or region.</string>
     <string name="services_lyrics_unavailable">Synchronized lyrics are unavailable for this song.</string>
@@ -55,9 +49,6 @@
     <string name="services_playback_thread_unavailable">Apple Music playback is not running.</string>
     <string name="services_developer_token_invalid">Apple Music credentials are invalid.</string>
     <string name="services_cache_clear_failed">Some cached files could not be cleared. Please try again.</string>
-    <string name="services_ytm_video_invalid">This YouTube Music track could not be identified.</string>
-    <string name="services_ytm_playlist_invalid">This YouTube Music playlist could not be identified.</string>
-    <string name="services_ytm_http_error">YouTube Music request failed (HTTP %1$d).</string>
     <string name="services_unknown_title">Untitled</string>
     <string name="services_kind_album">Album</string>
     <string name="services_kind_artist">Artist</string>
