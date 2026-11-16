@@ -2,6 +2,7 @@ package dev.amatv
 
 import android.app.Application
 import dev.amatv.core.LibraryActions
+import dev.amatv.core.LyricsStore
 import dev.amatv.core.SettingsStore
 import dev.amatv.core.SharedPreferencesSettingsStorage
 import dev.amatv.i18n.AppText
@@ -15,6 +16,7 @@ import kotlinx.coroutines.SupervisorJob
 class AmAtvApplication : Application() {
     lateinit var settingsStore: SettingsStore
     lateinit var libraryActions: LibraryActions
+    lateinit var lyricsStore: LyricsStore
     val musicServices by lazy { MusicServices(this) }
 
     override fun onCreate() {
@@ -26,9 +28,16 @@ class AmAtvApplication : Application() {
             onCacheDiskChanged = { contentCache.setEnabled(it) },
             onCachePrefetchChanged = { contentCache.setPrefetch(it) },
         )
+        val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         libraryActions = LibraryActions(
             api = musicServices.api,
-            coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+            coroutineScope = applicationScope,
+        )
+        lyricsStore = LyricsStore(
+            source = musicServices,
+            settingsStore = settingsStore,
+            coroutineScope = applicationScope,
+            appLanguageTagProvider = { resources.configuration.locales[0].toLanguageTag() },
         )
         // The car build keeps a full log for export; only the app process, not Gecko's.
         if (BuildConfig.FLYME_AUTO && getProcessName() == packageName) LogRecorder.start(this)

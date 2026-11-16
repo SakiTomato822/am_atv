@@ -3,6 +3,7 @@ package dev.amatv.ui
 import dev.amatv.BuildConfig
 import dev.amatv.model.LyricLine
 import dev.amatv.model.LyricTiming
+import dev.amatv.model.forDisplay as modelForDisplay
 import kotlin.math.abs
 import kotlin.math.ceil
 
@@ -10,26 +11,7 @@ import kotlin.math.ceil
 internal fun LyricLine.forDisplay(
     showTranslation: Boolean,
     showPronunciation: Boolean,
-): LyricLine {
-    if (showTranslation && showPronunciation) return this
-    fun filteredWords(source: List<dev.amatv.model.LyricWord>): List<dev.amatv.model.LyricWord> {
-        if (showPronunciation || source.none {
-                !it.pronunciationText.isNullOrBlank() || it.pronunciationEndMs != null
-            }
-        ) return source
-        return source.map { it.copy(pronunciationText = null, pronunciationEndMs = null) }
-    }
-    return copy(
-        words = filteredWords(words),
-        backgroundWords = filteredWords(backgroundWords),
-        translation = translation.takeIf { showTranslation },
-        backgroundTranslation = backgroundTranslation.takeIf { showTranslation },
-        pronunciationText = pronunciationText.takeIf { showPronunciation },
-        backgroundPronunciationText = backgroundPronunciationText.takeIf { showPronunciation },
-        pronunciationWords = pronunciationWords.takeIf { showPronunciation }.orEmpty(),
-        backgroundPronunciationWords = backgroundPronunciationWords.takeIf { showPronunciation }.orEmpty(),
-    )
-}
+): LyricLine = modelForDisplay(showTranslation, showPronunciation)
 
 /** Only the current viewport and its outgoing scroll context need word trees. */
 internal fun lyricViewportMountOrder(

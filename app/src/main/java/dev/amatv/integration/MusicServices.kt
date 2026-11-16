@@ -36,7 +36,7 @@ interface RecommendationProvider {
     suspend fun amStationNextTracks(stationId: String): List<Track>
 }
 
-class MusicServices(context: Context) : RecommendationProvider {
+class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.LyricsSource {
     private val appContext = context.applicationContext
     val contentCache = ContentCache.get(appContext)
     val playbackDiagnostics = PlaybackDiagnostics.get(appContext)
@@ -314,16 +314,19 @@ class MusicServices(context: Context) : RecommendationProvider {
 
     suspend fun catalogAlbumOf(song: Track): Track? = api.catalogAlbumOf(song)
 
-    suspend fun lyricsFor(
+    override suspend fun lyricsFor(
         track: Track,
-        localization: LyricsLocalizationRequest = LyricsLocalizationRequest.Disabled,
+        localization: LyricsLocalizationRequest,
     ): List<LyricLine> {
         val playable = resolvePlayableTrack(track)
         return appleLyrics.lyricsFor(checkNotNull(playable.catalogId), localization)
     }
 
+    override fun canWriteCache(): Boolean = contentCache.canWrite()
+    override val cacheGeneration: Long get() = contentCache.generation
+
     /** Resolve all songs through account-storefront equivalence, retaining source provenance. */
-    suspend fun resolvePlayableTrack(track: Track): Track {
+    override suspend fun resolvePlayableTrack(track: Track): Track {
         if (track.catalogKind != dev.amatv.model.CatalogKind.Song) return track
         checkNotNull(track.catalogId) { AppText.text(R.string.services_catalog_id_missing) }
         return resolvePlayableSongTrack(track, api::resolveCatalogSongId)

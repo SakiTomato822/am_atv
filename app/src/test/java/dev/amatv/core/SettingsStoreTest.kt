@@ -10,7 +10,7 @@ import org.junit.Test
 
 class SettingsStoreTest {
 
-    private class FakeSettingsStorage(
+    internal class FakeSettingsStorage(
         private val initial: SettingsState = SettingsState(),
     ) : SettingsStorage {
         var savedRepeatMode: PlaybackRepeatMode? = null

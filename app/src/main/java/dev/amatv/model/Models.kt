@@ -51,7 +51,10 @@ data class Track(
     val isExplicit: Boolean = false,
     /** Why a Top Picks card is there ("Made for You", "New Release"...). */
     val pickReason: String? = null,
-)
+) {
+    /** Catalog identity survives MusicKit's different browse and now-playing wrapper ids. */
+    fun lyricsIdentity(): String = catalogId?.takeIf(String::isNotBlank) ?: id
+}
 
 /**
  * Compares two projections of the same live playback-queue entry.
@@ -206,6 +209,31 @@ data class LyricLine(
      */
     val renderedText: String
         get() = renderLyricWords(words, joinWithSpaces).ifBlank { renderLyricWords(backgroundWords, joinWithSpaces) }.trim()
+}
+
+/** Applies display preferences without changing timing, singer or background-vocal structure. */
+fun LyricLine.forDisplay(
+    showTranslation: Boolean,
+    showPronunciation: Boolean,
+): LyricLine {
+    if (showTranslation && showPronunciation) return this
+    fun filteredWords(source: List<LyricWord>): List<LyricWord> {
+        if (showPronunciation || source.none {
+                !it.pronunciationText.isNullOrBlank() || it.pronunciationEndMs != null
+            }
+        ) return source
+        return source.map { it.copy(pronunciationText = null, pronunciationEndMs = null) }
+    }
+    return copy(
+        words = filteredWords(words),
+        backgroundWords = filteredWords(backgroundWords),
+        translation = translation.takeIf { showTranslation },
+        backgroundTranslation = backgroundTranslation.takeIf { showTranslation },
+        pronunciationText = pronunciationText.takeIf { showPronunciation },
+        backgroundPronunciationText = backgroundPronunciationText.takeIf { showPronunciation },
+        pronunciationWords = pronunciationWords.takeIf { showPronunciation }.orEmpty(),
+        backgroundPronunciationWords = backgroundPronunciationWords.takeIf { showPronunciation }.orEmpty(),
+    )
 }
 
 /** Mirrors KaraokeWordItem's renderedString rules when producing a whole lyric line. */
