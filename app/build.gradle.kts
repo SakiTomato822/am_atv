@@ -5,8 +5,6 @@ import dev.amatv.build.MusicKitSongIdVisitorFactory
 import dev.amatv.build.MusicKitStackMapFrames
 import dev.amatv.build.VerifyMusicKitSdkTask
 import java.util.Properties
-import java.util.Base64
-import java.time.Instant
 
 val localProperties = Properties().apply {
     val propertiesFile = rootProject.file("local.properties")
@@ -78,33 +76,9 @@ android {
                 "proguard-rules.pro",
             )
         }
-        create("standalone") {
-            initWith(getByName("release"))
-            // Same local signing identity lets the TV update without losing its account.
-            signingConfig = signingConfigs.getByName("debug")
-            matchingFallbacks += "release"
-            buildConfigField("String", "MUSICKIT_TOKEN_ENDPOINT", "\"\"")
-        }
-        create("standaloneGecko") {
-            initWith(getByName("standalone"))
-            matchingFallbacks += listOf("standalone", "release")
-            proguardFile("src/standaloneGecko/proguard-rules.pro")
-            buildConfigField("String", "AUTH_BROWSER_ACTIVITY", "\"dev.amatv.integration.GeckoMusicKitAuthActivity\"")
-            buildConfigField("boolean", "AUTH_BROWSER_IS_GECKO", "true")
-            // The default supports both ARM architectures; a device-specific
-            // APK can omit the other engine with -Pamatv.geckoAbi=<ABI>.
-            val geckoAbi = providers.gradleProperty("amatv.geckoAbi").orNull
-            require(geckoAbi == null || geckoAbi in listOf("armeabi-v7a", "arm64-v8a")) {
-                "amatv.geckoAbi must be armeabi-v7a or arm64-v8a"
-            }
-            ndk.abiFilters += geckoAbi?.let(::listOf) ?: listOf("armeabi-v7a", "arm64-v8a")
-        }
-        create("benchmark") {
-            initWith(getByName("standalone"))
-            matchingFallbacks += listOf("standalone", "release")
-        }
         create("flymeGecko") {
-            initWith(getByName("standaloneGecko"))
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
             val fixedKeystorePath = localSetting("FLYME_SIGNING_KEYSTORE_FILE")
             if (fixedKeystorePath.isNotBlank()) {
                 val fixedKeystore = rootProject.file(fixedKeystorePath)
@@ -120,7 +94,10 @@ android {
             versionNameSuffix = "-flyme.14.5"
             manifestPlaceholders["flymeApplicationLabel"] = "@string/flyme_app_name"
             manifestPlaceholders["flymeRadioProbeEnabled"] = "false"
-            matchingFallbacks += listOf("standaloneGecko", "standalone", "release")
+            matchingFallbacks += "release"
+            proguardFile("src/flymeGecko/proguard-rules.pro")
+            buildConfigField("String", "AUTH_BROWSER_ACTIVITY", "\"dev.amatv.integration.GeckoMusicKitAuthActivity\"")
+            buildConfigField("boolean", "AUTH_BROWSER_IS_GECKO", "true")
             buildConfigField("boolean", "FLYME_AUTO", "true")
             buildConfigField("boolean", "FLYME_NATIVE_MEDIA", localSetting("flyme.nativeMedia", "true"))
             // Stations play through MusicKit JS in GeckoView; songs stay on the native SDK.
@@ -149,12 +126,6 @@ android {
                 ndk.abiFilters += previewAbi
             }
         }
-    }
-
-    sourceSets.getByName("flymeGecko") {
-        java.srcDir("src/standaloneGecko/java")
-        assets.srcDir("src/standaloneGecko/assets")
-        res.srcDir("src/standaloneGecko/res")
     }
 
     compileOptions {
@@ -194,8 +165,6 @@ androidComponents {
     onVariants(selector().all()) { variant ->
         if (variant.name == "flymeGecko") {
             variant.outputs.forEach { it.versionCode.set(37) }
-        }
-        if (variant.name == "standaloneGecko" || variant.name == "flymeGecko") {
             // Direct APK distribution benefits from compressed browser binaries.
             // Android extracts the selected architecture once during installation.
             variant.packaging.jniLibs.useLegacyPackaging.set(true)
@@ -211,26 +180,6 @@ androidComponents {
         )
     }
 }
-
-val verifyStandaloneCredential = tasks.register("verifyStandaloneCredential") {
-    doLast {
-        check(bundledDeveloperToken.isNotBlank()) {
-            "Set AM_DEVELOPER_TOKEN_FILE to a signed developer token before building a standalone APK."
-        }
-        val parts = bundledDeveloperToken.split('.')
-        check(parts.size == 3) { "Standalone developer token is not a JWT." }
-        val header = String(Base64.getUrlDecoder().decode(parts[0]), Charsets.UTF_8)
-        val payload = String(Base64.getUrlDecoder().decode(parts[1]), Charsets.UTF_8)
-        check(header.contains("ES256")) { "Standalone developer token must use ES256." }
-        val expiry = Regex("\"exp\"\\s*:\\s*(\\d+)").find(payload)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
-        check(expiry > Instant.now().epochSecond + 86_400L) {
-            "The standalone credential must remain valid for at least one day. Export a fresh token."
-        }
-        logger.lifecycle("Standalone developer credential expires ${Instant.ofEpochSecond(expiry)}")
-    }
-}
-tasks.matching { it.name == "preStandaloneBuild" || it.name == "preStandaloneGeckoBuild" || it.name == "preBenchmarkBuild" }
-    .configureEach { dependsOn(verifyStandaloneCredential) }
 
 val verifyFlymeRuntime = tasks.register("verifyFlymeRuntime") {
     doLast {
@@ -277,13 +226,6 @@ dependencies {
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test.uiautomator:uiautomator:2.4.0")
 
-    // The last stable Gecko release compatible with this project's Kotlin 2.3.21
-    // and compileSdk 36. It is packaged only in the alternate sign-in APK.
-    add("standaloneGeckoImplementation", "org.mozilla.geckoview:geckoview:153.0.20260810162159") {
-        // Bundling a browser must not replace the app's existing artwork/player
-        // Media3 version. MusicKit remains the sole music playback engine.
-        exclude(group = "androidx.media3")
-    }
     add("flymeGeckoImplementation", "org.mozilla.geckoview:geckoview:153.0.20260810162159") {
         exclude(group = "androidx.media3")
     }
