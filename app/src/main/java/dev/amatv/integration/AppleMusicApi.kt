@@ -420,18 +420,11 @@ class AppleMusicApi(
      */
     override suspend fun isSongInLibrary(catalogSongId: String): Boolean? {
         require(catalogSongId.matches(Regex("[0-9]+"))) { "Catalog song ID is invalid" }
-        val root = runCatching {
-            requestRoot("/v1/catalog/${effectiveStorefront()}/songs/$catalogSongId?include=library",
-                needsUserToken = true)
-        }.getOrNull() ?: return null
+        val root = requestRoot("/v1/catalog/${effectiveStorefront()}/songs/$catalogSongId?include=library",
+            needsUserToken = true)
 
-        val data0 = root.optJSONArray("data")?.optJSONObject(0) ?: return null
+        val data0 = root.getJSONArray("data").getJSONObject(0)
         val relationships = data0.optJSONObject("relationships")
-        val attributes = data0.optJSONObject("attributes")
-
-        val relKeys = relationships?.keys()?.asSequence()?.toList()?.filter { "library" in it.lowercase() }
-        val attrKeys = attributes?.keys()?.asSequence()?.toList()?.filter { "library" in it.lowercase() }
-        android.util.Log.i("AMATV-Library", "isSongInLibrary catalogId=$catalogSongId relKeys=$relKeys attrKeys=$attrKeys")
 
         if (relationships == null || !relationships.has("library")) {
             return null

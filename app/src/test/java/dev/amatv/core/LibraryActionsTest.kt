@@ -18,6 +18,7 @@ class LibraryActionsTest {
         var isSongInLibraryResult: Boolean? = false
         var addFavoriteShouldFail = false
         var addToLibraryShouldFail = false
+        var isSongInLibraryShouldFail = false
 
         var isFavoriteCallCount = 0
         var addFavoriteCallCount = 0
@@ -36,6 +37,7 @@ class LibraryActionsTest {
 
         override suspend fun isSongInLibrary(catalogSongId: String): Boolean? {
             isSongInLibraryCallCount++
+            if (isSongInLibraryShouldFail) throw RuntimeException("Network timeout")
             return isSongInLibraryResult
         }
 
@@ -191,6 +193,19 @@ class LibraryActionsTest {
         val actions = createActions(api, this)
 
         val track = testTrack(catalogId = "8001")
+        actions.onCurrentTrackChanged(track, signedIn = true)
+
+        assertNull(actions.state.value.current.isInLibrary)
+    }
+
+    @Test
+    fun apiThrowsOnSongInLibraryLeavesStateNull() = runBlocking {
+        val api = FakeLibraryActionsApi().apply {
+            isSongInLibraryShouldFail = true
+        }
+        val actions = createActions(api, this)
+
+        val track = testTrack(catalogId = "9001")
         actions.onCurrentTrackChanged(track, signedIn = true)
 
         assertNull(actions.state.value.current.isInLibrary)

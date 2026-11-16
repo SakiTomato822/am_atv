@@ -3,15 +3,9 @@ package dev.amatv.ui
 import dev.amatv.BuildConfig
 import dev.amatv.model.LyricLine
 import dev.amatv.model.LyricTiming
-import dev.amatv.model.forDisplay as modelForDisplay
 import kotlin.math.abs
 import kotlin.math.ceil
 
-/** Applies display preferences without changing timing, singer or background-vocal structure. */
-internal fun LyricLine.forDisplay(
-    showTranslation: Boolean,
-    showPronunciation: Boolean,
-): LyricLine = modelForDisplay(showTranslation, showPronunciation)
 
 /** Only the current viewport and its outgoing scroll context need word trees. */
 internal fun lyricViewportMountOrder(

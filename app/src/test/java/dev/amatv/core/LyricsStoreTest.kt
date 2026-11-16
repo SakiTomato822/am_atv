@@ -203,6 +203,33 @@ class LyricsStoreTest {
     }
 
     @Test
+    fun retryCurrentLyricsOnlyTriggersSingleLyricsForFetch() = runBlocking {
+        var fetchCount = 0
+        var shouldFail = true
+        val source = FakeLyricsSource().apply {
+            lyricsResolver = { _, _ ->
+                fetchCount++
+                if (shouldFail) throw dev.amatv.integration.LyricsRequestException(
+                    dev.amatv.integration.LyricsFailureReason.Authorization,
+                    "Auth error"
+                )
+                else listOf(lyricLine("Recovered Line"))
+            }
+        }
+        val store = createStore(source)
+        val track = testTrack(catalogId = "6002")
+
+        store.setCurrentTrack(track, isSignedIn = true)
+        assertEquals(1, fetchCount)
+        assertEquals(LyricsLoadPhase.Failed, store.state.value.phase)
+
+        shouldFail = false
+        store.retryCurrentLyrics()
+        assertEquals(2, fetchCount)
+        assertEquals(LyricsLoadPhase.Ready, store.state.value.phase)
+    }
+
+    @Test
     fun duplicateSetCurrentTrackWithSameVariantIsNoOp() = runBlocking {
         val source = FakeLyricsSource().apply {
             lyricsResolver = { _, _ -> listOf(lyricLine("Test")) }

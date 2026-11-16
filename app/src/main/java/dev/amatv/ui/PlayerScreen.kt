@@ -151,6 +151,7 @@ import dev.amatv.model.LyricLine
 import dev.amatv.model.LyricTimeline
 import dev.amatv.model.LyricTiming
 import dev.amatv.model.LyricWord
+import dev.amatv.model.forDisplay
 import dev.amatv.integration.AudioSpectrum
 import dev.amatv.model.Track
 import dev.amatv.model.matchesPlaybackQueueEntry

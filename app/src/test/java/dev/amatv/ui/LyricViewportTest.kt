@@ -1,9 +1,11 @@
 package dev.amatv.ui
 
 import androidx.compose.ui.graphics.Color
+import dev.amatv.core.lyricsCacheKey
 import dev.amatv.model.LyricLine
 import dev.amatv.model.LyricTiming
 import dev.amatv.model.LyricWord
+import dev.amatv.model.forDisplay
 import dev.amatv.model.Track
 import org.junit.Assert.*
 import org.junit.Test

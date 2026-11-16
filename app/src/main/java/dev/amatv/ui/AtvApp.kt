@@ -125,14 +125,6 @@ private suspend fun <T> cancellableResult(block: suspend () -> T): Result<T> = t
     Result.failure(error)
 }
 
-typealias LyricsLoadPhase = dev.amatv.core.LyricsLoadPhase
-typealias ActiveLyricsState = dev.amatv.core.LyricsState
-
-internal fun lyricsCacheKey(trackIdentity: String, variant: String): String =
-    dev.amatv.core.lyricsCacheKey(trackIdentity, variant)
-
-internal fun ActiveLyricsState.resolvedCacheEntries(): Map<String, List<LyricLine>> =
-    (this as dev.amatv.core.LyricsState).resolvedCacheEntries()
 
 private fun demoShelves(): Map<Destination, List<ContentShelf>> = mapOf(
     Destination.Home to listOf(
@@ -154,7 +146,7 @@ fun AmAtvApp() {
     val lyricsLanguageTag = LocalConfiguration.current.locales[0].toLanguageTag()
     val scope = rememberCoroutineScope()
     val shelfLoads = remember(scope) { ShelfLoads(scope) }
-    val services = remember(context) { (context.applicationContext as? dev.amatv.AmAtvApplication)?.musicServices ?: MusicServices(context) }
+    val services = remember(context) { (context.applicationContext as dev.amatv.AmAtvApplication).musicServices }
     val cacheSettings by services.contentCache.settings.collectAsState()
     val playbackPrefs = remember(context) { PlaybackPreferences(context) }
     val settingsStore = remember(context) { (context.applicationContext as dev.amatv.AmAtvApplication).settingsStore }
@@ -306,7 +298,6 @@ fun AmAtvApp() {
     var pendingRestore by remember {
         mutableStateOf(startupCheckpoint?.takeIf { track.catalogId != null })
     }
-    var lyricsRetryNonce by remember { mutableIntStateOf(0) }
     val authLaunchGate = remember { AuthLaunchGate() }
     var playbackRequestJob by remember { mutableStateOf<Job?>(null) }
     var selectionGeneration by remember { mutableLongStateOf(0L) }
@@ -518,7 +509,7 @@ fun AmAtvApp() {
         playWhenReady = true
         if (lyricsState.trackIdentity == track.lyricsIdentity() &&
             lyricsState.phase == LyricsLoadPhase.Failed
-        ) lyricsRetryNonce++
+        ) lyricsStore.retryCurrentLyrics()
         pendingRestore = pendingRestore?.copy(wasPlaying = true)
         if (!startupSessionLoaded && selectionGeneration == 0L) return
         // Play while Next is resolving belongs to the incoming entry, not
@@ -542,7 +533,6 @@ fun AmAtvApp() {
     }
 
     fun retryCurrentLyrics() {
-        lyricsRetryNonce++
         lyricsStore.retryCurrentLyrics()
     }
 
@@ -1301,7 +1291,6 @@ fun AmAtvApp() {
         track.catalogKind,
         lyricsRequestReady,
         reloadNonce,
-        lyricsRetryNonce,
         cacheSettings.revision,
         lyricsVariant,
     ) {

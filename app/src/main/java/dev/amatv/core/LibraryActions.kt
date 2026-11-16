@@ -2,6 +2,7 @@ package dev.amatv.core
 
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -81,7 +82,7 @@ class LibraryActions(
         if (needsFavoriteFetch || needsLibraryFetch) {
             coroutineScope.launch {
                 if (needsFavoriteFetch) {
-                    val favorite = runCatching { withContext(ioDispatcher) { api.isFavorite(catalogId) } }.getOrNull()
+                    val favorite = cancellableResult { withContext(ioDispatcher) { api.isFavorite(catalogId) } }.getOrNull()
                     if (favorite != null && currentTrack?.catalogId == catalogId) {
                         mutableState.value = mutableState.value.copy(
                             current = mutableState.value.current.copy(isFavorite = favorite),
@@ -90,7 +91,7 @@ class LibraryActions(
                     }
                 }
                 if (needsLibraryFetch) {
-                    val inLibrary = runCatching { withContext(ioDispatcher) { api.isSongInLibrary(catalogId) } }.getOrNull()
+                    val inLibrary = cancellableResult { withContext(ioDispatcher) { api.isSongInLibrary(catalogId) } }.getOrNull()
                     if (inLibrary != null && currentTrack?.catalogId == catalogId) {
                         mutableState.value = mutableState.value.copy(
                             current = mutableState.value.current.copy(isInLibrary = inLibrary),
@@ -117,7 +118,7 @@ class LibraryActions(
         )
 
         coroutineScope.launch {
-            val result = runCatching {
+            val result = cancellableResult {
                 withContext(ioDispatcher) { api.addFavorite(catalogId) }
             }
             if (result.isSuccess) {
@@ -156,7 +157,7 @@ class LibraryActions(
         )
 
         coroutineScope.launch {
-            val result = runCatching {
+            val result = cancellableResult {
                 withContext(ioDispatcher) { api.addToLibrary(catalogId) }
             }
             if (result.isSuccess) {
@@ -191,3 +192,12 @@ private fun logWarning(tag: String, msg: String) {
         System.err.println("$tag: $msg")
     }
 }
+
+private suspend inline fun <T> cancellableResult(crossinline block: suspend () -> T): Result<T> =
+    try {
+        Result.success(block())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (t: Throwable) {
+        Result.failure(t)
+    }
