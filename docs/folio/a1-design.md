@@ -1,60 +1,64 @@
-# A1 设计方案：SettingsStore、LibraryActions、LyricsStore
+# A1 设计方案：SettingsStore、LibraryActions、LyricsStore（修订版）
 
 本文档定义 AM Folio 15 重构阶段 A1 的核心层架构与迁移设计。核心层文件位于 `app/src/main/java/dev/amatv/core/`，包名为 `dev.amatv.core`。
+本设计稿已根据 Claude 的审查意见（`A1-REVIEW.md`）进行了全面修订。
 
 ---
 
-## 总体设计原则
+## 总体原则与单例生命周期
 
-1. **纯 Kotlin 逻辑**：核心层类不依赖任何 Compose 库（零 `androidx.compose.*` 依赖），不持有 Activity 或 UI 组件引用。
-2. **状态单向流动**：核心层对外仅暴露 `StateFlow<不可变 data class>` 供界面与外部观察，所有操作通过普通成员函数调用。
-3. **存储与格式完全兼容**：沿用现有 `PlaybackPreferences`（`am_atv_playback_preferences`）、`FlymePlaybackOptions`（`am_atv_flyme_playback`）以及 `ContentCache`（`content-cache`）的 SharedPreferences 文件与键名，不改存储结构，不做数据迁移。
-4. **单例与生命周期**：整个进程生命周期只有一份，由 `AmAtvApplication` 在启动时初始化并持有，全局可通过 Application 或依赖注入访问。
-5. **纯 JVM 单元测试**：测试位于 `app/src/test/java/dev/amatv/core/`，全部采用 Fake 实现依赖，不依赖 Mock 框架，不依赖 Android 设备/模拟器环境。
+1. **搬代码，不重写逻辑**：能把原代码块原样剪切过去就原样剪切，只改变量的来源，不改动已有判断条件、错误处理和执行顺序。
+2. **纯 Kotlin 逻辑**：核心层类不依赖任何 Compose 库（零 `androidx.compose.*` 依赖），不持有 Activity 或 UI 组件引用。
+3. **单例与协程作用域**：
+   - 三个核心 Store 全局由 `AmAtvApplication` 单例持有。
+   - 内部协程作用域统一采用 `CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)`，保证状态更新保留在主线程（与 Compose 响应模型一致）。
+   - 涉及网络与磁盘 I/O 的底层调用在调用点使用 `withContext(Dispatchers.IO)`，与原代码一致。
+   - Compose 界面内统一使用 `remember { (context.applicationContext as AmAtvApplication).xxx }` 获取实例。
+4. **存储与格式完全兼容**：沿用现有 `PlaybackPreferences`（`am_atv_playback_preferences`）、`FlymePlaybackOptions`（`am_atv_flyme_playback`）以及 `ContentCache`（`content-cache`）的 SharedPreferences 文件与键名，不改存储结构，不做数据迁移。
+5. **纯 JVM 单元测试**：测试位于 `app/src/test/java/dev/amatv/core/`，全部采用 Fake 依赖，不改动、不削弱已有测试。
 
 ---
 
 ## 一、SettingsStore
 
-### 1. 要搬的东西清单
+### 1. 唯一数据源保证（消除双重数据源）
 
-#### 搬入清单
-- `AtvApp.kt`:
-  - `lyricsPreferred`（行 167）：歌词默认展开/显示偏好。
-  - `lowPerformanceMode`（行 208）：低性能模式开关。
-  - `repeatMode`（行 271）：循环模式默认偏好初值。
-  - `shuffleEnabled`（行 272）：随机播放开关默认偏好初值。
-  - `autoplayEnabled`（行 273）：自动播放/无限续播偏好初值。
-  - `lyricOffsetMs`（行 274）：歌词时间轴微调偏移量（毫秒）。
-  - `lyricTextSize`（行 275）：歌词字体尺寸。
-  - `lyricTranslationEnabled`（行 276-278）：歌词翻译开关。
-  - `lyricPronunciationEnabled`（行 279-281）：歌词注音/罗马音开关。
-  - `lyricTranslationLanguageTag`（行 282-284）：歌词翻译目标语言 tag。
-  - `lyricPronunciationLanguageTag`（行 285-287）：歌词注音目标语言 tag。
-  - 各类设置变更回调（行 2118-2126, 2150-2153, 2214-2217, 2228-2243）：包括 `onLyricOffsetChange`、`onLowPerformanceModeChange`、`onLyricsPreferredChange`、`onLyricTextSizeChange`、`onLyricTranslationEnabledChange`、`onLyricPronunciationEnabledChange`、`onLyricTranslationLanguageChange`、`onLyricPronunciationLanguageChange`。
-- `FlymePlaybackOptions.kt`:
-  - `lyricStyle`（行 19, 50-51）：歌词背景样式（Flow 流光 / Soak 浸润）。
-  - `appearance`（行 16, 45-47）：外观日夜模式（Light, Dark, System, Time）。
-  - `lightFromMinute`, `lightUntilMinute`（行 17-18, 48-49）：定时日间模式时间区间。
-  - `fadeAlbums`（行 9, 41）：专辑切歌淡入淡出。
-  - `fadeStations`（行 11, 42）：电台切歌淡入淡出。
-  - `fadePlaylists`（行 12, 43）：歌单切歌淡入淡出。
-  - `stationsAsSongs`（行 14, 44）：电台以普通单曲模式播放偏好。
-- `ContentCacheSettings.kt` / `ContentCache.kt`:
-  - `cacheDiskEnabled`（`enabled`）：磁盘内容缓存总开关。
-  - `cachePrefetchNextTwo`（`prefetch-next-two`）：队列后续两首预取开关。
+为防止内存出现双重状态，在**同一个提交**中，将所有设置字段的读写方全部迁移至 `SettingsStore`。
+原有的 `PlaybackPreferences`、`FlymePlaybackOptions` 和 `ContentCache` 仅保留底层存储适配器的角色，界面与业务逻辑不再直接读写旧类的设置项。
 
-#### 明确不搬的清单及原因
-- `activeTab` / `saveActiveTab`（`PlaybackPreferences.kt` 行 151-159, `AtvApp.kt` 行 174-179）：属于界面导航浏览状态，留给 A2（ContentStore / Navigation）。
-- `saveSession`, `restoreSession`, `restoreCheckpointSession`, `clearSession`（`PlaybackPreferences.kt` 行 161-171, `AtvApp.kt` 行 168-172）：属于播放会话持久化，留给 A3（SessionStore）。
-- `PlaybackQueueController` 内部运行态的 `repeat`, `shuffle`, `infinite` 状态机（`PlaybackQueueController.kt` 行 388, 408, 430）：属于播放队列实时状态（A3），`SettingsStore` 仅持有持久化默认值并实现 `QueuePreferences` 供其读取和回写。
-- `LanguageSettings`（`LanguageSettings.kt` 行 40, 67）：应用多语言设置，直接调用 `AppCompatDelegate.setApplicationLocales` 由系统持久化，不经过 SharedPreferences，属于系统/UI 层配置。
-- `stationHistory`（`AtvApp.kt` 行 221）：属于播放历史记录，留给 A2/A3。
-- `search_history`（`FlymeSearch.kt` 行 22）：属于搜索历史，留给 A2。
+#### 「字段 → 原读写方 → 改后」对照表
+
+| 字段名 | 原存储 / 键名 | 原读写方 | 改后读写方 |
+|---|---|---|---|
+| `repeatMode` | `am_atv_playback_preferences`<br>`pref_playback_repeat_mode` | - `AtvApp.kt` (行 271 remember)<br>- `PlaybackQueueController.kt` (行 132, 430, 609) | `SettingsStore.repeatMode` / `SettingsStore.setRepeatMode`。`PlaybackQueueController` 构造时直接传入 `SettingsStore`。 |
+| `shuffleEnabled` | `am_atv_playback_preferences`<br>`pref_playback_shuffle_enabled` | - `AtvApp.kt` (行 272 remember)<br>- `PlaybackQueueController.kt` (行 133, 172, 408, 610) | `SettingsStore.shuffleEnabled` / `SettingsStore.setShuffleEnabled`。 |
+| `autoplayEnabled` | `am_atv_playback_preferences`<br>`pref_playback_autoplay_enabled` | - `AtvApp.kt` (行 273 remember)<br>- `PlaybackQueueController.kt` (行 134, 388, 611) | `SettingsStore.autoplayEnabled` / `SettingsStore.setAutoplayEnabled`。 |
+| `lowPerformanceMode` | `am_atv_playback_preferences`<br>`pref_playback_low_performance_mode` | - `AtvApp.kt` (行 208 remember, 行 2123)<br>- `PlaybackQueueController.kt`<br>- `PlayerScreen.kt` | `SettingsStore.state.value.lowPerformanceMode`，更新调 `settingsStore.setLowPerformanceMode`。 |
+| `lyricsPreferred` | `am_atv_playback_preferences`<br>`pref_playback_lyrics_preferred` | - `AtvApp.kt` (行 167 remember, 行 2150)<br>- `PlayerScreen.kt` | `SettingsStore.state.value.lyricsPreferred`，更新调 `settingsStore.setLyricsPreferred`。 |
+| `lyricOffsetMs` | `am_atv_playback_preferences`<br>`pref_playback_lyric_offset_ms` | - `AtvApp.kt` (行 274 remember, 行 2118)<br>- `PlayerScreen.kt` | `SettingsStore.state.value.lyricOffsetMs`，更新调 `settingsStore.setLyricOffsetMs`。 |
+| `lyricTextSize` | `am_atv_playback_preferences`<br>`pref_lyric_text_size` | - `AtvApp.kt` (行 275 remember, 行 2214)<br>- `PlayerScreen.kt` | `SettingsStore.state.value.lyricTextSize`，更新调 `settingsStore.setLyricTextSize`。 |
+| `lyricTranslationEnabled` | `am_atv_playback_preferences`<br>`pref_lyric_translation_enabled` | - `AtvApp.kt` (行 276 remember, 行 2228)<br>- `PlayerScreen.kt` | `SettingsStore.state.value.lyricTranslationEnabled`，更新调 `settingsStore.setLyricTranslationEnabled`。 |
+| `lyricPronunciationEnabled` | `am_atv_playback_preferences`<br>`pref_lyric_pronunciation_enabled` | - `AtvApp.kt` (行 279 remember, 行 2232)<br>- `PlayerScreen.kt` | `SettingsStore.state.value.lyricPronunciationEnabled`，更新调 `settingsStore.setLyricPronunciationEnabled`。 |
+| `lyricTranslationLanguageTag` | `am_atv_playback_preferences`<br>`pref_lyric_translation_language` | - `AtvApp.kt` (行 282 remember, 行 2236)<br>- `PlayerScreen.kt` | `SettingsStore.state.value.lyricTranslationLanguageTag`，更新调 `settingsStore.setLyricTranslationLanguageTag`。 |
+| `lyricPronunciationLanguageTag` | `am_atv_playback_preferences`<br>`pref_lyric_pronunciation_language` | - `AtvApp.kt` (行 285 remember, 行 2240)<br>- `PlayerScreen.kt` | `SettingsStore.state.value.lyricPronunciationLanguageTag`，更新调 `settingsStore.setLyricPronunciationLanguageTag`。 |
+| `lyricStyle` | `am_atv_flyme_playback`<br>`lyric_style_soak` | - `FlymePlaybackOptions.kt` (行 50)<br>- `FlymeMediaSettings.kt` (行 121)<br>- `PlayerScreen.kt` (行 83) | `SettingsStore.state.value.lyricStyle`，更新调 `settingsStore.setLyricStyle`。`FlymePlaybackOptionsSettings` 与 `PlayerScreen` 改接 `settingsStore`。 |
+| `appearance` | `am_atv_flyme_playback`<br>`appearance` | - `FlymePlaybackOptions.kt` (行 45)<br>- `FlymeMediaSettings.kt` (行 139)<br>- `CarLayout.kt` (行 22) | `SettingsStore.state.value.appearance`，更新调 `settingsStore.setAppearance`。`CarLayout` 读 `settingsStore.state`。 |
+| `lightFromMinute`, `lightUntilMinute` | `am_atv_flyme_playback`<br>`light_from_minute`, `light_until_minute` | - `FlymePlaybackOptions.kt` (行 48-49)<br>- `FlymeMediaSettings.kt` (行 158-170)<br>- `CarLayout.kt` (行 22) | `SettingsStore.setLightSchedule(from, until)`。`FlymeAppearanceSettings` 改接 `settingsStore`。 |
+| `fadeAlbums`, `fadeStations`, `fadePlaylists` | `am_atv_flyme_playback`<br>`fade_albums`, `fade_stations`, `fade_playlists` | - `FlymePlaybackOptions.kt` (行 41-43)<br>- `FlymeMediaSettings.kt` (行 107-112)<br>- `AtvApp.kt` (行 721-729) | `SettingsStore.setFadeAlbums` 等。`AtvApp.kt` 切歌淡入淡出 LaunchedEffect 读 `settingsStore.state`。 |
+| `stationsAsSongs` | `am_atv_flyme_playback`<br>`stations_as_songs` | - `FlymePlaybackOptions.kt` (行 44)<br>- `FlymeMediaSettings.kt` (行 118)<br>- `MusicServices.kt` (行 202) | `SettingsStore.setStationsAsSongs`。`MusicServices` 读 `settingsStore.state.value.stationsAsSongs`。 |
+| `cacheDiskEnabled` | `content-cache`<br>`enabled` | - `ContentCache.kt` (行 43, 57)<br>- `ContentCacheSettings.kt` (行 53)<br>- `AtvApp.kt` (行 1376) | `SettingsStore.state.value.cacheDiskEnabled`，更新调 `settingsStore.setCacheDiskEnabled`。`ContentCache` 监听同步更新。 |
+| `cachePrefetchNextTwo` | `content-cache`<br>`prefetch-next-two` | - `ContentCache.kt` (行 44, 60)<br>- `ContentCacheSettings.kt` (行 60)<br>- `AtvApp.kt` (行 1376) | `SettingsStore.state.value.cachePrefetchNextTwo`，更新调 `settingsStore.setCachePrefetchNextTwo`。 |
+
+#### 明确不搬入的清单及原因
+- `activeTab` / `saveActiveTab`（`PlaybackPreferences.kt` 行 151-159）：界面导航状态，留给 A2（ContentStore / Navigation）。
+- `saveSession`, `restoreSession`, `restoreCheckpointSession`, `clearSession`（`PlaybackPreferences.kt` 行 161-171）：播放队列会话持久化，留给 A3（SessionStore）。
+- `LanguageSettings`（`LanguageSettings.kt`）：系统语言配置，调用 `AppCompatDelegate.setApplicationLocales` 由系统持久化，属于系统层，不通过 SharedPreferences 存储。
 
 ---
 
-### 2. 对外接口
+### 2. 对外接口与按键精准持久化
+
+为了避免全量 `persist(state)` 把未设置过的字段覆写为默认值、破坏「未设置」的原始语义，`SettingsStorage` 设计为按字段粒度持久化接口。
 
 ```kotlin
 package dev.amatv.core
@@ -68,13 +72,13 @@ enum class AppearanceMode { Light, Dark, System, Time }
 enum class LyricBackgroundStyle { Flow, Soak }
 
 data class SettingsState(
-    // 播放偏好 (am_atv_playback_preferences)
+    // 播放偏好
     val repeatMode: PlaybackRepeatMode = PlaybackRepeatMode.Off,
     val shuffleEnabled: Boolean = false,
     val autoplayEnabled: Boolean = true,
     val lowPerformanceMode: Boolean = false,
 
-    // 歌词偏好 (am_atv_playback_preferences)
+    // 歌词偏好
     val lyricsPreferred: Boolean = true,
     val lyricOffsetMs: Long = 0L,
     val lyricTextSize: LyricTextSize = LyricTextSize.Standard,
@@ -83,7 +87,7 @@ data class SettingsState(
     val lyricTranslationLanguageTag: String = "",
     val lyricPronunciationLanguageTag: String = "en-US",
 
-    // 车机外观与播放选项 (am_atv_flyme_playback)
+    // 车机外观与播放选项
     val lyricStyle: LyricBackgroundStyle = LyricBackgroundStyle.Flow,
     val appearance: AppearanceMode = AppearanceMode.System,
     val lightFromMinute: Int = 7 * 60,
@@ -93,11 +97,11 @@ data class SettingsState(
     val fadePlaylists: Boolean = true,
     val stationsAsSongs: Boolean = false,
 
-    // 缓存偏好 (content-cache)
+    // 缓存偏好
     val cacheDiskEnabled: Boolean = true,
     val cachePrefetchNextTwo: Boolean = true,
 ) {
-    /** 辅助判断当前时刻在指定系统夜间模式下是否应渲染为浅色界面 */
+    /** 从 FlymePlaybackSettings 原样剪切，不做重写 */
     fun isLight(systemDark: Boolean, minuteOfDay: Int): Boolean = when (appearance) {
         AppearanceMode.Light -> true
         AppearanceMode.Dark -> false
@@ -110,9 +114,33 @@ data class SettingsState(
     }
 }
 
+/** 按字段细粒度持久化接口，确保每次只写被修改的单个键 */
 interface SettingsStorage {
-    fun load(): SettingsState
-    fun persist(state: SettingsState)
+    fun loadInitialState(): SettingsState
+
+    fun saveRepeatMode(mode: PlaybackRepeatMode)
+    fun saveShuffleEnabled(enabled: Boolean)
+    fun saveAutoplayEnabled(enabled: Boolean)
+    fun saveLowPerformanceMode(enabled: Boolean)
+
+    fun saveLyricsPreferred(preferred: Boolean)
+    fun saveLyricOffsetMs(offsetMs: Long)
+    fun saveLyricTextSize(size: LyricTextSize)
+    fun saveLyricTranslationEnabled(enabled: Boolean)
+    fun saveLyricPronunciationEnabled(enabled: Boolean)
+    fun saveLyricTranslationLanguageTag(tag: String)
+    fun saveLyricPronunciationLanguageTag(tag: String)
+
+    fun saveLyricStyle(style: LyricBackgroundStyle)
+    fun saveAppearance(appearance: AppearanceMode)
+    fun saveLightSchedule(fromMinute: Int, untilMinute: Int)
+    fun saveFadeAlbums(fade: Boolean)
+    fun saveFadeStations(fade: Boolean)
+    fun saveFadePlaylists(fade: Boolean)
+    fun saveStationsAsSongs(asSongs: Boolean)
+
+    fun saveCacheDiskEnabled(enabled: Boolean)
+    fun saveCachePrefetchNextTwo(enabled: Boolean)
 }
 
 class SettingsStore(
@@ -120,13 +148,11 @@ class SettingsStore(
 ) : QueuePreferences {
     val state: StateFlow<SettingsState>
 
-    // 播放偏好操作
     fun setRepeatMode(mode: PlaybackRepeatMode)
     fun setShuffleEnabled(enabled: Boolean)
     fun setAutoplayEnabled(enabled: Boolean)
     fun setLowPerformanceMode(enabled: Boolean)
 
-    // 歌词偏好操作
     fun setLyricsPreferred(preferred: Boolean)
     fun setLyricOffsetMs(offsetMs: Long)
     fun setLyricTextSize(size: LyricTextSize)
@@ -135,7 +161,6 @@ class SettingsStore(
     fun setLyricTranslationLanguageTag(tag: String)
     fun setLyricPronunciationLanguageTag(tag: String)
 
-    // 车机样式与音频过渡操作
     fun setLyricStyle(style: LyricBackgroundStyle)
     fun setAppearance(appearance: AppearanceMode)
     fun setLightSchedule(fromMinute: Int, untilMinute: Int)
@@ -144,11 +169,10 @@ class SettingsStore(
     fun setFadePlaylists(fade: Boolean)
     fun setStationsAsSongs(asSongs: Boolean)
 
-    // 缓存设置操作
     fun setCacheDiskEnabled(enabled: Boolean)
     fun setCachePrefetchNextTwo(enabled: Boolean)
 
-    // QueuePreferences 协议实现，供 PlaybackQueueController 读写
+    // 实现 QueuePreferences 协议，供 PlaybackQueueController 读写
     override var repeatMode: PlaybackRepeatMode
     override var shuffleEnabled: Boolean
     override var autoplayEnabled: Boolean
@@ -158,95 +182,30 @@ class SettingsStore(
 
 ---
 
-### 3. 依赖与生命周期
-
-- **构造依赖**：`SettingsStorage` 抽象接口。在生产代码中，由 `SharedPreferencesSettingsStorage(context: Context)` 实现，其内部读写现有的三份 SharedPreferences（`am_atv_playback_preferences`、`am_atv_flyme_playback`、`content-cache`）。在 JVM 单元测试中，传入 `FakeSettingsStorage`（基于内存 Map）。
-- **无协程依赖**：所有设置读写为同步内存更新（StateFlow）+ 异步/后台持久化（`apply()`），无需外部 CoroutineScope 即可保证纯粹同步读。
-- **生命周期**：整个进程生命周期内单例，由 `AmAtvApplication` 在 `onCreate()` 时初始化持有。
-
----
-
-### 4. 和其他块的交界
-
-- **与 `PlaybackQueueController`**：`SettingsStore` 实现了 `QueuePreferences`，`PlaybackQueueController` 可以继续接收它，并在用户循环播放/随机切换时直接读写该属性，`SettingsStore` 保证属性写入能同步更新 `state.value` 并落盘。
-- **与 `LyricsStore`**：`LyricsStore` 观察 `SettingsStore.state`，当歌词语言、翻译开关或注音开关变化时，自动重新生成 `LyricsLocalizationRequest` 与变体标识，驱动当前歌曲的重新解析与加载。
-- **与 `FlymePlaybackOptions`**：`FlymePlaybackOptions` 现有的调用方（`CarLayout`、`PlayerScreen`）可直接桥接到 `SettingsStore`，保持向后兼容。
-
----
-
-### 5. 旧界面怎么接（`AtvApp.kt` 改动）
-
-1. **删除 `AtvApp.kt` 中的 11 个 remember 状态**：
-   删除 `lyricsPreferred`, `lowPerformanceMode`, `repeatMode`, `shuffleEnabled`, `autoplayEnabled`, `lyricOffsetMs`, `lyricTextSize`, `lyricTranslationEnabled`, `lyricPronunciationEnabled`, `lyricTranslationLanguageTag`, `lyricPronunciationLanguageTag`。
-2. **在 `AmAtvApp` 顶部收集状态**：
-   ```kotlin
-   val settingsStore = (context.applicationContext as AmAtvApplication).settingsStore
-   val settingsState by settingsStore.state.collectAsState()
-   ```
-3. **替换参数传递与回调**：
-   ```kotlin
-   PlayerScreen(
-       ...
-       lyricsPreferred = settingsState.lyricsPreferred,
-       onLyricsPreferredChange = settingsStore::setLyricsPreferred,
-       lyricOffsetMs = settingsState.lyricOffsetMs,
-       onLyricOffsetChange = settingsStore::setLyricOffsetMs,
-       lyricTextSize = settingsState.lyricTextSize,
-       onLyricTextSizeChange = settingsStore::setLyricTextSize,
-       lowPerformanceMode = settingsState.lowPerformanceMode,
-       onLowPerformanceModeChange = settingsStore::setLowPerformanceMode,
-       lyricTranslationEnabled = settingsState.lyricTranslationEnabled,
-       onLyricTranslationEnabledChange = settingsStore::setLyricTranslationEnabled,
-       lyricPronunciationEnabled = settingsState.lyricPronunciationEnabled,
-       onLyricPronunciationEnabledChange = settingsStore::setLyricPronunciationEnabled,
-       lyricTranslationLanguageTag = settingsState.lyricTranslationLanguageTag,
-       onLyricTranslationLanguageChange = settingsStore::setLyricTranslationLanguageTag,
-       lyricPronunciationLanguageTag = settingsState.lyricPronunciationLanguageTag,
-       onLyricPronunciationLanguageChange = settingsStore::setLyricPronunciationLanguageTag,
-   )
-   ```
-
----
-
-### 6. 测试计划（`SettingsStoreTest`）
-
-1. `initializesWithDefaultValuesWhenPreferencesEmpty`：当持久化存储为空时，所有设置字段均为设计默认值。
-2. `readsExistingPreferencesOnStartup`：当存储中已有历史值时，启动时能够完整准确恢复。
-3. `updatingSettingPersistsToStorageAndEmitsNewState`：调用 `setLyricOffsetMs(500)`、`setLyricStyle(Soak)` 等，断言 `state.value` 立即更新且存储被同步持久化。
-4. `queuePreferencesInterfaceUpdatesReflectInStateAndStorage`：通过 `QueuePreferences` 属性 setter（如 `repeatMode = One`）赋值，验证 StateFlow 与底层存储同步更新。
-5. `isLightCalculatesCorrectlyForVariousModes`：断言 `AppearanceMode.Light`、`Dark`、`System` 以及跨越午夜的 `Time` 模式的时间判断结果。
-
----
-
-### 7. 风险与不确定点
-
-- **风险点**：`PlaybackQueueController` 在初始化恢复队列时会读写 `QueuePreferences`。如果 `SettingsStore` 的属性访问不是内存即时的，可能会导致启动时队列偏好混乱。
-- **保证不变策略**：内部使用 `AtomicReference` 或 StateFlow 的即时值，属性 getter/setter 直接读写内存状态并触发异步持久化，确保与原有 `PlaybackPreferences` 内存语义完全一致。
-
----
-
 ## 二、LibraryActions
 
-### 1. 要搬的东西清单
+### 1. 业务逻辑与 API 规范核对
 
-#### 搬入清单
-- `AtvApp.kt`:
-  - `favoriteState`（行 223）：`Map<String, Boolean>`，记录歌曲 Catalog ID 对应的喜欢状态缓存。
-  - `favoriteCatalogId`（行 224）：记录当前正在检查喜欢状态的歌曲 Catalog ID。
-  - `LaunchedEffect(track.catalogId, connectionState)`（行 709-718）：当歌曲 Catalog ID 变化且已登录时，触发从 Apple Music 查询喜欢状态。
-  - `toggleFavorite()`（行 943-958）：处理点击星标（喜欢）逻辑，包含乐观更新、网络请求、失败回滚和不可取消提示。
-- `AppleMusicApi.kt` 扩展：
-  - `addFavorite(catalogSongId: String)`（行 400-404）：已存在，沿用。
-  - `isFavorite(catalogSongId: String)`（行 385-393）：已存在，沿用。
-  - `addToLibrary(catalogSongId: String)`：新增方法，通过 `POST /v1/me/library?ids%5Bsongs%5D=$catalogSongId` 将曲目加入用户资料库。
-  - `isSongInLibrary(catalogSongId: String)`：新增查询，通过 `GET /v1/catalog/{storefront}/songs/$catalogSongId?include=library` 查询歌曲是否在用户资料库中。
+#### (1) 「是否在资料库」查询方式与依据
+- **接口与请求**：
+  在 `AppleMusicApi.kt` 中使用 `GET /v1/catalog/{storefront}/songs/$catalogSongId?include=library`（`needsUserToken = true`）。
+- **字段核对依据**：
+  根据 Apple Music API 规范，当在 catalog 歌曲资源中请求 `include=library` 时：
+  - 若该歌曲已被加入用户个人 iCloud 资料库，Apple Music 会在返回 JSON 的 `data[0].relationships.library.data` 中嵌入对应关联资源（类型为 `library-songs`，包含对应的用户私有资料库 ID `i.xxx`）。
+  - 若该歌曲未被加入用户资料库，`relationships` 中可能不包含 `library` 键，或 `relationships.library.data` 为空数组。
+  - **真实的「不知道」处理**：如果响应格式不符合预期（如缺失 `relationships` 或无法确定），返回 `null`（未知）。不进行盲目兜底猜想。
+- **模拟器验证要求**：
+  在模拟器上播放一首 Catalog 歌曲时，在 Logcat 记录该请求的 HTTP 状态码以及返回体中 `relationships` / `attributes` 与 `library` 相关的键名，不输出用户 token。
 
-#### 明确不搬的清单及原因
-- `libraryNextPages`, `libraryVisitedPages`, `libraryLoadingShelves`, `libraryFailedShelves`, `libraryPagingGeneration`, `libraryPageJobs`（`AtvApp.kt` 行 257-262）：属于资料库页面（Library tab）的陈列架与分页浏览，留给 A2（ContentStore）。
-- `libraryAlbumsPage`, `libraryArtistsPage`, `libraryPlaylistsPage`, `librarySongsPage`（`AppleMusicApi.kt`）：属于资料库资源浏览 API，留给 A2。
-- 播放控制和队列跳歌相关逻辑：留给 A3。
-
----
+#### (2) 旧界面与新接口的行为边界
+- **旧界面不新增按钮**：A1 阶段旧界面不增加「加入资料库」UI 按钮，界面行为保持完全一致。
+- **`addToLibrary()` 仅由测试覆盖**：新功能留在 B 阶段新界面启用。
+- **喜欢（Favorite）流程 100% 保持原有逻辑**：
+  - 乐观更新：点击后立即更新状态为 true。
+  - 失败回滚：API 抛出异常后回滚为 false，并发出通知提示（提示文案原样使用 `R.string.player_favorite_failed`）。
+  - 已喜欢时再次点击：不调用 API，发出提示（原样使用 `R.string.player_favorite_remove_unsupported`）。
+- **已在资料库时再次加入资料库**：
+  - 不调用网络接口，直接发出 `LibraryNotice.RemoveFromLibraryUnsupported` 通知。
 
 ### 2. 对外接口
 
@@ -259,6 +218,7 @@ import kotlinx.coroutines.flow.StateFlow
 sealed interface LibraryNotice {
     data object FavoriteRemoveUnsupported : LibraryNotice
     data object FavoriteFailed : LibraryNotice
+    data object RemoveFromLibraryUnsupported : LibraryNotice
     data object AddToLibraryFailed : LibraryNotice
     data object AddedToLibrary : LibraryNotice
     data object AddedToFavorites : LibraryNotice
@@ -292,125 +252,85 @@ class LibraryActions(
 ) {
     val state: StateFlow<LibraryActionsState>
 
-    /** 当当前播放歌曲或登录状态变化时调用 */
     fun onCurrentTrackChanged(track: Track?, isSignedIn: Boolean)
-
-    /** 触发喜欢当前歌曲 */
     fun toggleFavorite()
-
-    /** 触发将当前歌曲加入资料库 */
     fun addToLibrary()
-
-    /** 消费/清除通知提示 */
     fun dismissNotice()
 }
 ```
 
 ---
 
-### 3. 依赖与生命周期
-
-- **构造依赖**：
-  - `LibraryActionsApi`：抽象 API 接口。生产代码由 `AppleMusicApi` 实现；JVM 单元测试由 `FakeLibraryActionsApi` 实现。
-  - `coroutineScope: CoroutineScope`：管理异步网络请求，应用级由 `AmAtvApplication` 主协程作用域传入，测试中使用 `TestScope`。
-- **无 Activity / UI 依赖**：纯数据流和网络调用。
-- **生命周期**：整个进程生命周期内单例，由 `AmAtvApplication` 持有。
-
----
-
-### 4. 和其他块的交界
-
-- **歌曲来源交界**：在 A3 之前，当前播放的 `track` 仍在 `AtvApp.kt` 状态中。当 `track` 变更或登录状态变更时，`AtvApp.kt` 调用 `libraryActions.onCurrentTrackChanged(track, isSignedIn)`。
-- **本地资料库歌曲自动识别**：若传入的 `track.resourceType == "library-songs"` 或 `track.id.startsWith("library:")`，`LibraryActions` 直接将 `isInLibrary` 置为 `true`，无需发起网络请求。
-- **通知消息交界**：`LibraryActionsState.notice` 暴露给 UI 层，由 `PlayerScreen` 统一转换为现有的提示文案（如 `R.string.player_favorite_remove_unsupported`、`R.string.player_favorite_failed`）。
-
----
-
-### 5. 旧界面怎么接（`AtvApp.kt` 改动）
-
-1. **删除 `AtvApp.kt` 中的状态与函数**：
-   删除 `favoriteState`、`favoriteCatalogId`、`toggleFavorite()` 以及行 709 的 `LaunchedEffect(track.catalogId, connectionState)`。
-2. **在 `AmAtvApp` 顶部收集状态**：
-   ```kotlin
-   val libraryActions = (context.applicationContext as AmAtvApplication).libraryActions
-   val libraryState by libraryActions.state.collectAsState()
-   
-   LaunchedEffect(track.catalogId, connectionState) {
-       libraryActions.onCurrentTrackChanged(track, connectionState == MusicConnectionState.SignedIn)
-   }
-   ```
-3. **接入 `PlayerScreen`**：
-   ```kotlin
-   PlayerScreen(
-       ...
-       isFavorite = libraryState.current.isFavorite?.takeIf { libraryState.current.catalogId == track.catalogId },
-       onToggleFavorite = libraryActions::toggleFavorite,
-       // 若需要展示资料库状态（AM Folio 15 新功能）：
-       // isInLibrary = libraryState.current.isInLibrary,
-       // onAddToLibrary = libraryActions::addToLibrary,
-   )
-   ```
-
----
-
-### 6. 测试计划（`LibraryActionsTest`）
-
-1. `librarySongDetectedLocallyWithoutNetworkCall`：当 `track.resourceType == "library-songs"` 时，无需请求 API，`isInLibrary` 立即为 `true`。
-2. `catalogSongFetchesFavoriteAndLibraryStatusWhenSignedIn`：已登录时传入 Catalog 歌曲，成功调用 API 并更新 `isFavorite` 与 `isInLibrary`。
-3. `notSignedInDoesNotTriggerApi`：未登录时不发起 API 请求，状态保持 null。
-4. `toggleFavoriteOptimisticUpdateAndRollbackOnFailure`：点击喜欢时立即变为 true；若 API 失败，回滚为 false 并发出 `FavoriteFailed` 通知。
-5. `toggleFavoriteWhenAlreadyFavoritedEmitsNoticeWithoutCallingApi`：已喜欢时点击，不调用 API，直接发出 `FavoriteRemoveUnsupported` 通知。
-6. `addToLibraryOptimisticUpdateAndRollbackOnFailure`：点击加入资料库时乐观更新为 true；若 API 失败，回滚为 false 并发出 `AddToLibraryFailed` 通知。
-7. `cachedStatusReusedWhenSwitchingBackToPreviousSong`：切换曲目再次切回时优先读取内存缓存，避免重复网络调用。
-
----
-
-### 7. 风险与不确定点
-
-- **关于「从资料库移除」和「取消喜欢」的 API 限制调研结论**：
-  - **取消喜欢（Remove from Favorite Songs）**：代码已有明确注释（`AppleMusicApi.kt` 行 396-399），Apple Music 公开 API 对 `DELETE /v1/me/favorites` 返回 40012 Insufficient Permissions (`Favorites:DELETE:IdsQuery`)，仅允许苹果第一方客户端取消喜欢，第三方公开 API 不支持。
-  - **从资料库移除（Remove from Library）**：经核实 Apple Music REST API 官方规范与 Apple Developer Forums 开发者讨论，Apple Music 公开 API **仅提供** `POST /v1/me/library?ids[songs]=...` 用于添加，**没有提供**公开的 `DELETE` 接口从个人资料库删除单曲/专辑（`DELETE /v1/me/library/songs/{id}` 并不向第三方开放，仅能删除自建歌单 `DELETE /v1/me/library/playlists/{id}`）。因此，**第三方客户端同样不支持从资料库移除歌曲**。在设计中，若歌曲已在资料库中，再次点击加入资料库操作将被忽略或提示不可移除。
-- **`POST /v1/me/library` 请求格式核对**：
-  - 遵循 `AppleMusicApi` 现有的 `addFavorite` 请求写法：
-    ```kotlin
-    suspend fun addToLibrary(catalogSongId: String) {
-        require(catalogSongId.matches(Regex("[0-9]+"))) { "Catalog song ID is invalid" }
-        requestRoot("/v1/me/library?ids%5Bsongs%5D=$catalogSongId", needsUserToken = true,
-            method = "POST", postBody = "")
-    }
-    ```
-  - Apple Music API 会对成功添加返回 202 Accepted，`requestRoot` 将其视为正常响应。
-
----
-
 ## 三、LyricsStore
 
-### 1. 要搬的东西清单
+### 1. 循环刷新防护与驱动 Key（重点）
 
-#### 搬入清单
-- `AtvApp.kt`:
-  - `lyricsByTrackId`（行 308-310）：内存歌词缓存（最多保留 24 条记录）。
-  - `lyricsLookupFailures`（行 311）：记录返回 404/Unavailable 的歌曲 ID，防止重复请求。
-  - `activeLyrics`（行 312-321）：当前活跃歌曲的歌词状态（`ActiveLyricsState`：行数据、阶段、变体标识）。
-  - `lyricsRetryNonce`（行 322）：歌词重试计数器。
-  - `withCachedLyrics(candidate: Track): Track`（行 350-358）：为 Track 填充已缓存歌词。
-  - `cacheLyrics(identity: String, variant: String, lines: List<LyricLine>)`（行 360-365）：将解析好的歌词写入内存缓存。
-  - `retryCurrentLyrics()`（行 584-591）：清除不可用标记并重试加载当前歌词。
-  - `acceptResolvedTrack` 中歌词缓存 key 的迁移（行 375-380）：Library 曲目解析出新 Catalog ID 时重命名缓存键。
-  - 队列后续歌曲预取副作用（行 1372-1410）：当正在播放且缓存开启时，预拉取队列接下来的曲目歌词。
-  - 缓存清理响应副作用（行 1411-1418）：清理磁盘缓存时保留正在显示的当前歌词，清空历史缓存。
-  - 当前歌词加载副作用（行 1420-1545）：当前歌曲歌词的主加载链路，包含基线兜底、变体计算、API 拉取及重试。
-  - `lyricsLocalization` 与 `lyricsVariant` 的动态计算（行 289-304）：根据语言、翻译和注音开关组合生成请求变体。
+#### (1) 循环刷新隐患与机制解析
+在旧实现中，`track` 会被填入已加载的歌词行（`track = track.copy(lyrics = currentLyricsLines)`）。如果直接使用 `LaunchedEffect(track)` 驱动 `setCurrentTrack`，歌词填回 `track` 会触发 `track` 自身变化，进而重新触发 `LaunchedEffect`，陷入无限死循环。
 
-#### 明确不搬的清单及原因
-- `lyricsPreferred`（行 167）：歌词开关偏好属于用户设置，归入 `SettingsStore`。
-- `lyricOffsetMs`（行 274）：歌词偏移偏好属于用户设置，归入 `SettingsStore`。
-- `lyricTextSize`（行 275）：歌词字体偏好属于用户设置，归入 `SettingsStore`。
-- `systemPlaybackSnapshot` / `publishSystemSnapshot`（行 1361-1367）：将当前歌词发布至 Flyme 车机系统 MediaSession 元数据，属于系统集成与播放控制（A3），由调用方监听 `LyricsStore.state` 后触发。
-- `ArtworkImages.prefetch(context, it)`（行 1385）：封面图片下载预取属于图片加载管线，不属于歌词业务。
-- `queueController.updateCatalogIdentity`（行 374）：队列中曲目 Catalog ID 的更新属于播放队列状态（A3）。
+#### (2) 驱动 `setCurrentTrack` 的权威 Key 集合
+必须且仅能使用原 `AtvApp.kt` 约 1420 行大 `LaunchedEffect` 的原始参数作为触发条件：
+```kotlin
+val currentLyricsIdentity = track.lyricsIdentity()
+val lyricsRequestReady = startupSessionLoaded && hasCurrentTrack &&
+    connectionState == MusicConnectionState.SignedIn
 
----
+LaunchedEffect(
+    currentLyricsIdentity,
+    track.catalogKind,
+    lyricsRequestReady,
+    reloadNonce,
+    lyricsRetryNonce,
+    cacheSettings.revision,
+    lyricsVariant,
+) {
+    lyricsStore.setCurrentTrack(
+        track = track.takeIf { lyricsRequestReady },
+        isSignedIn = connectionState == MusicConnectionState.SignedIn,
+        variant = lyricsVariant,
+    )
+}
+```
+**原原本本对应的 7 个 Key**：
+1. `currentLyricsIdentity`（`track.lyricsIdentity()`）
+2. `track.catalogKind`
+3. `lyricsRequestReady`（`startupSessionLoaded && hasCurrentTrack && connectionState == SignedIn`）
+4. `reloadNonce`
+5. `lyricsRetryNonce`
+6. `cacheSettings.revision`
+7. `lyricsVariant`
+
+#### (3) 幂等防重入保证
+在 `LyricsStore.setCurrentTrack` 内部：
+若传入的 `trackIdentity == state.value.trackIdentity` 且 `variant == state.value.resolvedVariant` 且处于 `Ready` 阶段，该调用必须是**严格空操作（No-op）**。避免在 Activity 重建、横竖屏切换或小窗恢复时引起重复加载。
+
+#### (4) 歌词合回 `track` 的具体位置
+原代码中，MediaSession 媒体元数据导出（EVCC 歌词广播、`publishSystemSnapshot`）依赖 `track.lyrics`。
+搬移后，在 `AtvApp.kt` 原有合并点保留如下合回逻辑：
+```kotlin
+val currentLyricsLines = if (lyricsState.trackIdentity == currentLyricsIdentity) {
+    lyricsState.lines
+} else {
+    track.lyrics
+}
+track = track.copy(lyrics = currentLyricsLines)
+```
+随后将该包含完整歌词的 `track` 传入 `publishSystemSnapshot` 及 `PlayerScreen(track = track)`，确保车机桌面、仪表盘及 MediaSession 的歌词输出与重构前百分百一致。
+
+#### (5) 基线兜底逻辑原样移植
+原 `AtvApp.kt` 行 1462-1478 的 baseline 保护逻辑原封不动移入 `LyricsStore`：
+```kotlin
+val baseline = (if (activeLyrics.trackIdentity == lookupIdentity) {
+    activeLyrics.lines
+} else {
+    track.lyrics
+}).map { it.forDisplay(showTranslation = false, showPronunciation = false) }
+```
+在拉取本地化歌词时，`activeLyrics` 的初始状态以 `baseline` 填充，阶段置为 `Loading`；若发生临时网络故障（Transient Failure），保留 `baseline` 且阶段置为 `Failed`。测试用例必须严格断言在 `Loading` 与 `Failed` 状态下 `lines == baseline`。
+
+#### (6) 行为变化明确记录
+- **唯一允许的行为变化**：由进程级单例带来——当 Activity 重建（如小窗切全屏、配置变更）后，由于 `LyricsStore` 位于 Application 进程单例中，**内存歌词缓存依然保留**，无需重新从磁盘或网络拉取已载入的歌词。
+- 其他所有可见 UI 行为、时序、状态流转保持绝对不变。
 
 ### 2. 对外接口
 
@@ -457,132 +377,71 @@ class LyricsStore(
 ) {
     val state: StateFlow<LyricsState>
 
-    /** 当前播放歌曲或登录状态变化时由宿主调用 */
-    fun setCurrentTrack(track: Track?, isSignedIn: Boolean)
-
-    /** 队列后续预取目标变动时由宿主调用（最多预取前 2 首） */
+    fun setCurrentTrack(track: Track?, isSignedIn: Boolean, variant: String? = null)
     fun setPrefetchTargets(targets: List<Track>, isPlaying: Boolean)
-
-    /** 重试加载当前歌曲歌词 */
     fun retryCurrentLyrics()
-
-    /** 从缓存中填充歌曲歌词（用于播放前注入或展示） */
     fun withCachedLyrics(candidate: Track): Track
-
-    /** 当 Library 歌曲解析完成并获得最新 Track 时调用，负责迁移歌词缓存 key */
     fun onTrackIdentityResolved(oldIdentity: String, newIdentity: String)
-
-    /** 当磁盘缓存清空时调用，保留当前播放行的同时重置历史缓存 */
     fun onCacheCleared()
 }
 ```
 
 ---
 
-### 3. 依赖与生命周期
+## 四、单元测试计划
 
-- **构造依赖**：
-  - `LyricsSource`：抽象数据源接口。生产代码由 `MusicServices` 与 `ContentCache` 实现包装（包装 `services.resolvePlayableTrack`、`services.lyricsFor` 及 `services.contentCache`）；测试中使用 `FakeLyricsSource`。
-  - `SettingsStore`：提供歌词本地化配置（翻译/注音开关、目标语言 tag）。
-  - `appLanguageTagProvider: () -> String`：提供应用界面的当前语言（用于默认歌词语言判定）。
-  - `coroutineScope: CoroutineScope`：管理歌词拉取作业生命周期。
-- **无 Activity / UI 依赖**：纯 Kotlin 协程与业务数据流。
-- **生命周期**：整个进程生命周期内单例，由 `AmAtvApplication` 持有。
+测试全部位于 `app/src/test/java/dev/amatv/core/`，使用假依赖（Fake），测试异步流转使用协程测试库或标准 `runBlocking`。
 
----
+### 1. `SettingsStoreTest`
+1. `initializesWithDefaultValuesWhenPreferencesEmpty`：存储为空时，所有字段均为设计默认值。
+2. `readsExistingPreferencesOnStartup`：存储有历史记录时，启动时准确还原。
+3. `updatingSettingPersistsOnlyModifiedKey`：更新单个字段（如 `setLyricOffsetMs`），断言仅有对应键被写入存储，其他键不产生多余写入。
+4. `queuePreferencesInterfaceUpdatesReflectInStateAndStorage`：通过 `QueuePreferences` 接口（`repeatMode = One` 等）写入，内存 State 与底层存储均同步更新。
+5. `isLightCalculatesCorrectlyForVariousModes`：验证浅色/深色/系统/定时（含跨午夜）模式下的时间判断结果。
 
-### 4. 和其他块的交界
+### 2. `LibraryActionsTest`
+1. `librarySongDetectedLocallyWithoutNetworkCall`：`track.resourceType == "library-songs"` 时，无需网络请求，`isInLibrary` 立即为 true。
+2. `catalogSongFetchesStatusFromApi`：已登录时，调用 API 获取 `isFavorite` 与 `isInLibrary` 状态。
+3. `notSignedInDoesNotTriggerApi`：未登录时不发起网络调用，状态为 null。
+4. `toggleFavoriteOptimisticUpdateAndRollbackOnFailure`：喜欢操作先乐观置为 true，API 失败时回滚为 false 并发出 `FavoriteFailed`（对应 `R.string.player_favorite_failed`）。
+5. `toggleFavoriteWhenAlreadyFavoritedEmitsNoticeWithoutCallingApi`：已喜欢时再点喜欢，不调 API，发出 `FavoriteRemoveUnsupported`（对应 `R.string.player_favorite_remove_unsupported`）。
+6. `addToLibraryOptimisticUpdateAndRollbackOnFailure`：加入资料库操作乐观更新并处理失败回滚。
+7. `addToLibraryWhenAlreadyInLibraryEmitsNoticeWithoutCallingApi`：已在资料库中再次点击，不调接口，发出 `RemoveFromLibraryUnsupported`。
+8. `apiMissingLibraryRelationshipReturnsNull`：当 API 返回响应中未包含 library 关联信息时，返回 null（未知），不进行臆测。
 
-- **与 `SettingsStore`**：`LyricsStore` 观察 `SettingsStore.state`。当用户在界面中开关翻译、注音或切换语言时，`LyricsStore` 自动计算新的 `LyricsLocalizationRequest` 与 `lyricsVariant`，并触发当前歌曲的新变体加载流程。
-- **与播放宿主（A3 前为 `AtvApp.kt`，A3 之后为 `PlaybackController`）**：
-  - 宿主在切歌或 Session 恢复时调用 `setCurrentTrack(track, isSignedIn)`。
-  - 宿主在准备播放下一首或恢复队列时调用 `lyricsStore.withCachedLyrics(track)`。
-  - 宿主在队列或播放状态变动时调用 `setPrefetchTargets(targets, isPlaying)`。
-- **与车机系统媒体会话（MediaSession）**：宿主监听 `lyricsStore.state`，当 `state.lines` 产生变更且处于当前歌曲时，调用 `publishSystemSnapshot` 发布到车机桌面与仪表盘。
-
----
-
-### 5. 旧界面怎么接（`AtvApp.kt` 改动）
-
-1. **删除 `AtvApp.kt` 中的歌词状态与函数**：
-   删除 `lyricsByTrackId`, `lyricsLookupFailures`, `activeLyrics`, `lyricsRetryNonce`, `retryCurrentLyrics()`, `withCachedLyrics()`, `cacheLyrics()`，以及行 1372-1418、1420-1545 的两个大型 `LaunchedEffect`。
-2. **在 `AmAtvApp` 顶部收集状态与驱动**：
-   ```kotlin
-   val lyricsStore = (context.applicationContext as AmAtvApplication).lyricsStore
-   val lyricsState by lyricsStore.state.collectAsState()
-   
-   val lyricsRequestReady = startupSessionLoaded && hasCurrentTrack &&
-       connectionState == MusicConnectionState.SignedIn
-   LaunchedEffect(track, lyricsRequestReady) {
-       lyricsStore.setCurrentTrack(track.takeIf { lyricsRequestReady }, connectionState == MusicConnectionState.SignedIn)
-   }
-   
-   LaunchedEffect(prefetchTargets, isPlaying) {
-       lyricsStore.setPrefetchTargets(prefetchTargets, isPlaying)
-   }
-   ```
-3. **在播放与列表处调用 `withCachedLyrics`**：
-   原有所有 `withCachedLyrics(...)` 统一替换为 `lyricsStore.withCachedLyrics(...)`。
-4. **接入 `PlayerScreen`**：
-   ```kotlin
-   PlayerScreen(
-       ...
-       track = track.copy(lyrics = lyricsState.lines),
-       lyricsLoading = lyricsState.isLoading && lyricsState.trackIdentity == currentLyricsIdentity,
-       lyricsLookupFailed = lyricsState.isLookupFailed && lyricsState.trackIdentity == currentLyricsIdentity,
-       lyricsTransientFailure = lyricsState.isTransientFailure && lyricsState.trackIdentity == currentLyricsIdentity,
-       onRetryLyrics = lyricsStore::retryCurrentLyrics,
-       lyricsEnhancementsReady = !lyricsLocalization.enabled ||
-           (lyricsState.trackIdentity == currentLyricsIdentity &&
-               lyricsState.resolvedVariant == lyricsVariant &&
-               lyricsState.isReady),
-   )
-   ```
+### 3. `LyricsStoreTest`
+1. `loadsLyricsSuccessfullyAndUpdatesStateToReady`：正常歌词获取成功，进入 Ready 阶段并更新行列表。
+2. `hitMemoryCacheAvoidsNetworkCall`：命中内存缓存时不触发底层网络获取。
+3. `cachesBaselineWhenLocalizationDisabled`：未开启本地化翻译且自带基线歌词时，直接使用基线并进入 Ready。
+4. `handlesUnavailableDefinitiveMissAndRemembersFailure`：404/Unavailable 时进入 Unavailable 阶段，并记录不可用避免重复轮询。
+5. `retainsBaselineDuringLoadingAndTransientFailure`：**必须断言**在 `Loading` 和临时 `Failed` 状态下，`state.value.lines` 严格等于原有 `baseline` 歌词，绝不闪烁空白。
+6. `retryCurrentLyricsClearsFailureAndTriggersFetch`：重试歌词能清空失败标记并重新请求。
+7. `duplicateSetCurrentTrackWithSameVariantIsNoOp`：相同曲目和变体重复调用 `setCurrentTrack` 为空操作，不发起多余网络请求。
+8. `trackIdentityResolutionMigratesCacheKeys`：当 Library 歌曲解析出真实 catalogId 时，迁移内存缓存键。
+9. `prefetchUpcomingTargetsLoadsAndCachesAhead`：满足预取条件时预拉取后两首曲目歌词并存入缓存。
+10. `cacheClearedRetainsActiveLines`：触发 `onCacheCleared` 时清空历史缓存，但保留当前正在显示的行。
 
 ---
 
-### 6. 测试计划（`LyricsStoreTest`）
+## 五、建议的提交顺序（按 A1-REVIEW.md 实施）
 
-1. `loadsLyricsSuccessfullyAndUpdatesStateToReady`：歌曲拥有有效歌词时，成功获取并发布 `LyricsLoadPhase.Ready` 及解析好的行。
-2. `hitMemoryCacheAvoidsNetworkCall`：当歌词已存在于内存缓存中时，直接命中，不触发底层 `lyricsFor` 调用。
-3. `cachesBaselineWhenLocalizationDisabled`：当未启用翻译/注音且歌曲已自带基线歌词时，直接使用基线并置为 `Ready`。
-4. `handlesUnavailableDefinitiveMissAndRemembersFailure`：API 返回 404/Unavailable 时，进入 `Unavailable` 阶段，并记录失败 ID 避免重复请求。
-5. `handlesTransientFailureWithRetryableState`：临时网络故障时进入 `Failed` 阶段，同时保留基线文本显示不发生闪烁。
-6. `retryCurrentLyricsClearsFailureAndTriggersFetch`：调用 `retryCurrentLyrics()` 能够移除失败记录并重新拉取。
-7. `withCachedLyricsEnrichesTrack`：验证 `withCachedLyrics` 能为 Track 填充已缓存的歌词行。
-8. `trackIdentityResolutionMigratesCacheKeys`：当歌曲 Catalog ID 发生映射变更时，成功迁移内存缓存中的 Key，后续访问不失效。
-9. `prefetchUpcomingTargetsLoadsAndCachesAhead`：当满足预取条件时，预拉取队列后续曲目的歌词并写入缓存。
-10. `cacheClearedRetainsActiveLines`：触发 `onCacheCleared()` 时，清空历史缓存但保留当前正在播放的行。
+每个 Store 的「核心实现 + 单元测试 + 接入旧界面」放在同一个提交中，保证每一次提交均可独立编译、且全量单元测试通过：
 
----
-
-### 7. 风险与不确定点
-
-- **风险点：歌词基线兜底逻辑在异步加载中的平滑性**：
-  `AtvApp.kt` 原有逻辑保证了在切换语言或网络重试时，不会闪烁空白歌词（已有的 `track.lyrics` 作为基线保留显示）。
-- **保证不变策略**：
-  在 `LyricsStore` 中原样继承 `ActiveLyricsState` 对 `baseline` 的保护机制：在进入 `Loading` 或 `Failed` 时，当前 state 的 `lines` 继续保持基线或已有行，只有在 `Unavailable` 且无基线时才显示空行。
-
----
-
-## 四、建议的提交顺序
-
-为了保证每个提交粒度清晰、独立完整、且每次提交均能通过编译与测试，建议按如下顺序实施：
-
-1. **Commit 1: `docs: add a1 architecture and migration design`** (当前提交)
-   - 提交 `docs/folio/a1-design.md`。不改动任何 Kotlin 代码。
-2. **Commit 2: `core: implement SettingsStore with JVM unit tests`**
-   - 新建 `app/src/main/java/dev/amatv/core/SettingsStore.kt` 及 `SettingsStorage.kt`。
-   - 新建 `app/src/test/java/dev/amatv/core/SettingsStoreTest.kt`，实现全套 JVM 单元测试。
-   - 保持现有 `AtvApp.kt` 不变，确保编译与测试通过。
-3. **Commit 3: `core: implement LibraryActions and AppleMusicApi library extension`**
-   - 在 `AppleMusicApi.kt` 中增加 `addToLibrary` 及 `isSongInLibrary` 方法。
-   - 新建 `app/src/main/java/dev/amatv/core/LibraryActions.kt`。
-   - 新建 `app/src/test/java/dev/amatv/core/LibraryActionsTest.kt`，编写完整 JVM 测试。
-4. **Commit 4: `core: implement LyricsStore with JVM unit tests`**
-   - 新建 `app/src/main/java/dev/amatv/core/LyricsStore.kt`。
-   - 新建 `app/src/test/java/dev/amatv/core/LyricsStoreTest.kt`，覆盖内存缓存、基线兜底、变体切换、重试及预取测试。
-5. **Commit 5: `ui: wire AtvApp to SettingsStore, LibraryActions, and LyricsStore`**
-   - 在 `AmAtvApplication` 中注册并初始化这三个核心层 Store。
-   - 重构 `AtvApp.kt`：移除对应的 `remember` 状态与副作用函数，改为观察和调用 `SettingsStore`、`LibraryActions` 和 `LyricsStore`。
-   - 运行全量单元测试与构建验证，确保旧界面行为百分之百无退化。
+1. **Commit 1: `docs: revise A1 architecture design per review comments`** (当前提交)
+   - 提交本修订版设计文档 `docs/folio/a1-design.md`。不改动任何 Kotlin 代码。
+2. **Commit 2: `core: implement SettingsStore, unit tests, and wire all callers`**
+   - 新增 `dev.amatv.core.SettingsStore`、`SettingsState`、`SettingsStorage`。
+   - `AmAtvApplication` 持有单例。
+   - 实现全套 `SettingsStoreTest`。
+   - 迁移所有读写方：`PlaybackQueueController`（接入 `SettingsStore` 作为 `QueuePreferences`）、`CarLayout`、`FlymePlaybackOptionsSettings`、`FlymeAppearanceSettings`、`ContentCacheSettings`、`AtvApp.kt`。
+3. **Commit 3: `core: implement LibraryActions, AppleMusicApi extension, and wire favorite workflow`**
+   - 在 `AppleMusicApi.kt` 增加 `addToLibrary` 与 `isSongInLibrary` 方法。
+   - 新增 `dev.amatv.core.LibraryActions`、`LibraryActionsState`。
+   - `AmAtvApplication` 持有单例。
+   - 实现全套 `LibraryActionsTest`。
+   - 在 `AtvApp.kt` 中改接喜欢流程，保持原 UI 字符串资源提示与完全相同的交互行为。
+4. **Commit 4: `core: implement LyricsStore, unit tests, and wire lyrics pipeline`**
+   - 新增 `dev.amatv.core.LyricsStore`、`LyricsState`。
+   - `AmAtvApplication` 持有单例。
+   - 实现全套 `LyricsStoreTest`（重点断言基线不闪烁与幂等性）。
+   - 在 `AtvApp.kt` 中改接歌词加载管线，严格使用 7 个权威 Key 驱动防循环刷新，合回 `track` 保证 MediaSession 输出一致。
