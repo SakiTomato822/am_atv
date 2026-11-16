@@ -75,14 +75,12 @@ import dev.amatv.integration.toSessionJson
 import dev.amatv.data.MockCatalog
 import dev.amatv.i18n.AppText
 import dev.amatv.i18n.destinationLabel
-import dev.amatv.integration.AutoplaySource
 import dev.amatv.integration.MusicConnectionState
 import dev.amatv.integration.MusicServices
 import dev.amatv.integration.AuthLaunchGate
 import dev.amatv.integration.retryCatalogRequest
 import dev.amatv.integration.LibraryPage
 import dev.amatv.integration.mergeLibraryPage
-import dev.amatv.integration.GoogleTvPairing
 import dev.amatv.integration.PlaybackPreferences
 import dev.amatv.integration.PlaybackSession
 import dev.amatv.integration.PlaybackRepeatMode
@@ -270,8 +268,6 @@ fun AmAtvApp() {
         )
     }
     var advancingEndedTrackId by remember { mutableStateOf<String?>(null) }
-    var ytmPairing by remember { mutableStateOf<GoogleTvPairing?>(null) }
-    var ytmSignedIn by remember { mutableStateOf(services.ytmSignedIn) }
     var repeatMode by remember { mutableStateOf(playbackPrefs.repeatMode) }
     var shuffleEnabled by remember { mutableStateOf(playbackPrefs.shuffleEnabled) }
     var autoplayEnabled by remember { mutableStateOf(playbackPrefs.autoplayEnabled) }
@@ -632,30 +628,6 @@ fun AmAtvApp() {
         }
     }
 
-    fun startYtmPairing() {
-        if (!services.ytmPairingConfigured) {
-            serviceMessage = AppText.text(R.string.app_google_sign_in_unavailable)
-            return
-        }
-        scope.launch {
-            try {
-                val pairing = services.startYtmPairing()
-                ytmPairing = pairing
-                serviceMessage = null
-                services.awaitYtmPairing(pairing)
-                ytmPairing = null
-                ytmSignedIn = true
-                shelvesByDestination = shelvesByDestination - Destination.Home
-                reloadNonce++
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Throwable) {
-                ytmPairing = null
-                serviceMessage = error.message ?: AppText.text(R.string.app_google_pairing_failed)
-            }
-        }
-    }
-
     fun executeTrackPlayback(nextTrack: Track) {
         waitingQueueEntryId = null
         selectionGeneration++
@@ -821,11 +793,6 @@ fun AmAtvApp() {
             })
             StartupQueueAction.ToggleShuffle -> queueController.setShuffle(!queueController.state.value.shuffle)
             StartupQueueAction.ToggleInfinite -> queueController.setInfinite(!queueController.state.value.infinite)
-            StartupQueueAction.ToggleSource -> queueController.setAutoplaySource(
-                if (queueController.state.value.source == AutoplaySource.YouTubeMusic) AutoplaySource.AppleMusic
-                else AutoplaySource.YouTubeMusic,
-            )
-            is StartupQueueAction.SetSource -> queueController.setAutoplaySource(action.source)
         }
         return true
     }
@@ -1226,17 +1193,12 @@ fun AmAtvApp() {
             track.catalogId != snapshot.currentTrack.catalogId
         )
         snapshot.currentTrack?.let { current ->
-            val provenance = queueController.state.value.current?.track?.takeIf { it.catalogId == current.catalogId }
-            val withLyrics = withCachedLyrics(current.copy(
-                recommendedByYtm = provenance?.recommendedByYtm == true,
-                ytmVideoId = provenance?.ytmVideoId,
-            ))
+            val withLyrics = withCachedLyrics(current)
             if (track.id != withLyrics.id ||
                 track.lyrics != withLyrics.lyrics ||
                 track.title != withLyrics.title ||
                 track.artist != withLyrics.artist ||
-                track.durationMs != withLyrics.durationMs ||
-                track.recommendedByYtm != withLyrics.recommendedByYtm
+                track.durationMs != withLyrics.durationMs
             ) {
                 track = withLyrics
             }
@@ -1317,12 +1279,9 @@ fun AmAtvApp() {
                         previousDestination = previousDestination,
                         radioActive = queueState.infinite,
                         radioSeed = queueState.recommendationSeed,
-                        radioContinuation = queueState.ytmContinuation,
-                        radioSeedVideoId = queueState.ytmSeedVideoId,
                         autoplayEntryIndices = currentEntries.withIndex()
                             .filter { it.value.origin == EntryOrigin.Autoplay }
                             .map { it.index }.toSet(),
-                        autoplaySource = queueState.source,
                         queueEntryIds = currentEntries.map { it.entryId },
                         playedEntryIds = currentEntries.filter { it.wasPlayed }.map { it.entryId }.toSet(),
                         contextQueue = queueState.contextEntries.map { it.track },
@@ -1350,7 +1309,7 @@ fun AmAtvApp() {
     }
     LaunchedEffect(
         destination, previousDestination, track.id, playbackQueue, isPlaying, playWhenReady,
-        queueState.repeat, queueState.shuffle, queueState.infinite, queueState.source,
+        queueState.repeat, queueState.shuffle, queueState.infinite,
     ) {
         delay(350L)
         saveCurrentSession(false)
@@ -1369,10 +1328,6 @@ fun AmAtvApp() {
             delay(5_000L)
             services.prefetchLibraryDetails()
         }
-    }
-    LaunchedEffect(queueState.source) {
-        shelvesByDestination = shelvesByDestination - Destination.Home
-        reloadNonce++
     }
 
     // Auto-advance timer: detects track finish and smoothly advances
@@ -1589,7 +1544,7 @@ fun AmAtvApp() {
         }
     }
 
-    LaunchedEffect(destination, connectionState, reloadNonce, contentLanguageTag, queueState.source) {
+    LaunchedEffect(destination, connectionState, reloadNonce, contentLanguageTag) {
         if (shelvesLanguageTag != contentLanguageTag) {
             resetLibraryPagination()
             // Section titles are presentation metadata. Invalidate only this
@@ -1635,7 +1590,7 @@ fun AmAtvApp() {
                 savedShelfDestinations = savedShelfDestinations + target
             }
         }
-        val shelfKey = listOf(target, connectionState, reloadNonce, contentLanguageTag, queueState.source)
+        val shelfKey = listOf(target, connectionState, reloadNonce, contentLanguageTag)
         val (loadedShelves, errors) = shelfLoads.load(shelfKey) {
         val errors = mutableListOf<Throwable>()
         coroutineScope {
@@ -1659,20 +1614,11 @@ fun AmAtvApp() {
                     val songs = async { cancellableResult { services.charts("songs") } }
                     val albums = async { cancellableResult { services.charts("albums") } }
                     val playlists = async { cancellableResult { services.charts("playlists") } }
-                    val ytmShelves = async {
-                        if (queueState.source == AutoplaySource.YouTubeMusic) {
-                            cancellableResult { services.ytmHomeShelves() }
-                        } else Result.success(emptyList())
-                    }
 
                     buildList {
                         recommendations.await().fold(
                             onSuccess = { addAll(it) },
                             onFailure = errors::add,
-                        )
-                        ytmShelves.await().fold(
-                            onSuccess = { addAll(it) },
-                            onFailure = { Log.w("AMATV-YTM", "Home recommendations unavailable", it) },
                         )
                         recentPlayedTracks.await().fold(
                             onSuccess = { items ->
@@ -2105,17 +2051,6 @@ fun AmAtvApp() {
                             }
                         },
                         onSignIn = (::startSignIn),
-                        ytmSignedIn = ytmSignedIn,
-                        ytmPairing = ytmPairing,
-                        ytmPairingConfigured = services.ytmPairingConfigured,
-                        onYtmSignIn = (::startYtmPairing),
-                        onYtmSignOut = {
-                            services.signOutYtm()
-                            ytmSignedIn = false
-                            ytmPairing = null
-                            shelvesByDestination = shelvesByDestination - Destination.Home
-                            reloadNonce++
-                        },
                         onSignOut = {
                             resetLibraryPagination()
                             selectionGeneration++
@@ -2184,8 +2119,6 @@ fun AmAtvApp() {
                             lyricOffsetMs = offset
                             playbackPrefs.lyricOffsetMs = offset
                         },
-                        autoplaySource = queueState.source,
-                        onAutoplaySourceChange = { dispatchQueueAction(StartupQueueAction.SetSource(it)) },
                         lowPerformanceMode = lowPerformanceMode,
                         onLowPerformanceModeChange = {
                             lowPerformanceMode = it
@@ -2243,10 +2176,6 @@ fun AmAtvApp() {
                         canSetShuffle = !stationQueueContext,
                         canSetAutoplay = !stationQueueContext && track.catalogId != null &&
                             track.catalogKind == dev.amatv.model.CatalogKind.Song,
-                        autoplaySource = queueState.source,
-                        onToggleAutoplaySource = {
-                            if (!stationQueueContext) dispatchQueueAction(StartupQueueAction.ToggleSource)
-                        },
                         onClearQueue = {
                             if (!stationQueueContext) dispatchQueueAction(StartupQueueAction.ClearUpcoming)
                         },
@@ -2377,11 +2306,6 @@ private fun BrowseShell(
     setupMessage: String?,
     onDestination: (Destination) -> Unit,
     onSignIn: () -> Unit,
-    ytmSignedIn: Boolean,
-    ytmPairing: GoogleTvPairing?,
-    ytmPairingConfigured: Boolean,
-    onYtmSignIn: () -> Unit,
-    onYtmSignOut: () -> Unit,
     onSignOut: () -> Unit,
     onRetry: () -> Unit,
     onSearch: (String) -> Unit,
@@ -2403,8 +2327,6 @@ private fun BrowseShell(
     loadArtistOf: suspend (Track) -> Track? = { null },
     lyricOffsetMs: Long = 0L,
     onLyricOffsetChange: (Long) -> Unit = {},
-    autoplaySource: AutoplaySource = AutoplaySource.AppleMusic,
-    onAutoplaySourceChange: (AutoplaySource) -> Unit = {},
     lowPerformanceMode: Boolean = false,
     onLowPerformanceModeChange: (Boolean) -> Unit = {},
     cacheSettingsContent: @Composable () -> Unit = {},
@@ -2580,11 +2502,6 @@ private fun BrowseShell(
                             connectionState = connectionState,
                             setupMessage = setupMessage,
                             onSignIn = onSignIn,
-                            ytmSignedIn = ytmSignedIn,
-                            ytmPairing = ytmPairing,
-                            ytmPairingConfigured = ytmPairingConfigured,
-                            onYtmSignIn = onYtmSignIn,
-                            onYtmSignOut = onYtmSignOut,
                             onSignOut = onSignOut,
                             onRetry = onRetry,
                             onSearch = onSearch,
@@ -2600,8 +2517,6 @@ private fun BrowseShell(
                             },
                             lyricOffsetMs = lyricOffsetMs,
                             onLyricOffsetChange = onLyricOffsetChange,
-                            autoplaySource = autoplaySource,
-                            onAutoplaySourceChange = onAutoplaySourceChange,
                             lowPerformanceMode = lowPerformanceMode,
                             onLowPerformanceModeChange = onLowPerformanceModeChange,
                             cacheSettingsContent = cacheSettingsContent,

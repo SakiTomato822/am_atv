@@ -78,7 +78,6 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import dev.amatv.integration.MusicConnectionState
-import dev.amatv.integration.GoogleTvPairing
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.Destination
@@ -112,19 +111,12 @@ fun HomeScreen(
     connectionState: MusicConnectionState = MusicConnectionState.Demo,
     setupMessage: String? = null,
     onSignIn: () -> Unit = {},
-    ytmSignedIn: Boolean = false,
-    ytmPairing: GoogleTvPairing? = null,
-    ytmPairingConfigured: Boolean = false,
-    onYtmSignIn: () -> Unit = {},
-    onYtmSignOut: () -> Unit = {},
     onSignOut: () -> Unit = {},
     onRetry: () -> Unit = {},
     onSearch: (String) -> Unit = {},
     onOpenTrack: (Track, List<Track>) -> Unit = { _, _ -> },
     lyricOffsetMs: Long = 0L,
     onLyricOffsetChange: (Long) -> Unit = {},
-    autoplaySource: dev.amatv.integration.AutoplaySource = dev.amatv.integration.AutoplaySource.AppleMusic,
-    onAutoplaySourceChange: (dev.amatv.integration.AutoplaySource) -> Unit = {},
     lowPerformanceMode: Boolean = false,
     onLowPerformanceModeChange: (Boolean) -> Unit = {},
     firstContentFocusRequester: FocusRequester? = null,
@@ -139,17 +131,10 @@ fun HomeScreen(
                     connectionState = connectionState,
                     setupMessage = setupMessage,
                     onSignIn = onSignIn,
-                    ytmSignedIn = ytmSignedIn,
-                    ytmPairing = ytmPairing,
-                    ytmPairingConfigured = ytmPairingConfigured,
-                    onYtmSignIn = onYtmSignIn,
-                    onYtmSignOut = onYtmSignOut,
                     onSignOut = onSignOut,
                     onRetry = onRetry,
                     lyricOffsetMs = lyricOffsetMs,
                     onLyricOffsetChange = onLyricOffsetChange,
-                    autoplaySource = autoplaySource,
-                    onAutoplaySourceChange = onAutoplaySourceChange,
                     lowPerformanceMode = lowPerformanceMode,
                     onLowPerformanceModeChange = onLowPerformanceModeChange,
                     cacheSettingsContent = cacheSettingsContent,
@@ -269,17 +254,10 @@ private fun AccountScreen(
     connectionState: MusicConnectionState,
     setupMessage: String?,
     onSignIn: () -> Unit,
-    ytmSignedIn: Boolean = false,
-    ytmPairing: GoogleTvPairing? = null,
-    ytmPairingConfigured: Boolean = false,
-    onYtmSignIn: () -> Unit = {},
-    onYtmSignOut: () -> Unit = {},
     onSignOut: () -> Unit,
     onRetry: () -> Unit,
     lyricOffsetMs: Long = 0L,
     onLyricOffsetChange: (Long) -> Unit = {},
-    autoplaySource: dev.amatv.integration.AutoplaySource = dev.amatv.integration.AutoplaySource.AppleMusic,
-    onAutoplaySourceChange: (dev.amatv.integration.AutoplaySource) -> Unit = {},
     lowPerformanceMode: Boolean = false,
     onLowPerformanceModeChange: (Boolean) -> Unit = {},
     firstContentFocusRequester: FocusRequester?,
@@ -380,42 +358,6 @@ private fun AccountScreen(
             }
         }
         if (headingOverride == null) {
-            if (ytmPairingConfigured) {
-            Text(
-                text = if (ytmSignedIn) stringResource(R.string.browse_ytm_connected) else stringResource(R.string.browse_ytm_recommendations),
-                color = FlymeInk,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = when {
-                    ytmPairing != null ->
-                        stringResource(R.string.browse_pairing_instructions, ytmPairing.verificationUrl, ytmPairing.userCode)
-                    ytmSignedIn -> stringResource(R.string.browse_personalized_enabled)
-                    else -> stringResource(R.string.browse_pairing_hint)
-                },
-                color = FlymeInk.copy(alpha = 0.72f),
-                fontSize = 16.sp,
-            )
-            if (ytmPairingConfigured) {
-                FocusSurface(
-                    onClick = if (ytmSignedIn) onYtmSignOut else onYtmSignIn,
-                    modifier = Modifier.width(280.dp).height(50.dp),
-                    cornerRadius = 25.dp,
-                    background = FlymeInk.copy(alpha = 0.14f),
-                    focusedBackground = FlymeInk.copy(alpha = 0.27f),
-                ) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            if (ytmSignedIn) stringResource(R.string.browse_ytm_sign_out) else stringResource(R.string.browse_ytm_pair),
-                            color = FlymeInk,
-                            fontSize = 16.sp,
-                        )
-                    }
-                }
-            }
-            }
-
             Spacer(Modifier.height(8.dp))
             Text(
                 text = stringResource(R.string.browse_lyrics_sync),
@@ -507,52 +449,6 @@ private fun AccountScreen(
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(stringResource(R.string.browse_reset), color = FlymeInk.copy(alpha = 0.85f), fontSize = 14.sp)
                         }
-                    }
-                }
-            }
-            Spacer(Modifier.height(18.dp))
-            Text(
-                text = stringResource(R.string.browse_autoplay_source),
-                color = FlymeInk,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val isYtm = autoplaySource == dev.amatv.integration.AutoplaySource.YouTubeMusic
-                FocusSurface(
-                    onClick = { onAutoplaySourceChange(dev.amatv.integration.AutoplaySource.YouTubeMusic) },
-                    modifier = Modifier.width(220.dp).height(46.dp),
-                    cornerRadius = 23.dp,
-                    background = if (isYtm) FlymeInk.copy(alpha = 0.26f) else FlymeInk.copy(alpha = 0.12f),
-                    focusedBackground = FlymeInk.copy(alpha = 0.38f),
-                ) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = if (isYtm) stringResource(R.string.browse_selected_source, stringResource(R.string.browse_ytm_name)) else stringResource(R.string.browse_ytm_name),
-                            color = FlymeInk,
-                            fontSize = 15.sp,
-                            fontWeight = if (isYtm) FontWeight.Bold else FontWeight.Medium,
-                        )
-                    }
-                }
-                val isAm = autoplaySource == dev.amatv.integration.AutoplaySource.AppleMusic
-                FocusSurface(
-                    onClick = { onAutoplaySourceChange(dev.amatv.integration.AutoplaySource.AppleMusic) },
-                    modifier = Modifier.width(220.dp).height(46.dp),
-                    cornerRadius = 23.dp,
-                    background = if (isAm) FlymeInk.copy(alpha = 0.26f) else FlymeInk.copy(alpha = 0.12f),
-                    focusedBackground = FlymeInk.copy(alpha = 0.38f),
-                ) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = if (isAm) stringResource(R.string.browse_selected_source, stringResource(R.string.browse_apple_name)) else stringResource(R.string.browse_apple_name),
-                            color = FlymeInk,
-                            fontSize = 15.sp,
-                            fontWeight = if (isAm) FontWeight.Bold else FontWeight.Medium,
-                        )
                     }
                 }
             }

@@ -1,7 +1,5 @@
 package dev.amatv.ui
 
-import dev.amatv.integration.AutoplaySource
-
 /** Stable semantic actions: a bootstrap-tail index must never address the full timeline. */
 internal sealed interface StartupQueueAction {
     data object Next : StartupQueueAction
@@ -11,8 +9,6 @@ internal sealed interface StartupQueueAction {
     data object CycleRepeat : StartupQueueAction
     data object ToggleShuffle : StartupQueueAction
     data object ToggleInfinite : StartupQueueAction
-    data object ToggleSource : StartupQueueAction
-    data class SetSource(val source: AutoplaySource) : StartupQueueAction
 
     val changesTimeline: Boolean
         get() = this == Next || this == Previous || this is Select || this == ClearUpcoming

@@ -58,7 +58,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AllInclusive
-import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ClearAll
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.FastForward
@@ -183,7 +182,7 @@ private enum class PlayerNavigationZone {
 
 private data class PlayerChromeState(val controlsVisible: Boolean, val showQueue: Boolean)
 
-private enum class QueueModeControl { Shuffle, Repeat, Autoplay, Source, Clear }
+private enum class QueueModeControl { Shuffle, Repeat, Autoplay, Clear }
 
 private enum class PlayerControl {
     Previous,
@@ -229,8 +228,6 @@ fun PlayerScreen(
     onCycleRepeat: () -> Unit,
     onToggleShuffle: () -> Unit,
     onToggleAutoplay: () -> Unit,
-    autoplaySource: dev.amatv.integration.AutoplaySource = dev.amatv.integration.AutoplaySource.AppleMusic,
-    onToggleAutoplaySource: () -> Unit = {},
     onClearQueue: () -> Unit = {},
     audioSpectrum: () -> AudioSpectrum = { AudioSpectrum() },
     isActiveScreen: Boolean = true,
@@ -343,7 +340,6 @@ fun PlayerScreen(
             if (canSetShuffle && !autoplayEnabled) add(QueueModeControl.Shuffle)
             if (canSetRepeat && !autoplayEnabled) add(QueueModeControl.Repeat)
             if (canSetAutoplay) add(QueueModeControl.Autoplay)
-            add(QueueModeControl.Source)
             if (canClearQueue) add(QueueModeControl.Clear)
         }
     }
@@ -434,7 +430,6 @@ fun PlayerScreen(
             QueueModeControl.Shuffle -> if (canSetShuffle && !autoplayEnabled) onToggleShuffle()
             QueueModeControl.Repeat -> if (canSetRepeat && !autoplayEnabled) onCycleRepeat()
             QueueModeControl.Autoplay -> if (canSetAutoplay) onToggleAutoplay()
-            QueueModeControl.Source -> onToggleAutoplaySource()
             QueueModeControl.Clear -> if (canClearQueue) onClearQueue()
         }
     }
@@ -869,7 +864,7 @@ fun PlayerScreen(
         ) {
             CompositionLocalProvider(LocalFocusFrameVisibility provides chromeFocusVisibility) {
                 QueueModeControls(
-                    repeatMode, shuffleEnabled, autoplayEnabled, autoplaySource,
+                    repeatMode, shuffleEnabled, autoplayEnabled,
                     canSetRepeat, canSetShuffle, canSetAutoplay, canClearQueue,
                     focusedQueueMode.takeIf { navigationZone == PlayerNavigationZone.QueueModes },
                     onModeClick = ::activateQueueMode,
@@ -1005,7 +1000,6 @@ fun PlayerScreen(
                             focused = navigationZone == PlayerNavigationZone.Controls &&
                                 focusedControl == PlayerControl.Radio,
                             enabled = canSetAutoplay,
-                            ytmBadge = false,
                             frameKey = "player-main-radio",
                             onClick = { activateControl(PlayerControl.Radio) },
                         )
@@ -4735,7 +4729,6 @@ private fun QueueModeControls(
     repeatMode: PlaybackRepeatMode,
     shuffleEnabled: Boolean,
     autoplayEnabled: Boolean,
-    autoplaySource: dev.amatv.integration.AutoplaySource,
     canSetRepeat: Boolean,
     canSetShuffle: Boolean,
     canSetAutoplay: Boolean,
@@ -4776,21 +4769,6 @@ private fun QueueModeControls(
                     enabled = canSetAutoplay,
                     frameKey = "player-mode:autoplay",
                     onClick = { onModeClick(QueueModeControl.Autoplay) },
-                    ytmBadge = false,
-                )
-                QueueModeButton(
-                    icon = Icons.Rounded.AutoAwesome,
-                    label = stringResource(R.string.player_source_format, stringResource(
-                        if (autoplaySource == dev.amatv.integration.AutoplaySource.YouTubeMusic) {
-                            R.string.player_provider_ytm
-                        } else R.string.player_provider_apple_music,
-                    )),
-                    selected = true,
-                    focused = focusedMode == QueueModeControl.Source,
-                    enabled = true,
-                    frameKey = "player-mode:source",
-                    onClick = { onModeClick(QueueModeControl.Source) },
-                    ytmBadge = false,
                 )
                 QueueModeButton(
                     icon = Icons.Rounded.ClearAll,
@@ -4800,7 +4778,6 @@ private fun QueueModeControls(
                     enabled = canClearQueue,
                     frameKey = "player-mode:clear",
                     onClick = { onModeClick(QueueModeControl.Clear) },
-                    ytmBadge = false,
                 )
             }
 }
@@ -4813,7 +4790,6 @@ private fun QueueModeButton(
     focused: Boolean,
     enabled: Boolean,
     frameKey: String,
-    ytmBadge: Boolean = false,
     onClick: () -> Unit,
 ) {
     val interactive = enabled && LocalFocusTargetsEnabled.current
@@ -4834,7 +4810,6 @@ private fun QueueModeButton(
             .background(
                 when {
                     focused -> FlymeInk.copy(alpha = 0.94f)
-                    selected && ytmBadge -> Color(0xFFE32636).copy(alpha = 0.38f)
                     selected -> FlymeInk.copy(alpha = 0.24f)
                     else -> FlymeInk.copy(alpha = 0.1f)
                 },
@@ -4863,18 +4838,6 @@ private fun QueueModeButton(
             fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
         )
-        if (ytmBadge) {
-            Text(
-                text = stringResource(R.string.player_provider_ytm),
-                color = FlymeInk,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0xFFE32636))
-                    .padding(horizontal = 5.dp, vertical = 2.dp),
-            )
-        }
     }
 }
 
