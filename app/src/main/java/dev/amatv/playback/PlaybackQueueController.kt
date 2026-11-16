@@ -3,7 +3,6 @@ package dev.amatv.playback
 import dev.amatv.R
 import dev.amatv.i18n.AppText
 
-import dev.amatv.integration.AutoplaySource
 import dev.amatv.integration.PlaybackRepeatMode
 import dev.amatv.integration.PlaybackSession
 import dev.amatv.integration.QueuePreferences
@@ -71,13 +70,10 @@ data class QueueState(
     val shuffle: Boolean = false,
     val repeat: PlaybackRepeatMode = PlaybackRepeatMode.Off,
     val infinite: Boolean = true,
-    val source: AutoplaySource = AutoplaySource.AppleMusic,
     val autoplayStatus: AutoplayStatus = AutoplayStatus.Idle,
     val amStationId: String? = null,
     /** A station played song by song (no Widevine): it keeps supplying the songs, whatever autoplay says. */
     val stationFeed: String? = null,
-    val ytmContinuation: String? = null,
-    val ytmSeedVideoId: String? = null,
     val awaitingNext: Boolean = false,
     val contextEntries: List<QueueEntry> = emptyList(),
     /** User-selected anchor; only a confirmed unavailable anchor permits a healthy queued fallback. */
@@ -120,7 +116,7 @@ data class QueueState(
  * Single source of truth for AM/ATV playback queue management.
  * Manages 4 distinct lifecycle layers:
  * 1. Context Queue (user-initiated Album, Playlist, Shelf, or SongList)
- * 2. Recommendations & Infinite Autoplay (∞ dual-engine AM / YTM)
+ * 2. Recommendations & Infinite Autoplay (∞ Apple Music)
  * 3. Metadata-only session history; recommendation lookback is bounded independently
  * 4. Deduplication via normalized title/artist identity keys to prevent playback loops
  */
@@ -136,7 +132,6 @@ class PlaybackQueueController(
             repeat = playbackPrefs.repeatMode,
             shuffle = playbackPrefs.shuffleEnabled,
             infinite = playbackPrefs.autoplayEnabled,
-            source = playbackPrefs.autoplaySource,
         ),
     )
     val state: StateFlow<QueueState> = _state.asStateFlow()
@@ -156,7 +151,6 @@ class PlaybackQueueController(
         const val MAX_REFILL_PAGES = 3
         const val MAX_CONSECUTIVE_FAILURES = 5
         const val AM_NETWORK_TIMEOUT_MS = 15_000L
-        const val YTM_NETWORK_TIMEOUT_MS = 20_000L
     }
 
     fun playContext(
@@ -200,8 +194,6 @@ class PlaybackQueueController(
                 autoplayStatus = AutoplayStatus.Idle,
                 amStationId = null,
                 stationFeed = null,
-                ytmContinuation = null,
-                ytmSeedVideoId = null,
                 awaitingNext = false,
                 contextEntries = entries,
                 shuffle = isShuffled,
@@ -384,8 +376,6 @@ class PlaybackQueueController(
                 unshuffledUpNext = null,
                 autoplay = emptyList(),
                 amStationId = null,
-                ytmContinuation = null,
-                ytmSeedVideoId = null,
                 autoplayStatus = AutoplayStatus.Idle,
                 awaitingNext = false,
             )
@@ -403,8 +393,6 @@ class PlaybackQueueController(
                     infinite = false,
                     autoplay = emptyList(),
                     amStationId = null,
-                    ytmContinuation = null,
-                    ytmSeedVideoId = null,
                     autoplayStatus = AutoplayStatus.Idle,
                     awaitingNext = false,
                 )
@@ -413,23 +401,6 @@ class PlaybackQueueController(
             _state.update { it.copy(infinite = true) }
             triggerRefillIfNeeded()
         }
-    }
-
-    fun setAutoplaySource(source: AutoplaySource) {
-        if (_state.value.source == source) return
-        playbackPrefs.autoplaySource = source
-        cancelRefill()
-        _state.update { curr ->
-            curr.copy(
-                source = source,
-                autoplay = emptyList(),
-                amStationId = null,
-                ytmContinuation = null,
-                ytmSeedVideoId = null,
-                autoplayStatus = AutoplayStatus.Idle,
-            )
-        }
-        triggerRefillIfNeeded()
     }
 
     fun setShuffle(enabled: Boolean) {
@@ -466,11 +437,6 @@ class PlaybackQueueController(
 
     fun restoreFromSession(session: PlaybackSession) {
         val restored = session.sanitizedAutoplayEntries() ?: return
-        // Preferences represent the user's provider choice. A saved queue records
-        // provenance, and must not silently opt an upgraded installation into YTM.
-        val source = playbackPrefs.autoplaySource
-        val sameSource = source == restored.autoplaySource
-        val restoreYtmCursor = sameSource && source == AutoplaySource.YouTubeMusic
         cancelRefill()
         playbackSessionActive = false
         failedSongs.clear()
@@ -491,9 +457,7 @@ class PlaybackQueueController(
         }
         val clampedIndex = restored.currentIndex.coerceIn(entries.indices)
         val currentEntry = entries[clampedIndex]
-        val future = entries.drop(clampedIndex + 1).filter {
-            sameSource || it.origin == EntryOrigin.Context || it.wasPlayed
-        }
+        val future = entries.drop(clampedIndex + 1)
         val autoplayStart = future.indexOfLast { it.origin == EntryOrigin.Context } + 1
         val contextEntries = if (restored.contextQueue.isNotEmpty()) {
             // Context IDs may also be on the visible timeline; reuse that identity.
@@ -507,10 +471,7 @@ class PlaybackQueueController(
             history = entries.take(clampedIndex).map(::historyMetadata),
             current = currentEntry, upNext = future.take(autoplayStart),
             unshuffledUpNext = null, autoplay = future.drop(autoplayStart),
-            source = source, infinite = restored.radioActive, amStationId = null,
-            ytmContinuation = restored.radioContinuation.takeIf { restoreYtmCursor },
-            ytmSeedVideoId = (restored.radioSeedVideoId ?: restored.radioSeed?.ytmVideoId)
-                .takeIf { restoreYtmCursor },
+            infinite = restored.radioActive, amStationId = null,
             autoplayStatus = AutoplayStatus.Idle, awaitingNext = false,
             contextEntries = contextEntries,
             recommendationSeed = restored.radioSeed?.takeIf { it.catalogKind == CatalogKind.Song }
@@ -560,8 +521,6 @@ class PlaybackQueueController(
             contextEntries = current.contextEntries.map { it.updated() },
             recommendationSeed = current.recommendationSeed?.updated(),
             amStationId = if (seedChanged) null else current.amStationId,
-            ytmContinuation = if (seedChanged) null else current.ytmContinuation,
-            ytmSeedVideoId = if (seedChanged) null else current.ytmSeedVideoId,
             autoplayStatus = if (seedChanged) AutoplayStatus.Idle else current.autoplayStatus,
         ) }
         if (seedChanged) triggerRefillIfNeeded()
@@ -615,8 +574,6 @@ class PlaybackQueueController(
                 contextEntries = curr.contextEntries,
                 recommendationSeed = if (anchorFailed) replacementSeed ?: curr.recommendationSeed else curr.recommendationSeed,
                 amStationId = if (anchorFailed) null else curr.amStationId,
-                ytmContinuation = if (anchorFailed) null else curr.ytmContinuation,
-                ytmSeedVideoId = if (anchorFailed) null else curr.ytmSeedVideoId,
                 consecutiveFailures = failures,
                 failureLimitReached = limit,
                 awaitingNext = false,
@@ -652,7 +609,6 @@ class PlaybackQueueController(
                 repeat = playbackPrefs.repeatMode,
                 shuffle = playbackPrefs.shuffleEnabled,
                 infinite = playbackPrefs.autoplayEnabled,
-                source = playbackPrefs.autoplaySource,
                 autoplayStatus = AutoplayStatus.Idle,
             )
         }
@@ -677,71 +633,24 @@ class PlaybackQueueController(
         val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
                 val fetchedTracks: List<Track>
-                var recommendedByYtm = false
-                var usedAppleFallback = false
                 var nextAmStationId = s.amStationId
-                var nextYtmContinuation = s.ytmContinuation
-                var nextYtmSeedVideoId = s.ytmSeedVideoId
                 val stationFeed = s.stationFeed
                 if (stationFeed != null) {
                     fetchedTracks = withContext(recommendationDispatcher) {
                         withTimeout(AM_NETWORK_TIMEOUT_MS) { services.amStationNextTracks(stationFeed) }
                     }
-                } else when (s.source) {
-                    AutoplaySource.AppleMusic -> {
-                        val station = withContext(recommendationDispatcher) {
-                            withTimeout(AM_NETWORK_TIMEOUT_MS) {
-                                if (nextAmStationId == null) {
-                                    services.createAmStation(seedTrack.catalogId ?: seedTrack.id)
-                                } else {
-                                    nextAmStationId to services.amStationNextTracks(checkNotNull(nextAmStationId))
-                                }
+                } else {
+                    val station = withContext(recommendationDispatcher) {
+                        withTimeout(AM_NETWORK_TIMEOUT_MS) {
+                            if (nextAmStationId == null) {
+                                services.createAmStation(seedTrack.catalogId ?: seedTrack.id)
+                            } else {
+                                nextAmStationId to services.amStationNextTracks(checkNotNull(nextAmStationId))
                             }
-                        }
-                        nextAmStationId = station.first
-                        fetchedTracks = station.second
-                    }
-                    AutoplaySource.YouTubeMusic -> {
-                        val excluded = (s.history.takeLast(RECOMMENDATION_LOOKBACK) + listOfNotNull(s.current) + s.upNext + s.autoplay)
-                            .map { it.track } + failedSongs.values
-                        val page = try {
-                            withContext(recommendationDispatcher) {
-                                withTimeout(YTM_NETWORK_TIMEOUT_MS) {
-                                    services.ytmRadio(
-                                        seedTrack,
-                                        s.ytmContinuation,
-                                        excluded.mapNotNull { it.catalogId }.toSet(),
-                                        s.ytmSeedVideoId,
-                                    )
-                                }
-                            }
-                        } catch (_: TimeoutCancellationException) {
-                            null
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (_: Throwable) {
-                            null
-                        }
-                        if (page != null) {
-                            recommendedByYtm = true
-                            nextYtmContinuation = page.continuation
-                            nextYtmSeedVideoId = page.seedVideoId
-                            fetchedTracks = page.tracks
-                        } else {
-                            usedAppleFallback = true
-                            val station = withContext(recommendationDispatcher) {
-                                withTimeout(AM_NETWORK_TIMEOUT_MS) {
-                                    if (nextAmStationId == null) {
-                                        services.createAmStation(seedTrack.catalogId ?: seedTrack.id)
-                                    } else {
-                                        nextAmStationId to services.amStationNextTracks(checkNotNull(nextAmStationId))
-                                    }
-                                }
-                            }
-                            nextAmStationId = station.first
-                            fetchedTracks = station.second
                         }
                     }
+                    nextAmStationId = station.first
+                    fetchedTracks = station.second
                 }
                 if (refillGeneration != gen) return@launch
                 val live = _state.value
@@ -750,19 +659,14 @@ class PlaybackQueueController(
                     candidates = fetchedTracks,
                     excluded = occupied.map { it.track } + failedSongs.values,
                     recent = occupied.takeLast(6).map { it.track },
-                ).map { QueueEntry(nextEntryId++,
-                    it.copy(recommendedByYtm = recommendedByYtm), EntryOrigin.Autoplay) }
+                ).map { QueueEntry(nextEntryId++, it, EntryOrigin.Autoplay) }
                 // A failed single-song anchor may have had no fallback until this
                 // in-flight radio page arrived. Repair that seed before any refill.
                 val replacementSeed = if (live.recommendationSeed?.let(::isFailed) == true) {
                     (live.contextEntries + live.upNext + live.autoplay + newTracks)
                         .firstOrNull { it.track.catalogKind == CatalogKind.Song && !isFailed(it.track) }?.track
                 } else null
-                val providerCanContinue = replacementSeed != null || when {
-                    usedAppleFallback -> nextAmStationId != null
-                    s.source == AutoplaySource.AppleMusic -> nextAmStationId != null
-                    else -> nextYtmContinuation != null && nextYtmContinuation != s.ytmContinuation
-                }
+                val providerCanContinue = replacementSeed != null || nextAmStationId != null
                 val continueLoading = pagesRemaining > 1 && providerCanContinue &&
                     live.autoplay.size + newTracks.size < AUTOPLAY_RESERVE
                 _state.update { curr ->
@@ -773,8 +677,6 @@ class PlaybackQueueController(
                         } else AutoplayStatus.Idle,
                         recommendationSeed = replacementSeed ?: curr.recommendationSeed,
                         amStationId = if (replacementSeed != null) null else nextAmStationId,
-                        ytmContinuation = if (replacementSeed != null) null else nextYtmContinuation,
-                        ytmSeedVideoId = if (replacementSeed != null) null else nextYtmSeedVideoId,
                         awaitingNext = curr.awaitingNext && (newTracks.isNotEmpty() || continueLoading),
                     )
                 }

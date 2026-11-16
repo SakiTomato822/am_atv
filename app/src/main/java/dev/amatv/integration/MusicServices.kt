@@ -5,19 +5,14 @@ import dev.amatv.i18n.AppText
 
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import dev.amatv.BuildConfig
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.LyricLine
 import dev.amatv.model.Track
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -39,12 +34,6 @@ enum class MusicConnectionState {
 interface RecommendationProvider {
     suspend fun createAmStation(songId: String): Pair<String?, List<Track>>
     suspend fun amStationNextTracks(stationId: String): List<Track>
-    suspend fun ytmRadio(
-        seed: Track,
-        continuation: String? = null,
-        excludedCatalogIds: Set<String> = emptySet(),
-        continuationSeedVideoId: String? = null,
-    ): MusicServices.ResolvedRadioPage
 }
 
 class MusicServices(context: Context) : RecommendationProvider {
@@ -98,85 +87,6 @@ class MusicServices(context: Context) : RecommendationProvider {
         debugDumpDir = if (BuildConfig.DEBUG) java.io.File(appContext.cacheDir, "lyrics-ttml") else null,
         contentCache = contentCache,
     )
-    private val google = GoogleTvAuthorization(tokenStore)
-    private val ytm = YtmInnertubeClient(google::accessToken)
-    private val resolver = CrossCatalogResolver(api)
-
-    val ytmPairingConfigured get() = google.configured
-    val ytmSignedIn get() = google.signedIn
-    suspend fun startYtmPairing(): GoogleTvPairing = google.startPairing()
-    suspend fun awaitYtmPairing(pairing: GoogleTvPairing) = google.awaitPairing(pairing)
-    fun signOutYtm() = google.signOut()
-
-    data class ResolvedRadioPage(
-        val tracks: List<Track>,
-        val continuation: String?,
-        val seedVideoId: String?,
-    )
-
-    private suspend fun resolveRecommendation(song: YtmSong): Track? = try {
-        resolver.resolve(song)
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (error: Throwable) {
-        Log.w("AMATV-YTM", "Skipping recommendation ${song.videoId}", error)
-        null
-    }
-
-    override suspend fun ytmRadio(
-        seed: Track,
-        continuation: String?,
-        excludedCatalogIds: Set<String>,
-        continuationSeedVideoId: String?,
-    ): ResolvedRadioPage {
-        val saved = YtmResolutionCursor.decode(continuation)
-        val videoId = saved?.seedVideoId
-            ?: continuationSeedVideoId?.takeIf { continuation != null }
-            ?: seed.ytmVideoId ?: ytm.searchSong(seed.title, seed.artist, seed.durationMs)?.videoId
-            ?: return ResolvedRadioPage(emptyList(), null, null)
-        val candidates: List<YtmSong>
-        val providerNext: String?
-        if (saved != null && saved.pending.isNotEmpty()) {
-            candidates = saved.pending
-            providerNext = saved.providerContinuation
-        } else {
-            // A corrupt local cursor restarts the original seed instead of sending
-            // application metadata as an undocumented provider token.
-            val page = ytm.radio(videoId, continuation.takeUnless { YtmResolutionCursor.isLocal(it) })
-            candidates = page.songs
-            providerNext = page.continuation
-        }
-        // Resolve a bounded batch in provider order. Preserve every remaining song
-        // in the persisted cursor rather than dropping everything after take(15).
-        val batch = candidates.take(12)
-        val resolved = coroutineScope {
-            batch.map { song -> async { resolveRecommendation(song) } }.awaitAll()
-                .filterNotNull().filter { it.catalogId !in excludedCatalogIds }
-                .distinctBy { it.catalogId }
-        }
-        val next = YtmResolutionCursor(videoId, candidates.drop(batch.size), providerNext).encode()
-        return ResolvedRadioPage(resolved, next, videoId)
-    }
-
-    suspend fun ytmHomeShelves(): List<ContentShelf> = coroutineScope {
-        ytm.home().sortedByDescending { shelf ->
-            when {
-                shelf.title.contains("supermix", ignoreCase = true) -> 3
-                shelf.title.contains("listen again", ignoreCase = true) -> 2
-                else -> 1
-            }
-        }.take(3).mapIndexed { index, shelf ->
-            async {
-                val songs = if (shelf.playlistId != null && shelf.songs.isEmpty()) {
-                    ytm.playlist(shelf.playlistId)
-                } else shelf.songs
-                val tracks = songs.take(6).map { song ->
-                    async { resolveRecommendation(song) }
-                }.awaitAll().filterNotNull()
-                ContentShelf("ytm:$index", "YTM · ${shelf.title}", tracks)
-            }
-        }.awaitAll().filter { it.items.isNotEmpty() }
-    }
 
     val connectionState: MusicConnectionState
         get() = when {
