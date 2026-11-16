@@ -23,6 +23,10 @@ class SecureTokenStore(context: Context) {
         Context.MODE_PRIVATE,
     )
 
+    init {
+        preferences.edit().remove(KEY_YTM_SESSION_CIPHERTEXT).apply()
+    }
+
     fun readUserToken(): String? = readRecoverableToken(
         readEncrypted = { readEncrypted(KEY_USER_TOKEN_CIPHERTEXT) },
         readSdkFallback = { sdkAuthPreferences.getString("user-token", null) },
@@ -60,18 +64,6 @@ class SecureTokenStore(context: Context) {
     fun clear() {
         preferences.edit().remove(KEY_USER_TOKEN_CIPHERTEXT).apply()
         sdkAuthPreferences.edit().remove("user-token").apply()
-    }
-
-    fun readYtmSession(): String? = runCatching {
-        readEncrypted(KEY_YTM_SESSION_CIPHERTEXT)
-    }.getOrNull()
-
-    fun writeYtmSession(json: String) {
-        writeEncrypted(KEY_YTM_SESSION_CIPHERTEXT, json)
-    }
-
-    fun clearYtmSession() {
-        preferences.edit().remove(KEY_YTM_SESSION_CIPHERTEXT).apply()
     }
 
     private fun readEncrypted(key: String): String? {

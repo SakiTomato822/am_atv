@@ -6,15 +6,6 @@ import dev.amatv.model.CatalogKind
 import dev.amatv.model.Destination
 import dev.amatv.model.Track
 
-enum class AutoplaySource {
-    AppleMusic,
-    YouTubeMusic,
-}
-
-/** Only a recognized stored selection opts in to a different recommendation provider. */
-internal fun autoplaySourceFromStoredValue(raw: String?): AutoplaySource =
-    AutoplaySource.entries.firstOrNull { it.name == raw } ?: AutoplaySource.AppleMusic
-
 data class PlaybackSession(
     val queue: List<Track>,
     val currentIndex: Int,
@@ -24,9 +15,6 @@ data class PlaybackSession(
     val previousDestination: Destination,
     val radioActive: Boolean,
     val radioSeed: Track?,
-    val radioContinuation: String?,
-    val autoplaySource: AutoplaySource = AutoplaySource.AppleMusic,
-    val radioSeedVideoId: String? = null,
     val autoplayEntryIndices: Set<Int> = emptySet(),
     val queueEntryIds: List<Long> = emptyList(),
     val playedEntryIds: Set<Long> = emptySet(),
@@ -61,8 +49,6 @@ internal fun PlaybackSession.sanitizedAutoplayEntries(): PlaybackSession? {
         autoplayEntryIndices = retained.withIndex().filter { it.value in autoplayEntryIndices }
             .map { it.index }.toSet(),
         radioSeed = if (changedCurrent) queue[selected] else radioSeed,
-        radioContinuation = if (changedCurrent) null else radioContinuation,
-        radioSeedVideoId = if (changedCurrent) null else radioSeedVideoId,
     )
 }
 
@@ -70,18 +56,21 @@ interface QueuePreferences {
     var repeatMode: PlaybackRepeatMode
     var shuffleEnabled: Boolean
     var autoplayEnabled: Boolean
-    var autoplaySource: AutoplaySource
     var lowPerformanceMode: Boolean
 }
 
 /**
- * Persists the logical queue, playhead, active screen, and repeat/shuffle/YTM radio modes.
+ * Persists the logical queue, playhead, active screen, and repeat/shuffle/radio modes.
  */
 class PlaybackPreferences(context: Context) : QueuePreferences {
     private val preferences: SharedPreferences =
         context.getSharedPreferences("am_atv_playback_preferences", Context.MODE_PRIVATE)
 
     private val sessions = PlaybackSessionPersistence.get(context.applicationContext, preferences)
+
+    init {
+        preferences.edit().remove(KEY_AUTOPLAY_SOURCE).apply()
+    }
 
     override var repeatMode: PlaybackRepeatMode
         get() {
@@ -103,15 +92,6 @@ class PlaybackPreferences(context: Context) : QueuePreferences {
         get() = preferences.getBoolean(KEY_AUTOPLAY_ENABLED, true)
         set(value) {
             preferences.edit().putBoolean(KEY_AUTOPLAY_ENABLED, value).apply()
-        }
-
-    override var autoplaySource: AutoplaySource
-        get() {
-            val raw = runCatching { preferences.getString(KEY_AUTOPLAY_SOURCE, null) }.getOrNull()
-            return autoplaySourceFromStoredValue(raw)
-        }
-        set(value) {
-            preferences.edit().putString(KEY_AUTOPLAY_SOURCE, value.name).apply()
         }
 
     /** The user's last explicit lyrics choice; a song without lyrics never changes it. */

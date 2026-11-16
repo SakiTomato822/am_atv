@@ -42,9 +42,6 @@ data class Track(
     val hasLyricsAvailable: Boolean = lyrics.isNotEmpty(),
     /** Stable controller identity used to jump within the existing queue without rebuilding it. */
     val playbackQueueId: Long? = null,
-    /** Recommendation provenance; playback and lyrics still use Apple catalog IDs. */
-    val recommendedByYtm: Boolean = false,
-    val ytmVideoId: String? = null,
     /** Original API identity; library containers can also have a separate catalog ID. */
     val resourceId: String? = null,
     val resourceType: String? = null,

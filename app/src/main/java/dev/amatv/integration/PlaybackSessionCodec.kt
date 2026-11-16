@@ -55,9 +55,6 @@ internal object PlaybackSessionCodec {
             destination = enumValueOrDefault(root.optString("destination"), Destination.Home),
             previousDestination = enumValueOrDefault(root.optString("previousDestination"), Destination.Home),
             radioActive = root.optBoolean("radioActive"), radioSeed = root.optJSONObject("radioSeed")?.toSessionTrack(),
-            radioContinuation = root.optionalString("radioContinuation"),
-            radioSeedVideoId = root.optionalString("radioSeedVideoId"),
-            autoplaySource = autoplaySourceFromStoredValue(root.optString("autoplaySource")),
             autoplayEntryIndices = queue.indices.filter { queue[it].autoplay }.toSet(),
             queueEntryIds = queue.map { it.id }, playedEntryIds = queue.filter { it.played }.map { it.id }.toSet(),
             contextQueue = context.map { it.track }, contextEntryIds = context.map { it.id },
@@ -136,8 +133,7 @@ internal object PlaybackSessionCodec {
             .put("positionMs", session.positionMs.coerceAtLeast(0)).put("wasPlaying", session.wasPlaying)
             .put("destination", session.destination.name).put("previousDestination", session.previousDestination.name)
             .put("radioActive", session.radioActive).put("radioSeed", session.radioSeed?.toSessionJson())
-            .put("radioContinuation", session.radioContinuation).put("radioSeedVideoId", session.radioSeedVideoId)
-            .put("autoplaySource", session.autoplaySource.name).put("sessionId", session.sessionId)
+            .put("sessionId", session.sessionId)
             .put("persistenceId", session.persistenceId.ifBlank { "legacy-v1" }).put("savedRevision", session.savedRevision)
     }
 
@@ -155,9 +151,7 @@ internal object PlaybackSessionCodec {
             parsed.map { it.second }, current, if (parsed[current].first == rawCurrent) root.optLong("positionMs").coerceAtLeast(0) else 0,
             root.optBoolean("wasPlaying"), enumValueOrDefault(root.optString("destination"), Destination.Home),
             enumValueOrDefault(root.optString("previousDestination"), Destination.Home), root.optBoolean("radioActive"),
-            root.optJSONObject("radioSeed")?.toSessionTrack(), root.optionalString("radioContinuation"),
-            autoplaySourceFromStoredValue(root.optString("autoplaySource")),
-            root.optionalString("radioSeedVideoId") ?: root.optJSONObject("radioSeed")?.optionalString("ytmVideoId"),
+            root.optJSONObject("radioSeed")?.toSessionTrack(),
             parsed.indices.filter { parsed[it].first in autoplay }.toSet(),
             queueEntryIds = parsed.map { it.first + 1L },
             playedEntryIds = parsed.take(current).map { it.first + 1L }.toSet(), persistenceId = "legacy-v1",
@@ -184,8 +178,6 @@ internal fun Track.toSessionJson() = JSONObject()
     .put("motionArtworkUrl", motionArtworkUrl)
     .put("motionPreviewUrl", motionPreviewUrl)
     .put("hasLyricsAvailable", hasLyricsAvailable)
-    .put("recommendedByYtm", recommendedByYtm)
-    .put("ytmVideoId", ytmVideoId)
     .put("explicit", isExplicit)
 
 internal fun JSONObject.toSessionTrack(): Track {
@@ -210,8 +202,6 @@ internal fun JSONObject.toSessionTrack(): Track {
         hasLyricsAvailable = optBoolean("hasLyricsAvailable"),
         // Queue indices belong to one MusicKit process and cannot survive a cold start.
         playbackQueueId = null,
-        recommendedByYtm = optBoolean("recommendedByYtm"),
-        ytmVideoId = optionalString("ytmVideoId"),
         isExplicit = optBoolean("explicit"),
     )
 }
