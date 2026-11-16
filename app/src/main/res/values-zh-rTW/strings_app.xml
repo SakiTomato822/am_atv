@@ -9,8 +9,6 @@
     <string name="app_song_load_failed">無法載入這首歌曲，請重試。</string>
     <string name="app_seek_failed">無法調整播放進度，請重試。</string>
     <string name="app_apple_sign_in_unavailable">無法啟動 Apple Music 登入頁面。</string>
-    <string name="app_google_sign_in_unavailable">此版本尚未開放 Google 登入。</string>
-    <string name="app_google_pairing_failed">Google 配對失敗。</string>
     <string name="app_apple_sign_in_required">請先登入 Apple Music 帳號以播放曲目。</string>
     <string name="app_choose_content_before_playback">請先選擇要播放的內容。</string>
     <string name="app_multiple_songs_unavailable">多首歌曲暫時無法播放，請稍後重試。</string>
