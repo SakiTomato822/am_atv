@@ -1,7 +1,7 @@
-package dev.amatv.ui
+package dev.amatv.core
 
 /** Stable semantic actions: a bootstrap-tail index must never address the full timeline. */
-internal sealed interface StartupQueueAction {
+sealed interface StartupQueueAction {
     data object Next : StartupQueueAction
     data object Previous : StartupQueueAction
     data class Select(val entryId: Long) : StartupQueueAction
@@ -15,7 +15,7 @@ internal sealed interface StartupQueueAction {
 }
 
 /** Input stays bounded even if a remote keeps repeating while storage is unavailable. */
-internal class StartupQueueActions(private val capacity: Int = 128) {
+class StartupQueueActions(private val capacity: Int = 128) {
     private val pending = ArrayDeque<StartupQueueAction>()
 
     fun enqueue(action: StartupQueueAction): Boolean {

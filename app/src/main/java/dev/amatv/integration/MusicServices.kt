@@ -36,13 +36,13 @@ interface RecommendationProvider {
     suspend fun amStationNextTracks(stationId: String): List<Track>
 }
 
-class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.LyricsSource, dev.amatv.core.AccountOperations, dev.amatv.core.ContentOperations {
+class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.LyricsSource, dev.amatv.core.AccountOperations, dev.amatv.core.ContentOperations, dev.amatv.core.PlayerOperations {
     private val appContext = context.applicationContext
     val contentCache = ContentCache.get(appContext)
     val playbackDiagnostics = PlaybackDiagnostics.get(appContext)
     val playbackOptions = FlymePlaybackOptions.get(appContext)
     /** Call off the main thread: whether the system Widevine lets the web player play stations. */
-    val widevineReady: Boolean by lazy { checkWidevine().first }
+    override val widevineReady: Boolean by lazy { checkWidevine().first }
     private val tokenStore = SecureTokenStore(appContext)
     private val webAuthenticationSession = WebAuthenticationSession(appContext)
     private val developerTokens = DeveloperTokenClient(
@@ -271,7 +271,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
         value
     }
 
-    internal suspend fun prefetchLibraryDetails() {
+    override suspend fun prefetchLibraryDetails() {
         if (prefetchCompleted || connectionState != MusicConnectionState.SignedIn) return
         val first = prefetchOrNull { libraryPlaylistsPage() } ?: return
         val favorites = first.items.firstOrNull { it.title.trim().lowercase() in favoritePlaylistNames }
@@ -334,10 +334,10 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
 
     suspend fun prepareAndPlay(track: Track): Long = preparePlayback(track)
 
-    suspend fun preparePlayback(
+    override suspend fun preparePlayback(
         track: Track,
-        positionMs: Long = 0L,
-        playWhenReady: Boolean = true,
+        positionMs: Long,
+        playWhenReady: Boolean,
     ): Long {
         val userToken = checkNotNull(tokenStore.readUserToken()) { AppText.text(R.string.services_sign_in_apple_music) }
         val developerToken = developerTokens.token()
@@ -365,45 +365,45 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
     fun audioSpectrum(): AudioSpectrum = songSpectrum.sample()
     fun setSpectrumActive(enabled: Boolean) = songSpectrum.setActive(enabled)
 
-    fun play() {
+    override fun play() {
         mediaSession.playbackRequested()
         flymeMediaSource?.playbackRequested()
         if (stationEngineActive) stationEngine?.play() else bridge.play()
     }
-    fun pause() {
+    override fun pause() {
         mediaSession.playbackPaused()
         flymeMediaSource?.playbackPaused()
         if (stationEngineActive) stationEngine?.pause() else bridge.pause()
     }
     // Station streams are never seekable; MusicKitBridge also ignores live seeks.
-    fun seekTo(positionMs: Long) { if (!stationEngineActive) bridge.seekTo(positionMs) }
-    fun skipToNext() { if (stationEngineActive) stationEngine?.skipToNext() else bridge.skipToNext() }
-    fun skipToPrevious() { if (!stationEngineActive) bridge.skipToPrevious() }
+    override fun seekTo(positionMs: Long) { if (!stationEngineActive) bridge.seekTo(positionMs) }
+    override fun skipToNext() { if (stationEngineActive) stationEngine?.skipToNext() else bridge.skipToNext() }
+    override fun skipToPrevious() { if (!stationEngineActive) bridge.skipToPrevious() }
     fun skipToQueueItem(queueId: Long) = bridge.skipToQueueItem(queueId)
     /** Gapless preloading of the app's next song; stations manage their own queue. */
-    fun setLookahead(next: Track?) { if (!stationEngineActive) bridge.setLookahead(next) }
-    fun setFadeEnabled(enabled: Boolean) { bridge.fadeEnabled = enabled }
+    override fun setLookahead(next: Track?) { if (!stationEngineActive) bridge.setLookahead(next) }
+    override fun setFadeEnabled(enabled: Boolean) { bridge.fadeEnabled = enabled }
     /** A station's next songs, to play it on the native player without Widevine. */
-    suspend fun stationSongs(stationId: String): List<Track> = api.stationNextTracks(stationId)
-    fun skipToQueuedLookahead(catalogId: String): Boolean = !stationEngineActive && bridge.skipToQueuedLookahead(catalogId)
+    override suspend fun stationSongs(stationId: String): List<Track> = api.stationNextTracks(stationId)
+    override fun skipToQueuedLookahead(catalogId: String): Boolean = !stationEngineActive && bridge.skipToQueuedLookahead(catalogId)
     // The app queue owns repeat, shuffle and autoplay. Each native queue contains
     // one selected track, so enabling a second queue engine would race the app.
     fun playbackSnapshot(): PlaybackSnapshot? =
         if (stationEngineActive) stationEngine?.playbackSnapshot() else bridge.playbackSnapshot()
     // Both engines report to the same listener; the app drops stale generations.
-    fun setPlaybackListener(listener: ((PlaybackSnapshot) -> Unit)?) {
+    override fun setPlaybackListener(listener: ((PlaybackSnapshot) -> Unit)?) {
         bridge.setPlaybackListener(listener)
         stationEngine?.setPlaybackListener(listener)
     }
-    fun setSystemPlaybackCallbacks(callbacks: PlaybackMediaSession.Callbacks?) {
+    override fun setSystemPlaybackCallbacks(callbacks: PlaybackMediaSession.Callbacks?) {
         mediaSession.setCallbacks(callbacks)
         flymeMediaSource?.setCallbacks(callbacks)
     }
-    fun publishSystemPlayback(snapshot: PlaybackSnapshot, canSkipNext: Boolean, canSkipPrevious: Boolean) {
+    override fun publishSystemPlayback(snapshot: PlaybackSnapshot, canSkipNext: Boolean, canSkipPrevious: Boolean) {
         mediaSession.publish(snapshot, canSkipNext, canSkipPrevious)
         flymeMediaSource?.publish(snapshot.copy(canSkipNext = canSkipNext, canSkipPrevious = canSkipPrevious))
     }
-    fun release() {
+    override fun release() {
         clearDetailPages()
         detailPageScope.cancel()
         songSpectrum.release()

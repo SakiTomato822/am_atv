@@ -1,4 +1,4 @@
-package dev.amatv.ui
+package dev.amatv.core
 
 import org.junit.Assert.*
 import org.junit.Test

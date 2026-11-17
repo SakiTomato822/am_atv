@@ -72,8 +72,11 @@ import dev.amatv.core.LibraryNotice
 import dev.amatv.core.LibraryShelfPagination
 import dev.amatv.core.LyricsLoadPhase
 import dev.amatv.core.LyricsState
+import dev.amatv.core.StartupQueueAction
+import dev.amatv.core.StartupQueueActions
 import dev.amatv.core.lyricsCacheKey
 import dev.amatv.core.resolvedCacheEntries
+import dev.amatv.core.waitingRecommendationError
 import dev.amatv.LocalHostWindow
 import dev.amatv.WindowHosts
 import dev.amatv.integration.toSessionTrack
@@ -206,7 +209,7 @@ fun AmAtvApp() {
         contentStore.messages.collect { serviceMessage = it }
     }
     var lastPlaybackNotice by remember { mutableStateOf<String?>(null) }
-    var stationHistory by remember { mutableStateOf(loadStationHistory(context)) }
+    var stationHistory by remember { mutableStateOf(playbackPrefs.loadStationHistory()) }
     // A short Now Playing notice (favorites); playback snapshots clear playbackMessage too often.
     var playerNotice by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(playerNotice) {
@@ -1219,7 +1222,7 @@ fun AmAtvApp() {
         if (stationHistory.lastOrNull()?.catalogId == song.catalogId) return@LaunchedEffect
         stationHistory = (stationHistory.filter { it.catalogId != song.catalogId } + song.copy(lyrics = emptyList()))
             .takeLast(STATION_HISTORY_LIMIT)
-        saveStationHistory(context, stationHistory)
+        playbackPrefs.saveStationHistory(stationHistory)
     }
     val stationTimeline = if (BuildConfig.FLYME_AUTO && stationQueueContext) {
         if (stationHistory.lastOrNull()?.catalogId == track.catalogId) stationHistory else stationHistory + track
@@ -2140,17 +2143,3 @@ private fun TopNavigation(
 }
 
 private const val STATION_HISTORY_LIMIT = 50
-
-/** Station history stays on the head unit. */
-private fun loadStationHistory(context: android.content.Context): List<Track> = runCatching {
-    val raw = context.getSharedPreferences("am_atv_station_history", android.content.Context.MODE_PRIVATE)
-        .getString("songs", null) ?: return emptyList()
-    val array = org.json.JSONArray(raw)
-    List(array.length()) { array.getJSONObject(it).toSessionTrack() }
-}.getOrDefault(emptyList())
-
-private fun saveStationHistory(context: android.content.Context, songs: List<Track>) {
-    val array = org.json.JSONArray().apply { songs.forEach { put(it.toSessionJson()) } }
-    context.getSharedPreferences("am_atv_station_history", android.content.Context.MODE_PRIVATE)
-        .edit().putString("songs", array.toString()).apply()
-}

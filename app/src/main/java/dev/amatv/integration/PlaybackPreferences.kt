@@ -62,11 +62,12 @@ interface QueuePreferences {
 /**
  * Persists the logical queue, playhead, active screen, and repeat/shuffle/radio modes.
  */
-class PlaybackPreferences(context: Context) : QueuePreferences {
+class PlaybackPreferences(context: Context) : QueuePreferences, dev.amatv.core.PlaybackSessionStorage {
+    private val appContext = context.applicationContext
     private val preferences: SharedPreferences =
         context.getSharedPreferences("am_atv_playback_preferences", Context.MODE_PRIVATE)
 
-    private val sessions = PlaybackSessionPersistence.get(context.applicationContext, preferences)
+    private val sessions = PlaybackSessionPersistence.get(appContext, preferences)
 
     init {
         preferences.edit().remove(KEY_AUTOPLAY_SOURCE).apply()
@@ -148,26 +149,40 @@ class PlaybackPreferences(context: Context) : QueuePreferences {
             preferences.edit().putString(KEY_LYRIC_PRONUNCIATION_LANGUAGE, value).apply()
         }
 
-    val activeTab: Destination
+    override val activeTab: Destination
         get() = enumValueOrDefault(
             preferences.getString(KEY_ACTIVE_TAB, null).orEmpty(), Destination.Home,
         )
 
-    fun saveActiveTab(tab: Destination, synchronous: Boolean = false) {
+    override fun saveActiveTab(tab: Destination, synchronous: Boolean) {
         val edit = preferences.edit().putString(KEY_ACTIVE_TAB, tab.name)
         if (synchronous) edit.commit() else edit.apply()
     }
 
     /** Timeline serialization/disk I/O is coalesced off the UI thread. */
-    fun saveSession(session: PlaybackSession, synchronous: Boolean = false) = sessions.save(session, synchronous)
+    override fun saveSession(session: PlaybackSession, synchronous: Boolean) = sessions.save(session, synchronous)
 
     fun clearSession() = sessions.clear()
 
     /** Blocking file read/parse: call on Dispatchers.IO. */
-    fun restoreSession(): PlaybackSession? = sessions.restore()
+    override fun restoreSession(): PlaybackSession? = sessions.restore()
 
     /** Bounded cursor/cover metadata only, safe for initial composition. */
-    fun restoreCheckpointSession(): PlaybackSession? = sessions.checkpoint()
+    override fun restoreCheckpointSession(): PlaybackSession? = sessions.checkpoint()
+
+    /** Station history stays on the head unit. */
+    override fun loadStationHistory(): List<Track> = runCatching {
+        val raw = appContext.getSharedPreferences("am_atv_station_history", Context.MODE_PRIVATE)
+            .getString("songs", null) ?: return emptyList()
+        val array = org.json.JSONArray(raw)
+        List(array.length()) { array.getJSONObject(it).toSessionTrack() }
+    }.getOrDefault(emptyList())
+
+    override fun saveStationHistory(songs: List<Track>) {
+        val array = org.json.JSONArray().apply { songs.forEach { put(it.toSessionJson()) } }
+        appContext.getSharedPreferences("am_atv_station_history", Context.MODE_PRIVATE)
+            .edit().putString("songs", array.toString()).apply()
+    }
 
     private inline fun <reified T : Enum<T>> enumValueOrDefault(raw: String, fallback: T): T =
         enumValues<T>().firstOrNull { it.name == raw } ?: fallback
