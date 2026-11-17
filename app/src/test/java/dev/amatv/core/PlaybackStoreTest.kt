@@ -329,8 +329,13 @@ class PlaybackStoreTest {
     private class FakeAccountOps(
         override var connectionState: MusicConnectionState = MusicConnectionState.SignedIn,
     ) : AccountOperations {
+        var signOutCalls = 0
+        var onSignOutHook: () -> Unit = {}
+
         override fun completeWebAuthentication(data: Intent): String = "token"
         override fun signOut() {
+            signOutCalls++
+            onSignOutHook()
             connectionState = MusicConnectionState.ReadyToSignIn
         }
     }
@@ -383,6 +388,7 @@ class PlaybackStoreTest {
         val player: FakePlayerOperations,
         val sessions: PlaybackSessionStorage,
         val accountStore: AccountStore,
+        val accountOps: FakeAccountOps,
         val delayGate: DelayGate,
         val scope: CoroutineScope,
         var nowMs: Long,
@@ -408,7 +414,8 @@ class PlaybackStoreTest {
         val player = FakePlayerOperations().apply {
             this.isCatalogConfigured = isCatalogConfigured
         }
-        val accountStore = AccountStore(FakeAccountOps(connectionState))
+        val accountOps = FakeAccountOps(connectionState)
+        val accountStore = AccountStore(accountOps)
         val settingsStore = SettingsStore(FakeSettingsStorage(settingsState))
         val lyricsStore = LyricsStore(
             source = FakeLyricsSource(),
@@ -438,7 +445,7 @@ class PlaybackStoreTest {
             flymeAuto = flymeAuto,
             delayFn = { delayGate.delay(it) },
         )
-        return TestHarness(store, player, sessions, accountStore, delayGate, scope, nowMs)
+        return TestHarness(store, player, sessions, accountStore, accountOps, delayGate, scope, nowMs)
     }
 
     @Test
@@ -775,7 +782,7 @@ class PlaybackStoreTest {
             while (!h.store.state.value.startupSessionLoaded && spins++ < 50) {
                 kotlinx.coroutines.delay(5L)
             }
-            yield()
+            repeat(5) { yield() }
 
             assertTrue(h.store.state.value.startupSessionLoaded)
             assertEquals(s2.id, h.store.state.value.track.id)
@@ -903,7 +910,15 @@ class PlaybackStoreTest {
             assertTrue(h.store.state.value.hasCurrentTrack)
             assertNotNull(h.store.state.value.snapshot)
 
+            var queueStillPresentDuringSignOut = false
+            h.accountOps.onSignOutHook = {
+                queueStillPresentDuringSignOut = h.store.queueController.state.value.current != null
+            }
+
             h.store.onSignedOut()
+            assertEquals(1, h.accountOps.signOutCalls)
+            assertTrue(queueStillPresentDuringSignOut)
+            assertEquals(MusicConnectionState.ReadyToSignIn, h.accountStore.state.value.connectionState)
             val after = h.store.state.value
             assertFalse(after.isPlaying)
             assertFalse(after.playWhenReady)

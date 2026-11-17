@@ -610,15 +610,12 @@ class PlaybackStore(
 
     fun pausePlayback() {
         val pos = currentPositionMs()
+        _state.value = _state.value.copy(positionAnchorMs = pos, playWhenReady = false)
         networkRetryJob?.cancel()
         networkRetryJob = null
         pendingRestore = pendingRestore?.copy(wasPlaying = false)
         if (_state.value.track.catalogId != null) player.pause()
-        _state.value = _state.value.copy(
-            positionAnchorMs = pos,
-            playWhenReady = false,
-            isPlaying = false,
-        )
+        _state.value = _state.value.copy(isPlaying = false)
     }
 
     fun requestPlayback() {
@@ -802,17 +799,9 @@ class PlaybackStore(
         startupQueueActions.preferencesForNewContext().forEach { applyQueueAction(it) }
     }
 
-    private fun navigateToNowPlaying() {
-        if (currentDestination != Destination.NowPlaying) previousDestination = currentDestination
-        currentDestination = Destination.NowPlaying
-        navigationFlow.value = currentDestination to previousDestination
-        _events.tryEmit(PlaybackEvent.ShowNowPlaying)
-    }
-
     private fun playStationAsSongs(station: Track, stationId: String, songs: List<Track>) {
         supersedeStartupQueueWithNewContext()
         ++selectionGeneration
-        if (currentDestination != Destination.NowPlaying) previousDestination = currentDestination
         pendingRestore = null
         _state.value = _state.value.copy(playWhenReady = true)
         queueController.playStationSongs(
@@ -820,7 +809,7 @@ class PlaybackStore(
             songs = songs.map(::withCachedLyrics),
             context = PlaybackContext(kind = ContextKind.SongList, id = stationId, title = station.title),
         )
-        navigateToNowPlaying()
+        _events.tryEmit(PlaybackEvent.ShowNowPlaying)
     }
 
     fun playTrack(nextTrack: Track, contextQueue: List<Track> = emptyList(), webStation: Boolean = false) {
@@ -850,7 +839,6 @@ class PlaybackStore(
         }
         supersedeStartupQueueWithNewContext()
         ++selectionGeneration
-        if (currentDestination != Destination.NowPlaying) previousDestination = currentDestination
         pendingRestore = null
 
         val fullQueue = if (isStation) {
@@ -874,7 +862,7 @@ class PlaybackStore(
                 title = if (isStation) nextTrack.title else nextTrack.album,
             ),
         )
-        navigateToNowPlaying()
+        _events.tryEmit(PlaybackEvent.ShowNowPlaying)
     }
 
     fun playCollection(collection: Track, tracks: List<Track>, index: Int, shuffle: Boolean) {
@@ -885,7 +873,6 @@ class PlaybackStore(
             return
         }
         supersedeStartupQueueWithNewContext()
-        if (currentDestination != Destination.NowPlaying) previousDestination = currentDestination
         pendingRestore = null
         _state.value = _state.value.copy(playWhenReady = true)
         queueController.playContext(
@@ -902,7 +889,7 @@ class PlaybackStore(
             ),
             shuffle = shuffle,
         )
-        navigateToNowPlaying()
+        _events.tryEmit(PlaybackEvent.ShowNowPlaying)
     }
 
     private fun advanceNextTrack(isAuto: Boolean = true) {
@@ -944,7 +931,7 @@ class PlaybackStore(
             queueController.peekAutoNext()?.entryId == queued.first &&
             player.skipToQueuedLookahead(lookaheadId)
         ) {
-            _state.value = current.copy(playWhenReady = true)
+            _state.value = _state.value.copy(playWhenReady = true)
             return
         }
         dispatchQueueAction(if (relative > 0) StartupQueueAction.Next else StartupQueueAction.Previous)
@@ -1178,8 +1165,6 @@ class PlaybackStore(
         selectionGeneration++
         playbackRequestJob?.cancel()
         playbackRequestJob = null
-        networkRetryJob?.cancel()
-        networkRetryJob = null
         setExpectedPlaybackGeneration(0L)
         _state.value = _state.value.copy(
             isPlaying = false,
@@ -1193,23 +1178,16 @@ class PlaybackStore(
     fun onSignedOut() {
         selectionGeneration++
         playbackRequestJob?.cancel()
-        playbackRequestJob = null
-        networkRetryJob?.cancel()
-        networkRetryJob = null
+        accountStore.signOut()
         queueController.reset()
         waitingQueueEntryIdFlow.value = null
         pendingRestore = null
-        pendingRequestedSongCatalogId = null
-        gaplessLookahead = null
-        rawSystemSnapshot = null
         setExpectedPlaybackGeneration(0L)
         _state.value = _state.value.copy(
             isPlaying = false,
             playWhenReady = false,
             playbackPrepared = false,
             hasCurrentTrack = false,
-            playbackMessage = null,
-            snapshot = null,
         )
         setHasUserPlaybackRequest(false)
     }

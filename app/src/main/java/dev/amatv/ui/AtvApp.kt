@@ -593,7 +593,6 @@ fun AmAtvApp() {
                         onSignOut = {
                             contentStore.resetLibraryPagination()
                             playbackStore.onSignedOut()
-                            accountStore.signOut()
                             playbackPrefs.clearSession()
                             scope.launch { cancellableResult { services.contentCache.clear { ArtworkImages.clear(context) } } }
                             lyricsStore.onCacheCleared()
