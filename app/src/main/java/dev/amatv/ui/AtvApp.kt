@@ -72,16 +72,15 @@ import dev.amatv.core.LibraryNotice
 import dev.amatv.core.LibraryShelfPagination
 import dev.amatv.core.LyricsLoadPhase
 import dev.amatv.core.LyricsState
+import dev.amatv.core.PlaybackEvent
+import dev.amatv.core.PlaybackStore
 import dev.amatv.core.StartupQueueAction
-import dev.amatv.core.StartupQueueActions
 import dev.amatv.core.lyricsCacheKey
 import dev.amatv.core.resolvedCacheEntries
-import dev.amatv.core.waitingRecommendationError
 import dev.amatv.LocalHostWindow
 import dev.amatv.WindowHosts
 import dev.amatv.integration.toSessionTrack
 import dev.amatv.integration.toSessionJson
-import dev.amatv.data.MockCatalog
 import dev.amatv.i18n.AppText
 import dev.amatv.i18n.destinationLabel
 import dev.amatv.integration.MusicConnectionState
@@ -90,27 +89,18 @@ import dev.amatv.integration.AuthLaunchGate
 import dev.amatv.integration.retryCatalogRequest
 import dev.amatv.integration.LibraryPage
 import dev.amatv.integration.PlaybackPreferences
-import dev.amatv.integration.PlaybackSession
 import dev.amatv.integration.PlaybackRepeatMode
 import dev.amatv.integration.LyricsRequestResult
 import dev.amatv.integration.LyricsLocalizationRequest
 import dev.amatv.integration.requestLyricsWithRetry
-import dev.amatv.integration.PlaybackFailureKind
-import dev.amatv.integration.classifyPlaybackFailure
 import dev.amatv.integration.PlaybackSnapshot
-import dev.amatv.integration.PlaybackMediaSession
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.CatalogOpenAction
-import dev.amatv.model.openAction
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.Destination
 import dev.amatv.model.LyricLine
 import dev.amatv.model.Track
-import dev.amatv.model.matchesPlaybackQueueEntry
-import dev.amatv.playback.ContextKind
-import dev.amatv.playback.EntryOrigin
-import dev.amatv.playback.PlaybackContext
-import dev.amatv.playback.PlaybackQueueController
+import dev.amatv.model.openAction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
@@ -155,35 +145,46 @@ fun AmAtvApp() {
     val recentTracks = contentState.recentTracks
     // Full screen or the Flyme small window; see dev.amatv.HostWindow.
     val hostWindow = LocalHostWindow.current
-    val startupCheckpoint = remember(playbackPrefs) {
-        playbackPrefs.restoreCheckpointSession()?.copy(wasPlaying = false)
+    val playbackStore = remember(context, services, playbackPrefs) {
+        PlaybackStore(
+            player = services,
+            sessions = playbackPrefs,
+            accountStore = accountStore,
+            settingsStore = settingsStore,
+            lyricsStore = lyricsStore,
+            libraryActions = libraryActions,
+            coroutineScope = scope,
+            clock = android.os.SystemClock::elapsedRealtime,
+            initialPlayWhenReady = hostWindow?.resume == true,
+        )
     }
-    var startupSessionLoaded by remember { mutableStateOf(false) }
-    var startupCursorEdited by remember { mutableStateOf(false) }
-    val startupQueueActions = remember { StartupQueueActions() }
+    DisposableEffect(playbackStore) {
+        playbackStore.attach()
+        onDispose { playbackStore.dispose() }
+    }
+    val playbackState by playbackStore.state.collectAsState()
+    val queueState by playbackStore.queueController.state.collectAsState()
+    val timelineEntries = remember(queueState.history, queueState.current, queueState.upNext, queueState.autoplay) {
+        queueState.timelineEntries
+    }
+    val timelineTracks = remember(timelineEntries) { timelineEntries.map { it.track } }
+    val timelineEntryIds = remember(timelineEntries) { timelineEntries.map { it.entryId } }
+
     var destination by remember {
-        mutableStateOf(startupCheckpoint?.destination ?: playbackPrefs.activeTab)
+        mutableStateOf(playbackStore.startupCheckpoint?.destination ?: playbackPrefs.activeTab)
     }
     var previousDestination by remember {
-        mutableStateOf(startupCheckpoint?.previousDestination ?: playbackPrefs.activeTab)
+        mutableStateOf(playbackStore.startupCheckpoint?.previousDestination ?: playbackPrefs.activeTab)
     }
-    var track by remember {
-        mutableStateOf(startupCheckpoint?.queue?.getOrNull(startupCheckpoint.currentIndex)
-            ?: MockCatalog.tracks.first())
-    }
-    var hasCurrentTrack by remember {
-        mutableStateOf(startupCheckpoint != null || !services.isCatalogConfigured)
-    }
-    var positionAnchorMs by remember {
-        mutableLongStateOf(startupCheckpoint?.positionMs ?: if (track.catalogId == null) 7_500L else 0L)
-    }
-    var playStartedRealtimeMs by remember {
-        mutableLongStateOf(android.os.SystemClock.elapsedRealtime())
-    }
-    // Startup restores metadata and cursor only. An explicit user action owns playback; moving
-    // between the full-screen app and the small window is one, so it carries playback on.
-    var isPlaying by remember { mutableStateOf(false) }
-    var playWhenReady by remember { mutableStateOf(hostWindow?.resume == true) }
+    val track = playbackState.track
+    val hasCurrentTrack = playbackState.hasCurrentTrack
+    val positionAnchorMs = playbackState.positionAnchorMs
+    val playStartedRealtimeMs = playbackState.playStartedRealtimeMs
+    val isPlaying = playbackState.isPlaying
+    val playWhenReady = playbackState.playWhenReady
+    val playbackMessage = playbackState.playbackMessage
+    val stationHistory = playbackState.stationHistory
+    val startupSessionLoaded = playbackState.startupSessionLoaded
 
     val currentView = androidx.compose.ui.platform.LocalView.current
     val shouldKeepScreenOn = !BuildConfig.FLYME_AUTO && (isPlaying || playWhenReady)
@@ -193,23 +194,13 @@ fun AmAtvApp() {
             currentView.keepScreenOn = false
         }
     }
-    var playbackPrepared by remember { mutableStateOf(false) }
-    var hasUserPlaybackRequest by remember { mutableStateOf(false) }
-    var playbackMessage by remember { mutableStateOf<String?>(null) }
-    var waitingQueueEntryId by remember { mutableStateOf<Long?>(null) }
-    var expectedPlaybackGeneration by remember { mutableLongStateOf(0L) }
-    var lastPlaybackFailure by remember { mutableStateOf<PlaybackFailureKind?>(null) }
-    var commandFailure by remember { mutableStateOf<Triple<Long, PlaybackFailureKind, String>?>(null) }
-    var failureHandledSelection by remember { mutableLongStateOf(-1L) }
-    var successfulSelection by remember { mutableLongStateOf(-1L) }
-    var networkRetryJob by remember { mutableStateOf<Job?>(null) }
-    var networkRetryCount by remember(track.id) { mutableIntStateOf(0) }
     var serviceMessage by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(contentStore) {
         contentStore.messages.collect { serviceMessage = it }
     }
-    var lastPlaybackNotice by remember { mutableStateOf<String?>(null) }
-    var stationHistory by remember { mutableStateOf(playbackPrefs.loadStationHistory()) }
+    LaunchedEffect(playbackStore, destination, previousDestination) {
+        playbackStore.setNavigation(destination, previousDestination)
+    }
     // A short Now Playing notice (favorites); playback snapshots clear playbackMessage too often.
     var playerNotice by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(playerNotice) {
@@ -240,12 +231,8 @@ fun AmAtvApp() {
             }
         }
     }
-    // Gapless: the queue entry preloaded into MusicKit, and the entry being adopted without a prepare.
-    var gaplessLookahead by remember { mutableStateOf<Pair<Long, Track>?>(null) }
-    var adoptingGaplessEntryId by remember { mutableStateOf<Long?>(null) }
     // An album or artist to open in the browse shell, requested from the player.
     var browseDetailRequest by remember { mutableStateOf<Track?>(null) }
-    var advancingEndedTrackId by remember { mutableStateOf<String?>(null) }
     val effectiveLyricsLanguageTag = settingsState.lyricTranslationLanguageTag.ifBlank { lyricsLanguageTag }
     val lyricsLocalization = remember(
         effectiveLyricsLanguageTag, settingsState.lyricPronunciationLanguageTag,
@@ -263,51 +250,13 @@ fun AmAtvApp() {
             "|pron=${lyricsLocalization.includePronunciations}" +
             "|pronLang=${lyricsLocalization.pronunciationLanguageTag}"
     }
-    var pendingRestore by remember {
-        mutableStateOf(startupCheckpoint?.takeIf { track.catalogId != null })
-    }
     val authLaunchGate = remember { AuthLaunchGate() }
-    var playbackRequestJob by remember { mutableStateOf<Job?>(null) }
-    var selectionGeneration by remember { mutableLongStateOf(0L) }
     var spectrumPermissionAsked by remember { mutableStateOf(false) }
     var spectrumPermissionGranted by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
     }
     val spectrumPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         spectrumPermissionGranted = it
-    }
-    var pendingRequestedSongCatalogId by remember { mutableStateOf<String?>(null) }
-    // Read only by callbacks/effects: native position polls do not recompose the app.
-    val systemPlaybackSnapshot = remember { mutableStateOf<PlaybackSnapshot?>(null) }
-    lateinit var queueController: PlaybackQueueController
-
-    fun stationQueueTrack(): Track? = queueController.state.value.current?.track
-        ?.takeIf { it.catalogKind == CatalogKind.Station }
-
-    fun isStationPlayback(): Boolean = stationQueueTrack() != null
-
-    fun requestedPlaybackTrack(): Track = stationQueueTrack() ?: track
-
-    fun requestedPlaybackPositionMs(): Long = if (isStationPlayback()) 0L else positionAnchorMs
-
-    fun currentPlaybackSnapshot(): PlaybackSnapshot? = systemPlaybackSnapshot.value
-        ?.takeIf { it.requestGeneration != 0L && it.requestGeneration == expectedPlaybackGeneration }
-
-    fun withCachedLyrics(candidate: Track): Track = lyricsStore.withCachedLyrics(candidate)
-
-    fun acceptResolvedTrack(original: Track, resolved: Track): Track {
-        if (original.catalogId == resolved.catalogId) return resolved
-        val oldIdentity = original.lyricsIdentity()
-        val newIdentity = resolved.lyricsIdentity()
-        val currentLines = lyricsState.lines.takeIf { lyricsState.trackIdentity == oldIdentity }
-            ?: original.lyrics
-        val updated = resolved.copy(lyrics = currentLines)
-        queueController.updateCatalogIdentity(original, updated)
-        if (track.lyricsIdentity() == oldIdentity && track.resourceId == original.resourceId) {
-            lyricsStore.onTrackIdentityResolved(oldIdentity, newIdentity)
-            track = updated
-        }
-        return updated
     }
 
     fun refreshAllContent() {
@@ -329,125 +278,13 @@ fun AmAtvApp() {
         } else {
             accountStore.completeSignIn(data)
                 .onSuccess {
-                    selectionGeneration++
-                    playbackRequestJob?.cancel()
-                    isPlaying = false
-                    playWhenReady = false
-                    playbackPrepared = false
-                    hasUserPlaybackRequest = false
-                    expectedPlaybackGeneration = 0L
-                    playbackMessage = null
+                    playbackStore.onSignedIn()
                     lyricsStore.onCacheCleared()
                     contentStore.onSignedIn()
                     destination = Destination.Home
                     serviceMessage = null
                 }
                 .onFailure { serviceMessage = it.message ?: AppText.text(R.string.app_sign_in_failed) }
-        }
-    }
-
-    fun currentPositionMs(): Long {
-        if (!isPlaying) return positionAnchorMs
-        val elapsed = android.os.SystemClock.elapsedRealtime() - playStartedRealtimeMs
-        val advanced = positionAnchorMs + elapsed
-        return if (track.catalogId == null) advanced.mod(track.durationMs.coerceAtLeast(1L))
-        else advanced.coerceAtMost(track.durationMs.coerceAtLeast(1L))
-    }
-
-    fun launchNativePlayback(nextTrack: Track, resumePositionMs: Long = 0L) {
-        hasUserPlaybackRequest = true
-        playbackPrepared = false
-        playbackMessage = null
-        networkRetryJob?.cancel()
-        networkRetryJob = null
-        val selection = selectionGeneration
-        playbackRequestJob?.cancel()
-        expectedPlaybackGeneration = 0L
-        lastPlaybackFailure = null
-        commandFailure = null
-        // Stations intentionally resolve to individual song items; only gate exact song requests.
-        pendingRequestedSongCatalogId = nextTrack.catalogId.takeIf { nextTrack.catalogKind == CatalogKind.Song }
-        playbackRequestJob = scope.launch {
-            try {
-                val resolved = services.resolvePlayableTrack(nextTrack)
-                if (selection != selectionGeneration) return@launch
-                val playableTrack = acceptResolvedTrack(nextTrack, resolved)
-                pendingRequestedSongCatalogId = playableTrack.catalogId.takeIf {
-                    playableTrack.catalogKind == CatalogKind.Song
-                }
-                // Authorize/prepare silently. Re-read the latest user intent after
-                // token I/O, so a pause during preparation cannot be overwritten.
-                val nativeGeneration = services.preparePlayback(playableTrack, resumePositionMs, playWhenReady = false)
-                if (selection != selectionGeneration) return@launch
-                expectedPlaybackGeneration = nativeGeneration
-                if (playWhenReady) services.play() else services.pause()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Throwable) {
-                if (selection == selectionGeneration) {
-                    commandFailure = Triple(selection, classifyPlaybackFailure(null, null, null, error),
-                        error.message ?: AppText.text(R.string.app_song_load_failed))
-                }
-            }
-        }
-    }
-
-    fun pausePlayback() {
-        positionAnchorMs = currentPositionMs()
-        playWhenReady = false
-        networkRetryJob?.cancel()
-        networkRetryJob = null
-        pendingRestore = pendingRestore?.copy(wasPlaying = false)
-        if (track.catalogId != null) services.pause()
-        isPlaying = false
-    }
-
-    fun requestPlayback() {
-        playWhenReady = true
-        if (lyricsState.trackIdentity == track.lyricsIdentity() &&
-            lyricsState.phase == LyricsLoadPhase.Failed
-        ) lyricsStore.retryCurrentLyrics()
-        pendingRestore = pendingRestore?.copy(wasPlaying = true)
-        if (!startupSessionLoaded && selectionGeneration == 0L) return
-        // Play while Next is resolving belongs to the incoming entry, not
-        // the old song still used as the queue's continuation anchor.
-        if (waitingQueueEntryId != null) return
-        val requestedTrack = requestedPlaybackTrack()
-        if (requestedTrack.catalogId != null) {
-            if (lastPlaybackFailure != null || (expectedPlaybackGeneration == 0L && playbackRequestJob?.isActive != true)) {
-                selectionGeneration++
-                launchNativePlayback(requestedTrack, requestedPlaybackPositionMs())
-            } else if (expectedPlaybackGeneration != 0L) services.play()
-        } else {
-            playStartedRealtimeMs = android.os.SystemClock.elapsedRealtime()
-            isPlaying = true
-        }
-        playbackMessage = null
-    }
-
-    fun togglePlayback() {
-        if (playWhenReady) pausePlayback() else requestPlayback()
-    }
-
-    fun retryCurrentLyrics() {
-        lyricsStore.retryCurrentLyrics()
-    }
-
-    fun seekPlaybackBy(delta: Long) {
-        val snapshot = currentPlaybackSnapshot()
-        if (snapshot?.isLiveStream == true || snapshot?.canSeek == false) return
-        if (isStationPlayback() && snapshot?.isPrepared != true) return
-        positionAnchorMs = (currentPositionMs() + delta).coerceIn(0L, track.durationMs.coerceAtLeast(0L))
-        playStartedRealtimeMs = android.os.SystemClock.elapsedRealtime()
-        pendingRestore = pendingRestore?.copy(positionMs = positionAnchorMs)
-        startupCursorEdited = true
-        if (track.catalogId == null || expectedPlaybackGeneration == 0L) return
-        if (playbackPrepared) {
-            runCatching { services.seekTo(positionAnchorMs) }
-                .onFailure { playbackMessage = AppText.text(R.string.app_seek_failed) }
-        } else if (hasUserPlaybackRequest) {
-            selectionGeneration++
-            launchNativePlayback(requestedPlaybackTrack(), requestedPlaybackPositionMs())
         }
     }
 
@@ -471,278 +308,17 @@ fun AmAtvApp() {
         }
     }
 
-    fun executeTrackPlayback(nextTrack: Track) {
-        waitingQueueEntryId = null
-        selectionGeneration++
-        playbackRequestJob?.cancel()
-        pendingRestore = null
-        if (playWhenReady && nextTrack.catalogId != null && connectionState != MusicConnectionState.SignedIn) {
-            serviceMessage = AppText.text(R.string.app_apple_sign_in_required)
-            startSignIn()
-            return
-        }
-        positionAnchorMs = 0L
-        val initialTrack = withCachedLyrics(nextTrack)
-        track = initialTrack
-        advancingEndedTrackId = null
-        hasCurrentTrack = true
-        playStartedRealtimeMs = android.os.SystemClock.elapsedRealtime()
-        isPlaying = nextTrack.catalogId == null && playWhenReady
-        playbackMessage = null
-        playbackPrepared = false
-
-        val adopted = adoptingGaplessEntryId != null &&
-            adoptingGaplessEntryId == queueController.state.value.current?.entryId
-        if (adopted) {
-            // MusicKit already continued into this song: keep its generation, no pause or prepare.
-            isPlaying = playWhenReady
-            playbackPrepared = true
-            pendingRequestedSongCatalogId = null
-        } else if (nextTrack.catalogId != null) {
-            // Stop the previous song while authorization/preparation is pending.
-            services.pause()
-            if (playWhenReady) {
-                launchNativePlayback(initialTrack)
-            } else {
-                expectedPlaybackGeneration = 0L
-                pendingRequestedSongCatalogId = null
-                lastPlaybackFailure = null
-                commandFailure = null
-            }
-        } else {
-            expectedPlaybackGeneration = 0L
-            pendingRequestedSongCatalogId = null
-        }
-    }
-
-    val latestTrackPlayback by rememberUpdatedState<(Track) -> Unit>(::executeTrackPlayback)
-    queueController = remember {
-        PlaybackQueueController(
-            scope = scope,
-            services = services,
-            playbackPrefs = settingsStore,
-            onPlayTrack = { nextTrack ->
-                latestTrackPlayback(nextTrack)
-            },
-        )
-    }
-    val queueState by queueController.state.collectAsState()
-    val playbackQueue = queueState.displayQueue
-    val timelineEntries = remember(queueState.history, queueState.current, queueState.upNext, queueState.autoplay) {
-        queueState.timelineEntries
-    }
-    val timelineTracks = remember(timelineEntries) { timelineEntries.map { it.track } }
-    val timelineEntryIds = remember(timelineEntries) { timelineEntries.map { it.entryId } }
-
-    // Gapless (Flyme): once the current song is ready, mirror the app's next song into MusicKit so it
-    // can preload it and continue without a gap. Any change of current or next replaces it.
-    // Load the Favorite Songs / Library state of each song shown on Now Playing (Flyme star button).
-    LaunchedEffect(track.catalogId, connectionState) {
-        libraryActions.onCurrentTrackChanged(track, connectionState == MusicConnectionState.SignedIn)
-    }
-
-    // Fade at gapless song changes, chosen per kind of queue in Settings.
-    LaunchedEffect(queueState.context?.kind, queueState.stationFeed, settingsState.fadeStations, settingsState.fadeAlbums, settingsState.fadePlaylists) {
-        if (!BuildConfig.FLYME_AUTO) return@LaunchedEffect
-        services.setFadeEnabled(when {
-            queueState.stationFeed != null -> settingsState.fadeStations
-            queueState.context?.kind == ContextKind.Album -> settingsState.fadeAlbums
-            else -> settingsState.fadePlaylists
-        })
-    }
-
-    val gaplessNext = remember(queueState) { if (BuildConfig.FLYME_AUTO) queueController.peekAutoNext() else null }
-    LaunchedEffect(queueState.current?.entryId, gaplessNext?.entryId, gaplessNext?.track?.catalogId, playbackPrepared) {
-        if (!BuildConfig.FLYME_AUTO) return@LaunchedEffect
-        val next = gaplessNext
-        val current = queueState.current?.track
-        if (next == null || !playbackPrepared || isStationPlayback() || current?.catalogKind != CatalogKind.Song ||
-            next.track.catalogKind != CatalogKind.Song || next.track.catalogId == current.catalogId
-        ) {
-            if (gaplessLookahead != null) services.setLookahead(null)
-            gaplessLookahead = null
-            return@LaunchedEffect
-        }
-        // Let the current song settle before loading another stream.
-        delay(1_500L)
-        val resolved = cancellableResult { services.resolvePlayableTrack(next.track) }.getOrNull() ?: return@LaunchedEffect
-        if (resolved.catalogId != next.track.catalogId) queueController.updateCatalogIdentity(next.track, resolved)
-        gaplessLookahead = next.entryId to resolved
-        services.setLookahead(resolved)
-    }
-
-    fun waitForNextQueueEntry(entryId: Long?) {
-        if (entryId == null) return
-        waitingQueueEntryId = entryId
-        // Consume the startup Play gate even when only metadata navigation was
-        // replayed. The next entry's callback will honor the latest user intent.
-        hasUserPlaybackRequest = true
-        positionAnchorMs = currentPositionMs()
-        isPlaying = false
-        playbackPrepared = false
-        expectedPlaybackGeneration = 0L
-        playbackRequestJob?.cancel()
-        services.pause()
-        playbackMessage = null
-    }
-
-    fun applyQueueAction(action: StartupQueueAction): Boolean {
-        when (action) {
-            StartupQueueAction.Next -> {
-                pendingRestore = null
-                val next = queueController.advanceNext(manual = true)
-                val live = queueController.state.value
-                if (next == null && live.awaitingNext) {
-                    waitForNextQueueEntry(live.current?.entryId)
-                } else if (next == null) {
-                    positionAnchorMs = currentPositionMs()
-                    services.pause()
-                    isPlaying = false
-                    playWhenReady = false
+    LaunchedEffect(playbackStore) {
+        playbackStore.events.collect { event ->
+            when (event) {
+                is PlaybackEvent.Message -> serviceMessage = event.text
+                PlaybackEvent.SignInRequired -> startSignIn()
+                PlaybackEvent.ShowNowPlaying -> {
+                    if (destination != Destination.NowPlaying) previousDestination = destination
+                    destination = Destination.NowPlaying
                 }
             }
-            StartupQueueAction.Previous -> {
-                pendingRestore = null
-                queueController.advancePrevious(currentPositionMs())
-            }
-            is StartupQueueAction.Select -> {
-                if (!queueController.selectTimelineEntry(action.entryId)) return false
-            }
-            StartupQueueAction.ClearUpcoming -> queueController.clearUpcoming()
-            StartupQueueAction.CycleRepeat -> queueController.setRepeat(when (queueController.state.value.repeat) {
-                PlaybackRepeatMode.Off -> PlaybackRepeatMode.All
-                PlaybackRepeatMode.All -> PlaybackRepeatMode.One
-                PlaybackRepeatMode.One -> PlaybackRepeatMode.Off
-            })
-            StartupQueueAction.ToggleShuffle -> queueController.setShuffle(!queueController.state.value.shuffle)
-            StartupQueueAction.ToggleInfinite -> queueController.setInfinite(!queueController.state.value.infinite)
         }
-        return true
-    }
-
-    fun dispatchQueueAction(action: StartupQueueAction): Boolean =
-        if (!startupSessionLoaded && selectionGeneration == 0L) startupQueueActions.enqueue(action)
-        else applyQueueAction(action)
-
-    fun supersedeStartupQueueWithNewContext() {
-        // A catalog play action deliberately replaces the old rail. Keep pending
-        // preference choices, but don't replay old navigation into the new context.
-        startupQueueActions.preferencesForNewContext().forEach { applyQueueAction(it) }
-    }
-
-    LaunchedEffect(playbackPrefs) {
-        startupCheckpoint?.let(queueController::restoreFromSession)
-        val fullSession = cancellableResult {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { playbackPrefs.restoreSession() }
-        }.getOrNull()?.copy(wasPlaying = false)
-        if (selectionGeneration == 0L && fullSession != null) {
-            val cursor = if (startupCursorEdited && track.catalogId == fullSession.queue[fullSession.currentIndex].catalogId) {
-                positionAnchorMs
-            } else fullSession.positionMs
-            val restored = fullSession.copy(positionMs = cursor, wasPlaying = playWhenReady)
-            queueController.restoreFromSession(restored)
-            track = withCachedLyrics(restored.queue[restored.currentIndex])
-            hasCurrentTrack = true
-            positionAnchorMs = cursor
-            pendingRestore = restored.takeIf { track.catalogId != null }
-        }
-        if (selectionGeneration == 0L) {
-            // Replay metadata-only against the full rail, then honor the latest
-            // Play/Pause choice once. No intermediate item prepares native audio.
-            startupQueueActions.replayHydrated(
-                requestedPlayIntent = playWhenReady,
-                setPlayIntent = { playWhenReady = it },
-                apply = ::applyQueueAction,
-            )
-        } else {
-            startupQueueActions.drain()
-        }
-        startupSessionLoaded = true
-    }
-
-    // A Play press during metadata IO is deferred until the full queue/cursor is hydrated.
-    LaunchedEffect(startupSessionLoaded, playWhenReady, track.id) {
-        if (startupSessionLoaded && playWhenReady && !hasUserPlaybackRequest &&
-            waitingQueueEntryId == null && !queueState.awaitingNext && expectedPlaybackGeneration == 0L && playbackRequestJob?.isActive != true
-        ) {
-            if (track.catalogId != null) {
-                selectionGeneration++
-                launchNativePlayback(track, positionAnchorMs)
-            } else if (!services.isCatalogConfigured) {
-                hasUserPlaybackRequest = true
-                playStartedRealtimeMs = android.os.SystemClock.elapsedRealtime()
-                isPlaying = true
-            }
-        }
-    }
-    LaunchedEffect(hasUserPlaybackRequest) {
-        if (hasUserPlaybackRequest) queueController.activatePlaybackSession()
-    }
-
-    fun playStationAsSongs(station: Track, stationId: String, songs: List<Track>) {
-        supersedeStartupQueueWithNewContext()
-        ++selectionGeneration
-        if (destination != Destination.NowPlaying) previousDestination = destination
-        pendingRestore = null
-        playWhenReady = true
-        queueController.playStationSongs(
-            stationId = stationId,
-            songs = songs.map(::withCachedLyrics),
-            context = PlaybackContext(kind = ContextKind.SongList, id = stationId, title = station.title),
-        )
-        destination = Destination.NowPlaying
-    }
-
-    fun playTrack(nextTrack: Track, contextQueue: List<Track> = emptyList(), webStation: Boolean = false) {
-        val isStation = nextTrack.catalogKind == CatalogKind.Station
-        if (nextTrack.openAction != CatalogOpenAction.Play && !isStation) return
-        if (nextTrack.catalogId != null && connectionState != MusicConnectionState.SignedIn) {
-            serviceMessage = AppText.text(R.string.app_apple_sign_in_required)
-            startSignIn()
-            return
-        }
-        // Without a usable system Widevine the web player only gets 30-second previews: play the
-        // station's songs on the native player instead. Live radio has no songs and stays on the web.
-        val stationId = nextTrack.catalogId
-        if (isStation && BuildConfig.FLYME_AUTO && !webStation && stationId != null) {
-            scope.launch {
-                val asSongs = settingsState.stationsAsSongs ||
-                    !kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { services.widevineReady }
-                val songs = if (asSongs) {
-                    cancellableResult { services.stationSongs(stationId) }.getOrNull().orEmpty()
-                } else emptyList()
-                if (songs.isNotEmpty()) playStationAsSongs(nextTrack, stationId, songs)
-                else playTrack(nextTrack, contextQueue, webStation = true)
-            }
-            return
-        }
-        supersedeStartupQueueWithNewContext()
-        ++selectionGeneration
-        if (destination != Destination.NowPlaying) previousDestination = destination
-        pendingRestore = null
-
-        val fullQueue = if (isStation) {
-            listOf(withCachedLyrics(nextTrack))
-        } else if (contextQueue.isNotEmpty()) {
-            contextQueue.map(::withCachedLyrics)
-        } else if (nextTrack.catalogId == null) {
-            MockCatalog.tracks
-        } else {
-            listOf(withCachedLyrics(nextTrack))
-        }
-
-        val trackIndex = fullQueue.indexOfFirst { it.matchesPlaybackQueueEntry(nextTrack) }.coerceAtLeast(0)
-        playWhenReady = true
-        queueController.playContext(
-            tracks = fullQueue,
-            startIndex = trackIndex,
-            context = PlaybackContext(
-                kind = if (isStation) ContextKind.Single else ContextKind.SongList,
-                id = nextTrack.catalogId,
-                title = if (isStation) nextTrack.title else nextTrack.album,
-            ),
-        )
-        destination = Destination.NowPlaying
     }
 
     /** Leaves Now Playing for the song's artist or album page once Apple Music names it. */
@@ -759,82 +335,12 @@ fun AmAtvApp() {
         }
     }
 
-
-
-    fun playCollection(collection: Track, tracks: List<Track>, index: Int, shuffle: Boolean) {
-        if (tracks.isEmpty() || index !in tracks.indices) return
-        if (connectionState != MusicConnectionState.SignedIn) {
-            serviceMessage = AppText.text(R.string.app_apple_sign_in_required)
-            startSignIn()
-            return
-        }
-        supersedeStartupQueueWithNewContext()
-        if (destination != Destination.NowPlaying) previousDestination = destination
-        pendingRestore = null
-        playWhenReady = true
-        queueController.playContext(
-            tracks = tracks.map(::withCachedLyrics),
-            startIndex = index,
-            context = PlaybackContext(
-                kind = when {
-                    collection.catalogKind == CatalogKind.Album -> ContextKind.Album
-                    collection.resourceType == "library-playlists" -> ContextKind.LibraryPlaylist
-                    else -> ContextKind.Playlist
-                },
-                id = collection.resourceId ?: collection.catalogId,
-                title = collection.title,
-            ),
-            shuffle = shuffle,
-        )
-        destination = Destination.NowPlaying
-    }
-
-    fun advanceNextTrack(isAuto: Boolean = true) {
-        val next = queueController.advanceNext(manual = !isAuto)
-        val live = queueController.state.value
-        if (next == null && live.awaitingNext) {
-            waitForNextQueueEntry(live.current?.entryId)
-        } else if (next == null) {
-            isPlaying = false
-            playWhenReady = false
-        }
-    }
-
-    fun selectQueueTrack(index: Int) {
-        timelineEntries.getOrNull(index)?.let { entry ->
-            val previousIntent = playWhenReady
-            playWhenReady = true
-            if (!dispatchQueueAction(StartupQueueAction.Select(entry.entryId))) playWhenReady = previousIntent
-        }
-    }
-
-    fun skip(relative: Int) {
-        if (isStationPlayback()) {
-            val snapshot = currentPlaybackSnapshot() ?: return
-            val canSkip = if (relative > 0) snapshot.canSkipNext else snapshot.canSkipPrevious
-            if (!canSkip) return
-            if (relative > 0) services.skipToNext() else services.skipToPrevious()
-            return
-        }
-        // Next onto the gapless lookahead: MusicKit already buffered it, so no new prepare.
-        val queued = gaplessLookahead
-        val lookaheadId = queued?.second?.catalogId
-        if (relative > 0 && lookaheadId != null && playbackPrepared && isPlaying &&
-            queueController.peekAutoNext()?.entryId == queued.first &&
-            services.skipToQueuedLookahead(lookaheadId)
-        ) {
-            playWhenReady = true
-            return
-        }
-        dispatchQueueAction(if (relative > 0) StartupQueueAction.Next else StartupQueueAction.Previous)
-    }
-
     fun showNowPlaying() {
         if (!hasCurrentTrack) {
             val firstCandidate = shelvesByDestination[destination]?.firstOrNull()?.items?.firstOrNull()
                 ?: shelvesByDestination[Destination.Home]?.firstOrNull()?.items?.firstOrNull()
             if (firstCandidate != null) {
-                playTrack(firstCandidate)
+                playbackStore.playTrack(firstCandidate)
             } else {
                 serviceMessage = AppText.text(R.string.app_choose_content_before_playback)
             }
@@ -844,309 +350,20 @@ fun AmAtvApp() {
         destination = Destination.NowPlaying
     }
 
-    fun handlePlaybackFailure(selection: Long, kind: PlaybackFailureKind, message: String) {
-        if (selection != selectionGeneration || failureHandledSelection == selection) return
-        failureHandledSelection = selection
-        lastPlaybackFailure = kind
-        pendingRestore = null
-        pendingRequestedSongCatalogId = null
-        isPlaying = false
-        playbackPrepared = false
-        services.pause()
-        networkRetryJob?.cancel()
-        networkRetryJob = null
-        if (kind == PlaybackFailureKind.TrackUnavailable && playWhenReady && !isStationPlayback()) {
-            val entry = queueController.state.value.current
-            val next = entry?.let { queueController.skipFailedCurrent(it.entryId) }
-            // onPlayTrack can already have started another request synchronously.
-            if (selection != selectionGeneration) return
-            if (next == null && queueController.state.value.awaitingNext) {
-                waitForNextQueueEntry(queueController.state.value.current?.entryId)
-            } else if (next == null) {
-                playWhenReady = false
-                playbackMessage = if (queueController.state.value.failureLimitReached) {
-                    AppText.text(R.string.app_multiple_songs_unavailable)
-                } else message
-            }
-        } else if (kind == PlaybackFailureKind.Network && playWhenReady && networkRetryCount < 2) {
-            networkRetryCount++
-            val retrySelection = selection
-            val retryTrack = requestedPlaybackTrack()
-            val retryPosition = requestedPlaybackPositionMs()
-            networkRetryJob = scope.launch {
-                for (countdown in 3 downTo 1) {
-                    if (retrySelection != selectionGeneration || !playWhenReady) return@launch
-                    playbackMessage = AppText.text(R.string.services_song_connection_retry, countdown)
-                    delay(1_000L)
-                }
-                if (retrySelection != selectionGeneration || !playWhenReady) return@launch
-                playbackMessage = null
-                selectionGeneration++
-                launchNativePlayback(retryTrack, retryPosition)
-            }
-        } else {
-            playWhenReady = false
-            playbackMessage = message
-        }
-    }
-
-    LaunchedEffect(commandFailure) {
-        commandFailure?.let { handlePlaybackFailure(it.first, it.second, it.third) }
-    }
-
-    LaunchedEffect(waitingQueueEntryId, queueState.current?.entryId, queueState.awaitingNext, queueState.autoplayStatus) {
-        val waitingEntry = waitingQueueEntryId ?: return@LaunchedEffect
-        if (queueState.current?.entryId != waitingEntry) {
-            waitingQueueEntryId = null
-            return@LaunchedEffect
-        }
-        val message = waitingRecommendationError(
-            waitingEntry, queueState.current?.entryId, queueState.awaitingNext,
-            (queueState.autoplayStatus as? dev.amatv.playback.AutoplayStatus.Error)?.message,
-        )
-        if (message != null) {
-            // The failed wait is terminal. A later explicit Play may retry the
-            // displayed item, but hydration must never replay it automatically.
-            waitingQueueEntryId = null
-            playWhenReady = false
-            isPlaying = false
-            playbackMessage = message
-        } else if (!queueState.awaitingNext && queueState.autoplayStatus is dev.amatv.playback.AutoplayStatus.Idle) {
-            waitingQueueEntryId = null
-            playWhenReady = false
-        }
-    }
-
-    fun publishSystemSnapshot(snapshot: PlaybackSnapshot) {
-        val playback = if (!playWhenReady && (snapshot.isPlaying || snapshot.isBuffering)) {
-            snapshot.copy(isPlaying = false, isBuffering = false)
-        } else snapshot
-        val published = playback.withSystemLyrics(lyricsState.trackIdentity, lyricsState.lines)
-        systemPlaybackSnapshot.value = published
-        val live = queueController.state.value
-        val stationPlayback = live.current?.track?.catalogKind == CatalogKind.Station
-        services.publishSystemPlayback(
-            published,
-            if (stationPlayback) published.canSkipNext else live.canSkipNext,
-            if (stationPlayback) published.canSkipPrevious else live.canSkipPrevious,
-        )
-    }
-
-    fun applyPlaybackSnapshot(snapshot: PlaybackSnapshot) {
-        if (snapshot.requestGeneration == 0L || snapshot.requestGeneration != expectedPlaybackGeneration) return
-        if (snapshot.errorMessage != null) {
-            publishSystemSnapshot(snapshot)
-            handlePlaybackFailure(selectionGeneration, snapshot.failureKind ?: PlaybackFailureKind.Unexpected,
-                snapshot.errorMessage)
-            return
-        }
-        val pendingCatalogId = pendingRequestedSongCatalogId
-        // A Station request may report its current Song, so it must never pass this song-only gate.
-        if (pendingCatalogId != null &&
-            (!snapshot.hasPlayerCurrentTrack || snapshot.currentTrack?.catalogId != pendingCatalogId)
-        ) return
-        publishSystemSnapshot(snapshot)
-        if (snapshot.notice != lastPlaybackNotice) {
-            snapshot.notice?.let { serviceMessage = it }
-            lastPlaybackNotice = snapshot.notice
-        }
-        if (!snapshot.isPrepared) return
-        val queued = gaplessLookahead
-        if (snapshot.gaplessAdvanceCatalogId != null && queued != null &&
-            queued.second.catalogId == snapshot.gaplessAdvanceCatalogId &&
-            snapshot.currentTrack?.catalogId == queued.second.catalogId &&
-            queueController.peekAutoNext()?.entryId == queued.first
-        ) {
-            gaplessLookahead = null
-            adoptingGaplessEntryId = queued.first
-            try {
-                queueController.advanceNext(manual = false)
-            } finally {
-                adoptingGaplessEntryId = null
-            }
-            return
-        }
-        playbackPrepared = true
-        pendingRequestedSongCatalogId = null
-        pendingRestore = null
-        if (snapshot.isPlaying && snapshot.positionMs > 250L && successfulSelection != selectionGeneration) {
-            successfulSelection = selectionGeneration
-            networkRetryCount = 0
-            networkRetryJob?.cancel()
-            networkRetryJob = null
-            queueController.state.value.current?.let { queueController.markCurrentPlaybackStarted(it.entryId) }
-        }
-        val endedEntryKey = queueController.state.value.current?.entryId?.toString() ?: track.id
-        if (!snapshot.isEnded && snapshot.currentTrack?.catalogId == track.catalogId) advancingEndedTrackId = null
-        if (snapshot.isEnded && snapshot.currentTrack?.catalogId == track.catalogId &&
-            advancingEndedTrackId != endedEntryKey
-        ) {
-            advancingEndedTrackId = endedEntryKey
-            isPlaying = false
-            if (isStationPlayback()) {
-                playWhenReady = false
-                playbackPrepared = false
-                expectedPlaybackGeneration = 0L
-            } else {
-                advanceNextTrack(isAuto = true)
-            }
-            return
-        }
-        val trackChanged = snapshot.currentTrack != null && (
-            track.id != snapshot.currentTrack.id ||
-            track.catalogId != snapshot.currentTrack.catalogId
-        )
-        snapshot.currentTrack?.let { current ->
-            val withLyrics = withCachedLyrics(current)
-            if (track.id != withLyrics.id ||
-                track.lyrics != withLyrics.lyrics ||
-                track.title != withLyrics.title ||
-                track.artist != withLyrics.artist ||
-                track.durationMs != withLyrics.durationMs
-            ) {
-                track = withLyrics
-            }
-            hasCurrentTrack = true
-        }
-
-        // Performance optimization: prevent 20fps root recomposition by checking drift > 500ms
-        val currentPredictedMs = if (isPlaying) {
-            positionAnchorMs + (snapshot.capturedAtElapsedRealtimeMs - playStartedRealtimeMs)
-        } else {
-            positionAnchorMs
-        }
-        val drift = kotlin.math.abs(snapshot.positionMs - currentPredictedMs)
-        val seekOrDrift = drift > 500L
-        val playStateChanged = snapshot.isPlaying != isPlaying
-        if (trackChanged || playStateChanged || seekOrDrift) {
-            positionAnchorMs = snapshot.positionMs
-            playStartedRealtimeMs = snapshot.capturedAtElapsedRealtimeMs
-        }
-        if (playStateChanged) {
-            isPlaying = snapshot.isPlaying
-        }
-        playbackMessage = null
-    }
-
-    val latestSnapshotHandler by rememberUpdatedState<(PlaybackSnapshot) -> Unit>(::applyPlaybackSnapshot)
-    val latestSystemPlaybackCallbacks by rememberUpdatedState(
-        PlaybackMediaSession.Callbacks(
-            play = ::requestPlayback,
-            pause = ::pausePlayback,
-            next = { skip(1) },
-            previous = { skip(-1) },
-            seekTo = { position -> seekPlaybackBy(position - currentPositionMs()) },
-        ),
-    )
-    DisposableEffect(services) {
-        services.setSystemPlaybackCallbacks(PlaybackMediaSession.Callbacks(
-            play = { latestSystemPlaybackCallbacks.play() },
-            pause = { latestSystemPlaybackCallbacks.pause() },
-            next = { latestSystemPlaybackCallbacks.next() },
-            previous = { latestSystemPlaybackCallbacks.previous() },
-            seekTo = { latestSystemPlaybackCallbacks.seekTo(it) },
-        ))
-        services.setPlaybackListener { latestSnapshotHandler(it) }
-        onDispose {
-            services.setSystemPlaybackCallbacks(null)
-            services.setPlaybackListener(null)
-            services.release()
-        }
-    }
-    LaunchedEffect(queueState.canSkipNext, queueState.canSkipPrevious, queueState.current?.entryId) {
-        systemPlaybackSnapshot.value?.takeIf {
-            it.requestGeneration == expectedPlaybackGeneration
-        }?.let {
-            publishSystemSnapshot(it)
-        }
-    }
-
-    val saveCurrentSession by rememberUpdatedState<(Boolean) -> Unit> saveSession@{ synchronous ->
-        playbackPrefs.saveActiveTab(
-            if (destination == Destination.NowPlaying) previousDestination else destination,
-            synchronous,
-        )
-        if (!startupSessionLoaded && selectionGeneration == 0L) return@saveSession
-        if (hasCurrentTrack) {
-            val currentEntries = queueState.history + listOfNotNull(queueState.current) +
-                queueState.upNext + queueState.autoplay
-            val currentQueue = currentEntries.map { it.track }
-            if (currentQueue.isNotEmpty()) {
-                val currentIdx = queueState.history.size.coerceIn(0, currentQueue.lastIndex)
-                playbackPrefs.saveSession(
-                    PlaybackSession(
-                        queue = currentQueue,
-                        currentIndex = currentIdx,
-                        positionMs = currentPositionMs().coerceIn(0L, track.durationMs.coerceAtLeast(1L)),
-                        wasPlaying = playWhenReady,
-                        destination = destination,
-                        previousDestination = previousDestination,
-                        radioActive = queueState.infinite,
-                        radioSeed = queueState.recommendationSeed,
-                        autoplayEntryIndices = currentEntries.withIndex()
-                            .filter { it.value.origin == EntryOrigin.Autoplay }
-                            .map { it.index }.toSet(),
-                        queueEntryIds = currentEntries.map { it.entryId },
-                        playedEntryIds = currentEntries.filter { it.wasPlayed }.map { it.entryId }.toSet(),
-                        contextQueue = queueState.contextEntries.map { it.track },
-                        contextEntryIds = queueState.contextEntries.map { it.entryId },
-                        sessionId = queueState.sessionId,
-                        persistenceId = queueState.persistenceId,
-                    ),
-                    synchronous,
-                )
-            }
-        }
-    }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) saveCurrentSession(true)
+            if (event == Lifecycle.Event.ON_STOP) playbackStore.saveSession(true)
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        hostWindow?.saveNow = { saveCurrentSession(true) }
+        hostWindow?.saveNow = { playbackStore.saveSession(true) }
         onDispose {
             hostWindow?.saveNow = null
-            saveCurrentSession(true)
+            playbackStore.saveSession(true)
             lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
-    LaunchedEffect(
-        destination, previousDestination, track.id, playbackQueue, isPlaying, playWhenReady,
-        queueState.repeat, queueState.shuffle, queueState.infinite,
-    ) {
-        delay(350L)
-        saveCurrentSession(false)
-    }
     LaunchedEffect(playWhenReady) { if (hostWindow != null) WindowHosts.playing = playWhenReady }
-    LaunchedEffect(isPlaying, track.id) {
-        if (!isPlaying) return@LaunchedEffect
-        while (true) {
-            delay(5_000L)
-            saveCurrentSession(false)
-        }
-    }
-
-    LaunchedEffect(services, connectionState, playWhenReady) {
-        if (BuildConfig.FLYME_AUTO && connectionState == MusicConnectionState.SignedIn && !playWhenReady) {
-            delay(5_000L)
-            services.prefetchLibraryDetails()
-        }
-    }
-
-    // Auto-advance timer: detects track finish and smoothly advances
-    LaunchedEffect(isPlaying, track.id, track.durationMs) {
-        // Native playback ends only on its generation-bound SDK end event.
-        if (track.catalogId != null || !isPlaying || track.durationMs <= 2_000L) return@LaunchedEffect
-        while (isPlaying) {
-            val currentMs = currentPositionMs()
-            if (currentMs >= track.durationMs - 250L) {
-                advanceNextTrack(isAuto = true)
-                break
-            }
-            delay(250L)
-        }
-    }
 
     // Lyrics use the account API, not the native audio engine. Wait for the full
     // session (including deferred queue selection) before resolving the current
@@ -1158,16 +375,6 @@ fun AmAtvApp() {
         lyricsState.lines
     } else {
         track.lyrics
-    }
-
-    // Lyrics arrive independently of MusicKit's playback clock. Publish their
-    // completion/clearing immediately, rather than waiting for the next SDK event.
-    LaunchedEffect(currentLyricsIdentity, currentLyricsLines, hasCurrentTrack) {
-        if (!hasCurrentTrack) return@LaunchedEffect
-        systemPlaybackSnapshot.value?.takeIf {
-            it.requestGeneration == expectedPlaybackGeneration &&
-                it.currentTrack?.lyricsIdentity() == currentLyricsIdentity
-        }?.let(::publishSystemSnapshot)
     }
 
     val prefetchTargets = remember(queueState.current?.entryId, queueState.upNext, queueState.autoplay) {
@@ -1214,20 +421,10 @@ fun AmAtvApp() {
     }
 
     val stationQueueContext = queueState.current?.track?.catalogKind == CatalogKind.Station
-    // Station history (Flyme): the songs a station played, kept across launches, like Apple Music's
-    // played list. The queue view shows them before the current song while a station plays.
-    LaunchedEffect(track.catalogId, stationQueueContext) {
-        if (!BuildConfig.FLYME_AUTO || !stationQueueContext) return@LaunchedEffect
-        val song = track.takeIf { it.catalogKind == CatalogKind.Song && it.catalogId != null } ?: return@LaunchedEffect
-        if (stationHistory.lastOrNull()?.catalogId == song.catalogId) return@LaunchedEffect
-        stationHistory = (stationHistory.filter { it.catalogId != song.catalogId } + song.copy(lyrics = emptyList()))
-            .takeLast(STATION_HISTORY_LIMIT)
-        playbackPrefs.saveStationHistory(stationHistory)
-    }
     val stationTimeline = if (BuildConfig.FLYME_AUTO && stationQueueContext) {
         if (stationHistory.lastOrNull()?.catalogId == track.catalogId) stationHistory else stationHistory + track
     } else emptyList()
-    val activePlaybackSnapshot = currentPlaybackSnapshot()
+    val activePlaybackSnapshot = playbackState.snapshot
     // The native SDK briefly reports live while a song loads; only a station item can be a live stream.
     val isLiveStream = activePlaybackSnapshot?.isLiveStream == true && stationQueueContext
     val canSeekPlayback = !isLiveStream && activePlaybackSnapshot?.canSeek != false &&
@@ -1310,31 +507,31 @@ fun AmAtvApp() {
                     }
                     when (event.nativeKeyEvent.keyCode) {
                         KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
-                            togglePlayback()
+                            playbackStore.togglePlayback()
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_PLAY -> {
-                            requestPlayback()
+                            playbackStore.requestPlayback()
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_PAUSE -> {
-                            pausePlayback()
+                            playbackStore.pausePlayback()
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                            skip(1)
+                            playbackStore.skip(1)
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
-                            skip(-1)
+                            playbackStore.skip(-1)
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_REWIND -> {
-                            seekPlaybackBy(-10_000L)
+                            playbackStore.seekPlaybackBy(-10_000L)
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
-                            seekPlaybackBy(10_000L)
+                            playbackStore.seekPlaybackBy(10_000L)
                             true
                         }
                         else -> false
@@ -1374,7 +571,7 @@ fun AmAtvApp() {
                         isPlaying = isPlaying,
                         playWhenReady = playWhenReady,
                         nowPlayingSubtitle = nowPlayingSubtitle,
-                        onTogglePlayback = ::togglePlayback,
+                        onTogglePlayback = playbackStore::togglePlayback,
                         searchTracks = searchResults,
                         searchLoading = searchLoading,
                         recentTracks = recentTracks,
@@ -1395,27 +592,17 @@ fun AmAtvApp() {
                         onSignIn = (::startSignIn),
                         onSignOut = {
                             contentStore.resetLibraryPagination()
-                            selectionGeneration++
-                            playbackRequestJob?.cancel()
+                            playbackStore.onSignedOut()
                             accountStore.signOut()
-                            queueController.reset()
                             playbackPrefs.clearSession()
                             scope.launch { cancellableResult { services.contentCache.clear { ArtworkImages.clear(context) } } }
-                            isPlaying = false
-                            playWhenReady = false
-                            waitingQueueEntryId = null
-                            playbackPrepared = false
-                            hasUserPlaybackRequest = false
-                            hasCurrentTrack = false
                             lyricsStore.onCacheCleared()
-                            expectedPlaybackGeneration = 0L
-                            pendingRestore = null
                             contentStore.onSignedOut()
                             serviceMessage = AppText.text(R.string.app_apple_signed_out)
                         },
                         onRetry = (::refreshAllContent),
                         onSearch = contentStore::search,
-                        onOpenTrack = { item, q -> playTrack(item, contextQueue = q) },
+                        onOpenTrack = { item, q -> playbackStore.playTrack(item, contextQueue = q) },
                         loadCollection = services::collectionTracks,
                         cachedCollection = services::cachedCollectionTracks,
                         savedCollection = services::savedCollectionTracks,
@@ -1427,7 +614,7 @@ fun AmAtvApp() {
                         cachedArtistCatalog = services::cachedArtistPage,
                         savedArtistCatalog = services::savedArtistPage,
                         loadArtistViewMore = services::catalogArtistViewMore,
-                        onPlayCollection = ::playCollection,
+                        onPlayCollection = playbackStore::playCollection,
                         lyricOffsetMs = settingsState.lyricOffsetMs,
                         onLyricOffsetChange = settingsStore::setLyricOffsetMs,
                         lowPerformanceMode = settingsState.lowPerformanceMode,
@@ -1482,7 +669,7 @@ fun AmAtvApp() {
                         canSetAutoplay = !stationQueueContext && track.catalogId != null &&
                             track.catalogKind == dev.amatv.model.CatalogKind.Song,
                         onClearQueue = {
-                            if (!stationQueueContext) dispatchQueueAction(StartupQueueAction.ClearUpcoming)
+                            if (!stationQueueContext) playbackStore.dispatchQueueAction(StartupQueueAction.ClearUpcoming)
                         },
                         lyricsLoading = lyricsState.trackIdentity == currentLyricsIdentity &&
                             lyricsState.isLoading,
@@ -1490,15 +677,15 @@ fun AmAtvApp() {
                             lyricsState.isLookupFailed,
                         lyricsTransientFailure = lyricsState.trackIdentity == currentLyricsIdentity &&
                             lyricsState.isTransientFailure,
-                        onRetryLyrics = ::retryCurrentLyrics,
+                        onRetryLyrics = playbackStore::retryCurrentLyrics,
                         lyricOffsetMs = settingsState.lyricOffsetMs,
                         statusMessage = playerNotice ?: playbackMessage ?: if (queueState.awaitingNext) {
                             (queueState.autoplayStatus as? dev.amatv.playback.AutoplayStatus.Error)?.message
                         } else null,
-                        onTogglePlayback = (::togglePlayback),
-                        onSkipPrevious = { skip(-1) },
-                        onSkipNext = { skip(1) },
-                        onSeekBy = ::seekPlaybackBy,
+                        onTogglePlayback = playbackStore::togglePlayback,
+                        onSkipPrevious = { playbackStore.skip(-1) },
+                        onSkipNext = { playbackStore.skip(1) },
+                        onSeekBy = playbackStore::seekPlaybackBy,
                         canSeek = canSeekPlayback,
                         isLiveStream = isLiveStream,
                         stationName = stationName.takeIf { !isLiveStream && track.catalogKind != CatalogKind.Station },
@@ -1506,8 +693,8 @@ fun AmAtvApp() {
                             // A station's played song plays on its own, leaving the station.
                             if (stationTimeline.isNotEmpty()) {
                                 stationTimeline.getOrNull(index)?.takeIf { index != stationTimeline.lastIndex }
-                                    ?.let { song -> playWhenReady = true; playTrack(song, listOf(song)) }
-                            } else selectQueueTrack(index)
+                                    ?.let { song -> playbackStore.playTrack(song, listOf(song)) }
+                            } else playbackStore.selectQueueTrack(index)
                         },
                         onBack = { destination = previousDestination },
                         onOpenArtist = { openFromPlayer(services::catalogArtistOf) },
@@ -1533,13 +720,13 @@ fun AmAtvApp() {
                         onLyricTranslationLanguageChange = settingsStore::setLyricTranslationLanguageTag,
                         onLyricPronunciationLanguageChange = settingsStore::setLyricPronunciationLanguageTag,
                         onCycleRepeat = {
-                            if (!stationQueueContext) dispatchQueueAction(StartupQueueAction.CycleRepeat)
+                            if (!stationQueueContext) playbackStore.dispatchQueueAction(StartupQueueAction.CycleRepeat)
                         },
                         onToggleShuffle = {
-                            if (!stationQueueContext) dispatchQueueAction(StartupQueueAction.ToggleShuffle)
+                            if (!stationQueueContext) playbackStore.dispatchQueueAction(StartupQueueAction.ToggleShuffle)
                         },
                         onToggleAutoplay = {
-                            if (!stationQueueContext) dispatchQueueAction(StartupQueueAction.ToggleInfinite)
+                            if (!stationQueueContext) playbackStore.dispatchQueueAction(StartupQueueAction.ToggleInfinite)
                         },
                         modifier = Modifier
                             .fillMaxSize()
@@ -2141,5 +1328,3 @@ private fun TopNavigation(
         }
     }
 }
-
-private const val STATION_HISTORY_LIMIT = 50

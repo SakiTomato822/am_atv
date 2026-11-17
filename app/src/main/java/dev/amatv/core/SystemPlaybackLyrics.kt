@@ -1,4 +1,4 @@
-package dev.amatv.ui
+package dev.amatv.core
 
 import dev.amatv.integration.PlaybackSnapshot
 import dev.amatv.model.LyricLine
