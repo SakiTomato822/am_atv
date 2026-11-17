@@ -107,16 +107,16 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/flymeGecko/app-flymeGecko.apk dist/AMATV-FlymeAuto-Preview-arm64.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs dist/AMATV-FlymeAuto-Preview-arm64.apk | tee work/ci/signer.txt
+          cp app/build/outputs/apk/flymeGecko/app-flymeGecko.apk dist/AMFolio-Preview-arm64.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs dist/AMFolio-Preview-arm64.apk | tee work/ci/signer.txt
           grep -qi 'certificate SHA-256 digest: 91f7b9d6496414a0fab0a87c8fcc60f929df0dd9fa4d4a9a52215869178bab8d' work/ci/signer.txt
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging dist/AMATV-FlymeAuto-Preview-arm64.apk | grep "package: name='dev.amatv.flyme.preview'"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging dist/AMFolio-Preview-arm64.apk | grep "package: name='dev.amatv.flyme.preview'"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: inputs.preview
         with:
           name: flyme-preview-apk
-          path: dist/AMATV-FlymeAuto-Preview-arm64.apk
+          path: dist/AMFolio-Preview-arm64.apk
           retention-days: 3
 
       - name: Verify APK and prepare release
@@ -124,20 +124,20 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/flymeGecko/app-flymeGecko.apk dist/AMATV-FlymeAuto-Gecko-arm64.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs dist/AMATV-FlymeAuto-Gecko-arm64.apk | tee work/ci/signer.txt
+          cp app/build/outputs/apk/flymeGecko/app-flymeGecko.apk dist/AMFolio-arm64.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs dist/AMFolio-arm64.apk | tee work/ci/signer.txt
           python3 - <<'PY'
           import pathlib, re
           expected = '91f7b9d6496414a0fab0a87c8fcc60f929df0dd9fa4d4a9a52215869178bab8d'
           signers = re.findall(r'certificate SHA-256 digest: ([0-9a-fA-F]{64})', pathlib.Path('work/ci/signer.txt').read_text())
           assert [value.lower() for value in signers] == [expected], 'Signing certificate changed: refusing an incompatible update'
           PY
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging dist/AMATV-FlymeAuto-Gecko-arm64.apk > work/ci/badging.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging dist/AMFolio-arm64.apk > work/ci/badging.txt
           grep "package: name='dev.amatv.flyme'" work/ci/badging.txt
           grep "native-code: 'arm64-v8a'" work/ci/badging.txt
           python3 - <<'PY'
           import pathlib, zipfile
-          with zipfile.ZipFile('dist/AMATV-FlymeAuto-Gecko-arm64.apk') as z:
+          with zipfile.ZipFile('dist/AMFolio-arm64.apk') as z:
               names = set(z.namelist())
               assert 'lib/arm64-v8a/libappleMusicSDK.so' in names
               assert 'lib/arm64-v8a/libxul.so' in names
@@ -146,34 +146,27 @@ jobs:
           assert 'FLYME_UI_PREVIEW = false' in config
           assert 'AUTH_BROWSER_IS_GECKO = true' in config
           PY
-          (cd dist && sha256sum AMATV-FlymeAuto-Gecko-arm64.apk > SHA256SUMS.txt)
+          (cd dist && sha256sum AMFolio-arm64.apk > SHA256SUMS.txt)
           cat > dist/release-notes.md <<'EOF'
-          Flyme Auto 非官方适配版（ARM64，Android 9+）Flyme.14.5 测试版，基于 Sam 的 AM for TV。
+          AM Folio（余白）15.0 Alpha 1：Flyme Auto 非官方适配版的下一代，ARM64，Android 9+，基于 Sam 的 AM for TV。
 
-          versionCode 37，与之前的版本使用同一固定签名，可直接覆盖安装并保留登录与应用数据。
+          这是 15 系列的第一个测试版，界面和 14.5 基本一样，主要是内部重构，请当作测试版使用。
 
-          Flyme.14.5 相对 Flyme.14.4 的变化：
-          - 歌词等待圆点：第一句前和 7 秒以上的间奏，新的横屏和竖屏歌词页都会显示三个逐个点亮的圆点；竖屏海报模式里圆点占大字那一行。
-          - 小窗：整个 App 都在小窗里（不再只有播放页），并按手机尺寸排版，字和按钮不再过小。小窗按钮只在横屏播放页右上角；回到全屏用 Flyme 小窗自带的放大按钮。
-          - 竖屏「流光」背景压暗，浅色封面上的歌词更清楚；海报歌词居中，短句自动放大；没有歌词时「取色渐隐」不再叠一层背景封面。
-          - 已知：Flyme 小窗放大回全屏时，音乐可能会中断，需要重新点播放；Flyme 15 会修。
+          versionCode 38，包名仍是 dev.amatv.flyme，签名不变，可直接覆盖 14.x 安装，保留登录与应用数据。
 
-          Flyme.14.3 的修复（累计）：
-          - 主唱与和声重叠的段落，歌词不再停住；同时在唱的几行一起点亮。
-          - 竖屏「取色渐隐」更素；搜索结果竖屏上下排列；手机上顶部栏不再与状态栏重叠。
+          相对 Flyme.14.5 的变化：
+          - 改名：App 名称改为 AM Folio，简体中文系统显示「余白」，繁体显示「餘白」。
+          - 修复：竖屏海报模式下切到下一首（包括自动播完切歌）时小窗或 App 闪退。
+          - 修复：部分歌曲歌词一直停在第一句不动；没有逐句时间的歌词改为列表显示，不再出现卡住的海报。
+          - 海报歌词：同一首歌字号统一，不再一句大一句小。
+          - 移除 YouTube Music 相关功能（YTM 电台续播、Google 账号配对），只保留 Apple Music。
+          - 内部：设置、喜欢、歌词逻辑搬进独立的核心层，为 15 的新界面做准备；界面行为应与 14.5 一致，如有不同请反馈。
 
-          Flyme.14 系列的主要变化（累计）：
-          - Metro 风格主页与导航，左右滑动切换页面。
-          - 手机与平板适配：高像素密度屏幕横屏不再溢出或错位；资料库在竖屏下每行 3 张卡片。
-          - 播放页：横屏「流光」为 Flyme.12 布局加玻璃控制卡片；「取色渐隐」与竖屏为新歌词页；竖屏支持返回、拖动翻看歌词、无歌词时显示大封面；下拉退出只在顶部区域生效。
-          - 歌词沿用 Flyme.12 的逐字效果；「译」按钮打开歌词设置；海报模式按歌词本来的短句换行。
-          - 资料库启动时显示上一次的完整内容；喜好歌曲、歌单等详情页有本机缓存。
-
-          已知情况：专辑、歌单、歌手、设置页面与竖屏下的播放队列仍沿用横屏排版，会在 Flyme 15 的新界面里解决。
+          已知情况：专辑、歌单、歌手、设置页面与竖屏下的播放队列仍沿用横屏排版，会在 15 的新界面里解决。
 
           本版沿用上游 APK 的内置开发者 Token，有效期字段为 2027-04-22，到期前会随新版本更新；不包含签名私钥或任何用户登录凭证。
 
-          包名 dev.amatv.flyme，与 UI Preview 包可并存。请下载 AMATV-FlymeAuto-Gecko-arm64.apk。
+          请下载 AMFolio-arm64.apk。
           EOF
 
       - name: Publish release APK
@@ -183,16 +176,16 @@ jobs:
         run: |
           tag="flyme-auto-test-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           # Name the release by the app's own version (e.g. Flyme.6), not the workflow run count.
-          version=$(sed -n 's/.*versionNameSuffix = "-flyme\.\([0-9][0-9.]*\)".*/\1/p' app/build.gradle.kts | head -n 1)
+          version=$(sed -n 's/.*versionNameSuffix = "-flyme\.\([0-9][0-9a-z.-]*\)".*/\1/p' app/build.gradle.kts | head -n 1)
           test -n "$version"
           if [ "${{ inputs.stable }}" = "true" ] && gh release view "flyme-auto-v${version}" > /dev/null 2>&1; then
             # A rebuilt stable version replaces its APK, checksums and notes in place.
-            gh release upload "flyme-auto-v${version}" dist/AMATV-FlymeAuto-Gecko-arm64.apk dist/SHA256SUMS.txt --clobber
+            gh release upload "flyme-auto-v${version}" dist/AMFolio-arm64.apk dist/SHA256SUMS.txt --clobber
             gh release edit "flyme-auto-v${version}" --notes-file dist/release-notes.md
           elif [ "${{ inputs.stable }}" = "true" ]; then
-            gh release create "flyme-auto-v${version}" dist/AMATV-FlymeAuto-Gecko-arm64.apk dist/SHA256SUMS.txt --target "$(git rev-parse HEAD)" --latest --title "Flyme Auto · Flyme.${version}" --notes-file dist/release-notes.md
+            gh release create "flyme-auto-v${version}" dist/AMFolio-arm64.apk dist/SHA256SUMS.txt --target "$(git rev-parse HEAD)" --latest --title "AM Folio · ${version}" --notes-file dist/release-notes.md
           else
-            gh release create "$tag" dist/AMATV-FlymeAuto-Gecko-arm64.apk dist/SHA256SUMS.txt --target "$(git rev-parse HEAD)" --prerelease --latest=false --title "Flyme Auto · Flyme ${version}" --notes-file dist/release-notes.md
+            gh release create "$tag" dist/AMFolio-arm64.apk dist/SHA256SUMS.txt --target "$(git rev-parse HEAD)" --prerelease --latest=false --title "AM Folio · ${version}" --notes-file dist/release-notes.md
           fi
 
       - name: Remove private build inputs

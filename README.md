@@ -1,4 +1,4 @@
-# AM for Flyme Auto
+# AM Folio（余白）
 
 **Apple Music in the car: an unofficial client adapted for Flyme Auto (Lynk & Co 06 and others)**
 
@@ -23,7 +23,7 @@ English · [繁體中文](README.zh-TW.md) · [简体中文](README.zh-CN.md)
 
 ## Download
 
-Get the latest **Flyme Auto test build** from [Releases](https://github.com/SakiTomato822/am_atv/releases): `AMATV-FlymeAuto-Gecko-arm64.apk`.
+Get the latest **Flyme Auto test build** from [Releases](https://github.com/SakiTomato822/am_atv/releases): `AMFolio-arm64.apk`.
 
 - ARM64, Android 9+; package `dev.amatv.flyme`.
 - Every test build uses the same signing key, so it installs over the previous one and keeps your sign-in and settings.
