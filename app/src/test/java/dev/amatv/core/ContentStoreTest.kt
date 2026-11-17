@@ -425,4 +425,38 @@ class ContentStoreTest {
             scope.cancel()
         }
     }
+
+    @Test
+    fun inFlightLibraryLoadCancelledOnSignOutAndNewDestinationDoesNotWriteStaleShelves() = runBlocking {
+        val scope = testScope()
+        try {
+            val libraryGate = CompletableDeferred<Unit>()
+            val ops = FakeContentOperations().apply {
+                recentlyAddedHandler = {
+                    libraryGate.await()
+                    listOf(testTrack("stale-lib"))
+                }
+                chartsHandler = { type -> listOf(testTrack("home-chart-$type")) }
+            }
+            val store = ContentStore(ops, scope, Dispatchers.Unconfined)
+
+            store.loadDestination(Destination.Library, MusicConnectionState.SignedIn, 0, "en-US")
+            assertTrue(store.state.value.isLoading(Destination.Library))
+
+            store.onSignedOut()
+            store.loadDestination(
+                Destination.Home,
+                MusicConnectionState.ReadyToSignIn,
+                store.state.value.reloadGeneration,
+                "en-US",
+            )
+
+            libraryGate.complete(Unit)
+
+            assertTrue(store.state.value.shelvesFor(Destination.Library).isEmpty())
+            assertTrue(store.state.value.shelvesFor(Destination.Home).isNotEmpty())
+        } finally {
+            scope.cancel()
+        }
+    }
 }

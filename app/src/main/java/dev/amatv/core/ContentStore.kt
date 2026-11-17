@@ -10,7 +10,6 @@ import dev.amatv.integration.retryCatalogRequest
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.Destination
 import dev.amatv.model.Track
-import dev.amatv.ui.LibraryShelfPagination
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -41,6 +40,15 @@ internal fun demoShelves(): Map<Destination, List<ContentShelf>> = mapOf(
         ContentShelf("demo-library", AppText.text(R.string.app_recently_added), MockCatalog.tracks, featured = true),
     ),
 )
+
+/** The shelf retains its existing cards while one continuation page is requested. */
+data class LibraryShelfPagination(
+    val hasMore: Boolean,
+    val loading: Boolean = false,
+    val failed: Boolean = false,
+) {
+    val showAction: Boolean get() = hasMore || loading || failed
+}
 
 data class ContentState(
     val shelvesByDestination: Map<Destination, List<ContentShelf>> = emptyMap(),
@@ -109,7 +117,8 @@ class ContentStore(
     private var libraryVisitedPages: Map<String, Set<String>> = emptyMap()
     private var libraryPagingGeneration: Long = 0L
     private val libraryPageJobs = mutableMapOf<String, Job>()
-    private val destinationJobs = mutableMapOf<Destination, Job>()
+    private var loadJob: Job? = null
+    private var loadKey: List<Any?>? = null
     private var searchJob: Job? = null
 
     fun resetLibraryPagination() {
@@ -227,6 +236,10 @@ class ContentStore(
         reloadGeneration: Int,
         contentLanguageTag: String,
     ) {
+        val key = listOf(destination, connectionState, reloadGeneration, contentLanguageTag)
+        if (key == loadKey && loadJob?.isActive == true) return
+        loadJob?.cancel()
+        loadKey = key
         if (shelvesLanguageTag == null) {
             shelvesLanguageTag = contentLanguageTag
         } else if (shelvesLanguageTag != contentLanguageTag) {
@@ -259,9 +272,7 @@ class ContentStore(
         _state.value = _state.value.copy(
             loadingDestinations = _state.value.loadingDestinations + target,
         )
-        val shelfKey = listOf(target, connectionState, reloadGeneration, contentLanguageTag)
-        destinationJobs[target]?.cancel()
-        destinationJobs[target] = coroutineScope.launch {
+        val job = coroutineScope.launch(start = CoroutineStart.LAZY) {
             // Show the last session's shelves at once; the network load below replaces them. The library
             // is kept whole too: its playlist index alone left an old, partial list on screen every launch.
             val snapshotName = target.name
@@ -289,7 +300,7 @@ class ContentStore(
                     )
                 }
             }
-            val (loadedShelves, errors) = shelfLoads.load(shelfKey) {
+            val (loadedShelves, errors) = shelfLoads.load(key) {
                 val errors = mutableListOf<Throwable>()
                 coroutineScope {
                     when (target) {
@@ -570,6 +581,8 @@ class ContentStore(
             }
             _messages.tryEmit(msg)
         }
+        loadJob = job
+        job.start()
     }
 
     fun ensureDefaultSearch() {

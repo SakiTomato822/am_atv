@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.amatv.BuildConfig
 import dev.amatv.R
+import dev.amatv.core.LibraryShelfPagination
 import dev.amatv.integration.MusicConnectionState
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.Destination

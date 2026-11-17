@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.sp
 import dev.amatv.R
 import dev.amatv.BuildConfig
 import dev.amatv.core.LibraryNotice
+import dev.amatv.core.LibraryShelfPagination
 import dev.amatv.core.LyricsLoadPhase
 import dev.amatv.core.LyricsState
 import dev.amatv.core.lyricsCacheKey

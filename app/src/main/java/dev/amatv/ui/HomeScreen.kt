@@ -77,6 +77,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
+import dev.amatv.core.LibraryShelfPagination
 import dev.amatv.integration.MusicConnectionState
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.ContentShelf
@@ -87,15 +88,6 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-
-/** The shelf retains its existing cards while one continuation page is requested. */
-data class LibraryShelfPagination(
-    val hasMore: Boolean,
-    val loading: Boolean = false,
-    val failed: Boolean = false,
-) {
-    val showAction: Boolean get() = hasMore || loading || failed
-}
 
 @Composable
 fun HomeScreen(

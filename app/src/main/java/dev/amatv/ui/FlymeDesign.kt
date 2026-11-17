@@ -1,5 +1,6 @@
 package dev.amatv.ui
 
+import dev.amatv.core.LibraryShelfPagination
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
