@@ -85,7 +85,6 @@ import dev.amatv.integration.MusicServices
 import dev.amatv.integration.AuthLaunchGate
 import dev.amatv.integration.retryCatalogRequest
 import dev.amatv.integration.LibraryPage
-import dev.amatv.integration.mergeLibraryPage
 import dev.amatv.integration.PlaybackPreferences
 import dev.amatv.integration.PlaybackSession
 import dev.amatv.integration.PlaybackRepeatMode
@@ -110,7 +109,6 @@ import dev.amatv.playback.PlaybackContext
 import dev.amatv.playback.PlaybackQueueController
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -126,26 +124,12 @@ private suspend fun <T> cancellableResult(block: suspend () -> T): Result<T> = t
 }
 
 
-private fun demoShelves(): Map<Destination, List<ContentShelf>> = mapOf(
-    Destination.Home to listOf(
-        ContentShelf("demo-picks", AppText.text(R.string.app_demo_top_picks), MockCatalog.tracks, featured = true),
-        ContentShelf("demo-recent", AppText.text(R.string.app_recently_played), MockCatalog.tracks.asReversed()),
-    ),
-    Destination.Browse to listOf(
-        ContentShelf("demo-new", AppText.text(R.string.app_demo_new_this_week), MockCatalog.tracks, featured = true),
-    ),
-    Destination.Library to listOf(
-        ContentShelf("demo-library", AppText.text(R.string.app_recently_added), MockCatalog.tracks, featured = true),
-    ),
-)
-
 @Composable
 fun AmAtvApp() {
     val context = LocalContext.current
     val contentLanguageTag = LocalConfiguration.current.locales.toLanguageTags()
     val lyricsLanguageTag = LocalConfiguration.current.locales[0].toLanguageTag()
     val scope = rememberCoroutineScope()
-    val shelfLoads = remember(scope) { ShelfLoads(scope) }
     val services = remember(context) { (context.applicationContext as dev.amatv.AmAtvApplication).musicServices }
     val cacheSettings by services.contentCache.settings.collectAsState()
     val playbackPrefs = remember(context) { PlaybackPreferences(context) }
@@ -158,6 +142,13 @@ fun AmAtvApp() {
     val accountStore = remember(context) { (context.applicationContext as dev.amatv.AmAtvApplication).accountStore }
     val accountState by accountStore.state.collectAsState()
     val connectionState = accountState.connectionState
+    val contentStore = remember(context) { (context.applicationContext as dev.amatv.AmAtvApplication).contentStore }
+    val contentState by contentStore.state.collectAsState()
+    val shelvesByDestination = contentState.shelvesByDestination
+    val loadingDestinations = contentState.loadingDestinations
+    val searchResults = contentState.searchResults
+    val searchLoading = contentState.searchLoading
+    val recentTracks = contentState.recentTracks
     // Full screen or the Flyme small window; see dev.amatv.HostWindow.
     val hostWindow = LocalHostWindow.current
     val startupCheckpoint = remember(playbackPrefs) {
@@ -210,6 +201,9 @@ fun AmAtvApp() {
     var networkRetryJob by remember { mutableStateOf<Job?>(null) }
     var networkRetryCount by remember(track.id) { mutableIntStateOf(0) }
     var serviceMessage by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(contentStore) {
+        contentStore.messages.collect { serviceMessage = it }
+    }
     var lastPlaybackNotice by remember { mutableStateOf<String?>(null) }
     var stationHistory by remember { mutableStateOf(loadStationHistory(context)) }
     // A short Now Playing notice (favorites); playback snapshots clear playbackMessage too often.
@@ -247,38 +241,6 @@ fun AmAtvApp() {
     var adoptingGaplessEntryId by remember { mutableStateOf<Long?>(null) }
     // An album or artist to open in the browse shell, requested from the player.
     var browseDetailRequest by remember { mutableStateOf<Track?>(null) }
-    var reloadNonce by remember { mutableIntStateOf(0) }
-    var shelvesLanguageTag by remember { mutableStateOf(contentLanguageTag) }
-    var shelvesByDestination by remember {
-        mutableStateOf<Map<Destination, List<ContentShelf>>>(
-            if (services.isCatalogConfigured) {
-                emptyMap()
-            } else {
-                demoShelves()
-            },
-        )
-    }
-    // Destinations showing shelves saved by an earlier launch, still to be refreshed.
-    var savedShelfDestinations by remember { mutableStateOf(emptySet<Destination>()) }
-    var loadingDestinations by remember {
-        mutableStateOf(
-            if (services.isCatalogConfigured) setOf(Destination.Home) else emptySet(),
-        )
-    }
-    var searchResults by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var libraryNextPages by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    var libraryVisitedPages by remember { mutableStateOf<Map<String, Set<String>>>(emptyMap()) }
-    var libraryLoadingShelves by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var libraryFailedShelves by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var libraryPagingGeneration by remember { mutableLongStateOf(0L) }
-    val libraryPageJobs = remember { mutableMapOf<String, Job>() }
-    var searchLoading by remember { mutableStateOf(false) }
-    var searchJob by remember { mutableStateOf<Job?>(null) }
-    var recentTracks by remember {
-        mutableStateOf(
-            if (services.isCatalogConfigured) emptyList() else MockCatalog.tracks.asReversed(),
-        )
-    }
     var advancingEndedTrackId by remember { mutableStateOf<String?>(null) }
     val effectiveLyricsLanguageTag = settingsState.lyricTranslationLanguageTag.ifBlank { lyricsLanguageTag }
     val lyricsLocalization = remember(
@@ -344,78 +306,11 @@ fun AmAtvApp() {
         return updated
     }
 
-    fun resetLibraryPagination() {
-        libraryPagingGeneration++
-        libraryPageJobs.values.forEach(Job::cancel)
-        libraryPageJobs.clear()
-        libraryNextPages = emptyMap()
-        libraryVisitedPages = emptyMap()
-        libraryLoadingShelves = emptySet()
-        libraryFailedShelves = emptySet()
-    }
-
-    fun rememberLibraryPage(shelfId: String, page: LibraryPage) {
-        val visited = libraryVisitedPages[shelfId].orEmpty() + page.requestedPage
-        check(page.nextPage == null || page.nextPage !in visited) {
-            AppText.text(R.string.services_playlist_page_repeated)
-        }
-        libraryVisitedPages = libraryVisitedPages + (shelfId to visited)
-        libraryNextPages = page.nextPage?.let { libraryNextPages + (shelfId to it) }
-            ?: (libraryNextPages - shelfId)
-    }
-
-    fun loadMoreLibraryShelf(shelfId: String) {
-        val nextPage = libraryNextPages[shelfId]
-        if (nextPage == null && shelfId !in libraryFailedShelves) return
-        if (connectionState != MusicConnectionState.SignedIn || shelfId in libraryLoadingShelves) return
-        val generation = libraryPagingGeneration
-        libraryLoadingShelves = libraryLoadingShelves + shelfId
-        libraryFailedShelves = libraryFailedShelves - shelfId
-        libraryPageJobs[shelfId] = scope.launch {
-            try {
-                val page = retryCatalogRequest({
-                    when (shelfId) {
-                        "lib-artists" -> services.libraryArtistsPage(nextPage)
-                        "lib-albums" -> services.libraryAlbumsPage(nextPage)
-                        "lib-playlists" -> services.libraryPlaylistsPage(nextPage)
-                        "lib-songs" -> services.librarySongsPage(nextPage)
-                        else -> error("Unknown library shelf")
-                    }
-                })
-                if (generation != libraryPagingGeneration) return@launch
-                check(page.requestedPage !in libraryVisitedPages[shelfId].orEmpty()) {
-                    AppText.text(R.string.services_playlist_page_repeated)
-                }
-                rememberLibraryPage(shelfId, page)
-                val shelves = shelvesByDestination[Destination.Library].orEmpty().map { shelf ->
-                    if (shelf.id == shelfId) shelf.copy(items = mergeLibraryPage(shelf.items, page.items)) else shelf
-                }
-                shelvesByDestination = shelvesByDestination + (Destination.Library to shelves)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                if (generation == libraryPagingGeneration) {
-                    libraryFailedShelves = libraryFailedShelves + shelfId
-                    Log.w("AMATV-Library", "Library page failed (${error.javaClass.simpleName})")
-                }
-            } finally {
-                if (generation == libraryPagingGeneration) {
-                    libraryLoadingShelves = libraryLoadingShelves - shelfId
-                    libraryPageJobs.remove(shelfId)
-                }
-            }
-        }
-    }
-
     fun refreshAllContent() {
-        services.clearDetailPages()
-        resetLibraryPagination()
         accountStore.syncConnectionState()
-        shelvesByDestination = emptyMap()
-        loadingDestinations = setOf(destination)
+        contentStore.refreshAll(destination)
         serviceMessage = null
         lyricsStore.onCacheCleared()
-        reloadNonce++
     }
 
     val webAuthenticationLauncher = rememberLauncherForActivityResult(
@@ -439,12 +334,9 @@ fun AmAtvApp() {
                     expectedPlaybackGeneration = 0L
                     playbackMessage = null
                     lyricsStore.onCacheCleared()
-                    resetLibraryPagination()
-                    shelvesByDestination = emptyMap()
-                    loadingDestinations = setOf(Destination.Home)
+                    contentStore.onSignedIn()
                     destination = Destination.Home
                     serviceMessage = null
-                    reloadNonce++
                 }
                 .onFailure { serviceMessage = it.message ?: AppText.text(R.string.app_sign_in_failed) }
         }
@@ -1291,7 +1183,7 @@ fun AmAtvApp() {
         currentLyricsIdentity,
         track.catalogKind,
         lyricsRequestReady,
-        reloadNonce,
+        contentState.reloadGeneration,
         cacheSettings.revision,
         lyricsVariant,
     ) {
@@ -1302,327 +1194,18 @@ fun AmAtvApp() {
         )
     }
 
-    LaunchedEffect(destination, connectionState, reloadNonce, contentLanguageTag) {
-        if (shelvesLanguageTag != contentLanguageTag) {
-            resetLibraryPagination()
-            // Section titles are presentation metadata. Invalidate only this
-            // cache, retaining the selected song, queue, focus and account.
-            shelvesByDestination = if (services.isCatalogConfigured) emptyMap() else demoShelves()
-            loadingDestinations = emptySet()
-            shelvesLanguageTag = contentLanguageTag
-        }
-        if (!services.isCatalogConfigured) return@LaunchedEffect
-        val target = destination
-        if (
-            target != Destination.Home &&
-            target != Destination.Browse &&
-            target != Destination.Library
-        ) {
-            return@LaunchedEffect
-        }
-        if (shelvesByDestination[target]?.isNotEmpty() == true && target !in savedShelfDestinations) return@LaunchedEffect
-        if (target == Destination.Library && connectionState != MusicConnectionState.SignedIn) {
-            loadingDestinations = loadingDestinations - target
-            return@LaunchedEffect
-        }
-
-        loadingDestinations = loadingDestinations + target
-        // Show the last session's shelves at once; the network load below replaces them. The library
-        // is kept whole too: its playlist index alone left an old, partial list on screen every launch.
-        val snapshotName = target.name
-        if (snapshotName != null && shelvesByDestination[target].isNullOrEmpty() &&
-            connectionState == MusicConnectionState.SignedIn
-        ) {
-            cancellableResult { services.savedShelves(snapshotName, contentLanguageTag) }.getOrNull()
-                ?.takeIf { it.isNotEmpty() && shelvesByDestination[target].isNullOrEmpty() }
-                ?.let { saved ->
-                    shelvesByDestination = shelvesByDestination + (target to saved)
-                    savedShelfDestinations = savedShelfDestinations + target
-                }
-        }
-        if (target == Destination.Library && shelvesByDestination[target].isNullOrEmpty()) {
-            services.savedPlaylistIndex()?.takeIf { it.isNotEmpty() }?.let { playlists ->
-                shelvesByDestination = shelvesByDestination + (target to listOf(
-                    ContentShelf("lib-playlists", AppText.text(R.string.app_library_playlists), playlists),
-                ))
-                savedShelfDestinations = savedShelfDestinations + target
-            }
-        }
-        val shelfKey = listOf(target, connectionState, reloadNonce, contentLanguageTag)
-        val (loadedShelves, errors) = shelfLoads.load(shelfKey) {
-        val errors = mutableListOf<Throwable>()
-        coroutineScope {
-            when (target) {
-                Destination.Home -> {
-                    val recommendations = async {
-                        if (connectionState == MusicConnectionState.SignedIn) {
-                            cancellableResult { services.recommendationShelves() }
-                        } else Result.success(emptyList())
-                    }
-                    val recentPlayedTracks = async {
-                        if (connectionState == MusicConnectionState.SignedIn) {
-                            cancellableResult { services.recentlyPlayedTracks() }
-                        } else Result.success(emptyList())
-                    }
-                    val recentContainers = async {
-                        if (connectionState == MusicConnectionState.SignedIn) {
-                            cancellableResult { services.recentlyPlayed() }
-                        } else Result.success(emptyList())
-                    }
-                    val songs = async { cancellableResult { services.charts("songs") } }
-                    val albums = async { cancellableResult { services.charts("albums") } }
-                    val playlists = async { cancellableResult { services.charts("playlists") } }
-
-                    buildList {
-                        recommendations.await().fold(
-                            onSuccess = { addAll(it) },
-                            onFailure = errors::add,
-                        )
-                        recentPlayedTracks.await().fold(
-                            onSuccess = { items ->
-                                if (items.isNotEmpty()) {
-                                    recentTracks = items
-                                    add(
-                                        ContentShelf(
-                                            id = "recent-tracks",
-                                            title = AppText.text(R.string.app_recent_tracks),
-                                            items = items,
-                                            featured = isEmpty(),
-                                        ),
-                                    )
-                                }
-                            },
-                            onFailure = errors::add,
-                        )
-                        recentContainers.await().fold(
-                            onSuccess = { items ->
-                                if (items.isNotEmpty()) {
-                                    add(ContentShelf("recent", AppText.text(R.string.app_recent_albums_and_playlists), items))
-                                }
-                            },
-                            onFailure = errors::add,
-                        )
-                        songs.await().fold(
-                            onSuccess = { items ->
-                                if (items.isNotEmpty()) {
-                                    add(
-                                        ContentShelf(
-                                            id = "top-songs",
-                                            title = AppText.text(R.string.app_top_songs),
-                                            items = items,
-                                            featured = isEmpty(),
-                                        ),
-                                    )
-                                }
-                            },
-                            onFailure = errors::add,
-                        )
-                        albums.await().fold(
-                            onSuccess = { items ->
-                                if (items.isNotEmpty()) {
-                                    add(ContentShelf("top-albums", AppText.text(R.string.app_top_albums), items))
-                                }
-                            },
-                            onFailure = errors::add,
-                        )
-                        playlists.await().fold(
-                            onSuccess = { items ->
-                                if (items.isNotEmpty()) {
-                                    add(ContentShelf("top-playlists", AppText.text(R.string.app_top_playlists), items))
-                                }
-                            },
-                            onFailure = errors::add,
-                        )
-                    }
-                }
-
-                Destination.Browse -> {
-                    val songs = async { cancellableResult { services.charts("songs") } }
-                    val albums = async { cancellableResult { services.charts("albums") } }
-                    val playlists = async { cancellableResult { services.charts("playlists") } }
-                    val videos = async { cancellableResult { services.charts("music-videos") } }
-                    val radio = async { cancellableResult { services.liveRadio() } }
-
-                    buildList {
-                        songs.await().fold(
-                            onSuccess = { items ->
-                                if (items.isNotEmpty()) {
-                                    add(
-                                        ContentShelf(
-                                            id = "browse-songs",
-                                            title = AppText.text(R.string.app_new_top_tracks),
-                                            items = items,
-                                            featured = true,
-                                        ),
-                                    )
-                                }
-                            },
-                            onFailure = errors::add,
-                        )
-                        albums.await().fold(
-                            onSuccess = { items ->
-                                if (items.isNotEmpty()) {
-                                    add(ContentShelf("browse-albums", AppText.text(R.string.app_top_albums), items))
-                                }
-                            },
-                            onFailure = errors::add,
-                        )
-                        playlists.await().fold(
-                            onSuccess = { items ->
-                                if (items.isNotEmpty()) {
-                                    add(ContentShelf("browse-playlists", AppText.text(R.string.app_featured_playlists), items))
-                                }
-                            },
-                            onFailure = errors::add,
-                        )
-                        videos.await().fold(
-                            onSuccess = { items ->
-                                if (items.isNotEmpty()) {
-                                    add(ContentShelf("browse-videos", AppText.text(R.string.app_top_music_videos), items))
-                                }
-                            },
-                            onFailure = errors::add,
-                        )
-                        radio.await().fold(
-                            onSuccess = { items ->
-                                if (items.isNotEmpty()) {
-                                    add(ContentShelf("browse-radio", AppText.text(R.string.app_apple_music_radio), items))
-                                }
-                            },
-                            onFailure = errors::add,
-                        )
-                    }
-                }
-
-                Destination.Library -> {
-                    val recentlyAdded = async { cancellableResult { services.recentlyAdded() } }
-                    val artists = async { cancellableResult { services.libraryArtistsPage() } }
-                    val albums = async { cancellableResult { services.libraryAlbumsPage() } }
-                    val playlists = async { cancellableResult { services.libraryPlaylistsPage() } }
-                    val songs = async { cancellableResult { services.librarySongsPage() } }
-                    val recentPlayed = async { cancellableResult { services.recentlyPlayedTracks() } }
-
-                    buildList {
-                        recentlyAdded.await().fold(
-                            onSuccess = { items ->
-                                if (items.isNotEmpty()) {
-                                    add(
-                                        ContentShelf(
-                                            id = "lib-recently-added",
-                                            title = AppText.text(R.string.app_recently_added),
-                                            items = items,
-                                            featured = true,
-                                        ),
-                                    )
-                                }
-                            },
-                            onFailure = errors::add,
-                        )
-                        artists.await().fold(
-                            onSuccess = { page ->
-                                rememberLibraryPage("lib-artists", page)
-                                add(ContentShelf("lib-artists", AppText.text(R.string.app_library_artists), page.items))
-                            },
-                            onFailure = { error ->
-                                errors += error
-                                libraryFailedShelves = libraryFailedShelves + "lib-artists"
-                                add(ContentShelf("lib-artists", AppText.text(R.string.app_library_artists), emptyList()))
-                            },
-                        )
-                        albums.await().fold(
-                            onSuccess = { page ->
-                                rememberLibraryPage("lib-albums", page)
-                                if (page.items.isNotEmpty() || page.nextPage != null) {
-                                    add(ContentShelf("lib-albums", AppText.text(R.string.app_library_albums),
-                                        page.items, featured = isEmpty()))
-                                }
-                            },
-                            onFailure = { error ->
-                                errors += error
-                                libraryFailedShelves = libraryFailedShelves + "lib-albums"
-                                add(ContentShelf("lib-albums", AppText.text(R.string.app_library_albums), emptyList()))
-                            },
-                        )
-                        playlists.await().fold(
-                            onSuccess = { page ->
-                                rememberLibraryPage("lib-playlists", page)
-                                if (page.items.isNotEmpty() || page.nextPage != null) {
-                                    add(
-                                        ContentShelf(
-                                            id = "lib-playlists",
-                                            title = AppText.text(R.string.app_library_playlists),
-                                            items = page.items,
-                                            featured = isEmpty(),
-                                        ),
-                                    )
-                                }
-                            },
-                            onFailure = { error ->
-                                errors += error
-                                libraryFailedShelves = libraryFailedShelves + "lib-playlists"
-                                add(shelvesByDestination[Destination.Library].orEmpty()
-                                    .firstOrNull { it.id == "lib-playlists" }
-                                    ?: ContentShelf("lib-playlists", AppText.text(R.string.app_library_playlists), emptyList()))
-                            },
-                        )
-                        songs.await().fold(
-                            onSuccess = { page ->
-                                rememberLibraryPage("lib-songs", page)
-                                if (page.items.isNotEmpty() || page.nextPage != null) {
-                                    add(ContentShelf("lib-songs", AppText.text(R.string.app_library_songs), page.items))
-                                }
-                            },
-                            onFailure = { error ->
-                                errors += error
-                                libraryFailedShelves = libraryFailedShelves + "lib-songs"
-                                add(ContentShelf("lib-songs", AppText.text(R.string.app_library_songs), emptyList()))
-                            },
-                        )
-                        recentPlayed.await().fold(
-                            onSuccess = { items ->
-                                if (items.isNotEmpty()) {
-                                    recentTracks = items
-                                    add(ContentShelf("lib-recent", AppText.text(R.string.app_recently_played), items))
-                                }
-                            },
-                            onFailure = errors::add,
-                        )
-                    }
-                }
-
-                Destination.NowPlaying,
-                Destination.Sing,
-                Destination.Videos,
-                Destination.Radio,
-                Destination.Account,
-                Destination.Search,
-                -> emptyList()
-            }
-        } to errors
-        }
-        val keepSaved = loadedShelves.isEmpty() && target in savedShelfDestinations
-        if (!keepSaved) {
-            shelvesByDestination = shelvesByDestination + (target to loadedShelves)
-            savedShelfDestinations = savedShelfDestinations - target
-            if (snapshotName != null && loadedShelves.isNotEmpty() && connectionState == MusicConnectionState.SignedIn) {
-                scope.launch { cancellableResult { services.saveShelves(snapshotName, contentLanguageTag, loadedShelves) } }
-            }
-        }
-        loadingDestinations = loadingDestinations - target
-        serviceMessage = if (loadedShelves.isEmpty() && !keepSaved) {
-            errors.firstOrNull()?.message
-        } else {
-            null
-        }
+    LaunchedEffect(destination, connectionState, contentState.reloadGeneration, contentLanguageTag) {
+        contentStore.loadDestination(
+            destination = destination,
+            connectionState = connectionState,
+            reloadGeneration = contentState.reloadGeneration,
+            contentLanguageTag = contentLanguageTag,
+        )
     }
 
     LaunchedEffect(destination) {
-        if (destination == Destination.Search && searchResults.isEmpty() && services.isCatalogConfigured) {
-            searchLoading = true
-            runCatching { services.charts("songs") }
-                .onSuccess { searchResults = it }
-                .onFailure { serviceMessage = it.message }
-            searchLoading = false
+        if (destination == Destination.Search) {
+            contentStore.ensureDefaultSearch()
         }
     }
 
@@ -1792,11 +1375,8 @@ fun AmAtvApp() {
                         searchLoading = searchLoading,
                         recentTracks = recentTracks,
                         shelves = shelvesByDestination[activeBrowseDestination].orEmpty(),
-                        shelfPagination = (libraryNextPages.keys + libraryLoadingShelves + libraryFailedShelves)
-                            .associateWith { id -> LibraryShelfPagination(
-                                id in libraryNextPages, id in libraryLoadingShelves, id in libraryFailedShelves,
-                            ) },
-                        onLoadMoreShelf = ::loadMoreLibraryShelf,
+                        shelfPagination = contentState.shelfPagination,
+                        onLoadMoreShelf = { shelfId -> contentStore.loadMoreLibraryShelf(shelfId, connectionState) },
                         loading = activeBrowseDestination in loadingDestinations,
                         connectionState = connectionState,
                         setupMessage = serviceMessage ?: services.setupMessage,
@@ -1810,7 +1390,7 @@ fun AmAtvApp() {
                         },
                         onSignIn = (::startSignIn),
                         onSignOut = {
-                            resetLibraryPagination()
+                            contentStore.resetLibraryPagination()
                             selectionGeneration++
                             playbackRequestJob?.cancel()
                             accountStore.signOut()
@@ -1826,33 +1406,11 @@ fun AmAtvApp() {
                             lyricsStore.onCacheCleared()
                             expectedPlaybackGeneration = 0L
                             pendingRestore = null
-                            shelvesByDestination = emptyMap()
-                            recentTracks = emptyList()
+                            contentStore.onSignedOut()
                             serviceMessage = AppText.text(R.string.app_apple_signed_out)
-                            reloadNonce++
                         },
                         onRetry = (::refreshAllContent),
-                        onSearch = { query ->
-                            searchJob?.cancel()
-                            searchJob = scope.launch {
-                                searchLoading = true
-                                try {
-                                    cancellableResult { services.search(query) }
-                                        .onSuccess { items ->
-                                            searchResults = items
-                                            serviceMessage = if (items.isEmpty()) {
-                                                AppText.text(R.string.app_search_no_results_format, query)
-                                            } else null
-                                        }
-                                        .onFailure {
-                                            searchResults = emptyList()
-                                            serviceMessage = it.message ?: AppText.text(R.string.app_search_failed)
-                                        }
-                                } finally {
-                                    searchLoading = false
-                                }
-                            }
-                        },
+                        onSearch = contentStore::search,
                         onOpenTrack = { item, q -> playTrack(item, contextQueue = q) },
                         loadCollection = services::collectionTracks,
                         cachedCollection = services::cachedCollectionTracks,
@@ -2594,28 +2152,4 @@ private fun saveStationHistory(context: android.content.Context, songs: List<Tra
     val array = org.json.JSONArray().apply { songs.forEach { put(it.toSessionJson()) } }
     context.getSharedPreferences("am_atv_station_history", android.content.Context.MODE_PRIVATE)
         .edit().putString("songs", array.toString()).apply()
-}
-
-/**
- * One shelf load per destination and inputs. Startup recomposition can restart the loading effect
- * with unchanged inputs; the restarted effect awaits the running load instead of requesting every
- * Apple Music endpoint again. A load for the same destination with other inputs is superseded.
- */
-private class ShelfLoads(private val scope: CoroutineScope) {
-    private val running = mutableMapOf<List<Any?>, Deferred<Pair<List<ContentShelf>, List<Throwable>>>>()
-
-    suspend fun load(
-        key: List<Any?>,
-        block: suspend () -> Pair<List<ContentShelf>, List<Throwable>>,
-    ): Pair<List<ContentShelf>, List<Throwable>> {
-        val deferred = running[key]?.takeIf { it.isActive } ?: run {
-            running.keys.filter { it.first() == key.first() && it != key }.forEach { running.remove(it)?.cancel() }
-            scope.async { block() }.also { running[key] = it }
-        }
-        return try {
-            deferred.await()
-        } finally {
-            if (!deferred.isActive && running[key] === deferred) running.remove(key)
-        }
-    }
 }

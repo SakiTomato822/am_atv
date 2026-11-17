@@ -36,7 +36,7 @@ interface RecommendationProvider {
     suspend fun amStationNextTracks(stationId: String): List<Track>
 }
 
-class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.LyricsSource, dev.amatv.core.AccountOperations {
+class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.LyricsSource, dev.amatv.core.AccountOperations, dev.amatv.core.ContentOperations {
     private val appContext = context.applicationContext
     val contentCache = ContentCache.get(appContext)
     val playbackDiagnostics = PlaybackDiagnostics.get(appContext)
@@ -105,7 +105,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
             else -> null
         }
 
-    val isCatalogConfigured: Boolean
+    override val isCatalogConfigured: Boolean
         get() = DeveloperTokenPolicy.isConfigured(
             BuildConfig.MUSICKIT_DEVELOPER_TOKEN, BuildConfig.MUSICKIT_TOKEN_ENDPOINT,
         )
@@ -135,12 +135,12 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
     }
 
     /** Last saved shelves of a destination for this account and language, or null. */
-    suspend fun savedShelves(name: String, languageTag: String): List<ContentShelf>? {
+    override suspend fun savedShelves(name: String, languageTag: String): List<ContentShelf>? {
         val userToken = tokenStore.readUserToken()?.takeIf(String::isNotBlank) ?: return null
         return shelfSnapshots.read(name, userToken, languageTag)
     }
 
-    suspend fun saveShelves(name: String, languageTag: String, shelves: List<ContentShelf>) {
+    override suspend fun saveShelves(name: String, languageTag: String, shelves: List<ContentShelf>) {
         val userToken = tokenStore.readUserToken()?.takeIf(String::isNotBlank) ?: return
         shelfSnapshots.write(name, userToken, languageTag, shelves)
     }
@@ -158,23 +158,23 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
     }
 
     suspend fun recommendations(): List<Track> = api.recommendations()
-    suspend fun recommendationShelves(): List<ContentShelf> = api.recommendationShelves()
-    suspend fun recentlyPlayed(): List<Track> = api.recentlyPlayed()
-    suspend fun recentlyPlayedTracks(): List<Track> = api.recentlyPlayedTracks()
-    suspend fun recentlyAdded(): List<Track> = api.recentlyAdded()
+    override suspend fun recommendationShelves(): List<ContentShelf> = api.recommendationShelves()
+    override suspend fun recentlyPlayed(): List<Track> = api.recentlyPlayed()
+    override suspend fun recentlyPlayedTracks(): List<Track> = api.recentlyPlayedTracks()
+    override suspend fun recentlyAdded(): List<Track> = api.recentlyAdded()
     suspend fun libraryPlaylists(): List<Track> = api.libraryPlaylists()
     suspend fun libraryAlbums(): List<Track> = api.libraryAlbums()
     suspend fun libraryArtists(): List<Track> = api.libraryArtists()
     suspend fun librarySongs(): List<Track> = api.librarySongs()
-    suspend fun libraryAlbumsPage(nextPage: String? = null): LibraryPage = api.libraryAlbumsPage(nextPage)
-    suspend fun libraryArtistsPage(nextPage: String? = null): LibraryPage = api.libraryArtistsPage(nextPage)
-    suspend fun libraryPlaylistsPage(nextPage: String? = null): LibraryPage =
+    override suspend fun libraryAlbumsPage(nextPage: String?): LibraryPage = api.libraryAlbumsPage(nextPage)
+    override suspend fun libraryArtistsPage(nextPage: String?): LibraryPage = api.libraryArtistsPage(nextPage)
+    override suspend fun libraryPlaylistsPage(nextPage: String?): LibraryPage =
         if (nextPage == null) playlistIndex.getOrLoad(Unit) {
             saveDetail("playlist-index", { encodeDetailTracks(it.items) }) { api.libraryPlaylistsPage() }
         }
         else api.libraryPlaylistsPage(nextPage)
-    internal suspend fun savedPlaylistIndex(): List<Track>? = readDetail("playlist-index", ::decodeDetailTracks)
-    suspend fun librarySongsPage(nextPage: String? = null): LibraryPage = api.librarySongsPage(nextPage)
+    override suspend fun savedPlaylistIndex(): List<Track>? = readDetail("playlist-index", ::decodeDetailTracks)
+    override suspend fun librarySongsPage(nextPage: String?): LibraryPage = api.librarySongsPage(nextPage)
     suspend fun libraryArtistAlbumsPage(artist: Track, nextPage: String? = null): LibraryPage =
         artistLibraryPages.getOrLoad(artist.detailKey() to nextPage) {
             if (nextPage != null) api.libraryArtistAlbumsPage(artist, nextPage)
@@ -185,10 +185,10 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
     fun cachedArtistAlbums(artist: Track): LibraryPage? = artistLibraryPages.peek(artist.detailKey() to null)
     internal suspend fun savedArtistAlbums(artist: Track): List<Track>? =
         readDetail("artist-albums/${artist.detailKey()}", ::decodeDetailTracks)
-    suspend fun charts(types: String = "albums,songs,playlists"): List<Track> =
+    override suspend fun charts(types: String): List<Track> =
         api.charts(types)
-    suspend fun liveRadio(): List<Track> = api.liveRadio()
-    suspend fun search(term: String): List<Track> = api.search(term)
+    override suspend fun liveRadio(): List<Track> = api.liveRadio()
+    override suspend fun search(term: String): List<Track> = api.search(term)
     override suspend fun createAmStation(songId: String): Pair<String?, List<Track>> =
         api.createContinuousStation(songId)
     override suspend fun amStationNextTracks(stationId: String): List<Track> =
@@ -235,7 +235,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
     suspend fun catalogArtistViewMore(moreHref: String): List<Track> =
         artistViewPages.getOrLoad(moreHref) { api.catalogArtistViewMore(moreHref) }
 
-    fun clearDetailPages(dropSnapshots: Boolean = false) {
+    override fun clearDetailPages(dropSnapshots: Boolean) {
         if (dropSnapshots) detailSnapshots.clear() else detailSnapshots.invalidateWrites()
         collectionPages.clear()
         firstTrackPages.clear()
