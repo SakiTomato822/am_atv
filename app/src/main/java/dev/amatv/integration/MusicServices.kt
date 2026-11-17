@@ -36,7 +36,7 @@ interface RecommendationProvider {
     suspend fun amStationNextTracks(stationId: String): List<Track>
 }
 
-class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.LyricsSource {
+class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.LyricsSource, dev.amatv.core.AccountOperations {
     private val appContext = context.applicationContext
     val contentCache = ContentCache.get(appContext)
     val playbackDiagnostics = PlaybackDiagnostics.get(appContext)
@@ -88,7 +88,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
         contentCache = contentCache,
     )
 
-    val connectionState: MusicConnectionState
+    override val connectionState: MusicConnectionState
         get() = when {
             tokenStore.readUserToken() != null -> MusicConnectionState.SignedIn
             isCatalogConfigured ->
@@ -121,7 +121,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
         )
     }
 
-    fun completeWebAuthentication(data: Intent): String {
+    override fun completeWebAuthentication(data: Intent): String {
         val userToken = checkNotNull(
             data.getStringExtra(MusicKitWebAuthActivity.EXTRA_USER_TOKEN),
         ) { AppText.text(R.string.services_auth_invalid_user_token) }
@@ -145,7 +145,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
         shelfSnapshots.write(name, userToken, languageTag, shelves)
     }
 
-    fun signOut() {
+    override fun signOut() {
         shelfSnapshots.clear()
         webAuthenticationSession.markLocalWebSessionForReset()
         songSpectrum.setActive(false)

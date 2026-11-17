@@ -1,6 +1,7 @@
 package dev.amatv
 
 import android.app.Application
+import dev.amatv.core.AccountStore
 import dev.amatv.core.LibraryActions
 import dev.amatv.core.LyricsStore
 import dev.amatv.core.SettingsStore
@@ -17,6 +18,7 @@ class AmAtvApplication : Application() {
     lateinit var settingsStore: SettingsStore
     lateinit var libraryActions: LibraryActions
     lateinit var lyricsStore: LyricsStore
+    lateinit var accountStore: AccountStore
     val musicServices by lazy { MusicServices(this) }
 
     override fun onCreate() {
@@ -39,6 +41,7 @@ class AmAtvApplication : Application() {
             coroutineScope = applicationScope,
             appLanguageTagProvider = { resources.configuration.locales[0].toLanguageTag() },
         )
+        accountStore = AccountStore(operations = musicServices)
         // The car build keeps a full log for export; only the app process, not Gecko's.
         if (BuildConfig.FLYME_AUTO && getProcessName() == packageName) LogRecorder.start(this)
     }

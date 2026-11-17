@@ -155,6 +155,9 @@ fun AmAtvApp() {
     val libraryState by libraryActions.state.collectAsState()
     val lyricsStore = remember(context) { (context.applicationContext as dev.amatv.AmAtvApplication).lyricsStore }
     val lyricsState by lyricsStore.state.collectAsState()
+    val accountStore = remember(context) { (context.applicationContext as dev.amatv.AmAtvApplication).accountStore }
+    val accountState by accountStore.state.collectAsState()
+    val connectionState = accountState.connectionState
     // Full screen or the Flyme small window; see dev.amatv.HostWindow.
     val hostWindow = LocalHostWindow.current
     val startupCheckpoint = remember(playbackPrefs) {
@@ -206,7 +209,6 @@ fun AmAtvApp() {
     var successfulSelection by remember { mutableLongStateOf(-1L) }
     var networkRetryJob by remember { mutableStateOf<Job?>(null) }
     var networkRetryCount by remember(track.id) { mutableIntStateOf(0) }
-    var connectionState by remember { mutableStateOf(services.connectionState) }
     var serviceMessage by remember { mutableStateOf<String?>(null) }
     var lastPlaybackNotice by remember { mutableStateOf<String?>(null) }
     var stationHistory by remember { mutableStateOf(loadStationHistory(context)) }
@@ -408,7 +410,7 @@ fun AmAtvApp() {
     fun refreshAllContent() {
         services.clearDetailPages()
         resetLibraryPagination()
-        connectionState = services.connectionState
+        accountStore.syncConnectionState()
         shelvesByDestination = emptyMap()
         loadingDestinations = setOf(destination)
         serviceMessage = null
@@ -426,7 +428,7 @@ fun AmAtvApp() {
                 dev.amatv.integration.MusicKitWebAuthActivity.EXTRA_ERROR,
             ) ?: AppText.text(R.string.app_apple_sign_in_cancelled)
         } else {
-            runCatching { services.completeWebAuthentication(data) }
+            accountStore.completeSignIn(data)
                 .onSuccess {
                     selectionGeneration++
                     playbackRequestJob?.cancel()
@@ -437,7 +439,6 @@ fun AmAtvApp() {
                     expectedPlaybackGeneration = 0L
                     playbackMessage = null
                     lyricsStore.onCacheCleared()
-                    connectionState = MusicConnectionState.SignedIn
                     resetLibraryPagination()
                     shelvesByDestination = emptyMap()
                     loadingDestinations = setOf(Destination.Home)
@@ -1812,7 +1813,7 @@ fun AmAtvApp() {
                             resetLibraryPagination()
                             selectionGeneration++
                             playbackRequestJob?.cancel()
-                            services.signOut()
+                            accountStore.signOut()
                             queueController.reset()
                             playbackPrefs.clearSession()
                             scope.launch { cancellableResult { services.contentCache.clear { ArtworkImages.clear(context) } } }
@@ -1825,7 +1826,6 @@ fun AmAtvApp() {
                             lyricsStore.onCacheCleared()
                             expectedPlaybackGeneration = 0L
                             pendingRestore = null
-                            connectionState = services.connectionState
                             shelvesByDestination = emptyMap()
                             recentTracks = emptyList()
                             serviceMessage = AppText.text(R.string.app_apple_signed_out)
