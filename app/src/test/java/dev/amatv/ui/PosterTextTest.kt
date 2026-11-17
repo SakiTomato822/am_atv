@@ -3,17 +3,6 @@ package dev.amatv.ui
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-class PosterTextTest {
-    @Test fun cjkPhrasesGetTheirOwnLines() {
-        assertEquals("童年的\n荡秋千", posterText("童年的 荡秋千"))
-        assertEquals("夏日\n乾いた雲", posterText(" 夏日  乾いた雲 "))
-    }
-
-    @Test fun latinLinesKeepTheirSpaces() {
-        assertEquals("No way to stop, no way to fight", posterText("No way to stop, no way to fight"))
-    }
-}
-
 class RenderedLyricTextTest {
     private fun unit(text: String, space: Boolean) =
         dev.amatv.model.LyricWord(text, 0L, 90L, hasTrailingWhitespace = space)
@@ -24,7 +13,6 @@ class RenderedLyricTextTest {
             unit("来", true), unit("我的", false), unit("眼", false), unit("睛", false),
         ))
         assertEquals("我一大早起不来 我的眼睛", line.renderedText)
-        assertEquals("我一大早起不来\n我的眼睛", posterText(line.renderedText))
     }
 
     @Test fun latinWordsKeepTheirSpaces() {

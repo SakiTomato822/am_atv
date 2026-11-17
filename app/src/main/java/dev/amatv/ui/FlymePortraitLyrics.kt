@@ -230,7 +230,7 @@ private fun PortraitHeader(
     }
 }
 
-/** The current line as poster type, broken at its spaces, with the lines around it small and faint. */
+/** The current line as poster type, wrapping only where it runs out of width, with the lines around it small and faint. */
 @Composable
 private fun PortraitPoster(
     track: Track,
@@ -258,7 +258,7 @@ private fun PortraitPoster(
     // One size for the whole song, set by its longest line: sized per line, the poster jumped between big
     // and small from one line to the next. A song of only short lines still gets the larger type.
     val size = remember(lines, width, textScale, pinned) {
-        lines.minOf { posterFontSize(posterText(it.renderedText), width, (if (pinned) 40 else 46) * textScale) }
+        lines.minOf { posterFontSize(it.renderedText.trim(), width, (if (pinned) 40 else 46) * textScale) }
     }
     // Centred in the space below the cover, so a short poster does not leave a hole under it.
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically)) {
@@ -276,7 +276,7 @@ private fun PortraitPoster(
                 return@AnimatedContent
             }
             val line = shown as LyricLine
-            val text = posterText(line.renderedText)
+            val text = line.renderedText.trim()
             Column {
                 Text(text,
                     color = Color.White.copy(alpha = if (active < 0) 0.45f else 1f),
@@ -345,19 +345,5 @@ private fun PortraitControls(
 /** Height of the compact Soak header (padding, back button, two text lines). */
 private val SoakHeaderHeight = 76.dp
 
-private val PhraseScripts = setOf(
-    Character.UnicodeScript.HAN, Character.UnicodeScript.HIRAGANA,
-    Character.UnicodeScript.KATAKANA, Character.UnicodeScript.HANGUL,
-)
-
-/**
- * In Chinese, Japanese and Korean lyrics a space separates phrases, so each phrase gets its own poster
- * line. Elsewhere a space is just a word gap and the line wraps normally.
- */
-internal fun posterText(text: String): String {
-    val trimmed = text.trim()
-    val phrased = trimmed.codePoints().anyMatch { Character.UnicodeScript.of(it) in PhraseScripts }
-    return if (phrased) trimmed.replace(Regex(" +"), "\n") else trimmed
-}
 
 
