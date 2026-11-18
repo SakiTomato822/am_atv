@@ -52,4 +52,17 @@ class FolioPivotTest {
         assertEquals(-146f, placement.translationX, 0.01f)
         assertTrue(placement.isPeekingLeft)
     }
+
+    @Test
+    fun coldStartDefaultsToListenNowAndInProcessSwitchesPreservePage() {
+        FolioUiSession.reset()
+        assertEquals(1, FolioUiSession.HOME_PAGE_INDEX)
+        assertEquals(FolioUiSession.HOME_PAGE_INDEX, FolioUiSession.initialPage())
+
+        FolioUiSession.onPageChanged(3)
+        assertEquals(3, FolioUiSession.initialPage())
+
+        FolioUiSession.reset()
+        assertEquals(1, FolioUiSession.initialPage())
+    }
 }

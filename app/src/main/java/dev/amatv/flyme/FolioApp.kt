@@ -87,6 +87,28 @@ private enum class FolioRootPage(val index: Int, val labelRes: Int, val destinat
 }
 
 /**
+ * Process-scoped, non-persisted page cursor for the new UI: cold launch starts at Listen Now
+ * (`Home`), while full-screen <-> small-window activity recreation keeps the active page.
+ */
+internal object FolioUiSession {
+    val HOME_PAGE_INDEX: Int = FolioRootPage.Home.index
+
+    @Volatile
+    var currentPage: Int = HOME_PAGE_INDEX
+        private set
+
+    fun initialPage(): Int = currentPage
+
+    fun onPageChanged(page: Int) {
+        currentPage = page.coerceIn(0, FolioRootPage.entries.lastIndex)
+    }
+
+    fun reset() {
+        currentPage = HOME_PAGE_INDEX
+    }
+}
+
+/**
  * Root composable for AM Folio 15 responsive UI (`dev.amatv.flyme`).
  * Reads state from and dispatches actions directly to `dev.amatv.core` stores without scaling `CarLayout`.
  */
@@ -156,18 +178,14 @@ fun FolioApp(
         }
     }
 
-    val initialPage = remember {
-        when (playbackStore.navigation.value.first) {
-            Destination.Browse -> FolioRootPage.Browse.index
-            Destination.Library -> FolioRootPage.Library.index
-            Destination.Search -> FolioRootPage.Search.index
-            else -> FolioRootPage.Home.index
-        }
-    }
+    val initialPage = remember { FolioUiSession.initialPage() }
     val pagerState = rememberPagerState(
         initialPage = initialPage,
         pageCount = { FolioRootPage.entries.size },
     )
+    LaunchedEffect(pagerState.currentPage) {
+        FolioUiSession.onPageChanged(pagerState.currentPage)
+    }
 
     val authLaunchGate = remember { AuthLaunchGate() }
     val webAuthenticationLauncher = rememberLauncherForActivityResult(

@@ -138,3 +138,25 @@
   - 错误：**0**
   - 跳过：**0**
 - **打包结果**：`:app:assembleFlymeGecko` 构建成功（`BUILD SUCCESSFUL`，产物 `app/build/outputs/apk/flymeGecko/app-flymeGecko.apk`，大小 193,537,238 字节）。
+
+---
+
+## 第二轮
+
+对照 `B1A-FIX.md` 的返工要求，逐项核对与修改如下：
+
+1. **车机密度核对（`FolioTier.kt`、`FolioApp.kt`、`FolioTierTest.kt`）**：
+   - 核对确认 `FolioTier.kt` 的纯函数 `folioRenderDensity(systemDensity)` 与 `folioLayoutDp(windowWidthPx, windowHeightPx, systemDensity)`，以及 `FolioApp.kt` 先按物理像素换算并覆写根 `LocalDensity` 再读取 `WindowInsets` 的顺序已满足规则：系统密度 `< 1.5` 时按 `1.5f` 渲染、`>= 1.5` 保持不变。
+   - 在 `FolioTierTest.kt` 的 `densityClampsLowDensityDisplaysToOnePointFiveAndConvertsDp` 补充 `2560×720@160dpi → 1706.67×480 dp（Ultrawide / u 档）` 用例，与 `1920×1080@160 → 1280×720 dp（e 档）`、`3840×1080@160 → 2560×720 dp（u 档）` 一并覆盖。
+2. **底部玻璃胶囊背景透明度与可读性（`FolioTheme.kt`、`FolioComponents.kt`、`FolioTierTest.kt`）**：
+   - 改动与取值理由：在 Android 11 无系统级实时背景模糊的前提下，为 `FolioPalette` 新增专用于胶囊的磨砂背景色 `capsuleBg`（不改变其他普通控件用的 `glass` 与车机/带鱼屏封面圆点 `FolioMiniPlayerDot`）：
+     - **深色主题**：`capsuleBg = Color(0xE628252D)`（即底部背景 `#131016` 与约 10% `#FFFFFF` 混合后的深炭紫底色 `#28252D` 叠加 `0xE6 ≈ 90.2%` 不透明度）。仅余 ~10% 穿透亮度，使胶囊下方滚动的白字列表不再可辨认，但彩色封面/亮块滚过时仍保有轻微明暗晃动；同时保留 `glassHighlightTop -> glassb` 渐变描边、`White 6% -> Transparent` 顶部微反光与 `18.dp` 阴影。
+     - **浅色主题**：`capsuleBg = Color(0xEBFBF9FC)`（`#F5F3F6` 与高比例白混合的浅雾白底色 `#FBF9FC` 叠加 `0xEB ≈ 92.2%` 不透明度），仅余 ~8% 穿透率以压住下方深色 `#17151C` 文字，搭配顶部 `White 16% -> Transparent` 高光、边框及 `10.dp` 阴影。
+   - 在 `FolioTierTest.kt` 新增 `capsuleBackgroundKeepsHighOpacityWithoutBlur` 单测约束两套主题胶囊不透明度均 `>= 0.90f`。
+3. **冷启动页与大/小窗同进程切页记忆（`FolioApp.kt`、`FolioPivotTest.kt`）**：
+   - 移除原本读取 `playbackStore.navigation.value` 作为 `initialPage` 的逻辑（不改核心层）。
+   - 在 `FolioApp.kt` 新增进程级、不持久化的 `internal object FolioUiSession`，初始页固定为 `HOME_PAGE_INDEX = 1`（`现在收听`）；用户滑动或点击切页时通过 `LaunchedEffect(pagerState.currentPage)` 更新 `FolioUiSession.onPageChanged(...)`。冷启动（新进程）必定回到「现在收听」，而在同一进程内通过 `WindowHosts` 在 `MainActivity` 与 `MiniWindowActivity` 之间销毁并重建 Activity 时可保留当前所在页。
+   - 在 `FolioPivotTest.kt` 新增 `coldStartDefaultsToListenNowAndInProcessSwitchesPreservePage` 单测验证冷启动初始页为 `1`（`现在收听`）及同进程页面记忆。
+4. **第二轮验收结果**：
+   - 修改/新增代码文件：`app/src/main/java/dev/amatv/flyme/FolioTheme.kt`、`app/src/main/java/dev/amatv/flyme/FolioComponents.kt`、`app/src/main/java/dev/amatv/flyme/FolioApp.kt`、`app/src/test/java/dev/amatv/flyme/FolioTierTest.kt`、`app/src/test/java/dev/amatv/flyme/FolioPivotTest.kt`、`B1A-REPORT.md`。
+   - 完整验收命令结果：`BUILD SUCCESSFUL in 1m 20s`；`app/build/test-results/testFlymeGeckoUnitTest` 共 **79 个测试类 / 518 项单元测试全部通过（通过 518 / 失败 0 / 错误 0 / 跳过 0）**；APK 产物 `app/build/outputs/apk/flymeGecko/app-flymeGecko.apk`（194,078,405 字节）。
