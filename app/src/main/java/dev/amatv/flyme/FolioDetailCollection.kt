@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -20,6 +21,7 @@ import dev.amatv.core.PlaybackState
 import dev.amatv.integration.LibraryCollection
 import dev.amatv.integration.MusicServices
 import dev.amatv.model.CatalogKind
+import dev.amatv.model.ContentShelf
 import dev.amatv.model.Track
 import kotlin.math.roundToInt
 
@@ -30,6 +32,7 @@ internal fun FolioCollectionDetail(
     services: MusicServices,
     playback: PlaybackState,
     bottomPadding: Dp,
+    homeShelves: List<ContentShelf>,
     onOpenItem: (Track, List<Track>) -> Unit,
     onPlayCollection: (Track, List<Track>, Int, Boolean) -> Unit,
 ) {
@@ -52,6 +55,7 @@ internal fun FolioCollectionDetail(
             ?.items.orEmpty().filter { it.catalogId != collection.catalogId } to
             retryArtist.takeIf { artistData.failed }
     } else null
+    val playlistAlbums = if (album) emptyList() else remember(homeShelves) { folioPlaylistRecommendations(homeShelves) }
     val kind = stringResource(if (album) R.string.browse_kind_album else R.string.browse_kind_playlist)
     val meta = if (data.value == null) {
         kind
@@ -123,6 +127,15 @@ internal fun FolioCollectionDetail(
                 }
                 folioDetailCards(otherAlbums.first, columns, gap, true, onOpenItem)
             }
+            if (playlistAlbums.isNotEmpty()) {
+                item(key = "playlist-recommendations") {
+                    FolioSectionTitle(
+                        stringResource(R.string.folio_detail_playlist_recommendations),
+                        Modifier.padding(top = 28.dp),
+                    )
+                }
+                folioDetailCards(playlistAlbums, columns, gap, true, onOpenItem)
+            }
             val retryRelated = related?.second?.takeIf { related.first.failed } ?: otherAlbums?.second
             if (retryRelated != null) {
                 item(key = "related-error") {
@@ -132,3 +145,12 @@ internal fun FolioCollectionDetail(
         }
     }
 }
+
+internal fun folioPlaylistRecommendations(homeShelves: List<ContentShelf>): List<Track> =
+    homeShelves.asSequence()
+        .filter { it.id.startsWith("recommendation:") }
+        .flatMap { it.items.asSequence() }
+        .filter { it.catalogKind == CatalogKind.Album }
+        .distinctBy { it.catalogId ?: it.id }
+        .take(3)
+        .toList()

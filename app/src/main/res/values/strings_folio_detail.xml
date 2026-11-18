@@ -12,6 +12,11 @@
         <item quantity="one">%d minute</item>
         <item quantity="other">%d minutes</item>
     </plurals>
+    <plurals name="folio_detail_artist_songs">
+        <item quantity="one">%d song</item>
+        <item quantity="other">%d songs</item>
+    </plurals>
+    <string name="folio_detail_playlist_recommendations">You Might Also Like</string>
     <string name="folio_detail_my_playlist">My Playlist</string>
     <string name="folio_detail_more_albums">More Albums by %1$s</string>
     <string name="folio_detail_view_more">See More</string>

@@ -33,6 +33,7 @@ import dev.amatv.R
 import dev.amatv.core.PlaybackState
 import dev.amatv.integration.MusicServices
 import dev.amatv.model.CatalogKind
+import dev.amatv.model.ContentShelf
 import dev.amatv.model.Track
 import dev.amatv.ui.rememberArtworkPalette
 
@@ -40,6 +41,7 @@ import dev.amatv.ui.rememberArtworkPalette
 @Composable
 internal fun BoxScope.FolioDetailLayer(
     stack: List<Track>,
+    homeShelves: List<ContentShelf>,
     statusTop: Dp,
     navBottom: Dp,
     onOpenItem: (Track, List<Track>) -> Unit,
@@ -66,7 +68,7 @@ internal fun BoxScope.FolioDetailLayer(
             key(entries.size, item) {
                 FolioDetailPage(
                     item, statusTop, navBottom, onOpenItem, onBack, services, playback,
-                    onPlayCollection, onOpenPlayer,
+                    onPlayCollection, onOpenPlayer, homeShelves,
                 )
             }
         }
@@ -84,12 +86,12 @@ private fun FolioDetailPage(
     playback: PlaybackState,
     onPlayCollection: (Track, List<Track>, Int, Boolean) -> Unit,
     onOpenPlayer: () -> Unit,
+    homeShelves: List<ContentShelf>,
 ) {
     val spec = LocalFolioTierSpec.current
     val palette = LocalFolioPalette.current
     val layout = folioDetailLayout(spec.tier)
     val artist = if (item.catalogKind == CatalogKind.Artist) rememberFolioArtistData(item, services) else null
-    val shortArtist = artist != null && spec.tier == FolioTier.Short
     val bottomPadding = navBottom + spec.capsp + 28.dp
     val artwork = artist?.first?.value?.artist ?: item
     val colors = rememberArtworkPalette(artwork.artworkUrl, artwork.palette)
@@ -126,16 +128,16 @@ private fun FolioDetailPage(
                     FolioMiniPlayerDot(playback.track, onOpenPlayer)
                 }
             }
-            Spacer(Modifier.height(if (shortArtist) folioShortArtistBodyGap else folioDetailBodyGap))
+            Spacer(Modifier.height(folioDetailBodyGap))
 
             if (artist != null) {
                 FolioArtistDetail(
                     item, artist.first, artist.second, layout, services, playback,
-                    navBottom, bottomPadding, onOpenItem,
+                    bottomPadding, onOpenItem,
                 )
             } else {
                 FolioCollectionDetail(
-                    item, layout, services, playback, bottomPadding, onOpenItem, onPlayCollection,
+                    item, layout, services, playback, bottomPadding, homeShelves, onOpenItem, onPlayCollection,
                 )
             }
         }

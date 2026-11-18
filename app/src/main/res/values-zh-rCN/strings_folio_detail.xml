@@ -3,6 +3,8 @@
     <plurals name="folio_detail_songs"><item quantity="other">%d 首</item></plurals>
     <plurals name="folio_detail_albums"><item quantity="other">%d 张专辑</item></plurals>
     <plurals name="folio_detail_minutes"><item quantity="other">%d 分钟</item></plurals>
+    <plurals name="folio_detail_artist_songs"><item quantity="other">%d 首歌曲</item></plurals>
+    <string name="folio_detail_playlist_recommendations">你可能也喜欢</string>
     <string name="folio_detail_my_playlist">我的歌单</string>
     <string name="folio_detail_more_albums">%1$s 的更多专辑</string>
     <string name="folio_detail_view_more">查看更多</string>

@@ -1,9 +1,9 @@
 package dev.amatv.flyme
 
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import dev.amatv.data.MockCatalog
 import dev.amatv.model.CatalogKind
+import dev.amatv.model.ContentShelf
 import dev.amatv.model.Track
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
@@ -19,49 +19,42 @@ class FolioDetailTest {
         val tiers = listOf(FolioTier.Narrow, FolioTier.Short, FolioTier.Medium, FolioTier.Wide, FolioTier.Ultrawide)
         val layouts = tiers.map(::folioDetailLayout)
 
-        assertEquals(listOf(116, 104, 188, 220, 170), layouts.map { it.coverSize })
+        assertEquals(listOf(116, 112, 188, 220, 170), layouts.map { it.coverSize })
         assertEquals(listOf(32, 32, 46, 60, 52), layouts.map { it.titleSize })
         assertEquals(listOf(1, 1, 1, 2, 3), layouts.map { it.collectionColumns })
         assertEquals(listOf(true, false, false, false, false), layouts.map { it.buttonsBelowCover })
-        assertEquals(
-            listOf(FolioArtistHeader.Top, FolioArtistHeader.Left, FolioArtistHeader.Top,
-                FolioArtistHeader.Top, FolioArtistHeader.LeftWithSimilarRail),
-            layouts.map { it.artistHeader },
+    }
+
+    @Test
+    fun artistHeaderActionsAndCoveredSongColumnsFollowTheWindowTier() {
+        val portrait = folioDetailLayout(tierOf(393.dp, 852.dp))
+        val tablet = folioDetailLayout(tierOf(800.dp, 1000.dp))
+        val landscape = folioDetailLayout(tierOf(914.dp, 411.dp))
+        val car = folioDetailLayout(tierOf(1280.dp, 720.dp))
+        val ultrawide = folioDetailLayout(tierOf(1920.dp, 540.dp))
+
+        assertTrue(portrait.buttonsBelowCover)
+        assertEquals(1, portrait.topSongColumns)
+        for (layout in listOf(tablet, landscape, car, ultrawide)) {
+            assertFalse(layout.buttonsBelowCover)
+            assertEquals(2, layout.topSongColumns)
+        }
+    }
+
+    @Test
+    fun playlistRecommendationsUseAtMostThreeDistinctAlbumsFromHomeRecommendations() {
+        val song = MockCatalog.tracks.first()
+        val albums = List(4) { index ->
+            song.copy(id = "album-$index", catalogId = "catalog-$index", catalogKind = CatalogKind.Album)
+        }
+        val homepage = listOf(
+            ContentShelf("recent", "Recently Played", listOf(albums.last())),
+            ContentShelf("recommendation:first", "For You", listOf(song, albums.first())),
+            ContentShelf("recommendation:second", "More", listOf(albums.first().copy(id = "duplicate")) + albums.drop(1)),
         )
-        assertEquals(listOf(116, 104, 188, 220, 200), layouts.map { it.artistCoverSize })
-        assertEquals(listOf(32, 32, 46, 60, 38), layouts.map { it.artistTitleSize })
-        assertEquals(listOf(1, 1, 2, 2, 2), layouts.map { it.topSongColumns })
-    }
 
-    @Test
-    fun shortArtistHeaderFitsLandscapeAboveCapsule() {
-        val windowHeight = 411.dp
-        val tier = tierOf(914.dp, windowHeight)
-        assertEquals(FolioTier.Short, tier)
-        val layout = folioDetailLayout(tier)
-        val spec = specForTier(tier)
-        val contentHeight = with(Density(420f / 160f)) {
-            layout.artistCoverSize.dp + layout.artistTitleLineHeight.toDp() +
-                folioShortArtistMetaLineHeight.toDp() + folioDetailButtonHeight + folioShortArtistItemGap * 3
-        }
-        val statusTop = 24.dp
-        val navBottom = 16.dp
-        val bodyTop = statusTop + folioDetailTopMargin + spec.ib + folioShortArtistBodyGap
-        val availableHeight = windowHeight - bodyTop - folioShortArtistBottomPadding(spec, navBottom)
-
-        assertEquals(215.6f, contentHeight.value, 0.01f)
-        assertEquals(227.dp, availableHeight)
-        assertTrue("Artist header needs $contentHeight, available $availableHeight", contentHeight <= availableHeight)
-        assertTrue(contentHeight <= windowHeight - bodyTop - folioShortArtistBottomPadding(spec, 24.dp))
-    }
-
-    @Test
-    fun onlyUltrawideMovesSimilarArtistsOutOfTheMusicColumn() {
-        for (tier in FolioTier.entries) {
-            val layout = folioDetailLayout(tier)
-            assertEquals(tier == FolioTier.Ultrawide, layout.placesArtistShelfInRail("artist-123-similar-artists"))
-            assertFalse(layout.placesArtistShelfInRail("artist-123-full-albums"))
-        }
+        assertEquals(albums.take(3), folioPlaylistRecommendations(homepage))
+        assertTrue(folioPlaylistRecommendations(homepage.take(1)).isEmpty())
     }
 
     @Test
