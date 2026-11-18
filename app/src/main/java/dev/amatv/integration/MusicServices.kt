@@ -403,20 +403,6 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
         mediaSession.publish(snapshot, canSkipNext, canSkipPrevious)
         flymeMediaSource?.publish(snapshot.copy(canSkipNext = canSkipNext, canSkipPrevious = canSkipPrevious))
     }
-    /**
-     * A window closed. MusicKit allows one player per process, so the player is released for the next window
-     * to create its own. This object lives as long as the process, so the media session, Flyme media source,
-     * spectrum and detail caches are only reset: released, the next window would play with no system session.
-     */
-    override fun release() {
-        clearDetailPages()
-        songSpectrum.setActive(false)
-        mediaSession.clear()
-        flymeMediaSource?.clear()
-        bridge.release()
-        releaseStationEngine()
-    }
-
     private fun releaseStationEngine() {
         stationEngineActive = false
         stationEngine?.release()

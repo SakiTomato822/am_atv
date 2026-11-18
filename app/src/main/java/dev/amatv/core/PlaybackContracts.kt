@@ -29,7 +29,6 @@ interface PlayerOperations : RecommendationProvider {
     fun setPlaybackListener(listener: ((PlaybackSnapshot) -> Unit)?)
     fun setSystemPlaybackCallbacks(callbacks: PlaybackMediaSession.Callbacks?)
     fun publishSystemPlayback(snapshot: PlaybackSnapshot, canSkipNext: Boolean, canSkipPrevious: Boolean)
-    fun release()
 }
 
 interface PlaybackSessionStorage {

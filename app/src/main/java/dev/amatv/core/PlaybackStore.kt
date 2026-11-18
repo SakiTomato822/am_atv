@@ -70,6 +70,10 @@ private suspend fun <T> cancellableResult(block: suspend () -> T): Result<T> = t
     Result.failure(error)
 }
 
+/**
+ * The app's one player, kept for the whole process by [dev.amatv.AmAtvApplication]. Windows (full screen, the
+ * Flyme small window) come and go around it: switching window neither stops nor rebuilds playback.
+ */
 class PlaybackStore(
     private val player: PlayerOperations,
     private val sessions: PlaybackSessionStorage,
@@ -79,12 +83,11 @@ class PlaybackStore(
     private val libraryActions: LibraryActions,
     private val coroutineScope: CoroutineScope,
     private val clock: () -> Long,
-    initialPlayWhenReady: Boolean,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val flymeAuto: Boolean = BuildConfig.FLYME_AUTO,
     private val delayFn: suspend (Long) -> Unit = { delay(it) },
 ) {
-    val startupCheckpoint: PlaybackSession? =
+    private val startupCheckpoint: PlaybackSession? =
         sessions.restoreCheckpointSession()?.copy(wasPlaying = false)
 
     private var currentDestination: Destination =
@@ -92,6 +95,9 @@ class PlaybackStore(
     private var previousDestination: Destination =
         startupCheckpoint?.previousDestination ?: sessions.activeTab
     private val navigationFlow = MutableStateFlow(currentDestination to previousDestination)
+
+    /** The page shown and the one before it; a window that opens starts on these. */
+    val navigation: StateFlow<Pair<Destination, Destination>> = navigationFlow.asStateFlow()
 
     private val initialTrack: Track =
         startupCheckpoint?.queue?.getOrNull(startupCheckpoint.currentIndex)
@@ -105,7 +111,7 @@ class PlaybackStore(
                 ?: if (initialTrack.catalogId == null) 7_500L else 0L,
             playStartedRealtimeMs = clock(),
             isPlaying = false,
-            playWhenReady = initialPlayWhenReady,
+            playWhenReady = false,
             playbackPrepared = false,
             playbackMessage = null,
             stationHistory = sessions.loadStationHistory(),
@@ -139,7 +145,6 @@ class PlaybackStore(
     private var selectionGeneration = 0L
     private var pendingRequestedSongCatalogId: String? = null
     private var rawSystemSnapshot: PlaybackSnapshot? = null
-    private var attachJob: Job? = null
 
     val queueController: PlaybackQueueController = PlaybackQueueController(
         scope = coroutineScope,
@@ -228,11 +233,8 @@ class PlaybackStore(
         navigationFlow.value = destination to previous
     }
 
+    /** Connects the player and starts the store's work. Called once, when the store is created. */
     fun attach() {
-        if (attachJob != null) return
-        val parentJob = Job(coroutineScope.coroutineContext[Job])
-        attachJob = parentJob
-        val attachScope = CoroutineScope(coroutineScope.coroutineContext + parentJob)
 
         player.setSystemPlaybackCallbacks(
             PlaybackMediaSession.Callbacks(
@@ -246,7 +248,7 @@ class PlaybackStore(
         player.setPlaybackListener(::applyPlaybackSnapshot)
 
         // Load the full session on IO and replay any buffered user actions once.
-        attachScope.launch {
+        coroutineScope.launch {
             startupCheckpoint?.let(queueController::restoreFromSession)
             val fullSession = cancellableResult {
                 withContext(ioDispatcher) { sessions.restoreSession() }
@@ -285,7 +287,7 @@ class PlaybackStore(
         }
 
         // A Play press during metadata IO is deferred until the full queue/cursor is hydrated.
-        attachScope.launch {
+        coroutineScope.launch {
             _state.map { Triple(it.startupSessionLoaded, it.playWhenReady, it.track.id) }
                 .distinctUntilChanged()
                 .collectLatest { (loaded, ready, _) ->
@@ -308,14 +310,14 @@ class PlaybackStore(
                 }
         }
 
-        attachScope.launch {
+        coroutineScope.launch {
             hasUserPlaybackRequestFlow.collect { requested ->
                 if (requested) queueController.activatePlaybackSession()
             }
         }
 
         // Load the Favorite Songs / Library state of each song shown on Now Playing (Flyme star button).
-        attachScope.launch {
+        coroutineScope.launch {
             combine(
                 _state.map { it.track.catalogId }.distinctUntilChanged(),
                 accountStore.state.map { it.connectionState }.distinctUntilChanged(),
@@ -328,7 +330,7 @@ class PlaybackStore(
 
         // Fade at gapless song changes, chosen per kind of queue in Settings.
         if (flymeAuto) {
-            attachScope.launch {
+            coroutineScope.launch {
                 combine(
                     queueController.state.map { it.context?.kind to it.stationFeed }.distinctUntilChanged(),
                     settingsStore.state.map { Triple(it.fadeStations, it.fadeAlbums, it.fadePlaylists) }
@@ -346,7 +348,7 @@ class PlaybackStore(
 
             // Gapless (Flyme): once the current song is ready, mirror the app's next song into MusicKit so it
             // can preload it and continue without a gap. Any change of current or next replaces it.
-            attachScope.launch {
+            coroutineScope.launch {
                 combine(
                     queueController.state.map { q ->
                         val next = queueController.peekAutoNext()
@@ -388,13 +390,13 @@ class PlaybackStore(
             }
         }
 
-        attachScope.launch {
+        coroutineScope.launch {
             commandFailureFlow.collect { failure ->
                 failure?.let { handlePlaybackFailure(it.first, it.second, it.third) }
             }
         }
 
-        attachScope.launch {
+        coroutineScope.launch {
             combine(
                 waitingQueueEntryIdFlow,
                 queueController.state.map { Triple(it.current?.entryId, it.awaitingNext, it.autoplayStatus) }
@@ -429,7 +431,7 @@ class PlaybackStore(
             }
         }
 
-        attachScope.launch {
+        coroutineScope.launch {
             queueController.state.map { Triple(it.canSkipNext, it.canSkipPrevious, it.current?.entryId) }
                 .distinctUntilChanged()
                 .collect {
@@ -439,7 +441,7 @@ class PlaybackStore(
                 }
         }
 
-        attachScope.launch {
+        coroutineScope.launch {
             combine(
                 navigationFlow,
                 _state.map { Triple(it.track.id, it.isPlaying, it.playWhenReady) }.distinctUntilChanged(),
@@ -453,7 +455,7 @@ class PlaybackStore(
             }
         }
 
-        attachScope.launch {
+        coroutineScope.launch {
             _state.map { it.isPlaying to it.track.id }
                 .distinctUntilChanged()
                 .collectLatest { (playing, _) ->
@@ -466,7 +468,7 @@ class PlaybackStore(
         }
 
         if (flymeAuto) {
-            attachScope.launch {
+            coroutineScope.launch {
                 combine(
                     accountStore.state.map { it.connectionState }.distinctUntilChanged(),
                     _state.map { it.playWhenReady }.distinctUntilChanged(),
@@ -482,7 +484,7 @@ class PlaybackStore(
         }
 
         // Auto-advance timer: detects track finish and smoothly advances
-        attachScope.launch {
+        coroutineScope.launch {
             _state.map { Triple(it.isPlaying, it.track.id, it.track.durationMs) to it.track.catalogId }
                 .distinctUntilChanged { a, b -> a.first == b.first }
                 .collectLatest { (key, catalogId) ->
@@ -502,7 +504,7 @@ class PlaybackStore(
 
         // Lyrics arrive independently of MusicKit's playback clock. Publish their
         // completion/clearing immediately, rather than waiting for the next SDK event.
-        attachScope.launch {
+        coroutineScope.launch {
             combine(
                 _state.map { Triple(it.track.lyricsIdentity(), it.track.lyrics, it.hasCurrentTrack) }
                     .distinctUntilChanged(),
@@ -522,7 +524,7 @@ class PlaybackStore(
         // Station history (Flyme): the songs a station played, kept across launches, like Apple Music's
         // played list. The queue view shows them before the current song while a station plays.
         if (flymeAuto) {
-            attachScope.launch {
+            coroutineScope.launch {
                 combine(
                     _state.map { it.track.catalogId }.distinctUntilChanged(),
                     queueController.state.map { it.current?.track?.catalogKind == CatalogKind.Station }
@@ -542,18 +544,6 @@ class PlaybackStore(
                 }
             }
         }
-    }
-
-    fun dispose() {
-        attachJob?.cancel()
-        attachJob = null
-        playbackRequestJob?.cancel()
-        playbackRequestJob = null
-        networkRetryJob?.cancel()
-        networkRetryJob = null
-        player.setSystemPlaybackCallbacks(null)
-        player.setPlaybackListener(null)
-        player.release()
     }
 
     fun currentPositionMs(): Long {

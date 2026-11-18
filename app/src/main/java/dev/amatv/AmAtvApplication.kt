@@ -1,16 +1,19 @@
 package dev.amatv
 
 import android.app.Application
+import android.os.SystemClock
 import dev.amatv.core.AccountStore
 import dev.amatv.core.ContentStore
 import dev.amatv.core.LibraryActions
 import dev.amatv.core.LyricsStore
+import dev.amatv.core.PlaybackStore
 import dev.amatv.core.SettingsStore
 import dev.amatv.core.SharedPreferencesSettingsStorage
 import dev.amatv.i18n.AppText
 import dev.amatv.integration.ContentCache
 import dev.amatv.integration.LogRecorder
 import dev.amatv.integration.MusicServices
+import dev.amatv.integration.PlaybackPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -22,6 +25,24 @@ class AmAtvApplication : Application() {
     lateinit var accountStore: AccountStore
     lateinit var contentStore: ContentStore
     val musicServices by lazy { MusicServices(this) }
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /**
+     * The player, for as long as the process lives. Created by the first window that opens (never in Gecko's
+     * process); later windows, including a switch between full screen and the small window, use the same one.
+     */
+    val playbackStore by lazy {
+        PlaybackStore(
+            player = musicServices,
+            sessions = PlaybackPreferences(this),
+            accountStore = accountStore,
+            settingsStore = settingsStore,
+            lyricsStore = lyricsStore,
+            libraryActions = libraryActions,
+            coroutineScope = applicationScope,
+            clock = SystemClock::elapsedRealtime,
+        ).also { it.attach() }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -32,7 +53,6 @@ class AmAtvApplication : Application() {
             onCacheDiskChanged = { contentCache.setEnabled(it) },
             onCachePrefetchChanged = { contentCache.setPrefetch(it) },
         )
-        val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         libraryActions = LibraryActions(
             api = musicServices.api,
             coroutineScope = applicationScope,

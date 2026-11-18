@@ -836,7 +836,6 @@ fun PlayerScreen(
         // Landscape only: in portrait the corner holds the lyric mode switch, and the small window is portrait.
         if (BuildConfig.FLYME_AUTO && isActiveScreen && !LocalCarPortrait.current) {
             FlymeWindowButton(
-                playWhenReady,
                 Modifier.align(Alignment.TopEnd).padding(top = 22.dp, end = 24.dp)
                     .clip(CircleShape).background(Color.White.copy(alpha = 0.12f)),
                 tint = Color.White,

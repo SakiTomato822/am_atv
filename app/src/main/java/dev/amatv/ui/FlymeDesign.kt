@@ -995,12 +995,11 @@ private fun MetroMiniPlayer(
 }
 
 /**
- * Moves the app into the Flyme small window (portrait), or from it back to full screen, handing the
- * playback session over. Shows nothing where no small window can be opened.
+ * Moves the app into the Flyme small window (portrait), or from it back to full screen; playback carries on.
+ * Shows nothing where no small window can be opened.
  */
 @Composable
 internal fun FlymeWindowButton(
-    playing: Boolean,
     modifier: Modifier = Modifier,
     size: Dp = 48.dp,
     iconSize: Dp = 22.dp,
@@ -1010,7 +1009,7 @@ internal fun FlymeWindowButton(
     FlymeGlyphButton(
         icon = if (host.mini) Icons.Rounded.OpenInFull else Icons.Rounded.PictureInPictureAlt,
         contentDescription = stringResource(if (host.mini) R.string.flyme_open_full_screen else R.string.flyme_open_mini_window),
-        onClick = { host.switchTo(mini = !host.mini, resume = playing) },
+        onClick = { host.switchTo(!host.mini) },
         modifier = modifier.automationId(if (host.mini) "window-full-screen" else "window-mini"),
         size = size,
         iconSize = iconSize,

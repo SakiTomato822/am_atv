@@ -73,12 +73,9 @@ import dev.amatv.core.LibraryShelfPagination
 import dev.amatv.core.LyricsLoadPhase
 import dev.amatv.core.LyricsState
 import dev.amatv.core.PlaybackEvent
-import dev.amatv.core.PlaybackStore
 import dev.amatv.core.StartupQueueAction
 import dev.amatv.core.lyricsCacheKey
 import dev.amatv.core.resolvedCacheEntries
-import dev.amatv.LocalHostWindow
-import dev.amatv.WindowHosts
 import dev.amatv.integration.toSessionTrack
 import dev.amatv.integration.toSessionJson
 import dev.amatv.i18n.AppText
@@ -143,25 +140,8 @@ fun AmAtvApp() {
     val searchResults = contentState.searchResults
     val searchLoading = contentState.searchLoading
     val recentTracks = contentState.recentTracks
-    // Full screen or the Flyme small window; see dev.amatv.HostWindow.
-    val hostWindow = LocalHostWindow.current
-    val playbackStore = remember(context, services, playbackPrefs) {
-        PlaybackStore(
-            player = services,
-            sessions = playbackPrefs,
-            accountStore = accountStore,
-            settingsStore = settingsStore,
-            lyricsStore = lyricsStore,
-            libraryActions = libraryActions,
-            coroutineScope = scope,
-            clock = android.os.SystemClock::elapsedRealtime,
-            initialPlayWhenReady = hostWindow?.resume == true,
-        )
-    }
-    DisposableEffect(playbackStore) {
-        playbackStore.attach()
-        onDispose { playbackStore.dispose() }
-    }
+    // Lives with the process, not this window: a window switch keeps playing.
+    val playbackStore = remember(context) { (context.applicationContext as dev.amatv.AmAtvApplication).playbackStore }
     val playbackState by playbackStore.state.collectAsState()
     val queueState by playbackStore.queueController.state.collectAsState()
     val timelineEntries = remember(queueState.history, queueState.current, queueState.upNext, queueState.autoplay) {
@@ -170,12 +150,8 @@ fun AmAtvApp() {
     val timelineTracks = remember(timelineEntries) { timelineEntries.map { it.track } }
     val timelineEntryIds = remember(timelineEntries) { timelineEntries.map { it.entryId } }
 
-    var destination by remember {
-        mutableStateOf(playbackStore.startupCheckpoint?.destination ?: playbackPrefs.activeTab)
-    }
-    var previousDestination by remember {
-        mutableStateOf(playbackStore.startupCheckpoint?.previousDestination ?: playbackPrefs.activeTab)
-    }
+    var destination by remember { mutableStateOf(playbackStore.navigation.value.first) }
+    var previousDestination by remember { mutableStateOf(playbackStore.navigation.value.second) }
     val track = playbackState.track
     val hasCurrentTrack = playbackState.hasCurrentTrack
     val positionAnchorMs = playbackState.positionAnchorMs
@@ -356,14 +332,8 @@ fun AmAtvApp() {
             if (event == Lifecycle.Event.ON_STOP) playbackStore.saveSession(true)
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        hostWindow?.saveNow = { playbackStore.saveSession(true) }
-        onDispose {
-            hostWindow?.saveNow = null
-            playbackStore.saveSession(true)
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    LaunchedEffect(playWhenReady) { if (hostWindow != null) WindowHosts.playing = playWhenReady }
 
     // Lyrics use the account API, not the native audio engine. Wait for the full
     // session (including deferred queue selection) before resolving the current

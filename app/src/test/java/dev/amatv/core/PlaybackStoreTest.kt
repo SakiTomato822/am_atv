@@ -177,7 +177,6 @@ class PlaybackStoreTest {
         var currentLookahead: Track? = null
         val fadeHistory = mutableListOf<Boolean>()
         val publishedSnapshots = mutableListOf<Triple<PlaybackSnapshot, Boolean, Boolean>>()
-        var releaseCalls = 0
         var createStationCalls = 0
         var stationTracks: List<Track> = emptyList()
 
@@ -249,10 +248,6 @@ class PlaybackStoreTest {
             canSkipPrevious: Boolean,
         ) {
             publishedSnapshots += Triple(snapshot, canSkipNext, canSkipPrevious)
-        }
-
-        override fun release() {
-            releaseCalls++
         }
 
         override suspend fun createAmStation(songId: String): Pair<String?, List<Track>> {
@@ -394,7 +389,6 @@ class PlaybackStoreTest {
         var nowMs: Long,
     ) {
         fun close() {
-            store.dispose()
             scope.cancel()
         }
     }
@@ -404,7 +398,6 @@ class PlaybackStoreTest {
         connectionState: MusicConnectionState = MusicConnectionState.SignedIn,
         sessions: PlaybackSessionStorage = FakeSessionStorage(),
         settingsState: SettingsState = SettingsState(autoplayEnabled = false),
-        initialPlayWhenReady: Boolean = false,
         flymeAuto: Boolean = true,
         isCatalogConfigured: Boolean = true,
         ioDispatcherOverride: CoroutineDispatcher? = null,
@@ -440,7 +433,6 @@ class PlaybackStoreTest {
             libraryActions = libraryActions,
             coroutineScope = scope,
             clock = { nowMs },
-            initialPlayWhenReady = initialPlayWhenReady,
             ioDispatcher = ioDispatcherOverride ?: dispatcher,
             flymeAuto = flymeAuto,
             delayFn = { delayGate.delay(it) },
