@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -24,8 +25,12 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.amatv.R
@@ -44,13 +49,15 @@ internal data class FolioDetailLayout(
     val artistTitleSize: Int = titleSize,
     val topSongColumns: Int = 1,
 ) {
+    val artistTitleLineHeight get() = (artistTitleSize * 1.05f).sp
+
     fun placesArtistShelfInRail(shelfId: String): Boolean =
         artistHeader == FolioArtistHeader.LeftWithSimilarRail && shelfId.endsWith("-similar-artists")
 }
 
 internal fun folioDetailLayout(tier: FolioTier): FolioDetailLayout = when (tier) {
     FolioTier.Narrow -> FolioDetailLayout(116, 32, buttonsBelowCover = true)
-    FolioTier.Short -> FolioDetailLayout(104, 32, artistHeader = FolioArtistHeader.Left, artistTitleSize = 26)
+    FolioTier.Short -> FolioDetailLayout(104, 32, artistHeader = FolioArtistHeader.Left)
     FolioTier.Medium -> FolioDetailLayout(188, 46, topSongColumns = 2)
     FolioTier.Wide -> FolioDetailLayout(220, 60, collectionColumns = 2, topSongColumns = 2)
     FolioTier.Ultrawide -> FolioDetailLayout(
@@ -58,6 +65,22 @@ internal fun folioDetailLayout(tier: FolioTier): FolioDetailLayout = when (tier)
         artistCoverSize = 200, artistTitleSize = 38, topSongColumns = 2,
     )
 }
+
+internal val folioDetailTopMargin = 12.dp
+internal val folioDetailBodyGap = 10.dp
+internal val folioShortArtistBodyGap = 4.dp
+internal val folioShortArtistItemGap = 4.dp
+internal val folioShortArtistMetaLineHeight = 18.sp
+internal val folioDetailButtonHeight = 48.dp
+
+internal fun folioShortArtistBottomPadding(spec: FolioTierSpec, navBottom: Dp): Dp =
+    navBottom + spec.capsp
+
+private val shortArtistLineHeightStyle = LineHeightStyle(
+    alignment = LineHeightStyle.Alignment.Center,
+    trim = LineHeightStyle.Trim.None,
+    mode = LineHeightStyle.Mode.Fixed,
+)
 
 /** Balances the columns while keeping reading order down each column, as in H5 CSS columns. */
 internal fun folioDetailColumnRanges(count: Int, columns: Int): List<IntRange> {
@@ -87,6 +110,13 @@ internal fun FolioDetailHeader(
     val titleSize = if (isArtist) layout.artistTitleSize else layout.titleSize
     val actionsBelow = vertical || layout.buttonsBelowCover
     val compactAside = vertical && layout.artistHeader == FolioArtistHeader.Left
+    val baseStyle = LocalTextStyle.current
+    val textStyle = if (compactAside) {
+        baseStyle.copy(
+            platformStyle = PlatformTextStyle(includeFontPadding = false),
+            lineHeightStyle = shortArtistLineHeightStyle,
+        )
+    } else baseStyle
 
     val cover: @Composable () -> Unit = {
         FolioArtwork(item, Modifier.size(coverSize.dp).shadow(12.dp, shape), shape)
@@ -98,30 +128,41 @@ internal fun FolioDetailHeader(
             fontFamily = font,
             fontWeight = FontWeight.Light,
             fontSize = titleSize.sp,
-            lineHeight = (titleSize * 1.05f).sp,
+            lineHeight = if (isArtist) layout.artistTitleLineHeight else (titleSize * 1.05f).sp,
             letterSpacing = (-0.5).sp,
             maxLines = if (isArtist) 1 else Int.MAX_VALUE,
             overflow = if (isArtist) TextOverflow.Ellipsis else TextOverflow.Clip,
+            style = textStyle,
         )
         byline?.invoke()
-        if (meta != null) FolioDetailLabel(meta)
+        if (meta != null) {
+            if (compactAside) {
+                FolioDetailLabel(
+                    meta, style = textStyle.copy(lineHeight = folioShortArtistMetaLineHeight), singleLine = true,
+                )
+            } else {
+                FolioDetailLabel(meta)
+            }
+        }
     }
     val sectionGap = when {
-        compactAside -> 4.dp
+        compactAside -> folioShortArtistItemGap
         vertical -> 12.dp
         isArtist && actionsBelow -> 22.dp
         else -> 16.dp
     }
     Column(
         modifier = modifier.fillMaxWidth().padding(
-            top = if (compactAside) 4.dp else 8.dp,
+            top = if (compactAside) 0.dp else 8.dp,
             bottom = if (compactAside) 0.dp else 24.dp,
         ),
         verticalArrangement = Arrangement.spacedBy(sectionGap),
     ) {
         if (vertical) {
             cover()
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { description() }
+            Column(verticalArrangement = Arrangement.spacedBy(if (compactAside) folioShortArtistItemGap else 6.dp)) {
+                description()
+            }
         } else {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(if (layout.buttonsBelowCover) 18.dp else 28.dp),
@@ -137,7 +178,7 @@ internal fun FolioDetailHeader(
             }
         }
         if (actionsBelow) {
-            FolioDetailActions(playable, onPlay, Modifier, compact = vertical)
+            FolioDetailActions(playable, onPlay, Modifier, compact = vertical && !compactAside)
         }
     }
 }
@@ -151,7 +192,7 @@ private fun FolioDetailActions(enabled: Boolean, onPlay: (Boolean) -> Unit, modi
             val background = if (shuffle) palette.rb2 else palette.accent
             val foreground = if (shuffle) palette.fg else Color.White
             Row(
-                modifier = Modifier.weight(1f).height(if (compact) 44.dp else 48.dp)
+                modifier = Modifier.weight(1f).height(if (compact) 44.dp else folioDetailButtonHeight)
                     .clip(if (compact) RoundedCornerShape(12.dp) else CircleShape)
                     .background(background.copy(alpha = background.alpha * if (enabled) 1f else 0.45f))
                     .clickable(enabled = enabled, role = Role.Button) { onPlay(shuffle) }
@@ -173,12 +214,20 @@ private fun FolioDetailActions(enabled: Boolean, onPlay: (Boolean) -> Unit, modi
 }
 
 @Composable
-internal fun FolioDetailLabel(text: String, modifier: Modifier = Modifier) {
+internal fun FolioDetailLabel(
+    text: String,
+    modifier: Modifier = Modifier,
+    style: TextStyle = LocalTextStyle.current,
+    singleLine: Boolean = false,
+) {
     Text(
         text = text,
         color = LocalFolioPalette.current.fg2,
         fontFamily = LocalFolioFontFamily.current,
         fontSize = 13.5.sp,
         modifier = modifier,
+        maxLines = if (singleLine) 1 else Int.MAX_VALUE,
+        overflow = if (singleLine) TextOverflow.Ellipsis else TextOverflow.Clip,
+        style = style,
     )
 }

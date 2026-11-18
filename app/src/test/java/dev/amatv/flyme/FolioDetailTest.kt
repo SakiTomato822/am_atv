@@ -1,5 +1,7 @@
 package dev.amatv.flyme
 
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import dev.amatv.data.MockCatalog
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
@@ -27,8 +29,30 @@ class FolioDetailTest {
             layouts.map { it.artistHeader },
         )
         assertEquals(listOf(116, 104, 188, 220, 200), layouts.map { it.artistCoverSize })
-        assertEquals(listOf(32, 26, 46, 60, 38), layouts.map { it.artistTitleSize })
+        assertEquals(listOf(32, 32, 46, 60, 38), layouts.map { it.artistTitleSize })
         assertEquals(listOf(1, 1, 2, 2, 2), layouts.map { it.topSongColumns })
+    }
+
+    @Test
+    fun shortArtistHeaderFitsLandscapeAboveCapsule() {
+        val windowHeight = 411.dp
+        val tier = tierOf(914.dp, windowHeight)
+        assertEquals(FolioTier.Short, tier)
+        val layout = folioDetailLayout(tier)
+        val spec = specForTier(tier)
+        val contentHeight = with(Density(420f / 160f)) {
+            layout.artistCoverSize.dp + layout.artistTitleLineHeight.toDp() +
+                folioShortArtistMetaLineHeight.toDp() + folioDetailButtonHeight + folioShortArtistItemGap * 3
+        }
+        val statusTop = 24.dp
+        val navBottom = 16.dp
+        val bodyTop = statusTop + folioDetailTopMargin + spec.ib + folioShortArtistBodyGap
+        val availableHeight = windowHeight - bodyTop - folioShortArtistBottomPadding(spec, navBottom)
+
+        assertEquals(215.6f, contentHeight.value, 0.01f)
+        assertEquals(227.dp, availableHeight)
+        assertTrue("Artist header needs $contentHeight, available $availableHeight", contentHeight <= availableHeight)
+        assertTrue(contentHeight <= windowHeight - bodyTop - folioShortArtistBottomPadding(spec, 24.dp))
     }
 
     @Test
