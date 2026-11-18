@@ -240,4 +240,42 @@ class FolioPlayerStateTest {
         assertEquals("-0:00", formatFolioRemainingTime(positionMs = 200_000L, durationMs = 180_000L))
         assertEquals("", formatFolioRemainingTime(positionMs = 10_000L, durationMs = 0L))
     }
+
+    @Test
+    fun backingOnlyLinesNeverBecomePosterLeadOrUpcomingPreview() {
+        val lead1 = LyricLine(words = listOf(LyricWord("慢一点 再慢一点", 5_000L, 10_000L)))
+        val backingOnly = LyricLine(
+            words = emptyList(),
+            backgroundWords = listOf(LyricWord("慢一点", 7_000L, 12_000L)),
+        )
+        val lead2 = LyricLine(words = listOf(LyricWord("让风从窗缝里进来", 12_000L, 17_000L)))
+        val lead3 = LyricLine(words = listOf(LyricWord("到家之前都算在路上", 17_000L, 22_000L)))
+        val lines = listOf(lead1, backingOnly, lead2, lead3)
+
+        assertTrue(isPosterBackingOnlyLine(backingOnly))
+        assertFalse(isPosterBackingOnlyLine(lead1))
+
+        // During the backing-only timestamp (10_500ms, after lead1 ended, backingOnly singing),
+        // Poster keeps lead1 as focusLeadIndex, illuminates "(慢一点)" in activeBackingText,
+        // and previews only lead2 & lead3 (skipping backingOnly).
+        val proj = projectPosterLyrics(
+            lines = lines,
+            positionMs = 10_500L,
+            activeLineIndices = setOf(1),
+        )
+        assertEquals(0, proj.focusLeadIndex)
+        assertTrue(proj.hasStartedLead)
+        assertEquals("(慢一点)", proj.activeBackingText)
+        assertEquals(listOf("让风从窗缝里进来", "到家之前都算在路上"), proj.upcomingLeadTexts)
+
+        // Before backingOnly starts (5_500ms), activeBackingText is empty and preview omits backingOnly.
+        val earlyProj = projectPosterLyrics(
+            lines = lines,
+            positionMs = 5_500L,
+            activeLineIndices = setOf(0),
+        )
+        assertEquals(0, earlyProj.focusLeadIndex)
+        assertEquals("", earlyProj.activeBackingText)
+        assertEquals(listOf("让风从窗缝里进来", "到家之前都算在路上"), earlyProj.upcomingLeadTexts)
+    }
 }

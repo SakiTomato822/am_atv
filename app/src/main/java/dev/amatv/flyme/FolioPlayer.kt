@@ -937,14 +937,17 @@ private fun TwoColumnPlayerBody(
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val leftColumnWidth = if (tierSpec.tier == FolioTier.Wide) maxWidth * 0.42f else maxWidth * 0.38f
+        val isWideCar = tierSpec.tier == FolioTier.Wide
+        // H5 `.t-e .lyr { left: 50%; right: 64px }`: Wide car tier splits 50/50 so lyrics stay in the right half.
+        val leftColumnWidth = if (isWideCar) maxWidth * 0.50f else maxWidth * 0.38f
         val bodyHeight = maxHeight
         Row(
             modifier = Modifier.fillMaxSize(),
-            horizontalArrangement = Arrangement.spacedBy(28.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (isWideCar) 0.dp else 28.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Left column: artwork card in Flow (or hidden/clear over Soak left bleed artwork)
+            // Left column: Wide car rolling lyrics show only the large cover (Flow & Soak, no duplicate title/artist);
+            // Wide car Poster keeps left clean for backdrop color glow. Short tier keeps its existing layout.
             Box(
                 modifier = Modifier
                     .width(leftColumnWidth)
@@ -952,8 +955,23 @@ private fun TwoColumnPlayerBody(
                     .then(pullHandle),
                 contentAlignment = Alignment.CenterStart,
             ) {
-                if (style == LyricBackgroundStyle.Flow) {
-                    val coverSize = if (tierSpec.tier == FolioTier.Wide) min(leftColumnWidth * 0.78f, 340.dp) else min(bodyHeight * 0.72f, 200.dp)
+                if (isWideCar) {
+                    if (displayState == FolioPlayerDisplayState.Lyrics ||
+                        (displayState == FolioPlayerDisplayState.None && style == LyricBackgroundStyle.Flow)
+                    ) {
+                        val coverSize = min((bodyHeight - 16.dp).coerceAtLeast(120.dp), min(leftColumnWidth * 0.78f, 400.dp))
+                        FolioArtwork(
+                            track = track,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .padding(start = 36.dp)
+                                .size(coverSize)
+                                .shadow(24.dp, RoundedCornerShape(14.dp))
+                                .clickable(onClick = onOpenAlbum),
+                        )
+                    }
+                } else if (style == LyricBackgroundStyle.Flow) {
+                    val coverSize = min(bodyHeight * 0.72f, 200.dp)
                     Column(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
@@ -970,7 +988,7 @@ private fun TwoColumnPlayerBody(
                             color = fg,
                             fontFamily = fontFamily,
                             fontWeight = FontWeight.SemiBold,
-                            fontSize = if (tierSpec.tier == FolioTier.Wide) 22.sp else 18.sp,
+                            fontSize = 18.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
@@ -982,7 +1000,7 @@ private fun TwoColumnPlayerBody(
                                 text = track.artist,
                                 color = fg2,
                                 fontFamily = fontFamily,
-                                fontSize = if (tierSpec.tier == FolioTier.Wide) 16.sp else 14.sp,
+                                fontSize = 14.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier
@@ -995,7 +1013,12 @@ private fun TwoColumnPlayerBody(
             }
 
             // Right column: lyrics / poster / queue fallback when no lyrics
-            Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .then(if (isWideCar) Modifier.padding(end = 28.dp) else Modifier),
+            ) {
                 when {
                     queuePanelVisible -> Column(
                         modifier = Modifier.fillMaxSize(),

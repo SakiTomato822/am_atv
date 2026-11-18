@@ -130,8 +130,17 @@ internal fun FolioPosterLyricsPanel(
     }
     val active = snapshot.focusLineIndex
     val waiting = snapshot.instrumentalScrollAnchor
-    val currentIndex = active.coerceAtLeast(0)
-    val upcomingBase = waiting?.let { it.beforeLineIndex - 1 } ?: currentIndex
+    val projection by remember(lines, snapshot, lyricPosition) {
+        derivedStateOf {
+            projectPosterLyrics(
+                lines = lines,
+                positionMs = lyricPosition.value,
+                activeLineIndices = snapshot.activeLineIndices,
+                isInstrumentalGap = waiting != null,
+                instrumentalBeforeLineIndex = waiting?.beforeLineIndex ?: 0,
+            )
+        }
+    }
     val density = LocalDensity.current
     val fullPresence = remember { mutableFloatStateOf(1f) }
     val bgPresence = remember { mutableFloatStateOf(1f) }
@@ -150,15 +159,15 @@ internal fun FolioPosterLyricsPanel(
             val subSizeSp = (posterSizeSp * 0.48f).coerceIn(17f, 24f)
             val subLineHeightSp = subSizeSp * 1.32f
             val transSizeSp = (posterSizeSp * 0.42f).coerceIn(15f, 21f)
+            val backingSizeSp = (baseSp * 0.5f).coerceIn(17f, 28f)
 
             Column(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
             ) {
-                val previousText = lines.getOrNull(active - 1)?.renderedText.orEmpty()
-                if (previousText.isNotBlank()) {
+                if (projection.previousLeadText.isNotEmpty()) {
                     Text(
-                        text = previousText,
+                        text = projection.previousLeadText,
                         color = fg.copy(alpha = 0.56f),
                         fontFamily = fontFamily,
                         fontWeight = FontWeight.SemiBold,
@@ -170,7 +179,7 @@ internal fun FolioPosterLyricsPanel(
                 }
 
                 AnimatedContent(
-                    targetState = waiting ?: lines[currentIndex],
+                    targetState = waiting ?: lines[projection.focusLeadIndex],
                     label = "folio-poster-focus",
                     transitionSpec = {
                         (fadeIn(tween(380)) + slideInVertically(tween(380)) { it / 4 }) togetherWith
@@ -194,7 +203,6 @@ internal fun FolioPosterLyricsPanel(
                         return@AnimatedContent
                     }
                     val line = shown as LyricLine
-                    val lineActive = active >= 0 && currentIndex in snapshot.activeLineIndices
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         CompositionLocalProvider(
                             LocalDensity provides Density(
@@ -204,7 +212,7 @@ internal fun FolioPosterLyricsPanel(
                         ) {
                             KaraokeLyricLine(
                                 line = line,
-                                isActive = lineActive,
+                                isActive = projection.hasStartedLead,
                                 retainedPresence = fullPresence,
                                 retainedBackgroundPresence = bgPresence,
                                 isFocused = true,
@@ -212,6 +220,16 @@ internal fun FolioPosterLyricsPanel(
                                 isUserScrolling = false,
                                 positionState = lyricPosition,
                                 restingUnlitAlpha = if (active < 0) 0.42f else 0.36f,
+                            )
+                        }
+                        if (projection.activeBackingText.isNotEmpty()) {
+                            Text(
+                                text = projection.activeBackingText,
+                                color = fg2,
+                                fontFamily = fontFamily,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = backingSizeSp.sp,
+                                lineHeight = (backingSizeSp * 1.3f).sp,
                             )
                         }
                         if (translationEnabled) {
@@ -230,21 +248,19 @@ internal fun FolioPosterLyricsPanel(
                 }
 
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    for ((step, alpha) in listOf(1 to 0.68f, 2 to 0.44f, 3 to 0.28f)) {
-                        val nextLine = lines.getOrNull(upcomingBase + step) ?: break
-                        val nextText = nextLine.renderedText
-                        if (nextText.isNotBlank()) {
-                            Text(
-                                text = nextText,
-                                color = fg.copy(alpha = alpha),
-                                fontFamily = fontFamily,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = subSizeSp.sp,
-                                lineHeight = subLineHeightSp.sp,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
+                    val alphas = listOf(0.62f, 0.42f, 0.26f)
+                    projection.upcomingLeadTexts.forEachIndexed { idx, nextText ->
+                        val alpha = alphas.getOrElse(idx) { 0.26f }
+                        Text(
+                            text = nextText,
+                            color = fg.copy(alpha = alpha),
+                            fontFamily = fontFamily,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = subSizeSp.sp,
+                            lineHeight = subLineHeightSp.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
             }
