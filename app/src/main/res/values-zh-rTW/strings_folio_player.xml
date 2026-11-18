@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="folio_player_close">收起播放器</string>
+    <string name="folio_player_add_library">加入資料庫</string>
+    <string name="folio_player_in_library">已在資料庫中</string>
+    <string name="folio_player_toggle_poster">切換至海報歌詞</string>
+    <string name="folio_player_toggle_lyrics">切換至捲動歌詞</string>
+    <string name="folio_player_translate_short">譯</string>
+    <string name="folio_player_translate_toggle">切換歌詞翻譯</string>
+    <string name="folio_player_no_lyrics">這首歌沒有歌詞</string>
+    <string name="folio_player_retry_lyrics">重試</string>
+    <string name="folio_player_queue_played">已播放 · %1$d 首</string>
+    <string name="folio_player_queue_now">正在播放</string>
+    <string name="folio_player_queue_up_next">接下來播放 · %1$d 首</string>
+    <string name="folio_player_queue_autoplay">自動播放</string>
+    <string name="folio_player_queue_similar">相似歌曲</string>
+    <string name="folio_player_queue_loading">正在為你挑選相似歌曲…</string>
+    <string name="folio_player_queue_empty">目前沒有待播曲目</string>
+    <string name="folio_player_controls_expand">展開播放控制</string>
+</resources>
