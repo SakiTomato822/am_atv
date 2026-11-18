@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="folio_detail_songs"><item quantity="other">%d 首</item></plurals>
+    <plurals name="folio_detail_albums"><item quantity="other">%d 張專輯</item></plurals>
+    <plurals name="folio_detail_minutes"><item quantity="other">%d 分鐘</item></plurals>
+    <string name="folio_detail_my_playlist">我的歌單</string>
+    <string name="folio_detail_more_albums">%1$s 的更多專輯</string>
+    <string name="folio_detail_view_more">查看更多</string>
+    <string name="folio_detail_artist_error">無法載入歌手詳情。</string>
+    <string name="folio_detail_artist_empty">這位歌手暫無可顯示的音樂。</string>
+</resources>
