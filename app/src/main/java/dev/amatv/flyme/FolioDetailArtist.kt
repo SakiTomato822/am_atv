@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,6 +28,7 @@ import dev.amatv.R
 import dev.amatv.core.PlaybackState
 import dev.amatv.integration.CatalogArtistPage
 import dev.amatv.integration.MusicServices
+import dev.amatv.model.ContentShelf
 import dev.amatv.model.Track
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -56,6 +60,14 @@ internal fun FolioArtistDetail(
     val more = remember { mutableStateMapOf<String, FolioDetailData<List<Track>>>() }
     var showAllSongs by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val headerOnLeft = layout.artistHeader != FolioArtistHeader.Top
+    val hasSimilarRail = layout.artistHeader == FolioArtistHeader.LeftWithSimilarRail
+    val (similarShelves, musicShelves) = shelves.partition { layout.placesArtistShelfInRail(it.id) }
+
+    fun requestMore(shelfId: String, href: String) {
+        more[shelfId] = FolioDetailData()
+        scope.launch { more[shelfId] = loadFolioArtistShelf(services, href) }
+    }
 
     val header: @Composable () -> Unit = {
         val meta = if (page != null) {
@@ -72,17 +84,25 @@ internal fun FolioArtistDetail(
                 val queue = if (shuffle) songs.shuffled() else songs
                 onOpenItem(queue.first(), queue)
             },
-            vertical = layout.artistSideBySide,
+            vertical = headerOnLeft,
         )
     }
 
-    BoxWithConstraints(Modifier.fillMaxSize().padding(start = spec.px, end = spec.pr)) {
-        val gap = 24.dp
-        val asideWidth = if (layout.artistSideBySide) (maxWidth * 0.30f).coerceIn(190.dp, 380.dp) else 0.dp
-        val mainWidth = if (layout.artistSideBySide) maxWidth - asideWidth - gap else maxWidth
-        val columns = adaptiveColumnCount(mainWidth, spec.liw, spec.lstGap)
-        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-            if (layout.artistSideBySide) {
+    val start = spec.px + if (hasSimilarRail) 44.dp else 0.dp
+    BoxWithConstraints(Modifier.fillMaxSize().padding(start = start, end = spec.pr)) {
+        val panelGap = if (hasSimilarRail) 36.dp else 24.dp
+        val asideWidth = when (layout.artistHeader) {
+            FolioArtistHeader.Top -> 0.dp
+            FolioArtistHeader.Left -> (maxWidth * 0.30f).coerceIn(190.dp, 380.dp)
+            FolioArtistHeader.LeftWithSimilarRail -> (maxWidth * 0.18f).coerceAtMost(300.dp)
+        }
+        val columns = adaptiveColumnCount(
+            if (headerOnLeft) maxWidth - asideWidth - panelGap else maxWidth,
+            spec.liw,
+            spec.lstGap,
+        )
+        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(panelGap)) {
+            if (headerOnLeft) {
                 LazyColumn(
                     modifier = Modifier.width(asideWidth).fillMaxHeight(),
                     contentPadding = PaddingValues(bottom = bottomPadding),
@@ -92,7 +112,7 @@ internal fun FolioArtistDetail(
                 modifier = Modifier.weight(1f).fillMaxHeight(),
                 contentPadding = PaddingValues(bottom = bottomPadding),
             ) {
-                if (!layout.artistSideBySide) item(key = "header") { header() }
+                if (!headerOnLeft) item(key = "header") { header() }
                 if (data.failed || (songs.isEmpty() && shelves.isEmpty())) {
                     item(key = "status") {
                         when {
@@ -108,7 +128,7 @@ internal fun FolioArtistDetail(
                     item(key = "top-songs") { FolioSectionTitle(stringResource(R.string.artist_top_songs)) }
                     folioDetailSongs(
                         if (showAllSongs) songs else songs.take(8),
-                        layout.topSongColumns, gap, playback, showCover = true, showArtist = true,
+                        layout.topSongColumns, 24.dp, playback, showCover = true, showArtist = true,
                     ) { index -> onOpenItem(songs[index], songs) }
                     if (songs.size > 8 && !showAllSongs) {
                         item(key = "top-songs-more") {
@@ -116,40 +136,64 @@ internal fun FolioArtistDetail(
                         }
                     }
                 }
-                for (shelf in shelves) {
-                    item(key = shelf.id) { FolioSectionTitle(shelf.title) }
-                    val extra = more[shelf.id]
-                    val cards = (shelf.items + extra?.value.orEmpty()).distinctBy { it.id }
-                    folioDetailCards(cards, columns, spec.lstGap, false, onOpenItem)
-                    val href = shelf.moreHref
-                    if (href != null && extra?.value == null) {
-                        item(key = "${shelf.id}-more") {
-                            if (extra?.loading == true) {
-                                FolioDetailStatus(stringResource(R.string.browse_loading))
-                            } else {
-                                val loadMore: () -> Unit = {
-                                    more[shelf.id] = FolioDetailData()
-                                    scope.launch {
-                                        try {
-                                            val items = services.catalogArtistViewMore(href)
-                                            more[shelf.id] = FolioDetailData(items, loading = false)
-                                        } catch (cancelled: CancellationException) {
-                                            throw cancelled
-                                        } catch (_: Exception) {
-                                            more[shelf.id] = FolioDetailData(loading = false, failed = true)
-                                        }
-                                    }
-                                }
-                                if (extra?.failed == true) {
-                                    FolioDetailStatus(stringResource(R.string.browse_load_more_error), loadMore)
-                                } else {
-                                    FolioChip(stringResource(R.string.folio_detail_view_more), false, loadMore)
-                                }
-                            }
-                        }
+                for (shelf in musicShelves) {
+                    val cardWidth = if (hasSimilarRail) spec.cw else null
+                    shelfContent(shelf, columns, spec.lstGap, cardWidth, more[shelf.id], onOpenItem, ::requestMore)
+                }
+            }
+            if (hasSimilarRail) {
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    contentPadding = PaddingValues(bottom = bottomPadding),
+                ) {
+                    for (shelf in similarShelves) {
+                        shelfContent(shelf, columns, spec.lstGap, 134.dp, more[shelf.id], onOpenItem, ::requestMore)
                     }
                 }
             }
         }
     }
+}
+
+private fun LazyListScope.shelfContent(
+    shelf: ContentShelf,
+    columns: Int,
+    gap: Dp,
+    cardWidth: Dp?,
+    extra: FolioDetailData<List<Track>>?,
+    onOpenItem: (Track, List<Track>) -> Unit,
+    loadMore: (String, String) -> Unit,
+) {
+    item(key = shelf.id) { FolioSectionTitle(shelf.title) }
+    val cards = (shelf.items + extra?.value.orEmpty()).distinctBy { it.id }
+    if (cardWidth != null) {
+        item(key = "${shelf.id}-cards") {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                items(cards, key = { it.id }) { card ->
+                    FolioGridCard(card, { onOpenItem(card, cards) }, Modifier.width(cardWidth).padding(bottom = 16.dp))
+                }
+            }
+        }
+    } else {
+        folioDetailCards(cards, columns, gap, false, onOpenItem)
+    }
+    val href = shelf.moreHref
+    if (href != null && extra?.value == null) {
+        item(key = "${shelf.id}-more") {
+            val requestMore = { loadMore(shelf.id, href) }
+            when {
+                extra?.loading == true -> FolioDetailStatus(stringResource(R.string.browse_loading))
+                extra?.failed == true -> FolioDetailStatus(stringResource(R.string.browse_load_more_error), requestMore)
+                else -> FolioChip(stringResource(R.string.folio_detail_view_more), false, requestMore)
+            }
+        }
+    }
+}
+
+private suspend fun loadFolioArtistShelf(services: MusicServices, href: String): FolioDetailData<List<Track>> = try {
+    FolioDetailData(services.catalogArtistViewMore(href), loading = false)
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (_: Exception) {
+    FolioDetailData(loading = false, failed = true)
 }

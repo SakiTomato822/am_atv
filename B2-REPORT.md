@@ -43,3 +43,13 @@
 - 使用 B1A 指定的 JDK 17、Android SDK、`flyme.uiVerification=true` 和 `arm64-v8a` 参数运行 `:app:testFlymeGeckoUnitTest :app:assembleFlymeGecko`。Gradle 返回 `BUILD SUCCESSFUL`。
 - 从 JUnit XML 汇总得到 **530 项单测通过**，其中 B2 新增 **11 项**，原有 **519 项**。失败、错误、跳过均为 0。
 - APK 生成于 `app/build/outputs/apk/flymeGecko/app-flymeGecko.apk`。
+
+## 返工
+
+- **宽档 e（车机）**：以 `car-artist.png` 为准，去掉左侧栏。圆头像在页头左侧，姓名、歌曲和专辑数量、播放和随机播放在右侧；页头下方是全宽滚动区，带封面的热门歌曲分两栏，随后是专辑、相似歌手等目录分区。
+- **矮档 m（手机横屏）**：以 `landscape-artist.png` 为准，保留左侧头像、姓名、数量和按钮，右侧独立滚动，热门歌曲为一栏。
+- **超宽档 u**：以 `uw-artist.png` 为准，左侧为歌手信息，中间为两栏热门歌曲和专辑等分区，右侧单独显示相似歌手的圆形卡片；其他分区不会被移到右栏。
+- **窄档 c、中档 t**：用 H5 的 `dev=pp` 和 `dev=pt` 打开 `artist:a2`，实截 `b2-fix-shots/pp-artist.png` 和 `b2-fix-shots/pt-artist.png`。两档均为顶部横排页头；窄档按钮另起一行，热门歌曲一栏；中档按钮留在头像右侧，热门歌曲两栏。H5 原文件未修改。
+- **姓名排版**：歌手页 c/m/t/e/u 分别使用 32/26/46/60/38 sp，全部单行，超出可用宽度以省略号截断。c/t/e 取当前 H5 的字号；m/u 按指定截图估算字号。专辑和歌单的字号与排版未改。
+- **范围与差异**：改动仅涉及 `FolioDetailArtist.kt`、`FolioDetailLayout.kt`、`FolioDetailTest.kt`、本报告和两张参考截图。保留真实目录的分区、查看更多、播放队列和出栈逻辑，因此曲目数量、分区和展开按钮可能与 H5 示例不同。未操作 Android 模拟器，设备端的最终像素差异仍不确定。
+- **验收**：五档布局、头像尺寸、字号和歌曲列数已有断言，新增一项覆盖仅超宽档将相似歌手移到右栏。按 B1A 参数运行 `:app:testFlymeGeckoUnitTest :app:assembleFlymeGecko`，见 `BUILD SUCCESSFUL`。JUnit 汇总 **531 项通过**（其中 B2 为 12 项），失败、错误、跳过均为 0；已生成 `app/build/outputs/apk/flymeGecko/app-flymeGecko.apk`。

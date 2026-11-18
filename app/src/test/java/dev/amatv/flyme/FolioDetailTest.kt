@@ -21,8 +21,23 @@ class FolioDetailTest {
         assertEquals(listOf(32, 32, 46, 60, 52), layouts.map { it.titleSize })
         assertEquals(listOf(1, 1, 1, 2, 3), layouts.map { it.collectionColumns })
         assertEquals(listOf(true, false, false, false, false), layouts.map { it.buttonsBelowCover })
-        assertEquals(listOf(false, true, false, true, true), layouts.map { it.artistSideBySide })
+        assertEquals(
+            listOf(FolioArtistHeader.Top, FolioArtistHeader.Left, FolioArtistHeader.Top,
+                FolioArtistHeader.Top, FolioArtistHeader.LeftWithSimilarRail),
+            layouts.map { it.artistHeader },
+        )
+        assertEquals(listOf(116, 112, 188, 220, 200), layouts.map { it.artistCoverSize })
+        assertEquals(listOf(32, 26, 46, 60, 38), layouts.map { it.artistTitleSize })
         assertEquals(listOf(1, 1, 2, 2, 2), layouts.map { it.topSongColumns })
+    }
+
+    @Test
+    fun onlyUltrawideMovesSimilarArtistsOutOfTheMusicColumn() {
+        for (tier in FolioTier.entries) {
+            val layout = folioDetailLayout(tier)
+            assertEquals(tier == FolioTier.Ultrawide, layout.placesArtistShelfInRail("artist-123-similar-artists"))
+            assertFalse(layout.placesArtistShelfInRail("artist-123-full-albums"))
+        }
     }
 
     @Test
