@@ -502,6 +502,7 @@ fun FolioApp(
                 // B2 fills this layer: detail pages stacked over the pager, under the capsule and the player.
                 FolioDetailLayer(
                     stack = detailStack,
+                    homeShelves = contentState.shelvesFor(Destination.Home),
                     statusTop = statusTop,
                     navBottom = navBottom,
                     onOpenItem = ::openItem,

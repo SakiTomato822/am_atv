@@ -62,3 +62,12 @@
 - H5 的详情内容区从状态栏下方 12 dp、44 dp 返回按钮及 10 dp 间距之后开始，`.colhead` 另有顶部 8 dp、底部 24 dp、6 dp 行距，按钮还带 10 dp 顶部外边距。竖排左栏需要把头像与其余项目累加，因此让头像从返回按钮下 4 dp 开始，项目之间各留 4 dp，列内首尾无额外留白。右栏沿用原来的起始位置。左栏视口底部保留实际导航栏安全区及 84 dp 胶囊空间，较短窗口或放大字号时仍可滚动。
 - **高度核算。** 在 914×411 dp、默认字号下，左栏内容高 **215.6 dp**（头像 104 + 姓名 33.6 + 信息 18 + 按钮行 48 + 三处间距 12）。纯函数单测采用 H5 横屏设备预设的顶部安全区 24 dp、底部安全区 16 dp。左栏从 `24 + 12 + 44 + 4 = 84 dp` 开始，底部预留 `16 + 84 = 100 dp`，可用高度 **227 dp**，余量 **11.4 dp**。底部安全区按 24 dp 再算一次，可用 **219 dp**，余量 **3.4 dp**。
 - 本次修改 `FolioDetail.kt`、`FolioDetailArtist.kt`、`FolioDetailLayout.kt`、`FolioDetailTest.kt` 和 `FolioApp.kt` 的详情层实参。按 B1A 参数运行 `:app:testFlymeGeckoUnitTest :app:assembleFlymeGecko`，结果为 `BUILD SUCCESSFUL`，**532 项单测通过**（含 B2 的 13 项），失败、错误、跳过均为 0。APK 位于 `app/build/outputs/apk/flymeGecko/app-flymeGecko.apk`。模拟器实画面待 Claude 复核。
+
+### 返工 5｜横屏与超宽歌手页恢复顶部页头
+
+- **歌手页。** 矮档 m、宽档 e 和超宽 u 共用顶部横排页头：左侧圆头像，右侧姓名、歌曲与专辑数量、播放和随机播放；热门歌曲、专辑和相似歌手都在下方同一个全宽滚动区。按 H5 的 `--bc` / `--h2f`，m/e/u 分别使用 112 dp / 32 sp、220 dp / 60 sp、170 dp / 52 sp。删除 m 的独立左栏、u 的相似歌手侧栏及专用尺寸、留白逻辑。窄档 c 的按钮仍另起一行，中档 t 的按钮仍在头像右侧。
+- **热门歌曲。** 曲目带封面，c 一栏、t/e/u 两栏。重拍的 `landscape-artist.png` 和当前 H5 的 `.top2` 在 m 档实际只有一栏；这里以本轮明确要求为准，m 也使用两栏。播放顺序、展开和分区续页保持不变。
+- **专辑与歌单。** 对照 `car-album.png`、`car-playlist.png`、`phone-album.png`：保留车机两栏曲目和手机单栏曲目，手机页头按钮与封面的间距调至 H5 的 22 dp；专辑、歌单的 m 档封面也统一到 H5 的 112 dp。歌单页尾的「你可能也喜欢」使用首页已加载的 Apple Music 推荐，最多显示三张不同专辑，无推荐专辑时不显示。不新增请求，不使用 H5 示例数据。专辑仍不显示发行年份，因为现有数据模型未提供该字段。
+- **验收。** 删除旧的 m 左栏高度和 u 侧栏单测，新增顶部页头按钮位置及热门歌曲列数的分档回归测试、歌单推荐选取测试。按 B1A 参数运行 `:app:testFlymeGeckoUnitTest :app:assembleFlymeGecko`，得到 `BUILD SUCCESSFUL`；532 项通过（B2 为 13 项），失败、错误、跳过均为 0。APK：`app/build/outputs/apk/flymeGecko/app-flymeGecko.apk`。未运行模拟器，Android 实画面仍待比对。
+
+- **返工 6｜矮档 m 热门歌曲改为一栏。** 按当前 H5 的 `.top2` 规则，窄档 c、矮档 m 各一栏，中档 t、宽档 e、超宽档 u 各两栏。修改 `FolioDetailLayout.kt` 的 m 档栏数，并在 `FolioDetailTest.kt` 对五档窗口逐一断言。按 B1A 参数运行 `:app:testFlymeGeckoUnitTest :app:assembleFlymeGecko`，得到 `BUILD SUCCESSFUL`。532 项单测通过（含 B2 的 13 项），失败、错误、跳过均为 0。APK 位于 `app/build/outputs/apk/flymeGecko/app-flymeGecko.apk`，模拟器画面仍待比对。
