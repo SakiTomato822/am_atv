@@ -17,7 +17,7 @@ class FolioDetailTest {
         val tiers = listOf(FolioTier.Narrow, FolioTier.Short, FolioTier.Medium, FolioTier.Wide, FolioTier.Ultrawide)
         val layouts = tiers.map(::folioDetailLayout)
 
-        assertEquals(listOf(116, 112, 188, 220, 170), layouts.map { it.coverSize })
+        assertEquals(listOf(116, 104, 188, 220, 170), layouts.map { it.coverSize })
         assertEquals(listOf(32, 32, 46, 60, 52), layouts.map { it.titleSize })
         assertEquals(listOf(1, 1, 1, 2, 3), layouts.map { it.collectionColumns })
         assertEquals(listOf(true, false, false, false, false), layouts.map { it.buttonsBelowCover })
@@ -26,7 +26,7 @@ class FolioDetailTest {
                 FolioArtistHeader.Top, FolioArtistHeader.LeftWithSimilarRail),
             layouts.map { it.artistHeader },
         )
-        assertEquals(listOf(116, 112, 188, 220, 200), layouts.map { it.artistCoverSize })
+        assertEquals(listOf(116, 104, 188, 220, 200), layouts.map { it.artistCoverSize })
         assertEquals(listOf(32, 26, 46, 60, 38), layouts.map { it.artistTitleSize })
         assertEquals(listOf(1, 1, 2, 2, 2), layouts.map { it.topSongColumns })
     }

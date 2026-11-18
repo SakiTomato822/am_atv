@@ -50,7 +50,7 @@ internal data class FolioDetailLayout(
 
 internal fun folioDetailLayout(tier: FolioTier): FolioDetailLayout = when (tier) {
     FolioTier.Narrow -> FolioDetailLayout(116, 32, buttonsBelowCover = true)
-    FolioTier.Short -> FolioDetailLayout(112, 32, artistHeader = FolioArtistHeader.Left, artistTitleSize = 26)
+    FolioTier.Short -> FolioDetailLayout(104, 32, artistHeader = FolioArtistHeader.Left, artistTitleSize = 26)
     FolioTier.Medium -> FolioDetailLayout(188, 46, topSongColumns = 2)
     FolioTier.Wide -> FolioDetailLayout(220, 60, collectionColumns = 2, topSongColumns = 2)
     FolioTier.Ultrawide -> FolioDetailLayout(
@@ -86,6 +86,7 @@ internal fun FolioDetailHeader(
     val coverSize = if (isArtist) layout.artistCoverSize else layout.coverSize
     val titleSize = if (isArtist) layout.artistTitleSize else layout.titleSize
     val actionsBelow = vertical || layout.buttonsBelowCover
+    val compactAside = vertical && layout.artistHeader == FolioArtistHeader.Left
 
     val cover: @Composable () -> Unit = {
         FolioArtwork(item, Modifier.size(coverSize.dp).shadow(12.dp, shape), shape)
@@ -105,9 +106,18 @@ internal fun FolioDetailHeader(
         byline?.invoke()
         if (meta != null) FolioDetailLabel(meta)
     }
+    val sectionGap = when {
+        compactAside -> 4.dp
+        vertical -> 12.dp
+        isArtist && actionsBelow -> 22.dp
+        else -> 16.dp
+    }
     Column(
-        modifier = modifier.fillMaxWidth().padding(top = 8.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(if (vertical) 12.dp else if (isArtist && actionsBelow) 22.dp else 16.dp),
+        modifier = modifier.fillMaxWidth().padding(
+            top = if (compactAside) 4.dp else 8.dp,
+            bottom = if (compactAside) 0.dp else 24.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(sectionGap),
     ) {
         if (vertical) {
             cover()
