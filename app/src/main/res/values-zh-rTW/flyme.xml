@@ -9,4 +9,12 @@
     <string name="flyme_text_standard">標準</string>
     <string name="flyme_text_large">大</string>
     <string name="flyme_text_extra_large">特大</string>
+    <string name="flyme_try_new_ui_title">試用新介面</string>
+    <string name="flyme_try_new_ui_summary">體驗 AM Folio 15 響應式新版介面，可在設定頁隨時切回舊介面。</string>
+    <string name="flyme_try_new_ui_on">開啟</string>
+    <string name="flyme_try_new_ui_off">關閉</string>
+    <string name="folio_tab_settings">設定</string>
+    <string name="folio_tag_lyrics">歌詞</string>
+    <string name="folio_artist_detail_pending">藝人詳情頁將在後續階段提供。</string>
+    <string name="folio_collection_empty">沒有可播放的歌曲。</string>
 </resources>

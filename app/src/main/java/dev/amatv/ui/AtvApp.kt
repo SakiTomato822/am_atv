@@ -589,6 +589,7 @@ fun AmAtvApp() {
                         lowPerformanceMode = settingsState.lowPerformanceMode,
                         onLowPerformanceModeChange = { settingsStore.lowPerformanceMode = it },
                         cacheSettingsContent = {
+                            if (BuildConfig.FLYME_AUTO) FlymeTryNewUiSettings(settingsStore)
                             LanguageSettings()
                             FlymeMediaSettings(services)
                             if (BuildConfig.FLYME_AUTO) FlymeAppearanceSettings(settingsStore)

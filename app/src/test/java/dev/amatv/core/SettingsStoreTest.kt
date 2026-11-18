@@ -32,6 +32,7 @@ class SettingsStoreTest {
         var savedFadeStations: Boolean? = null
         var savedFadePlaylists: Boolean? = null
         var savedStationsAsSongs: Boolean? = null
+        var savedTryNewUi: Boolean? = null
         var savedCacheDiskEnabled: Boolean? = null
         var savedCachePrefetchNextTwo: Boolean? = null
 
@@ -58,6 +59,7 @@ class SettingsStoreTest {
         override fun saveFadeStations(fade: Boolean) { savedFadeStations = fade }
         override fun saveFadePlaylists(fade: Boolean) { savedFadePlaylists = fade }
         override fun saveStationsAsSongs(asSongs: Boolean) { savedStationsAsSongs = asSongs }
+        override fun saveTryNewUi(enabled: Boolean) { savedTryNewUi = enabled }
         override fun saveCacheDiskEnabled(enabled: Boolean) { savedCacheDiskEnabled = enabled }
         override fun saveCachePrefetchNextTwo(enabled: Boolean) { savedCachePrefetchNextTwo = enabled }
     }
@@ -78,6 +80,7 @@ class SettingsStoreTest {
         assertFalse(state.lyricPronunciationEnabled)
         assertEquals(LyricBackgroundStyle.Flow, state.lyricStyle)
         assertEquals(AppearanceMode.System, state.appearance)
+        assertFalse(state.tryNewUi)
         assertTrue(state.cacheDiskEnabled)
         assertTrue(state.cachePrefetchNextTwo)
     }
@@ -91,6 +94,7 @@ class SettingsStoreTest {
             lyricOffsetMs = -250L,
             lyricStyle = LyricBackgroundStyle.Soak,
             appearance = AppearanceMode.Dark,
+            tryNewUi = true,
         )
         val storage = FakeSettingsStorage(custom)
         val store = SettingsStore(storage)
@@ -102,6 +106,7 @@ class SettingsStoreTest {
         assertEquals(-250L, state.lyricOffsetMs)
         assertEquals(LyricBackgroundStyle.Soak, state.lyricStyle)
         assertEquals(AppearanceMode.Dark, state.appearance)
+        assertTrue(state.tryNewUi)
     }
 
     @Test
@@ -119,6 +124,10 @@ class SettingsStoreTest {
         assertEquals(LyricBackgroundStyle.Soak, store.state.value.lyricStyle)
         assertEquals(LyricBackgroundStyle.Soak, storage.savedLyricStyle)
         assertNull(storage.savedAppearance)
+
+        store.setTryNewUi(true)
+        assertTrue(store.state.value.tryNewUi)
+        assertEquals(true, storage.savedTryNewUi)
     }
 
     @Test

@@ -357,6 +357,7 @@ class PlaybackStoreTest {
         override fun saveFadeStations(fade: Boolean) = Unit
         override fun saveFadePlaylists(fade: Boolean) = Unit
         override fun saveStationsAsSongs(asSongs: Boolean) = Unit
+        override fun saveTryNewUi(enabled: Boolean) = Unit
         override fun saveCacheDiskEnabled(enabled: Boolean) = Unit
         override fun saveCachePrefetchNextTwo(enabled: Boolean) = Unit
     }

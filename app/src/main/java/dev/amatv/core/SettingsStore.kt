@@ -39,6 +39,7 @@ data class SettingsState(
     val fadeStations: Boolean = true,
     val fadePlaylists: Boolean = true,
     val stationsAsSongs: Boolean = false,
+    val tryNewUi: Boolean = false,
 
     // 缓存偏好 (content-cache)
     val cacheDiskEnabled: Boolean = true,
@@ -80,6 +81,7 @@ interface SettingsStorage {
     fun saveFadeStations(fade: Boolean)
     fun saveFadePlaylists(fade: Boolean)
     fun saveStationsAsSongs(asSongs: Boolean)
+    fun saveTryNewUi(enabled: Boolean)
 
     fun saveCacheDiskEnabled(enabled: Boolean)
     fun saveCachePrefetchNextTwo(enabled: Boolean)
@@ -123,6 +125,7 @@ class SharedPreferencesSettingsStorage(context: Context) : SettingsStorage {
             fadeStations = flymePrefs.getBoolean(KEY_FADE_STATIONS, true),
             fadePlaylists = flymePrefs.getBoolean(KEY_FADE_PLAYLISTS, true),
             stationsAsSongs = flymePrefs.getBoolean(KEY_STATIONS_AS_SONGS, false),
+            tryNewUi = flymePrefs.getBoolean(KEY_TRY_NEW_UI, false),
             cacheDiskEnabled = cachePrefs.getBoolean(KEY_CACHE_ENABLED, true),
             cachePrefetchNextTwo = cachePrefs.getBoolean(KEY_CACHE_PREFETCH_NEXT_TWO, true),
         )
@@ -200,6 +203,10 @@ class SharedPreferencesSettingsStorage(context: Context) : SettingsStorage {
         flymePrefs.edit().putBoolean(KEY_STATIONS_AS_SONGS, asSongs).apply()
     }
 
+    override fun saveTryNewUi(enabled: Boolean) {
+        flymePrefs.edit().putBoolean(KEY_TRY_NEW_UI, enabled).apply()
+    }
+
     override fun saveCacheDiskEnabled(enabled: Boolean) {
         cachePrefs.edit().putBoolean(KEY_CACHE_ENABLED, enabled).apply()
     }
@@ -228,6 +235,7 @@ class SharedPreferencesSettingsStorage(context: Context) : SettingsStorage {
         const val KEY_FADE_STATIONS = "fade_stations"
         const val KEY_FADE_PLAYLISTS = "fade_playlists"
         const val KEY_STATIONS_AS_SONGS = "stations_as_songs"
+        const val KEY_TRY_NEW_UI = "try_new_ui"
         const val KEY_LYRIC_SOAK = "lyric_style_soak"
 
         const val KEY_CACHE_ENABLED = "enabled"
@@ -339,6 +347,11 @@ class SettingsStore(
     fun setStationsAsSongs(asSongs: Boolean) {
         mutableState.value = mutableState.value.copy(stationsAsSongs = asSongs)
         storage.saveStationsAsSongs(asSongs)
+    }
+
+    fun setTryNewUi(enabled: Boolean) {
+        mutableState.value = mutableState.value.copy(tryNewUi = enabled)
+        storage.saveTryNewUi(enabled)
     }
 
     fun setCacheDiskEnabled(enabled: Boolean) {
