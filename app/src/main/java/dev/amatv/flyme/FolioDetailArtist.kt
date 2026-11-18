@@ -103,9 +103,10 @@ internal fun FolioArtistDetail(
         )
         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(panelGap)) {
             if (headerOnLeft) {
+                val viewportBottomPadding = if (spec.tier == FolioTier.Short) bottomPadding else 0.dp
                 LazyColumn(
-                    modifier = Modifier.width(asideWidth).fillMaxHeight(),
-                    contentPadding = PaddingValues(bottom = bottomPadding),
+                    modifier = Modifier.width(asideWidth).fillMaxHeight().padding(bottom = viewportBottomPadding),
+                    contentPadding = PaddingValues(bottom = bottomPadding - viewportBottomPadding),
                 ) { item { header() } }
             }
             LazyColumn(
