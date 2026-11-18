@@ -358,7 +358,15 @@ fun FolioMiniPlayerCapsule(
             .height(64.dp)
             .shadow(elevation = if (palette.isLight) 10.dp else 18.dp, shape = pillShape, clip = false)
             .clip(pillShape)
-            .background(palette.glass)
+            .background(palette.capsuleBg)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color.White.copy(alpha = if (palette.isLight) 0.16f else 0.06f),
+                        Color.Transparent,
+                    ),
+                ),
+            )
             .border(
                 width = 1.dp,
                 brush = Brush.verticalGradient(listOf(palette.glassHighlightTop, palette.glassb)),

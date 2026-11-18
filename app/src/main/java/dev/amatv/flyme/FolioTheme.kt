@@ -59,6 +59,7 @@ data class FolioPalette(
     val rb2: Color,
     val glass: Color,
     val glassb: Color,
+    val capsuleBg: Color,
     val accent: Color,
     val glowTopRight: Color,
     val glowBottomLeft: Color,
@@ -78,6 +79,8 @@ val DarkFolioPalette = FolioPalette(
     rb2 = Color.White.copy(alpha = 0.17f),
     glass = Color.White.copy(alpha = 0.10f),
     glassb = Color.White.copy(alpha = 0.20f),
+    // Android 11 lacks backdrop blur; mix bg (#131016) + ~10% white at ~90% alpha (0xE6) to veil scrolling text.
+    capsuleBg = Color(0xE628252D),
     accent = Color(0xFFFF5C72),
     glowTopRight = Color(0xFF3A1824),
     glowBottomLeft = Color(0xFF10242A),
@@ -97,6 +100,8 @@ val LightFolioPalette = FolioPalette(
     rb2 = Color(0xFF17151C).copy(alpha = 0.12f),
     glass = Color.White.copy(alpha = 0.66f),
     glassb = Color(0xFF17151C).copy(alpha = 0.10f),
+    // Light frosted fallback at ~92% alpha (0xEB) prevents dark list text bleeding through while preserving subtle tint.
+    capsuleBg = Color(0xEBFBF9FC),
     accent = Color(0xFFC8243F),
     glowTopRight = Color(0xFFF7DDE3),
     glowBottomLeft = Color(0xFFDDEEF0),
@@ -157,6 +162,7 @@ fun FolioTheme(
     val rb2 by animateColorAsState(target.rb2, tween(duration), label = "folio-rb2")
     val glass by animateColorAsState(target.glass, tween(duration), label = "folio-glass")
     val glassb by animateColorAsState(target.glassb, tween(duration), label = "folio-glassb")
+    val capsuleBg by animateColorAsState(target.capsuleBg, tween(duration), label = "folio-capsule-bg")
     val accent by animateColorAsState(target.accent, tween(duration), label = "folio-accent")
     val glowTopRight by animateColorAsState(target.glowTopRight, tween(duration), label = "folio-glow-tr")
     val glowBottomLeft by animateColorAsState(target.glowBottomLeft, tween(duration), label = "folio-glow-bl")
@@ -171,6 +177,7 @@ fun FolioTheme(
         rb2 = rb2,
         glass = glass,
         glassb = glassb,
+        capsuleBg = capsuleBg,
         accent = accent,
         glowTopRight = glowTopRight,
         glowBottomLeft = glowBottomLeft,

@@ -101,6 +101,12 @@ class FolioTierTest {
         assertEquals(720f, uwH, 0.01f)
         assertEquals(FolioTier.Ultrawide, tierOf(uwW, uwH))
 
+        // 2560x720 @ 160dpi (density 1.0) -> 1.5 -> ~1706.67x480 dp (Ultrawide)
+        val (uw2W, uw2H) = folioLayoutDp(2560f, 720f, 1.0f)
+        assertEquals(2560f / 1.5f, uw2W, 0.01f)
+        assertEquals(480f, uw2H, 0.01f)
+        assertEquals(FolioTier.Ultrawide, tierOf(uw2W, uw2H))
+
         // 1920x1080 @ 240dpi (density 1.5) -> unchanged 1.5 -> 1280x720 dp (Wide)
         assertEquals(1.5f, folioRenderDensity(1.5f), 0.0001f)
         // High-density phone (3.0) -> unchanged 3.0 -> 390x844 dp (Narrow)
@@ -109,5 +115,11 @@ class FolioTierTest {
         assertEquals(390f, phoneW, 0.01f)
         assertEquals(844f, phoneH, 0.01f)
         assertEquals(FolioTier.Narrow, tierOf(phoneW, phoneH))
+    }
+
+    @Test
+    fun capsuleBackgroundKeepsHighOpacityWithoutBlur() {
+        assertTrue(DarkFolioPalette.capsuleBg.alpha >= 0.90f)
+        assertTrue(LightFolioPalette.capsuleBg.alpha >= 0.90f)
     }
 }
