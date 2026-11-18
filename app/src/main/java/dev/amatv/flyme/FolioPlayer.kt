@@ -65,6 +65,7 @@ import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
 import dev.amatv.model.forDisplay
 import dev.amatv.ui.rememberArtworkPalette
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -218,9 +219,15 @@ internal fun BoxScope.FolioPlayerLayer(
         val canSkipNext = if (isStation) snapshot?.canSkipNext == true else queueState.canSkipNext
 
         val fallbackUnavailable = stringResource(R.string.player_open_unavailable)
-        val openAlbumDetail: () -> Unit = {
+        val openCatalogDetail: (suspend () -> Track?) -> Unit = { fetch ->
             scope.launch {
-                val resolved = runCatching { musicServices.catalogAlbumOf(track) }.getOrNull()
+                val resolved = try {
+                    fetch()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    null
+                }
                 if (resolved != null) {
                     onOpenDetail(resolved)
                 } else {
@@ -228,16 +235,8 @@ internal fun BoxScope.FolioPlayerLayer(
                 }
             }
         }
-        val openArtistDetail: () -> Unit = {
-            scope.launch {
-                val resolved = runCatching { musicServices.catalogArtistOf(track) }.getOrNull()
-                if (resolved != null) {
-                    onOpenDetail(resolved)
-                } else {
-                    navigationMessage = fallbackUnavailable
-                }
-            }
-        }
+        val openAlbumDetail: () -> Unit = { openCatalogDetail { musicServices.catalogAlbumOf(track) } }
+        val openArtistDetail: () -> Unit = { openCatalogDetail { musicServices.catalogArtistOf(track) } }
         val revealControls: () -> Unit = {
             controlsManualOpen = true
             revealPulse++
@@ -481,7 +480,7 @@ internal fun BoxScope.FolioPlayerLayer(
                             FolioPlayerExpandedControls(
                                 track = track,
                                 tierSpec = tierSpec,
-                                positionMs = positionState.value,
+                                positionState = positionState,
                                 durationMs = durationMs,
                                 canSeek = canSeek,
                                 isLiveStream = isLiveStream,
@@ -521,7 +520,7 @@ internal fun BoxScope.FolioPlayerLayer(
                             FolioPlayerCollapsedCapsule(
                                 track = track,
                                 tierSpec = tierSpec,
-                                positionMs = positionState.value,
+                                positionState = positionState,
                                 durationMs = durationMs,
                                 playWhenReady = playbackState.playWhenReady,
                                 isLight = palette.isLight,
@@ -633,7 +632,7 @@ private fun UltrawidePlayerBody(
                 FolioPlayerExpandedControls(
                     track = track,
                     tierSpec = tierSpec,
-                    positionMs = positionState.value,
+                    positionState = positionState,
                     durationMs = durationMs,
                     canSeek = canSeek,
                     isLiveStream = isLiveStream,
@@ -658,7 +657,7 @@ private fun UltrawidePlayerBody(
                 FolioPlayerCollapsedCapsule(
                     track = track,
                     tierSpec = tierSpec,
-                    positionMs = positionState.value,
+                    positionState = positionState,
                     durationMs = durationMs,
                     playWhenReady = playWhenReady,
                     isLight = isLight,

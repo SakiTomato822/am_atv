@@ -361,6 +361,16 @@ fun computeSongPosterFontSize(
 
 fun hasTimedLyrics(lines: List<LyricLine>): Boolean = lines.any { !it.isStatic }
 
+/** Formats remaining playback duration as `-m:ss` matching H5 `#trem`. */
+fun formatFolioRemainingTime(
+    positionMs: Long,
+    durationMs: Long,
+): String {
+    if (durationMs <= 0L) return ""
+    val remaining = (durationMs - positionMs).coerceAtLeast(0L)
+    return "-${formatFolioDuration(remaining)}"
+}
+
 /** Mixes artwork palette into `--base` for Flow & Soak in dark and light modes. */
 fun folioPlayerBaseColor(
     artworkPalette: List<Color>,

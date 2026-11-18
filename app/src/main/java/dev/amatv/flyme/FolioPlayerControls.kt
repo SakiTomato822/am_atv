@@ -38,6 +38,7 @@ import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -148,8 +149,8 @@ internal fun FolioPlayerHeader(
                 contentDescription = stringResource(R.string.folio_player_close),
                 size = tierSpec.pib,
                 iconTint = fg,
-                bg = pillBg,
-                border = pillBorder,
+                bg = Color.Transparent,
+                border = Color.Transparent,
                 onClick = onClose,
             )
             if (showHeaderTitle) {
@@ -190,8 +191,8 @@ internal fun FolioPlayerHeader(
                 ),
                 size = tierSpec.pib,
                 iconTint = if (isInLibrary) accent else fg,
-                bg = pillBg,
-                border = pillBorder,
+                bg = Color.Transparent,
+                border = Color.Transparent,
                 enabled = !libraryInProgress && !isInLibrary,
                 onClick = onToggleLibrary,
             )
@@ -203,21 +204,16 @@ internal fun FolioPlayerHeader(
                 ),
                 size = tierSpec.pib,
                 iconTint = if (isFavorite) accent else fg,
-                bg = pillBg,
-                border = pillBorder,
+                bg = Color.Transparent,
+                border = Color.Transparent,
                 enabled = !favoriteInProgress,
                 onClick = onToggleFavorite,
             )
 
             val modeBg by animateColorAsState(
-                targetValue = if (isPosterMode) fg else pillBg,
+                targetValue = if (isPosterMode) fg.copy(alpha = 0.16f) else Color.Transparent,
                 animationSpec = tween(FolioMotion.FAST_MS),
                 label = "player-mode-bg",
-            )
-            val modeFg by animateColorAsState(
-                targetValue = if (isPosterMode) (if (isLight) Color.White else Color(0xFF17151C)) else fg,
-                animationSpec = tween(FolioMotion.FAST_MS),
-                label = "player-mode-fg",
             )
             val modeCd = stringResource(
                 if (isPosterMode) R.string.folio_player_toggle_lyrics else R.string.folio_player_toggle_poster,
@@ -227,14 +223,13 @@ internal fun FolioPlayerHeader(
                     .size(tierSpec.pib)
                     .clip(CircleShape)
                     .background(modeBg)
-                    .border(1.dp, pillBorder, CircleShape)
                     .clickable(enabled = hasTimedLyrics, role = Role.Button, onClick = onTogglePosterMode)
                     .semantics { contentDescription = modeCd },
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = "Tt",
-                    color = modeFg.copy(alpha = if (hasTimedLyrics) 1f else 0.36f),
+                    color = fg.copy(alpha = if (hasTimedLyrics) 1f else 0.36f),
                     fontFamily = fontFamily,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 15.sp,
@@ -262,7 +257,7 @@ internal fun FolioPlayerHeader(
 internal fun FolioPlayerCollapsedCapsule(
     track: Track,
     tierSpec: FolioPlayerTierSpec,
-    positionMs: Long,
+    positionState: State<Long>,
     durationMs: Long,
     playWhenReady: Boolean,
     isLight: Boolean,
@@ -273,7 +268,6 @@ internal fun FolioPlayerCollapsedCapsule(
     modifier: Modifier = Modifier,
 ) {
     val fontFamily = LocalFolioFontFamily.current
-    val progress = if (durationMs > 0L) (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
     val shape = RoundedCornerShape(FolioRadii.Capsule)
     val playIconBg = fg
     val playIconTint = if (isLight) Color.White else Color(0xFF17151C)
@@ -289,50 +283,62 @@ internal fun FolioPlayerCollapsedCapsule(
                 },
             )
             .height(64.dp)
-            .folioPlayerGlass(isLight = isLight, shape = shape)
-            .clickable(role = Role.Button, onClick = onExpand)
-            .semantics { contentDescription = expandCd },
+            .folioPlayerGlass(isLight = isLight, shape = shape),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight()
-                .padding(horizontal = 10.dp),
+                .padding(end = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            FolioArtwork(
-                track = track,
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.size(44.dp),
-            )
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+            // Mirror H5 `.pmeta` (.pc + .ptx) and B1a `FolioMiniPlayerCapsule`: tapping the track
+            // summary region expands the full control deck while Play/Pause stays independent.
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(topStart = 999.dp, bottomStart = 999.dp, topEnd = 16.dp, bottomEnd = 16.dp))
+                    .clickable(role = Role.Button, onClick = onExpand)
+                    .semantics { contentDescription = expandCd }
+                    .padding(start = 10.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(
-                    text = track.title,
-                    color = fg,
-                    fontFamily = fontFamily,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 15.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                FolioArtwork(
+                    track = track,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.size(44.dp),
                 )
-                if (track.artist.isNotBlank()) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
                     Text(
-                        text = track.artist,
-                        color = fg2,
+                        text = track.title,
+                        color = fg,
                         fontFamily = fontFamily,
-                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 15.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    if (track.artist.isNotBlank()) {
+                        Text(
+                            text = track.artist,
+                            color = fg2,
+                            fontFamily = fontFamily,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(42.dp)
                     .clip(CircleShape)
                     .background(playIconBg)
                     .clickable(role = Role.Button, onClick = onTogglePlay),
@@ -348,22 +354,32 @@ internal fun FolioPlayerCollapsedCapsule(
                 )
             }
         }
-        // Thin hairline playback indicator along the bottom edge (mbar).
-        Box(
+        // Thin hairline playback indicator along the bottom edge (mbar); read position only in Canvas.
+        Canvas(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(horizontal = 18.dp)
-                .height(2.5.dp)
-                .clip(CircleShape)
-                .background(fg.copy(alpha = 0.14f)),
+                .padding(horizontal = 20.dp, vertical = 3.dp)
+                .height(2.5.dp),
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(progress)
-                    .fillMaxHeight()
-                    .background(fg.copy(alpha = 0.78f)),
+            val progress = if (durationMs > 0L) {
+                (positionState.value.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+            val radius = CornerRadius(size.height * 0.5f, size.height * 0.5f)
+            drawRoundRect(
+                color = fg.copy(alpha = 0.14f),
+                size = size,
+                cornerRadius = radius,
             )
+            if (progress > 0f) {
+                drawRoundRect(
+                    color = fg.copy(alpha = 0.78f),
+                    size = Size(size.width * progress, size.height),
+                    cornerRadius = radius,
+                )
+            }
         }
     }
 }
@@ -372,7 +388,7 @@ internal fun FolioPlayerCollapsedCapsule(
 internal fun FolioPlayerExpandedControls(
     track: Track,
     tierSpec: FolioPlayerTierSpec,
-    positionMs: Long,
+    positionState: State<Long>,
     durationMs: Long,
     canSeek: Boolean,
     isLiveStream: Boolean,
@@ -473,7 +489,7 @@ internal fun FolioPlayerExpandedControls(
                     }
                 }
                 SeekSection(
-                    positionMs = positionMs,
+                    positionState = positionState,
                     durationMs = durationMs,
                     canSeek = canSeek,
                     isLiveStream = isLiveStream,
@@ -541,7 +557,7 @@ internal fun FolioPlayerExpandedControls(
         }
 
         SeekSection(
-            positionMs = positionMs,
+            positionState = positionState,
             durationMs = durationMs,
             canSeek = canSeek,
             isLiveStream = isLiveStream,
@@ -675,7 +691,7 @@ private fun TransportRow(
 
 @Composable
 private fun SeekSection(
-    positionMs: Long,
+    positionState: State<Long>,
     durationMs: Long,
     canSeek: Boolean,
     isLiveStream: Boolean,
@@ -687,6 +703,7 @@ private fun SeekSection(
     var dragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableFloatStateOf(0f) }
 
+    val positionMs = positionState.value
     val safeDuration = durationMs.coerceAtLeast(1L)
     val liveFraction = if (durationMs > 0L) (positionMs.toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f) else 0f
     val shownFraction = if (dragging) dragFraction else liveFraction
@@ -775,7 +792,7 @@ private fun SeekSection(
                 fontSize = 11.sp,
             )
             Text(
-                text = if (durationMs > 0L) formatFolioDuration(durationMs) else "",
+                text = if (!isLiveStream) formatFolioRemainingTime(shownPositionMs, durationMs) else "",
                 color = fg2,
                 fontFamily = fontFamily,
                 fontSize = 11.sp,
