@@ -14,6 +14,7 @@ import dev.amatv.core.PlaybackState
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.LyricLine
 import dev.amatv.model.Track
+import dev.amatv.model.renderLyricWords
 import dev.amatv.playback.AutoplayStatus
 import dev.amatv.playback.QueueEntry
 import dev.amatv.playback.QueueState
@@ -339,8 +340,106 @@ fun buildFolioQueueSnapshot(
     )
 }
 
+fun posterLeadText(line: LyricLine): String =
+    renderLyricWords(line.words, line.joinWithSpaces).trim()
+
+fun posterBackingText(line: LyricLine): String {
+    val raw = renderLyricWords(line.backgroundWords, line.joinWithSpaces).trim()
+    if (raw.isEmpty()) return ""
+    return if (raw.startsWith("(") || raw.startsWith("（")) raw else "($raw)"
+}
+
+/** True when a line carries only backing vocals (`backgroundWords`) with no lead vocal text. */
+fun isPosterBackingOnlyLine(line: LyricLine): Boolean =
+    posterLeadText(line).isEmpty() &&
+        renderLyricWords(line.backgroundWords, line.joinWithSpaces).isNotBlank()
+
+@Immutable
+data class PosterLyricsProjection(
+    val focusLeadIndex: Int,
+    val hasStartedLead: Boolean,
+    val previousLeadText: String,
+    val activeBackingText: String,
+    val upcomingLeadTexts: List<String>,
+)
+
 /**
- * Computes one unified poster font size across all lines of the current song so short and long
+ * Projects lyrics for Poster mode following H5 `snapshot()` / `renderPoster()` / `.pbv` rules:
+ * - Only lead vocal lines appear as `.pn` large lines, `.pv` previous line, and `.px` upcoming preview.
+ * - Backing-only lines (`words` empty, `backgroundWords` non-empty) never become `.pn` or `.px`; when
+ *   active in [activeLineIndices] they appear in [activeBackingText] beneath the focused lead line.
+ */
+fun projectPosterLyrics(
+    lines: List<LyricLine>,
+    positionMs: Long,
+    activeLineIndices: Collection<Int>,
+    isInstrumentalGap: Boolean = false,
+    instrumentalBeforeLineIndex: Int = 0,
+): PosterLyricsProjection {
+    if (lines.isEmpty()) {
+        return PosterLyricsProjection(
+            focusLeadIndex = 0,
+            hasStartedLead = false,
+            previousLeadText = "",
+            activeBackingText = "",
+            upcomingLeadTexts = emptyList(),
+        )
+    }
+
+    val leadIndices = lines.indices.filter { idx ->
+        !isPosterBackingOnlyLine(lines[idx]) && posterLeadText(lines[idx]).isNotEmpty()
+    }
+    if (leadIndices.isEmpty()) {
+        return PosterLyricsProjection(
+            focusLeadIndex = 0,
+            hasStartedLead = false,
+            previousLeadText = "",
+            activeBackingText = "",
+            upcomingLeadTexts = emptyList(),
+        )
+    }
+
+    val activeLead = leadIndices.lastOrNull { it in activeLineIndices }
+    val lastStartedLead = leadIndices.lastOrNull { lines[it].startMs <= positionMs }
+    val focusLeadIndex = activeLead ?: lastStartedLead ?: leadIndices.first()
+    val hasStartedLead = (activeLead ?: lastStartedLead) != null
+    val focusLeadPos = leadIndices.indexOf(focusLeadIndex)
+
+    val previousLeadText = if (!isInstrumentalGap && hasStartedLead && focusLeadPos > 0) {
+        posterLeadText(lines[leadIndices[focusLeadPos - 1]])
+    } else {
+        ""
+    }
+
+    val activeBackingIndex = if (!isInstrumentalGap) {
+        activeLineIndices
+            .filter { idx -> idx in lines.indices && isPosterBackingOnlyLine(lines[idx]) }
+            .maxOrNull()
+    } else {
+        null
+    }
+    val activeBackingText = activeBackingIndex?.let { posterBackingText(lines[it]) }.orEmpty()
+
+    val upcomingIndices = if (isInstrumentalGap) {
+        leadIndices.filter { it >= instrumentalBeforeLineIndex }.take(3)
+    } else if (hasStartedLead && focusLeadPos >= 0) {
+        leadIndices.drop(focusLeadPos + 1).take(3)
+    } else {
+        leadIndices.drop(1).take(3)
+    }
+    val upcomingLeadTexts = upcomingIndices.map { posterLeadText(lines[it]) }
+
+    return PosterLyricsProjection(
+        focusLeadIndex = focusLeadIndex,
+        hasStartedLead = hasStartedLead,
+        previousLeadText = previousLeadText,
+        activeBackingText = activeBackingText,
+        upcomingLeadTexts = upcomingLeadTexts,
+    )
+}
+
+/**
+ * Computes one unified poster font size across lead lines of the current song so short and long
  * lines share a consistent visual scale ("per-song longest line" rule).
  */
 fun computeSongPosterFontSize(
@@ -350,12 +449,16 @@ fun computeSongPosterFontSize(
 ): Float {
     if (lines.isEmpty() || availableWidthDp <= 0f) return baseSp
     var smallest = baseSp * 1.35f
+    var measuredAny = false
     for (line in lines) {
-        val text = line.renderedText.trim()
+        if (isPosterBackingOnlyLine(line)) continue
+        val text = posterLeadText(line)
         if (text.isEmpty()) continue
+        measuredAny = true
         val candidate = posterFontSize(text = text, widthDp = availableWidthDp, base = baseSp)
         if (candidate < smallest) smallest = candidate
     }
+    if (!measuredAny) return baseSp
     return smallest.coerceIn(baseSp * 0.72f, baseSp * 1.35f)
 }
 
