@@ -135,3 +135,24 @@
 - **返工 2 后构建与单测验收**：
   - `.\gradlew.bat "-PAM_DEVELOPER_TOKEN_FILE=D:\Data for Apps and etc\Codex\am_atv\work\upstream-public-developer-token.jwt" "-Pflyme.uiVerification=true" "-Pflyme.previewAbi=arm64-v8a" :app:testFlymeGeckoUnitTest :app:assembleFlymeGecko`
   - **结果**：**`BUILD SUCCESSFUL in 34s`**，**81** 套件 **529** 项单测全部通过（**0** 失败、**0** 跳过，`FolioPlayerStateTest` 10/10 通过）。
+
+---
+
+## 9. 返工 3（对应 `B1B-FIX3.md` 2 项改动）
+
+1. **去除海报当前句背后的圆角底色块（`FolioPlayerContent.kt`）**
+   - 原 `FolioPosterLyricsPanel` 对旧组件 `KaraokeLyricLine` 传入 `isFocused = true` 时，触发了其内部的 `FlymeInk @ 0.18f` + `RoundedCornerShape(16.dp)` 遥控器焦点高亮框。
+   - 改为专用无底框、无额外左右内边距的 `PosterLeadLineText`（保持背景点击显隐控制栏行为不变，滚动歌词 `CarLyricRows` 点按跳句完全不受影响）；移除不再使用的 `KaraokeLyricLine` 导入。
+2. **校准海报主行及辅行字号、`800` 字重与行高比例（`FolioPlayerState.kt` / `FolioPlayerContent.kt` / `FolioPlayerStateTest.kt`）**
+   - 修复 `computeSongPosterFontSize` 区间下限与上限为 `[baseSp, baseSp * 1.3f]`，按各档 `--pfs`（车机 `Wide = 56sp`、手机 `Narrow = 40sp` 等）及海报所在栏实际可用宽度，基于全曲最长主唱句计算统一字号。
+   - 新增 `PosterTypographySpec` / `posterTypographyFor` 精确对齐 H5 比例与字重：
+     - `.pn` 主行：`FontWeight.ExtraBold`（800），`lineHeight = mainSp × 1.16`
+     - `.pv` 上一句：`baseSp × 0.42`（移除旧的 `24f` 上限），`fg2`
+     - `.pbv` 跟随和声：`baseSp × 0.50`，`fg2`（并兼容主唱行内嵌 `backgroundWords` 在激活时段显示于 `.pbv`）
+     - `.pt` 译文：`baseSp × 0.38`，`fg2`
+     - `.px p` 预告行：`baseSp × 0.46`
+   - 新增单元测试 `posterTypographyMatchesH5RatiosOnWideCarAndNarrowPhone` 校验车机宽档与手机窄档字号及各层比例。
+
+- **返工 3 后构建与单测验收**：
+  - `.\gradlew.bat "-PAM_DEVELOPER_TOKEN_FILE=D:\Data for Apps and etc\Codex\am_atv\work\upstream-public-developer-token.jwt" "-Pflyme.uiVerification=true" "-Pflyme.previewAbi=arm64-v8a" :app:testFlymeGeckoUnitTest :app:assembleFlymeGecko`
+  - **结果**：**`BUILD SUCCESSFUL in 32s`**，**81** 套件 **530** 项单测全部通过（**0** 失败、**0** 跳过，`FolioPlayerStateTest` 11/11 通过）。

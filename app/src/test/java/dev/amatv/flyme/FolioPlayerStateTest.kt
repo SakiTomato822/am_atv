@@ -230,7 +230,37 @@ class FolioPlayerStateTest {
         val shortOnlySize = computeSongPosterFontSize(listOf(shortLine), availableWidthDp = 360f, baseSp = 40f)
         val mixedSongSize = computeSongPosterFontSize(listOf(shortLine, longLine), availableWidthDp = 360f, baseSp = 40f)
         assertTrue(mixedSongSize < shortOnlySize)
-        assertTrue(mixedSongSize >= 40f * 0.72f)
+        assertEquals(40f, mixedSongSize, 0.01f)
+    }
+
+    @Test
+    fun posterTypographyMatchesH5RatiosOnWideCarAndNarrowPhone() {
+        val longCarLines = listOf(
+            LyricLine(words = listOf(LyricWord("慢一点 再慢一点", 0L, 1000L))),
+            LyricLine(words = listOf(LyricWord("这是一句比较长的中文主唱歌词测试在车机右半栏时的最小基准字号", 1000L, 2000L))),
+        )
+        val carSpec = playerSpecForTier(FolioTier.Wide)
+        // Right half of 1280dp car layout minus padding is ~576dp; long line floors at --pfs = 56sp.
+        val carTypo = posterTypographyFor(longCarLines, availableWidthDp = 576f, baseSp = carSpec.pfs.value)
+        assertEquals(56f, carTypo.mainSp, 0.01f)
+        assertEquals(56f * 1.16f, carTypo.mainLineHeightSp, 0.01f)
+        assertEquals(56f * 0.42f, carTypo.prevSp, 0.01f)
+        assertEquals(56f * 0.50f, carTypo.backingSp, 0.01f)
+        assertEquals(56f * 0.38f, carTypo.translationSp, 0.01f)
+        assertEquals(56f * 0.46f, carTypo.nextSp, 0.01f)
+
+        // Short-lined song on Wide grows up to 1.3x (--pfs * 1.3 = 72.8sp).
+        val shortOnlyCar = listOf(LyricLine(words = listOf(LyricWord("慢一点", 0L, 1000L))))
+        val shortCarTypo = posterTypographyFor(shortOnlyCar, availableWidthDp = 576f, baseSp = carSpec.pfs.value)
+        assertEquals(56f * 1.3f, shortCarTypo.mainSp, 0.01f)
+
+        // Phone Narrow (--pfs = 40sp, width ~354dp)
+        val phoneSpec = playerSpecForTier(FolioTier.Narrow)
+        val phoneTypo = posterTypographyFor(longCarLines, availableWidthDp = 354f, baseSp = phoneSpec.pfs.value)
+        assertEquals(40f, phoneTypo.mainSp, 0.01f)
+        assertEquals(40f * 0.42f, phoneTypo.prevSp, 0.01f)
+        assertEquals(40f * 0.50f, phoneTypo.backingSp, 0.01f)
+        assertEquals(40f * 0.46f, phoneTypo.nextSp, 0.01f)
     }
 
     @Test
