@@ -116,3 +116,22 @@
 - **返工后构建与单测验收**：
   - `.\gradlew.bat "-PAM_DEVELOPER_TOKEN_FILE=D:\Data for Apps and etc\Codex\am_atv\work\upstream-public-developer-token.jwt" "-Pflyme.uiVerification=true" "-Pflyme.previewAbi=arm64-v8a" :app:testFlymeGeckoUnitTest :app:assembleFlymeGecko`
   - **结果**：**`BUILD SUCCESSFUL in 27s`**，**81** 套件 **528** 项单测全部通过（**0** 失败、**0** 跳过，`FolioPlayerStateTest` 9/9 通过）。
+
+---
+
+## 8. 返工 2（对应 `B1B-FIX2.md` 2 项改动）
+
+1. **车机宽档（`Wide / e`）歌词放右半边 + 大封面布局（`FolioPlayer.kt`）**
+   - `TwoColumnPlayerBody` 在 `FolioTier.Wide` 下精确采用 50% / 50% 左右分栏（右栏 `left: 50%`，对应 H5 `.t-e .lyr{left:50%;right:64px}` 与 `car-flow.png` / `car-soak.png`）。
+   - **滚动歌词态（Flow 与 Soak）**：左栏展示大图圆角专辑封面（`padding(start = 36.dp)` + `min(bodyHeight - 16.dp, 400.dp)`），移除封面下方重复的曲名与歌手文字（仅底部控件栏保留），右栏展示滚动歌词。
+   - **海报态**：右半边展示大字歌词，左栏不绘制方框封面（仅保留背景取色渐隐/流光光晕）。
+   - 无歌词/队列态及 `Narrow` / `Short` / `Medium` / `Ultrawide` 其它档位均保持不变。
+2. **海报（`Poster`）歌词纯和声过滤与 `.pbv` 和声小字（`FolioPlayerState.kt` / `FolioPlayerContent.kt` / `FolioPlayerStateTest.kt`）**
+   - 新增纯函数 `posterLeadText`、`posterBackingText`、`isPosterBackingOnlyLine`、`projectPosterLyrics`；改写 `computeSongPosterFontSize` 与 `FolioPosterLyricsPanel`：
+     - 纯和声行（`words` 无有效主唱文字、`backgroundWords` 非空）绝不进入大字主行（`.pn`）、上一句（`.pv`）及后续预告行（`.px`），也不拉低全曲大字字号基准。
+     - 当播放时间进入纯和声行区间（`activeLineIndices` 命中且非间奏等待态）时，在当前主唱大字下方以 `--pfs × 0.5`（`fg2` 次要文字色）点亮 `.pbv` 括号和声小字。
+   - 新增单元测试 `backingOnlyLinesNeverBecomePosterLeadOrUpcomingPreview` 验证上述全部行为（未改动 `isOppositeAgent` 对唱规则）。
+
+- **返工 2 后构建与单测验收**：
+  - `.\gradlew.bat "-PAM_DEVELOPER_TOKEN_FILE=D:\Data for Apps and etc\Codex\am_atv\work\upstream-public-developer-token.jwt" "-Pflyme.uiVerification=true" "-Pflyme.previewAbi=arm64-v8a" :app:testFlymeGeckoUnitTest :app:assembleFlymeGecko`
+  - **结果**：**`BUILD SUCCESSFUL in 34s`**，**81** 套件 **529** 项单测全部通过（**0** 失败、**0** 跳过，`FolioPlayerStateTest` 10/10 通过）。
