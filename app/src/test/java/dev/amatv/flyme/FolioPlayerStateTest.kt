@@ -232,4 +232,12 @@ class FolioPlayerStateTest {
         assertTrue(mixedSongSize < shortOnlySize)
         assertTrue(mixedSongSize >= 40f * 0.72f)
     }
+
+    @Test
+    fun formatsRemainingTimeWithLeadingMinusSign() {
+        assertEquals("-0:51", formatFolioRemainingTime(positionMs = 129_000L, durationMs = 180_000L))
+        assertEquals("-3:00", formatFolioRemainingTime(positionMs = 0L, durationMs = 180_000L))
+        assertEquals("-0:00", formatFolioRemainingTime(positionMs = 200_000L, durationMs = 180_000L))
+        assertEquals("", formatFolioRemainingTime(positionMs = 10_000L, durationMs = 0L))
+    }
 }

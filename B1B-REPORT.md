@@ -97,3 +97,22 @@
 - **单测结果**：
   - 全量单元测试：`testFlymeGeckoUnitTest` 共运行 **81** 个测试套件、**527** 项单测，**0** 失败，**0** 错误，**0** 跳过。
   - 新增 `FolioPlayerStateTest`（8 项）：覆盖五档布局 token 校验、四态状态机与队列展示可见性、`Narrow` 顶栏标题显隐规则、`alwaysOpenControls` 规则、`FolioPlayerSession` 冷启动收起与同进程状态保持、常规队列四段分组与索引映射、电台 `stationHistory` 队列映射、以及按全曲最长句计算大字歌词字号。
+
+---
+
+## 7. 返工（对应 `B1B-FIX.md` 4 项修复）
+
+1. **点收起后的小胶囊展开控件（`FolioPlayerControls.kt` / `FolioPlayer.kt`）**
+   - 将 `positionState: State<Long>` 延迟至 `SeekSection` 与 `FolioPlayerCollapsedCapsule` 底部细进度条 `Canvas` 内部读取，消除了整屏每帧 60Hz 重组对点击态和语义节点的干扰。
+   - 在 `FolioPlayerCollapsedCapsule` 中移除外层 `Box` 的 `.clickable`，改为参照 H5 `.pmeta` 与 `FolioMiniPlayerCapsule` 结构，直接在左侧 `[封面 + 曲名/歌手]` 的 `Row(Modifier.weight(1f).fillMaxHeight())` 上绑定 `.clickable(role = Role.Button, onClick = onExpand)`；右侧播放/暂停按钮保持独立兄弟可点击节点，仅控制播放/暂停。
+2. **右上角与顶栏按钮样式（`FolioPlayerControls.kt`）**
+   - 左上角收起箭头及右上角 `+`/`✓`、`☆`/`★`、`Tt` 均改为无底无描边纯图标（`Tt` 在激活大字歌词态时仅叠加轻薄无框圆底 `fg @ 0.16f`，对应 H5 `.ib.on`）。
+   - 仅有小窗切换按钮（`.winb`）保留玻璃圆底与描边（`pillBg` + `pillBorder`）。
+3. **控件条右侧显示剩余时间（`FolioPlayerState.kt` / `FolioPlayerControls.kt`）**
+   - 新增纯函数 `formatFolioRemainingTime(positionMs, durationMs)` 并补充单测 `formatsRemainingTimeWithLeadingMinusSign`，`SeekSection` 右侧时间在非直播态统一渲染 `-${formatFolioDuration(remaining)}`（如 `-0:51`）。
+4. **打开专辑/歌手详情不吞 `CancellationException`（`FolioPlayer.kt`）**
+   - 移除两处 `runCatching { musicServices.catalogAlbumOf/ArtistOf(track) }.getOrNull()`，抽取 `openCatalogDetail`，遇到 `CancellationException` 立即重新抛出，其余异常安全降级为界面提示 `player_open_unavailable`。
+
+- **返工后构建与单测验收**：
+  - `.\gradlew.bat "-PAM_DEVELOPER_TOKEN_FILE=D:\Data for Apps and etc\Codex\am_atv\work\upstream-public-developer-token.jwt" "-Pflyme.uiVerification=true" "-Pflyme.previewAbi=arm64-v8a" :app:testFlymeGeckoUnitTest :app:assembleFlymeGecko`
+  - **结果**：**`BUILD SUCCESSFUL in 27s`**，**81** 套件 **528** 项单测全部通过（**0** 失败、**0** 跳过，`FolioPlayerStateTest` 9/9 通过）。
