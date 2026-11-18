@@ -158,7 +158,7 @@ fun FolioApp(
     }
 
     // B1b: the player sheet. B2: the detail stack (albums, playlists, artists). Both are UI state only.
-    var playerOpen by rememberSaveable { mutableStateOf(false) }
+    var playerOpen by remember { FolioPlayerSession.openState }
     var detailStack by remember { mutableStateOf(emptyList<Track>()) }
     val openPlayer = { playerOpen = true }
     val openDetail: (Track) -> Unit = { detailStack = detailStack + it }
@@ -273,7 +273,7 @@ fun FolioApp(
                     showToast(it)
                 }
                 PlaybackEvent.SignInRequired -> startSignIn()
-                PlaybackEvent.ShowNowPlaying -> Unit
+                PlaybackEvent.ShowNowPlaying -> playerOpen = true
             }
         }
     }
