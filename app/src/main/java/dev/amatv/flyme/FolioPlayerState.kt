@@ -418,7 +418,19 @@ fun projectPosterLyrics(
     } else {
         null
     }
-    val activeBackingText = activeBackingIndex?.let { posterBackingText(lines[it]) }.orEmpty()
+    val inlineBackingText = if (!isInstrumentalGap && activeBackingIndex == null && hasStartedLead) {
+        val lead = lines[focusLeadIndex]
+        if (lead.backgroundWords.isNotEmpty()) {
+            val bgStart = lead.backgroundWords.minOf { it.startMs }
+            val bgEnd = lead.backgroundWords.maxOf { it.endMs }
+            if (positionMs in bgStart until bgEnd) posterBackingText(lead) else ""
+        } else {
+            ""
+        }
+    } else {
+        ""
+    }
+    val activeBackingText = activeBackingIndex?.let { posterBackingText(lines[it]) } ?: inlineBackingText
 
     val upcomingIndices = if (isInstrumentalGap) {
         leadIndices.filter { it >= instrumentalBeforeLineIndex }.take(3)
@@ -438,9 +450,56 @@ fun projectPosterLyrics(
     )
 }
 
+@Immutable
+data class PosterTypographySpec(
+    val mainSp: Float,
+    val mainLineHeightSp: Float,
+    val prevSp: Float,
+    val prevLineHeightSp: Float,
+    val backingSp: Float,
+    val backingLineHeightSp: Float,
+    val translationSp: Float,
+    val translationLineHeightSp: Float,
+    val nextSp: Float,
+    val nextLineHeightSp: Float,
+)
+
+/**
+ * Computes Poster typography matching H5 `--pfs` ratios:
+ * - `.pn`: [baseSp..1.3x] sized by longest lead line in song, `line-height: 1.16`, weight 800
+ * - `.pv`: `baseSp * 0.42`, `.pbv`: `baseSp * 0.50`, `.pt`: `baseSp * 0.38`, `.px p`: `baseSp * 0.46`
+ */
+fun posterTypographyFor(
+    lines: List<LyricLine>,
+    availableWidthDp: Float,
+    baseSp: Float,
+): PosterTypographySpec {
+    val mainSp = computeSongPosterFontSize(
+        lines = lines,
+        availableWidthDp = availableWidthDp,
+        baseSp = baseSp,
+    )
+    val prevSp = baseSp * 0.42f
+    val backingSp = baseSp * 0.50f
+    val transSp = baseSp * 0.38f
+    val nextSp = baseSp * 0.46f
+    return PosterTypographySpec(
+        mainSp = mainSp,
+        mainLineHeightSp = mainSp * 1.16f,
+        prevSp = prevSp,
+        prevLineHeightSp = prevSp * 1.40f,
+        backingSp = backingSp,
+        backingLineHeightSp = backingSp * 1.30f,
+        translationSp = transSp,
+        translationLineHeightSp = transSp * 1.35f,
+        nextSp = nextSp,
+        nextLineHeightSp = nextSp * 1.35f,
+    )
+}
+
 /**
  * Computes one unified poster font size across lead lines of the current song so short and long
- * lines share a consistent visual scale ("per-song longest line" rule).
+ * lines share a consistent visual scale ("per-song longest line" rule), bounded to `[baseSp, 1.3x]`.
  */
 fun computeSongPosterFontSize(
     lines: List<LyricLine>,
@@ -448,7 +507,7 @@ fun computeSongPosterFontSize(
     baseSp: Float,
 ): Float {
     if (lines.isEmpty() || availableWidthDp <= 0f) return baseSp
-    var smallest = baseSp * 1.35f
+    var smallest = baseSp * 1.3f
     var measuredAny = false
     for (line in lines) {
         if (isPosterBackingOnlyLine(line)) continue
@@ -459,7 +518,7 @@ fun computeSongPosterFontSize(
         if (candidate < smallest) smallest = candidate
     }
     if (!measuredAny) return baseSp
-    return smallest.coerceIn(baseSp * 0.72f, baseSp * 1.35f)
+    return smallest.coerceIn(baseSp, baseSp * 1.3f)
 }
 
 fun hasTimedLyrics(lines: List<LyricLine>): Boolean = lines.any { !it.isStatic }

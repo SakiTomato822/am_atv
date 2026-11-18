@@ -40,7 +40,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,13 +48,15 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Density
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
@@ -63,12 +64,12 @@ import dev.amatv.R
 import dev.amatv.core.LyricsState
 import dev.amatv.model.LyricLine
 import dev.amatv.model.LyricTimeline
+import dev.amatv.model.LyricTiming
 import dev.amatv.model.Track
 import dev.amatv.playback.AutoplayStatus
 import dev.amatv.ui.CarLyricRows
 import dev.amatv.ui.DarkFlymePalette
 import dev.amatv.ui.InstrumentalInterludeRow
-import dev.amatv.ui.KaraokeLyricLine
 import dev.amatv.ui.LightFlymePalette
 import dev.amatv.ui.LocalFlymePalette
 
@@ -128,7 +129,6 @@ internal fun FolioPosterLyricsPanel(
     val lyricPosition = remember(positionState, offsetMs) {
         derivedStateOf { (positionState.value + offsetMs).coerceAtLeast(0L) }
     }
-    val active = snapshot.focusLineIndex
     val waiting = snapshot.instrumentalScrollAnchor
     val projection by remember(lines, snapshot, lyricPosition) {
         derivedStateOf {
@@ -141,25 +141,18 @@ internal fun FolioPosterLyricsPanel(
             )
         }
     }
-    val density = LocalDensity.current
-    val fullPresence = remember { mutableFloatStateOf(1f) }
-    val bgPresence = remember { mutableFloatStateOf(1f) }
 
     CompositionLocalProvider(
         LocalFlymePalette provides if (isLight) LightFlymePalette else DarkFlymePalette,
     ) {
         BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-            val posterSizeSp = remember(lines, maxWidth, baseSp) {
-                computeSongPosterFontSize(
+            val typo = remember(lines, maxWidth, baseSp) {
+                posterTypographyFor(
                     lines = lines,
                     availableWidthDp = maxWidth.value,
                     baseSp = baseSp,
                 )
             }
-            val subSizeSp = (posterSizeSp * 0.48f).coerceIn(17f, 24f)
-            val subLineHeightSp = subSizeSp * 1.32f
-            val transSizeSp = (posterSizeSp * 0.42f).coerceIn(15f, 21f)
-            val backingSizeSp = (baseSp * 0.5f).coerceIn(17f, 28f)
 
             Column(
                 modifier = Modifier.fillMaxSize(),
@@ -168,11 +161,11 @@ internal fun FolioPosterLyricsPanel(
                 if (projection.previousLeadText.isNotEmpty()) {
                     Text(
                         text = projection.previousLeadText,
-                        color = fg.copy(alpha = 0.56f),
+                        color = fg2,
                         fontFamily = fontFamily,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = subSizeSp.sp,
-                        lineHeight = subLineHeightSp.sp,
+                        fontSize = typo.prevSp.sp,
+                        lineHeight = typo.prevLineHeightSp.sp,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -204,32 +197,23 @@ internal fun FolioPosterLyricsPanel(
                     }
                     val line = shown as LyricLine
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        CompositionLocalProvider(
-                            LocalDensity provides Density(
-                                density = density.density,
-                                fontScale = density.fontScale * (posterSizeSp / 34f).coerceIn(0.68f, 1.6f),
-                            ),
-                        ) {
-                            KaraokeLyricLine(
-                                line = line,
-                                isActive = projection.hasStartedLead,
-                                retainedPresence = fullPresence,
-                                retainedBackgroundPresence = bgPresence,
-                                isFocused = true,
-                                isStaticMode = false,
-                                isUserScrolling = false,
-                                positionState = lyricPosition,
-                                restingUnlitAlpha = if (active < 0) 0.42f else 0.36f,
-                            )
-                        }
+                        PosterLeadLineText(
+                            line = line,
+                            positionState = lyricPosition,
+                            hasStartedLead = projection.hasStartedLead,
+                            fontSizeSp = typo.mainSp,
+                            lineHeightSp = typo.mainLineHeightSp,
+                            fontFamily = fontFamily,
+                            fg = fg,
+                        )
                         if (projection.activeBackingText.isNotEmpty()) {
                             Text(
                                 text = projection.activeBackingText,
                                 color = fg2,
                                 fontFamily = fontFamily,
                                 fontWeight = FontWeight.SemiBold,
-                                fontSize = backingSizeSp.sp,
-                                lineHeight = (backingSizeSp * 1.3f).sp,
+                                fontSize = typo.backingSp.sp,
+                                lineHeight = typo.backingLineHeightSp.sp,
                             )
                         }
                         if (translationEnabled) {
@@ -238,9 +222,9 @@ internal fun FolioPosterLyricsPanel(
                                     text = trans,
                                     color = fg2,
                                     fontFamily = fontFamily,
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = transSizeSp.sp,
-                                    lineHeight = (transSizeSp * 1.3f).sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = typo.translationSp.sp,
+                                    lineHeight = typo.translationLineHeightSp.sp,
                                 )
                             }
                         }
@@ -256,8 +240,8 @@ internal fun FolioPosterLyricsPanel(
                             color = fg.copy(alpha = alpha),
                             fontFamily = fontFamily,
                             fontWeight = FontWeight.SemiBold,
-                            fontSize = subSizeSp.sp,
-                            lineHeight = subLineHeightSp.sp,
+                            fontSize = typo.nextSp.sp,
+                            lineHeight = typo.nextLineHeightSp.sp,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -266,6 +250,55 @@ internal fun FolioPosterLyricsPanel(
             }
         }
     }
+}
+
+@Composable
+private fun PosterLeadLineText(
+    line: LyricLine,
+    positionState: State<Long>,
+    hasStartedLead: Boolean,
+    fontSizeSp: Float,
+    lineHeightSp: Float,
+    fontFamily: FontFamily,
+    fg: Color,
+) {
+    val posMs = positionState.value
+    val annotated = buildAnnotatedString {
+        if (!hasStartedLead || line.words.size <= 1 || line.timing != LyricTiming.Word) {
+            val alpha = if (!hasStartedLead) 0.42f else 1f
+            withStyle(SpanStyle(color = fg.copy(alpha = alpha))) {
+                append(posterLeadText(line))
+            }
+        } else {
+            line.words.forEachIndexed { index, word ->
+                val wordAlpha = when {
+                    posMs >= word.endMs -> 1f
+                    posMs <= word.startMs -> 0.40f
+                    else -> {
+                        val span = (word.endMs - word.startMs).coerceAtLeast(1L).toFloat()
+                        0.40f + 0.60f * ((posMs - word.startMs).toFloat() / span).coerceIn(0f, 1f)
+                    }
+                }
+                withStyle(SpanStyle(color = fg.copy(alpha = wordAlpha))) {
+                    if (word.displayText != word.text) {
+                        append(word.displayText)
+                    } else if (line.joinWithSpaces && word.hasTrailingWhitespace && index < line.words.lastIndex) {
+                        append(word.text)
+                        append(' ')
+                    } else {
+                        append(word.text)
+                    }
+                }
+            }
+        }
+    }
+    Text(
+        text = annotated,
+        fontFamily = fontFamily,
+        fontWeight = FontWeight.ExtraBold,
+        fontSize = fontSizeSp.sp,
+        lineHeight = lineHeightSp.sp,
+    )
 }
 
 @Composable
