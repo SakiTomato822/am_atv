@@ -135,8 +135,8 @@ internal fun BoxScope.FolioPlayerLayer(
         val tierSpec = playerSpecForTier(LocalFolioTierSpec.current.tier)
         val scope = rememberCoroutineScope()
 
-        var queueOpen by remember { mutableStateOf(false) }
-        var posterPreferred by remember { mutableStateOf(false) }
+        var queueOpen by FolioPlayerSession.queueOpenState
+        var posterPreferred by FolioPlayerSession.posterPreferredState
         var controlsManualOpen by remember { mutableStateOf(true) }
         var revealPulse by remember { mutableLongStateOf(0L) }
         var navigationMessage by remember { mutableStateOf<String?>(null) }

@@ -132,6 +132,12 @@ class FolioPlayerStateTest {
     }
 
     @Test
+    fun posterAndQueueChoiceStartOffOnColdStart() {
+        assertFalse(FolioPlayerSession.posterPreferredState.value)
+        assertFalse(FolioPlayerSession.queueOpenState.value)
+    }
+
+    @Test
     fun buildQueueSnapshotGroupsPlayedNowUpNextAndAutoplay() {
         val t0 = sampleTrack("0", "Old")
         val t1 = sampleTrack("1", "Current")

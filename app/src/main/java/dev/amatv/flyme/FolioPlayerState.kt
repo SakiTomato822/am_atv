@@ -26,9 +26,13 @@ import dev.amatv.ui.posterFontSize
  */
 object FolioPlayerSession {
     val openState: MutableState<Boolean> = mutableStateOf(false)
+    val queueOpenState: MutableState<Boolean> = mutableStateOf(false)
+    val posterPreferredState: MutableState<Boolean> = mutableStateOf(false)
 
     fun reset() {
         openState.value = false
+        queueOpenState.value = false
+        posterPreferredState.value = false
     }
 }
 
