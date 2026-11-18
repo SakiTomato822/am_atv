@@ -34,11 +34,14 @@ class FolioDetailTest {
         val ultrawide = folioDetailLayout(tierOf(1920.dp, 540.dp))
 
         assertTrue(portrait.buttonsBelowCover)
-        assertEquals(1, portrait.topSongColumns)
         for (layout in listOf(tablet, landscape, car, ultrawide)) {
             assertFalse(layout.buttonsBelowCover)
-            assertEquals(2, layout.topSongColumns)
         }
+        assertEquals(1, portrait.topSongColumns)
+        assertEquals(1, landscape.topSongColumns)
+        assertEquals(2, tablet.topSongColumns)
+        assertEquals(2, car.topSongColumns)
+        assertEquals(2, ultrawide.topSongColumns)
     }
 
     @Test

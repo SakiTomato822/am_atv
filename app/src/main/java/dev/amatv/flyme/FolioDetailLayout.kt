@@ -42,7 +42,7 @@ internal data class FolioDetailLayout(
 
 internal fun folioDetailLayout(tier: FolioTier): FolioDetailLayout = when (tier) {
     FolioTier.Narrow -> FolioDetailLayout(116, 32, buttonsBelowCover = true)
-    FolioTier.Short -> FolioDetailLayout(112, 32, topSongColumns = 2)
+    FolioTier.Short -> FolioDetailLayout(112, 32)
     FolioTier.Medium -> FolioDetailLayout(188, 46, topSongColumns = 2)
     FolioTier.Wide -> FolioDetailLayout(220, 60, collectionColumns = 2, topSongColumns = 2)
     FolioTier.Ultrawide -> FolioDetailLayout(170, 52, collectionColumns = 3, topSongColumns = 2)
