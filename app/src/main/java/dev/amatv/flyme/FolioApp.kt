@@ -40,6 +40,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -115,7 +116,6 @@ internal object FolioUiSession {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FolioApp(
-    onOpenPlayer: () -> Unit = {},
     onLightThemeChanged: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -156,6 +156,12 @@ fun FolioApp(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
+
+    // B1b: the player sheet. B2: the detail stack (albums, playlists, artists). Both are UI state only.
+    var playerOpen by rememberSaveable { mutableStateOf(false) }
+    var detailStack by remember { mutableStateOf(emptyList<Track>()) }
+    val openPlayer = { playerOpen = true }
+    val openDetail: (Track) -> Unit = { detailStack = detailStack + it }
 
     var toastMessage by remember { mutableStateOf<String?>(null) }
     var serviceMessage by remember { mutableStateOf<String?>(null) }
@@ -431,7 +437,7 @@ fun FolioApp(
                         if (!tierSpec.usesBottomCapsule && playbackState.hasCurrentTrack) {
                             FolioMiniPlayerDot(
                                 track = playbackState.track,
-                                onOpenPlayer = onOpenPlayer,
+                                onOpenPlayer = openPlayer,
                             )
                         } else {
                             Spacer(Modifier.height(tierSpec.ib))
@@ -517,6 +523,15 @@ fun FolioApp(
                     }
                 }
 
+                // B2 fills this layer: detail pages stacked over the pager, under the capsule and the player.
+                FolioDetailLayer(
+                    stack = detailStack,
+                    statusTop = statusTop,
+                    bottomPadding = contentBottomPadding,
+                    onOpenItem = ::openItem,
+                    onBack = { detailStack = detailStack.dropLast(1) },
+                )
+
                 // Bottom floating glass capsule on Narrow / Short / Medium tiers
                 if (tierSpec.usesBottomCapsule && playbackState.hasCurrentTrack) {
                     Box(
@@ -536,10 +551,22 @@ fun FolioApp(
                             },
                             isPlaying = playbackState.playWhenReady,
                             onTogglePlayback = playbackStore::togglePlayback,
-                            onOpenPlayer = onOpenPlayer,
+                            onOpenPlayer = openPlayer,
                         )
                     }
                 }
+
+                // B1b fills this layer: the player, above everything except the account panel and toasts.
+                FolioPlayerLayer(
+                    open = playerOpen,
+                    statusTop = statusTop,
+                    navBottom = navBottom,
+                    onClose = { playerOpen = false },
+                    onOpenDetail = { item ->
+                        playerOpen = false
+                        openDetail(item)
+                    },
+                )
 
                 // Account overlay panel
                 FolioAccountOverlay(

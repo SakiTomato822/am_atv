@@ -70,7 +70,7 @@ internal fun FolioHomePage(
     onOpenItem: (Track, List<Track>) -> Unit,
 ) {
     val tierSpec = LocalFolioTierSpec.current
-    val shelves = contentState.shelvesFor(Destination.Home)
+    val shelves = homeShelfOrder(contentState.shelvesFor(Destination.Home))
     val loading = contentState.isLoading(Destination.Home)
 
     if (shelves.isEmpty()) {
@@ -661,3 +661,13 @@ private fun FolioEmptyOrLoadingState(
         }
     }
 }
+
+/** H5 puts what was played recently at the top of Listen Now; the rest keeps Apple's order. */
+internal fun homeShelfOrder(shelves: List<ContentShelf>): List<ContentShelf> =
+    shelves.sortedBy {
+        when (it.id) {
+            "recent-tracks", "demo-recent" -> 0
+            "recent" -> 1
+            else -> 2
+        }
+    }

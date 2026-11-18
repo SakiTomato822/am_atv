@@ -119,7 +119,7 @@ class FolioTierTest {
 
     @Test
     fun capsuleBackgroundKeepsHighOpacityWithoutBlur() {
-        assertTrue(DarkFolioPalette.capsuleBg.alpha >= 0.90f)
-        assertTrue(LightFolioPalette.capsuleBg.alpha >= 0.90f)
+        assertTrue(DarkFolioPalette.capsuleBg.alpha >= 0.97f)
+        assertTrue(LightFolioPalette.capsuleBg.alpha >= 0.97f)
     }
 }

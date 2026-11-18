@@ -80,7 +80,7 @@ val DarkFolioPalette = FolioPalette(
     glass = Color.White.copy(alpha = 0.10f),
     glassb = Color.White.copy(alpha = 0.20f),
     // Android 11 lacks backdrop blur; mix bg (#131016) + ~10% white at ~90% alpha (0xE6) to veil scrolling text.
-    capsuleBg = Color(0xE628252D),
+    capsuleBg = Color(0xFA28252D),
     accent = Color(0xFFFF5C72),
     glowTopRight = Color(0xFF3A1824),
     glowBottomLeft = Color(0xFF10242A),
@@ -101,7 +101,7 @@ val LightFolioPalette = FolioPalette(
     glass = Color.White.copy(alpha = 0.66f),
     glassb = Color(0xFF17151C).copy(alpha = 0.10f),
     // Light frosted fallback at ~92% alpha (0xEB) prevents dark list text bleeding through while preserving subtle tint.
-    capsuleBg = Color(0xEBFBF9FC),
+    capsuleBg = Color(0xFAFBF9FC),
     accent = Color(0xFFC8243F),
     glowTopRight = Color(0xFFF7DDE3),
     glowBottomLeft = Color(0xFFDDEEF0),
