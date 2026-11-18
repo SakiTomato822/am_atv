@@ -49,6 +49,7 @@ internal fun FolioArtistDetail(
     layout: FolioDetailLayout,
     services: MusicServices,
     playback: PlaybackState,
+    navBottom: Dp,
     bottomPadding: Dp,
     onOpenItem: (Track, List<Track>) -> Unit,
 ) {
@@ -61,6 +62,7 @@ internal fun FolioArtistDetail(
     var showAllSongs by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val headerOnLeft = layout.artistHeader != FolioArtistHeader.Top
+    val shortTier = spec.tier == FolioTier.Short
     val hasSimilarRail = layout.artistHeader == FolioArtistHeader.LeftWithSimilarRail
     val (similarShelves, musicShelves) = shelves.partition { layout.placesArtistShelfInRail(it.id) }
 
@@ -103,15 +105,16 @@ internal fun FolioArtistDetail(
         )
         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(panelGap)) {
             if (headerOnLeft) {
-                val shortTier = spec.tier == FolioTier.Short
-                val viewportBottomPadding = if (shortTier) bottomPadding - 28.dp else 0.dp
+                val viewportBottomPadding = if (shortTier) folioShortArtistBottomPadding(spec, navBottom) else 0.dp
                 LazyColumn(
                     modifier = Modifier.width(asideWidth).fillMaxHeight().padding(bottom = viewportBottomPadding),
                     contentPadding = PaddingValues(bottom = if (shortTier) 0.dp else bottomPadding),
                 ) { item { header() } }
             }
             LazyColumn(
-                modifier = Modifier.weight(1f).fillMaxHeight(),
+                modifier = Modifier.weight(1f).fillMaxHeight().padding(
+                    top = if (shortTier) folioDetailBodyGap - folioShortArtistBodyGap else 0.dp,
+                ),
                 contentPadding = PaddingValues(bottom = bottomPadding),
             ) {
                 if (!headerOnLeft) item(key = "header") { header() }

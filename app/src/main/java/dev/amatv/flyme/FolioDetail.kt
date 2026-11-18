@@ -41,7 +41,7 @@ import dev.amatv.ui.rememberArtworkPalette
 internal fun BoxScope.FolioDetailLayer(
     stack: List<Track>,
     statusTop: Dp,
-    bottomPadding: Dp,
+    navBottom: Dp,
     onOpenItem: (Track, List<Track>) -> Unit,
     onBack: () -> Unit,
     services: MusicServices,
@@ -65,7 +65,7 @@ internal fun BoxScope.FolioDetailLayer(
         if (item != null) {
             key(entries.size, item) {
                 FolioDetailPage(
-                    item, statusTop, bottomPadding, onOpenItem, onBack, services, playback,
+                    item, statusTop, navBottom, onOpenItem, onBack, services, playback,
                     onPlayCollection, onOpenPlayer,
                 )
             }
@@ -77,7 +77,7 @@ internal fun BoxScope.FolioDetailLayer(
 private fun FolioDetailPage(
     item: Track,
     statusTop: Dp,
-    bottomPadding: Dp,
+    navBottom: Dp,
     onOpenItem: (Track, List<Track>) -> Unit,
     onBack: () -> Unit,
     services: MusicServices,
@@ -89,6 +89,8 @@ private fun FolioDetailPage(
     val palette = LocalFolioPalette.current
     val layout = folioDetailLayout(spec.tier)
     val artist = if (item.catalogKind == CatalogKind.Artist) rememberFolioArtistData(item, services) else null
+    val shortArtist = artist != null && spec.tier == FolioTier.Short
+    val bottomPadding = navBottom + spec.capsp + 28.dp
     val artwork = artist?.first?.value?.artist ?: item
     val colors = rememberArtworkPalette(artwork.artworkUrl, artwork.palette)
     val tint = if (palette.isLight) 0.32f else 0.42f
@@ -108,7 +110,7 @@ private fun FolioDetailPage(
                     awaitPointerEventScope { while (true) awaitPointerEvent() }
                 },
         )
-        Column(Modifier.fillMaxSize().padding(top = statusTop + 12.dp)) {
+        Column(Modifier.fillMaxSize().padding(top = statusTop + folioDetailTopMargin)) {
             Row(
                 modifier = Modifier.fillMaxWidth().height(spec.ib)
                     .padding(start = spec.px, end = spec.pr),
@@ -124,10 +126,13 @@ private fun FolioDetailPage(
                     FolioMiniPlayerDot(playback.track, onOpenPlayer)
                 }
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(if (shortArtist) folioShortArtistBodyGap else folioDetailBodyGap))
 
             if (artist != null) {
-                FolioArtistDetail(item, artist.first, artist.second, layout, services, playback, bottomPadding, onOpenItem)
+                FolioArtistDetail(
+                    item, artist.first, artist.second, layout, services, playback,
+                    navBottom, bottomPadding, onOpenItem,
+                )
             } else {
                 FolioCollectionDetail(
                     item, layout, services, playback, bottomPadding, onOpenItem, onPlayCollection,

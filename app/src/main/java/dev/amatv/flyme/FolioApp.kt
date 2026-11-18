@@ -504,7 +504,7 @@ fun FolioApp(
                 FolioDetailLayer(
                     stack = detailStack,
                     statusTop = statusTop,
-                    bottomPadding = contentBottomPadding,
+                    navBottom = navBottom,
                     onOpenItem = ::openItem,
                     onBack = { detailStack = popFolioDetail(detailStack) },
                     services = services,
