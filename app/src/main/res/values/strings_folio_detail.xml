@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="folio_detail_songs">
+        <item quantity="one">%d song</item>
+        <item quantity="other">%d songs</item>
+    </plurals>
+    <plurals name="folio_detail_albums">
+        <item quantity="one">%d album</item>
+        <item quantity="other">%d albums</item>
+    </plurals>
+    <plurals name="folio_detail_minutes">
+        <item quantity="one">%d minute</item>
+        <item quantity="other">%d minutes</item>
+    </plurals>
+    <string name="folio_detail_my_playlist">My Playlist</string>
+    <string name="folio_detail_more_albums">More Albums by %1$s</string>
+    <string name="folio_detail_view_more">See More</string>
+    <string name="folio_detail_artist_error">Could not load this artist.</string>
+    <string name="folio_detail_artist_empty">No music available for this artist.</string>
+</resources>

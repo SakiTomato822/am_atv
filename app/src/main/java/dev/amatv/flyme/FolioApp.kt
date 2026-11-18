@@ -159,7 +159,7 @@ fun FolioApp(
 
     // B1b: the player sheet. B2: the detail stack (albums, playlists, artists). Both are UI state only.
     var playerOpen by rememberSaveable { mutableStateOf(false) }
-    var detailStack by remember { mutableStateOf(emptyList<Track>()) }
+    var detailStack by FolioDetailSession.stack
     val openPlayer = { playerOpen = true }
     val openDetail: (Track) -> Unit = { detailStack = detailStack + it }
 
@@ -323,31 +323,8 @@ fun FolioApp(
             CatalogOpenAction.Station -> {
                 playbackStore.playTrack(item, contextQueue = listOf(item))
             }
-            CatalogOpenAction.Collection -> {
-                if (item.catalogId == null) {
-                    playbackStore.playCollection(item, MockCatalog.tracks, 0, shuffle = false)
-                    return
-                }
-                scope.launch {
-                    try {
-                        val tracks = services.cachedCollectionTracks(item)
-                            ?: services.savedCollectionTracks(item)
-                            ?: services.collectionTracks(item)
-                        if (tracks.isEmpty()) {
-                            showToast(context.getString(R.string.folio_collection_empty))
-                        } else {
-                            playbackStore.playCollection(item, tracks, 0, shuffle = false)
-                        }
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (error: Exception) {
-                        showToast(error.message ?: context.getString(R.string.browse_tracks_error_detail))
-                    }
-                }
-            }
-            CatalogOpenAction.OpenArtist -> {
-                showToast(context.getString(R.string.folio_artist_detail_pending))
-            }
+            CatalogOpenAction.Collection -> openDetail(item)
+            CatalogOpenAction.OpenArtist -> openDetail(item)
         }
     }
 
@@ -529,7 +506,12 @@ fun FolioApp(
                     statusTop = statusTop,
                     bottomPadding = contentBottomPadding,
                     onOpenItem = ::openItem,
-                    onBack = { detailStack = detailStack.dropLast(1) },
+                    onBack = { detailStack = popFolioDetail(detailStack) },
+                    services = services,
+                    playback = playbackState,
+                    onPlayCollection = playbackStore::playCollection,
+                    onOpenPlayer = openPlayer,
+                    handleBack = !playerOpen && !showAccount,
                 )
 
                 // Bottom floating glass capsule on Narrow / Short / Medium tiers
