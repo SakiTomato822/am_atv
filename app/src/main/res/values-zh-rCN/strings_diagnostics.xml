@@ -1,9 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="diagnostics_title">播放诊断</string>
-    <string name="diagnostics_summary">最近的切歌记录。切歌变慢时，截图这份列表发给开发者。</string>
-    <string name="diagnostics_empty">还没有切歌记录。</string>
-    <string name="diagnostics_clear">清除</string>
     <string name="diagnostics_gapless">无缝接上「%1$s」：%2$d 毫秒出声</string>
     <string name="diagnostics_prepare_after_end">上一首播完后重新准备「%1$s」：%2$.1f 秒出声</string>
     <string name="diagnostics_prepare">点歌或手动切到「%1$s」：%2$.1f 秒出声</string>
@@ -18,12 +14,10 @@
     <string name="diagnostics_exporting">正在导出…</string>
     <string name="diagnostics_exported">已保存到 %1$s，把这个文件发给开发者即可。</string>
     <string name="diagnostics_export_failed">导出日志失败：%1$s</string>
-    <string name="diagnostics_widevine">Widevine（电台用的系统 DRM）：%1$s</string>
     <string name="widevine_unsupported">这个系统没有 Widevine</string>
     <string name="widevine_ready">可用 · %1$s · %2$s %3$s</string>
     <string name="widevine_not_provisioned">有，但没有完成初始化（%1$s），系统没能激活它</string>
     <string name="widevine_error">有，但无法使用：%1$s</string>
-    <string name="widevine_checking">检测中…</string>
     <string name="playback_option_on">开</string>
     <string name="playback_option_off">关</string>
     <string name="playback_fade_title">歌曲间淡入淡出</string>
@@ -33,8 +27,6 @@
     <string name="playback_fade_playlists">播放列表：%1$s</string>
     <string name="playback_station_mode_title">电台播放方式</string>
     <string name="playback_station_mode_summary">很多车机和电视没有 Widevine；逐首播放会用原生播放器播电台里的歌，不需要 Widevine。直播电台仍需要 Widevine。</string>
-    <string name="playback_station_mode_auto">自动（Widevine 可用时用网页播放器）</string>
-    <string name="playback_station_mode_songs">始终逐首播放（不需要 Widevine）</string>
     <string name="appearance_title">外观</string>
     <string name="appearance_light">浅色</string>
     <string name="appearance_dark">深色</string>

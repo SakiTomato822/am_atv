@@ -1,7 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="language_title">语言</string>
-    <string name="language_system">跟随系统</string>
     <string name="nav_home">现在收听</string>
     <string name="nav_browse">最新发行</string>
     <string name="nav_sing">欢唱</string>

@@ -9,10 +9,6 @@
     <string name="flyme_text_standard">Standard</string>
     <string name="flyme_text_large">Large</string>
     <string name="flyme_text_extra_large">Extra large</string>
-    <string name="flyme_try_new_ui_title">Try New Interface</string>
-    <string name="flyme_try_new_ui_summary">Preview the AM Folio 15 responsive layout; switch back here or on the Settings page.</string>
-    <string name="flyme_try_new_ui_on">On</string>
-    <string name="flyme_try_new_ui_off">Off</string>
     <string name="folio_tab_settings">Settings</string>
     <string name="folio_tag_lyrics">Lyrics</string>
     <string name="folio_artist_detail_pending">Artist pages arrive in a later update.</string>

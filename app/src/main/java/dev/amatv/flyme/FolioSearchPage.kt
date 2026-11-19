@@ -51,7 +51,6 @@ import androidx.compose.ui.unit.sp
 import dev.amatv.R
 import dev.amatv.model.Track
 import dev.amatv.model.matchesPlaybackQueueEntry
-import dev.amatv.ui.pushSearchHistory
 import org.json.JSONArray
 
 @OptIn(ExperimentalLayoutApi::class)

@@ -42,10 +42,6 @@ import dev.amatv.integration.MusicConnectionState
 import dev.amatv.model.Destination
 import dev.amatv.model.Track
 import dev.amatv.model.matchesPlaybackQueueEntry
-import dev.amatv.ui.LibraryCategory
-import dev.amatv.ui.LibrarySort
-import dev.amatv.ui.sortLibrary
-import dev.amatv.ui.sorts
 import java.text.Collator
 import java.util.Locale
 

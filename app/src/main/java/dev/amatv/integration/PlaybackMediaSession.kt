@@ -10,6 +10,7 @@ import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
 import coil3.request.allowHardware
+import dev.amatv.artwork.ArtworkImages
 import dev.amatv.playback.PlaybackService
 import dev.amatv.model.LyricLine
 import dev.amatv.model.Track
@@ -120,7 +121,7 @@ class PlaybackMediaSession(private val context: Context) {
                 }
             })
             .build()
-        dev.amatv.ui.ArtworkImages.loader(context).enqueue(request)
+        ArtworkImages.loader(context).enqueue(request)
     }
 
     private fun coil3.Image.toBitmapCopy(): android.graphics.Bitmap? = runCatching {

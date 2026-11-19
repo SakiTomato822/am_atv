@@ -92,11 +92,6 @@ import dev.amatv.model.LyricTimeline
 import dev.amatv.model.LyricTiming
 import dev.amatv.model.Track
 import dev.amatv.playback.AutoplayStatus
-import dev.amatv.ui.CarLyricRows
-import dev.amatv.ui.DarkFlymePalette
-import dev.amatv.ui.InstrumentalInterludeRow
-import dev.amatv.ui.LightFlymePalette
-import dev.amatv.ui.LocalFlymePalette
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 

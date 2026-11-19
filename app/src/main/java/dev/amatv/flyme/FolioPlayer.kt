@@ -85,8 +85,8 @@ import dev.amatv.integration.MusicConnectionState
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
 import dev.amatv.model.forDisplay
-import dev.amatv.ui.ArtworkImages
-import dev.amatv.ui.rememberArtworkPalette
+import dev.amatv.artwork.ArtworkImages
+import dev.amatv.artwork.rememberArtworkPalette
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch

@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
-    <uses-feature android:name="android.software.leanback" android:required="false"
-        tools:replace="android:required" />
     <!-- No spectrum display on Flyme: drop the microphone permission the shared manifest asks for. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove" />
     <queries>
