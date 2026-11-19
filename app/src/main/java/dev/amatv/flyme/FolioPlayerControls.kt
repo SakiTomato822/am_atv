@@ -262,6 +262,7 @@ internal fun FolioPlayerAnimatedControlsSlot(
     reducedMotion: Boolean,
     track: Track,
     tierSpec: FolioPlayerTierSpec,
+    displayState: FolioPlayerDisplayState,
     positionState: State<Long>,
     durationMs: Long,
     canSeek: Boolean,
@@ -321,6 +322,7 @@ internal fun FolioPlayerAnimatedControlsSlot(
             FolioPlayerCollapsedCapsule(
                 track = track,
                 tierSpec = tierSpec,
+                showArtwork = showCollapsedCapsuleArtwork(tierSpec.tier, displayState),
                 positionState = positionState,
                 durationMs = durationMs,
                 playWhenReady = playWhenReady,
@@ -383,6 +385,7 @@ internal fun FolioPlayerAnimatedControlsSlot(
 internal fun FolioPlayerCollapsedCapsule(
     track: Track,
     tierSpec: FolioPlayerTierSpec,
+    showArtwork: Boolean,
     positionState: State<Long>,
     durationMs: Long,
     playWhenReady: Boolean,
@@ -428,15 +431,17 @@ internal fun FolioPlayerCollapsedCapsule(
                     .clip(RoundedCornerShape(topStart = 999.dp, bottomStart = 999.dp, topEnd = 16.dp, bottomEnd = 16.dp))
                     .clickable(role = Role.Button, onClick = onExpand)
                     .semantics { contentDescription = expandCd }
-                    .padding(start = 10.dp, end = 4.dp),
+                    .padding(start = if (showArtwork) 10.dp else 18.dp, end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                FolioArtwork(
-                    track = track,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.size(44.dp),
-                )
+                if (showArtwork) {
+                    FolioArtwork(
+                        track = track,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.size(44.dp),
+                    )
+                }
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(2.dp),

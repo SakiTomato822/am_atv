@@ -537,4 +537,25 @@ class FolioPlayerStateTest {
         // Reduced motion lights immediately at timestamp.
         assertEquals(1.00f, posterCharAlpha(1000L, charStartMs = 1000L, reducedMotion = true), 0.01f)
     }
+
+    @Test
+    fun collapsedCapsuleArtworkAppearsOnlyInPortraitNonPosterModes() {
+        val portraitTiers = setOf(FolioTier.Narrow, FolioTier.Medium)
+        val states = listOf(
+            FolioPlayerDisplayState.Lyrics,
+            FolioPlayerDisplayState.Poster,
+            FolioPlayerDisplayState.Queue,
+            FolioPlayerDisplayState.None,
+        )
+        for (tier in FolioTier.entries) {
+            for (state in states) {
+                val expected = tier in portraitTiers && state != FolioPlayerDisplayState.Poster
+                assertEquals(
+                    "tier=$tier state=$state",
+                    expected,
+                    showCollapsedCapsuleArtwork(tier, state),
+                )
+            }
+        }
+    }
 }

@@ -263,6 +263,16 @@ fun isQueuePanelVisible(
 fun shortTierLyricsStartDp(windowWidthDp: Float): Dp =
     if (windowWidthDp >= 680f) 384.dp else 360.dp
 
+/**
+ * Collapsed capsule `.pmeta .pc` shows thumbnail ONLY on portrait tiers (`Narrow` / `Medium`) when
+ * not in Poster mode, matching H5 `.player.s-poster .pmeta .pc,.t-m/.t-e/.t-u .player .pmeta .pc{display:none}`.
+ */
+fun showCollapsedCapsuleArtwork(
+    tier: FolioTier,
+    displayState: FolioPlayerDisplayState,
+): Boolean = (tier == FolioTier.Narrow || tier == FolioTier.Medium) &&
+    displayState != FolioPlayerDisplayState.Poster
+
 /** Mirrors H5 `alwaysOpen` controls rule. */
 fun alwaysOpenControls(
     tier: FolioTier,
