@@ -68,6 +68,7 @@ import dev.amatv.i18n.AppText
 import dev.amatv.integration.AuthLaunchGate
 import dev.amatv.integration.MusicConnectionState
 import dev.amatv.integration.MusicKitWebAuthActivity
+import dev.amatv.integration.PlaybackPreferences
 import dev.amatv.model.CatalogOpenAction
 import dev.amatv.model.Destination
 import dev.amatv.model.Track
@@ -256,6 +257,7 @@ fun FolioApp(
     fun signOut() {
         contentStore.resetLibraryPagination()
         playbackStore.onSignedOut()
+        PlaybackPreferences(context).clearSession()
         scope.launch {
             services.contentCache.clear { ArtworkImages.clear(context) }
         }
