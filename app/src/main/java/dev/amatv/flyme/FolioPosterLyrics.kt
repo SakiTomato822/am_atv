@@ -431,7 +431,8 @@ private fun PosterLeadLineText(
     previousSweepEnd: Long?,
 ) {
     val sweep = if (sweepEnabled) remember(layout, line) {
-        posterSweepUnits(line).takeIf { it.isNotEmpty() }?.let { PosterLyricSweep(layout, it) }
+        val featherPx = with(layout.layoutInput.density) { layout.layoutInput.style.fontSize.toPx() * 0.6f }
+        PosterLyricSweep(layout, line, featherPx)
     } else null
     val height = with(LocalDensity.current) { layout.size.height.toDp() }
     Canvas(modifier.fillMaxWidth().height(height)) {

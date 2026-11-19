@@ -63,6 +63,10 @@ internal data class PosterTextLine(val text: String, val isOppositeSinger: Boole
 
 internal const val POSTER_PREVIOUS_FADE_MS = 200L
 
+internal fun posterLeadEndMs(line: LyricLine): Long =
+    if (line.timing == LyricTiming.Line && line.lineEndMs != null) line.lineEndMs
+    else line.words.filterNot { it.isBackgroundVocal }.maxOfOrNull { it.endMs } ?: line.startMs
+
 internal data class PosterLyricsProjection(
     val focusLeadIndex: Int?,
     val hasStartedLead: Boolean,
@@ -76,9 +80,7 @@ internal data class PosterLyricsProjection(
 /** All inputs to a projection are constant between adjacent boundaries. */
 internal class PosterLyricsTimeline(private val lines: List<LyricLine>) {
     private val leadTexts = lines.map(::posterLeadText)
-    private val leadEnds = lines.map { line ->
-        line.words.filterNot { it.isBackgroundVocal }.maxOfOrNull { it.endMs } ?: line.startMs
-    }
+    private val leadEnds = lines.map(::posterLeadEndMs)
     private val leadIndices = lines.indices.filter {
         leadTexts[it].isNotEmpty() && lines[it].agentType != LyricAgentType.Group && !lines[it].isStatic
     }
@@ -107,7 +109,7 @@ internal class PosterLyricsTimeline(private val lines: List<LyricLine>) {
             }
         }
         for ((index, next) in leadIndices.zipWithNext()) {
-            if (lines[index].timing == LyricTiming.Word && leadEnds[index] > lines[next].startMs) {
+            if (leadEnds[index] > lines[next].startMs) {
                 add(leadEnds[index] + POSTER_PREVIOUS_FADE_MS)
             }
         }
@@ -131,7 +133,7 @@ internal class PosterLyricsTimeline(private val lines: List<LyricLine>) {
         val focus = leadIndices.getOrNull(startedLead.coerceAtLeast(0))
         val focusLine = focus?.let { lines[it] }
         val previous = leadIndices.getOrNull(startedLead - 1).takeIf { gap == null }
-        val previousSweepEnd = if (previous != null && focusLine != null && lines[previous].timing == LyricTiming.Word) {
+        val previousSweepEnd = if (previous != null && focusLine != null) {
             leadEnds[previous].takeIf { end -> end > focusLine.startMs && positionMs < end + POSTER_PREVIOUS_FADE_MS }
         } else null
         val smallLines = buildList {
