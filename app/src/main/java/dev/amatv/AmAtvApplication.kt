@@ -1,7 +1,10 @@
 package dev.amatv
 
 import android.app.Application
+import android.os.Build
+import android.os.LocaleList
 import android.os.SystemClock
+import androidx.core.app.LocaleManagerCompat
 import dev.amatv.core.AccountStore
 import dev.amatv.core.ContentStore
 import dev.amatv.core.LibraryActions
@@ -68,7 +71,23 @@ class AmAtvApplication : Application() {
             operations = musicServices,
             coroutineScope = applicationScope,
         )
-        // The car build keeps a full log for export; only the app process, not Gecko's.
-        if (BuildConfig.FLYME_AUTO && getProcessName() == packageName) LogRecorder.start(this)
+        if (getProcessName() == packageName) {
+            if (BuildConfig.FLYME_AUTO) LogRecorder.start(this)
+            val account = accountStore.state.value
+            if (account.isSignedIn) {
+                contentStore.startSignedInContent(account.connectionState, startupContentLanguageTag())
+            }
+        }
+    }
+
+    private fun startupContentLanguageTag(): String {
+        val configuredLocales = resources.configuration.locales
+        if (Build.VERSION.SDK_INT >= 33) return configuredLocales.toLanguageTags()
+
+        // AppCompat applies the stored app locales ahead of the system locales in each activity.
+        val appLocales = LocaleManagerCompat.getApplicationLocales(this)
+        val locales = (List(appLocales.size()) { appLocales[it] } +
+            List(configuredLocales.size()) { configuredLocales[it] }).distinct()
+        return LocaleList(*locales.toTypedArray()).toLanguageTags()
     }
 }

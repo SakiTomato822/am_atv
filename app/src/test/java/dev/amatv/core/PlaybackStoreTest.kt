@@ -23,6 +23,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -171,8 +172,8 @@ class PlaybackStoreTest {
         var seekCalls = mutableListOf<Long>()
         var skipNextCalls = 0
         var skipPreviousCalls = 0
-        var skipLookaheadCalls = mutableListOf<String>()
-        var skipLookaheadResult = false
+        val queuedSongCalls = mutableListOf<String?>()
+        var nativeQueueSongs = emptySet<String>()
         val lookaheadHistory = mutableListOf<Track?>()
         var currentLookahead: Track? = null
         val fadeHistory = mutableListOf<Boolean>()
@@ -216,9 +217,9 @@ class PlaybackStoreTest {
             skipPreviousCalls++
         }
 
-        override fun skipToQueuedLookahead(catalogId: String): Boolean {
-            skipLookaheadCalls += catalogId
-            return skipLookaheadResult
+        override suspend fun playQueuedSong(track: Track): Long? {
+            queuedSongCalls += track.catalogId
+            return if (track.catalogId in nativeQueueSongs) nextGeneration++ else null
         }
 
         override fun setLookahead(next: Track?) {
@@ -693,6 +694,55 @@ class PlaybackStoreTest {
     }
 
     @Test
+    fun manualNavigationAfterGaplessKeepsQueueHistoryAndIgnoresSupersededSnapshots() = runBlocking {
+        val h = createHarness(coroutineContext, flymeAuto = true)
+        try {
+            h.store.attach()
+            yield()
+            val a = song("411")
+            val b = song("412")
+            val c = song("413")
+            val d = song("414")
+            h.store.playTrack(a, listOf(a, b, c, d))
+            yield()
+            h.player.emit(snapshot(a, 1L, positionMs = 500L, isPlaying = true))
+            h.delayGate.fireOne(1_500L)
+            h.player.emit(snapshot(b, 1L, positionMs = 10L, isPlaying = true, gaplessAdvanceCatalogId = b.catalogId))
+            withTimeout(1_000L) {
+                while (h.player.currentLookahead != c) yield()
+            }
+            h.player.nativeQueueSongs = setOf("411", "412", "413")
+            val resolvesBeforeNavigation = h.player.resolvedCalls.size
+
+            h.player.systemCallbacks?.previous?.invoke()
+            yield()
+            assertEquals(a.id, h.store.state.value.track.id)
+            h.store.skip(1)
+            yield()
+            h.store.skip(1)
+            yield()
+            h.player.emit(snapshot(b, 3L, isPlaying = true))
+            assertEquals(c.id, h.store.state.value.track.id)
+            h.player.emit(snapshot(c, 4L, positionMs = 300L, isPlaying = true))
+            assertTrue(h.store.state.value.playbackPrepared)
+
+            h.store.selectQueueTrack(0)
+            yield()
+            assertEquals(a.id, h.store.state.value.track.id)
+            assertEquals(listOf("411", "412", "413", "411"), h.player.queuedSongCalls)
+            assertEquals(1, h.player.prepareCalls.size)
+            assertEquals(resolvesBeforeNavigation, h.player.resolvedCalls.size)
+
+            h.store.selectQueueTrack(3)
+            yield()
+            assertEquals(d.id, h.store.state.value.track.id)
+            assertEquals(2, h.player.prepareCalls.size)
+        } finally {
+            h.close()
+        }
+    }
+
+    @Test
     fun isEndedSnapshot_advancesNextOnceOnly() = runBlocking {
         val h = createHarness(coroutineContext)
         try {
@@ -837,10 +887,10 @@ class PlaybackStoreTest {
                 h.delayGate.fireOne(1_500L)
                 assertEquals(s3, h.player.currentLookahead)
 
-                h.player.skipLookaheadResult = true
+                h.player.nativeQueueSongs = setOf(checkNotNull(s3.catalogId))
                 h.store.skip(1)
                 yield()
-                assertEquals(listOf(s3.catalogId), h.player.skipLookaheadCalls)
+                assertEquals(listOf(s2.catalogId, s3.catalogId), h.player.queuedSongCalls)
                 assertEquals(2, h.player.prepareCalls.size)
             } finally {
                 h.close()

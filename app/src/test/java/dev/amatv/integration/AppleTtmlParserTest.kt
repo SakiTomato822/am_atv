@@ -1,5 +1,6 @@
 package dev.amatv.integration
 
+import dev.amatv.model.LyricAgentType
 import dev.amatv.model.LyricTiming
 import dev.amatv.model.LyricTimeline
 import org.json.JSONObject
@@ -30,10 +31,47 @@ class AppleTtmlParserTest {
         )
 
         assertEquals(listOf("Lead", "Harmony", "Next"), lines.map { it.text })
+        assertEquals(List(3) { LyricAgentType.Person }, lines.map { it.agentType })
         assertEquals(listOf(0, 1), LyricTimeline.activeLineIndicesAt(lines, 13_000))
         assertEquals(listOf(1), LyricTimeline.activeLineIndicesAt(lines, 16_500))
         assertEquals(0, LyricTimeline.activeLineAt(lines, 17_000, true))
         assertEquals(2, LyricTimeline.activeLineAt(lines, 18_320, true))
+    }
+
+    @Test
+    fun preservesDeclaredAgentTypesInStaticAndWordTimedLines() {
+        val lines = AppleTtmlParser.parse(
+            """<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+              <head><metadata>
+                <ttm:agent xml:id="solo" type="person"/>
+                <ttm:agent xml:id="ensemble" type="group"/>
+                <ttm:agent xml:id="role" type="character"/>
+              </metadata></head>
+              <body><div ttm:agent="solo">
+                <p>Lead</p>
+                <p ttm:agent="ensemble" begin="1s" end="2s"><span begin="1s" end="2s">Together</span></p>
+                <p ttm:agent="role" begin="2s" end="3s">Role</p>
+                <p ttm:agent="undeclared" begin="3s" end="4s">Unknown</p>
+              </div></body>
+            </tt>""",
+        )
+        assertEquals(
+            listOf(LyricAgentType.Person, LyricAgentType.Group, LyricAgentType.Character, LyricAgentType.None),
+            lines.map { it.agentType },
+        )
+    }
+
+    @Test
+    fun preservesSoloAgentWithoutMarkingTheSongAsMultiAgent() {
+        val line = AppleTtmlParser.parse(
+            """<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+              <head><metadata><ttm:agent xml:id="lead" type="person"/></metadata></head>
+              <body><div><p ttm:agent="lead">Solo</p></div></body>
+            </tt>""",
+        ).single()
+        assertEquals(LyricAgentType.Person, line.agentType)
+        assertFalse(line.isMultiAgentSong)
+        assertFalse(line.isOppositeAgent)
     }
 
     @Test
