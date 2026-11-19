@@ -186,9 +186,14 @@ internal class PosterLyricSweep(
                 if (start == end) {
                     drawText(layout, color = if (start <= 0f) last else first)
                 } else {
-                    drawText(layout, brush = Brush.horizontalGradient(
-                        colors = listOf(first, last), startX = start, endX = end,
-                    ))
+                    drawText(
+                        layout,
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(first, last), startX = start, endX = end,
+                        ),
+                        // Reset the cached TextPaint alpha left by solid-color draws.
+                        alpha = 1f,
+                    )
                 }
             }
         }
