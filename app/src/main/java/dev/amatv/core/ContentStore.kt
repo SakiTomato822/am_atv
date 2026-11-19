@@ -3,6 +3,7 @@ package dev.amatv.core
 import dev.amatv.R
 import dev.amatv.data.MockCatalog
 import dev.amatv.i18n.AppText
+import dev.amatv.integration.LibraryCollection
 import dev.amatv.integration.LibraryPage
 import dev.amatv.integration.MusicConnectionState
 import dev.amatv.integration.mergeLibraryPage
@@ -133,12 +134,16 @@ class ContentStore(
         )
     }
 
-    private fun rememberLibraryPage(shelfId: String, page: LibraryPage) {
+    private fun markLibraryPageVisited(shelfId: String, page: LibraryPage) {
         val visited = libraryVisitedPages[shelfId].orEmpty() + page.requestedPage
         check(page.nextPage == null || page.nextPage !in visited) {
             AppText.text(R.string.services_playlist_page_repeated)
         }
         libraryVisitedPages = libraryVisitedPages + (shelfId to visited)
+    }
+
+    private fun rememberLibraryPage(shelfId: String, page: LibraryPage) {
+        markLibraryPageVisited(shelfId, page)
         val currentNextPages = _state.value.libraryNextPages
         val updatedNextPages = page.nextPage?.let { currentNextPages + (shelfId to it) }
             ?: (currentNextPages - shelfId)
@@ -149,7 +154,9 @@ class ContentStore(
         val current = _state.value
         val nextPage = current.libraryNextPages[shelfId]
         if (nextPage == null && shelfId !in current.libraryFailedShelves) return
-        if (connectionState != MusicConnectionState.SignedIn || shelfId in current.libraryLoadingShelves) return
+        if (connectionState != MusicConnectionState.SignedIn || current.isLoading(Destination.Library) ||
+            shelfId in current.libraryLoadingShelves
+        ) return
         val generation = libraryPagingGeneration
         _state.value = current.copy(
             libraryLoadingShelves = current.libraryLoadingShelves + shelfId,
@@ -162,7 +169,7 @@ class ContentStore(
                         when (shelfId) {
                             "lib-artists" -> operations.libraryArtistsPage(nextPage)
                             "lib-albums" -> operations.libraryAlbumsPage(nextPage)
-                            "lib-playlists" -> operations.libraryPlaylistsPage(nextPage)
+                            "lib-playlists" -> loadLibraryPlaylistsPage(nextPage)
                             "lib-songs" -> operations.librarySongsPage(nextPage)
                             else -> error("Unknown library shelf")
                         }
@@ -175,7 +182,8 @@ class ContentStore(
                 rememberLibraryPage(shelfId, page)
                 val latest = _state.value
                 val shelves = latest.shelvesByDestination[Destination.Library].orEmpty().map { shelf ->
-                    if (shelf.id == shelfId) shelf.copy(items = mergeLibraryPage(shelf.items, page.items)) else shelf
+                    if (shelf.id != shelfId) shelf
+                    else shelf.copy(items = if (nextPage == null) page.items else mergeLibraryPage(shelf.items, page.items))
                 }
                 _state.value = latest.copy(
                     shelvesByDestination = latest.shelvesByDestination + (Destination.Library to shelves),
@@ -201,6 +209,10 @@ class ContentStore(
         libraryPageJobs[shelfId] = pageJob
         pageJob.start()
     }
+
+    // An explicit first-page URL bypasses the in-memory playlist index used by detail pages.
+    private suspend fun loadLibraryPlaylistsPage(nextPage: String? = null): LibraryPage =
+        operations.libraryPlaylistsPage(nextPage ?: LibraryCollection.Playlists.request.firstPage)
 
     fun refreshAll(current: Destination) {
         operations.clearDetailPages()
@@ -239,6 +251,11 @@ class ContentStore(
         val key = listOf(destination, connectionState, reloadGeneration, contentLanguageTag)
         if (key == loadKey && loadJob?.isActive == true) return
         loadJob?.cancel()
+        if (loadKey?.first() == Destination.Library) {
+            _state.value = _state.value.copy(
+                loadingDestinations = _state.value.loadingDestinations - Destination.Library,
+            )
+        }
         loadKey = key
         if (shelvesLanguageTag == null) {
             shelvesLanguageTag = contentLanguageTag
@@ -261,7 +278,9 @@ class ContentStore(
         ) {
             return
         }
-        if (_state.value.shelvesByDestination[target]?.isNotEmpty() == true && target !in _state.value.savedShelfDestinations) return
+        if (target != Destination.Library &&
+            _state.value.shelvesFor(target).isNotEmpty() && target !in _state.value.savedShelfDestinations
+        ) return
         if (target == Destination.Library && connectionState != MusicConnectionState.SignedIn) {
             _state.value = _state.value.copy(
                 loadingDestinations = _state.value.loadingDestinations - target,
@@ -300,7 +319,9 @@ class ContentStore(
                     )
                 }
             }
-            val (loadedShelves, errors) = shelfLoads.load(key) {
+            val libraryFirstPages = mutableMapOf<String, LibraryPage>()
+            val libraryFailures = mutableSetOf<String>()
+            val loadShelves: suspend () -> Pair<List<ContentShelf>, List<Throwable>> = {
                 val errors = mutableListOf<Throwable>()
                 coroutineScope {
                     when (target) {
@@ -446,10 +467,12 @@ class ContentStore(
                         }
 
                         Destination.Library -> {
+                            resetLibraryPagination()
+                            val savedShelves = _state.value.shelvesFor(Destination.Library).associateBy { it.id }
                             val recentlyAdded = async(ioDispatcher) { cancellableResult { operations.recentlyAdded() } }
                             val artists = async(ioDispatcher) { cancellableResult { operations.libraryArtistsPage() } }
                             val albums = async(ioDispatcher) { cancellableResult { operations.libraryAlbumsPage() } }
-                            val playlists = async(ioDispatcher) { cancellableResult { operations.libraryPlaylistsPage() } }
+                            val playlists = async(ioDispatcher) { cancellableResult { loadLibraryPlaylistsPage() } }
                             val songs = async(ioDispatcher) { cancellableResult { operations.librarySongsPage() } }
                             val recentPlayed = async(ioDispatcher) { cancellableResult { operations.recentlyPlayedTracks() } }
 
@@ -471,20 +494,19 @@ class ContentStore(
                                 )
                                 artists.await().fold(
                                     onSuccess = { page ->
-                                        rememberLibraryPage("lib-artists", page)
+                                        libraryFirstPages["lib-artists"] = page
                                         add(ContentShelf("lib-artists", AppText.text(R.string.app_library_artists), page.items))
                                     },
                                     onFailure = { error ->
                                         errors += error
-                                        _state.value = _state.value.copy(
-                                            libraryFailedShelves = _state.value.libraryFailedShelves + "lib-artists",
-                                        )
-                                        add(ContentShelf("lib-artists", AppText.text(R.string.app_library_artists), emptyList()))
+                                        libraryFailures += "lib-artists"
+                                        add(savedShelves["lib-artists"]
+                                            ?: ContentShelf("lib-artists", AppText.text(R.string.app_library_artists), emptyList()))
                                     },
                                 )
                                 albums.await().fold(
                                     onSuccess = { page ->
-                                        rememberLibraryPage("lib-albums", page)
+                                        libraryFirstPages["lib-albums"] = page
                                         if (page.items.isNotEmpty() || page.nextPage != null) {
                                             add(ContentShelf("lib-albums", AppText.text(R.string.app_library_albums),
                                                 page.items, featured = isEmpty()))
@@ -492,15 +514,14 @@ class ContentStore(
                                     },
                                     onFailure = { error ->
                                         errors += error
-                                        _state.value = _state.value.copy(
-                                            libraryFailedShelves = _state.value.libraryFailedShelves + "lib-albums",
-                                        )
-                                        add(ContentShelf("lib-albums", AppText.text(R.string.app_library_albums), emptyList()))
+                                        libraryFailures += "lib-albums"
+                                        add(savedShelves["lib-albums"]
+                                            ?: ContentShelf("lib-albums", AppText.text(R.string.app_library_albums), emptyList()))
                                     },
                                 )
                                 playlists.await().fold(
                                     onSuccess = { page ->
-                                        rememberLibraryPage("lib-playlists", page)
+                                        libraryFirstPages["lib-playlists"] = page
                                         if (page.items.isNotEmpty() || page.nextPage != null) {
                                             add(
                                                 ContentShelf(
@@ -514,27 +535,23 @@ class ContentStore(
                                     },
                                     onFailure = { error ->
                                         errors += error
-                                        _state.value = _state.value.copy(
-                                            libraryFailedShelves = _state.value.libraryFailedShelves + "lib-playlists",
-                                        )
-                                        add(_state.value.shelvesByDestination[Destination.Library].orEmpty()
-                                            .firstOrNull { it.id == "lib-playlists" }
+                                        libraryFailures += "lib-playlists"
+                                        add(savedShelves["lib-playlists"]
                                             ?: ContentShelf("lib-playlists", AppText.text(R.string.app_library_playlists), emptyList()))
                                     },
                                 )
                                 songs.await().fold(
                                     onSuccess = { page ->
-                                        rememberLibraryPage("lib-songs", page)
+                                        libraryFirstPages["lib-songs"] = page
                                         if (page.items.isNotEmpty() || page.nextPage != null) {
                                             add(ContentShelf("lib-songs", AppText.text(R.string.app_library_songs), page.items))
                                         }
                                     },
                                     onFailure = { error ->
                                         errors += error
-                                        _state.value = _state.value.copy(
-                                            libraryFailedShelves = _state.value.libraryFailedShelves + "lib-songs",
-                                        )
-                                        add(ContentShelf("lib-songs", AppText.text(R.string.app_library_songs), emptyList()))
+                                        libraryFailures += "lib-songs"
+                                        add(savedShelves["lib-songs"]
+                                            ?: ContentShelf("lib-songs", AppText.text(R.string.app_library_songs), emptyList()))
                                     },
                                 )
                                 recentPlayed.await().fold(
@@ -559,21 +576,35 @@ class ContentStore(
                     }
                 } to errors
             }
+            // Library pagination belongs to this refresh. Cancel it with the destination load.
+            val (loadedShelves, errors) = if (target == Destination.Library) loadShelves() else shelfLoads.load(key, loadShelves)
             val keepSaved = loadedShelves.isEmpty() && target in _state.value.savedShelfDestinations
             if (!keepSaved) {
-                _state.value = _state.value.copy(
+                var updated = _state.value.copy(
                     shelvesByDestination = _state.value.shelvesByDestination + (target to loadedShelves),
                     savedShelfDestinations = _state.value.savedShelfDestinations - target,
+                    loadingDestinations = _state.value.loadingDestinations - target,
                 )
+                if (target == Destination.Library) {
+                    libraryFirstPages.forEach { (id, page) -> markLibraryPageVisited(id, page) }
+                    updated = updated.copy(
+                        libraryNextPages = libraryFirstPages.mapNotNull { (id, page) ->
+                            page.nextPage?.let { id to it }
+                        }.toMap(),
+                        libraryFailedShelves = libraryFailures,
+                    )
+                }
+                _state.value = updated
                 if (loadedShelves.isNotEmpty() && connectionState == MusicConnectionState.SignedIn) {
                     coroutineScope.launch(ioDispatcher) {
                         cancellableResult { operations.saveShelves(snapshotName, contentLanguageTag, loadedShelves) }
                     }
                 }
+            } else {
+                _state.value = _state.value.copy(
+                    loadingDestinations = _state.value.loadingDestinations - target,
+                )
             }
-            _state.value = _state.value.copy(
-                loadingDestinations = _state.value.loadingDestinations - target,
-            )
             val msg = if (loadedShelves.isEmpty() && !keepSaved) {
                 errors.firstOrNull()?.message
             } else {

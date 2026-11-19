@@ -1,5 +1,6 @@
 package dev.amatv.core
 
+import dev.amatv.integration.LibraryCollection
 import dev.amatv.integration.LibraryPage
 import dev.amatv.integration.MusicConnectionState
 import dev.amatv.model.ContentShelf
@@ -168,6 +169,99 @@ class ContentStoreTest {
             assertFalse(store.state.value.isLoading(Destination.Library))
             assertTrue(store.state.value.shelvesFor(Destination.Library).any { it.id == "lib-recently-added" })
             assertTrue(store.state.value.shelvesFor(Destination.Library).none { it.id == "snap-1" })
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun reopeningLibraryRefreshesFirstPagesAndStartsPaginationFromTheNewCursor() = runBlocking {
+        val scope = testScope()
+        try {
+            val requests = mutableListOf<String?>()
+            val firstPlaylistPage = LibraryCollection.Playlists.request.firstPage
+            val ops = FakeContentOperations().apply {
+                libraryPlaylistsPageHandler = { page ->
+                    requests += page
+                    LibraryPage(emptyList(), null, checkNotNull(page))
+                }
+                libraryAlbumsPageHandler = { page ->
+                    when (page) {
+                        null -> LibraryPage(listOf(testTrack("old-album")), "old-next", "albums-0")
+                        "old-next" -> LibraryPage(listOf(testTrack("old-second")), null, page)
+                        else -> error("Unexpected page $page")
+                    }
+                }
+            }
+            val store = ContentStore(ops, scope, Dispatchers.Unconfined)
+            fun openLibrary() = store.loadDestination(Destination.Library, MusicConnectionState.SignedIn, 0, "en-US")
+            fun albums() = store.state.value.shelvesFor(Destination.Library).first { it.id == "lib-albums" }.items
+
+            openLibrary()
+            store.loadMoreLibraryShelf("lib-albums", MusicConnectionState.SignedIn)
+            assertEquals(listOf("old-album", "old-second"), albums().map { it.id })
+
+            val refresh = CompletableDeferred<Unit>()
+            ops.libraryAlbumsPageHandler = { page ->
+                when (page) {
+                    null -> {
+                        refresh.await()
+                        LibraryPage(listOf(testTrack("new-album")), "new-next", "albums-0")
+                    }
+                    "new-next" -> LibraryPage(listOf(testTrack("new-second")), null, page)
+                    else -> error("Unexpected page $page")
+                }
+            }
+            store.loadDestination(Destination.Home, MusicConnectionState.SignedIn, 0, "en-US")
+            openLibrary()
+            assertTrue(store.state.value.isLoading(Destination.Library))
+            assertEquals(listOf("old-album", "old-second"), albums().map { it.id })
+            refresh.complete(Unit)
+
+            assertEquals(listOf("new-album"), albums().map { it.id })
+            assertEquals(listOf(firstPlaylistPage, firstPlaylistPage), requests)
+            assertEquals("new-next", store.state.value.libraryNextPages["lib-albums"])
+            store.loadMoreLibraryShelf("lib-albums", MusicConnectionState.SignedIn)
+            assertEquals(listOf("new-album", "new-second"), albums().map { it.id })
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun failedLibraryCategoriesRetainTheirSnapshotsAndFirstPageRetryReplacesOldItems() = runBlocking {
+        val scope = testScope()
+        try {
+            val savedCategories = listOf("artists", "albums", "playlists", "songs").map { category ->
+                ContentShelf("lib-$category", category, listOf(testTrack("saved-$category")))
+            }
+            val ops = FakeContentOperations().apply {
+                savedShelvesMap["Library"] = savedCategories
+                libraryArtistsPageHandler = { error("Artists unavailable") }
+                libraryAlbumsPageHandler = { error("Albums unavailable") }
+                libraryPlaylistsPageHandler = { error("Playlists unavailable") }
+                librarySongsPageHandler = { error("Songs unavailable") }
+                recentlyAddedHandler = { listOf(testTrack("new-added")) }
+            }
+            val store = ContentStore(ops, scope, Dispatchers.Unconfined)
+            store.loadDestination(Destination.Library, MusicConnectionState.SignedIn, 0, "en-US")
+
+            val current = store.state.value
+            assertEquals(savedCategories, current.shelvesFor(Destination.Library).filter { it in savedCategories })
+            assertEquals(savedCategories.map { it.id }.toSet(), current.libraryFailedShelves)
+            assertTrue(current.shelvesFor(Destination.Library).any { it.items.single().id == "new-added" })
+
+            ops.libraryAlbumsPageHandler = { page ->
+                assertNull(page)
+                LibraryPage(listOf(testTrack("new-album")), null, "albums-0")
+            }
+            store.loadMoreLibraryShelf("lib-albums", MusicConnectionState.SignedIn)
+            val updated = store.state.value
+            assertFalse("lib-albums" in updated.libraryFailedShelves)
+            assertEquals(
+                listOf("new-album"),
+                updated.shelvesFor(Destination.Library).single { it.id == "lib-albums" }.items.map { it.id },
+            )
         } finally {
             scope.cancel()
         }
