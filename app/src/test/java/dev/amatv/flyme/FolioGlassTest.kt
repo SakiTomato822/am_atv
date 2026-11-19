@@ -48,11 +48,12 @@ class FolioGlassTest {
         val bLight = resolveFolioGlassColors(FolioGlassTier.BlurB, isLight = true)
         val cLight = resolveFolioGlassColors(FolioGlassTier.FallbackC, isLight = true)
 
-        assertEquals(0.45f, aLight.fill.alpha, 0.01f)
-        assertEquals(0.45f, bLight.fill.alpha, 0.01f)
+        assertEquals(0.24f, aLight.fill.alpha, 0.01f)
+        assertEquals(0.24f, bLight.fill.alpha, 0.01f)
         assertEquals(0.55f, cLight.fill.alpha, 0.01f)
-        assertEquals(aLight.border, cLight.border)
-        assertEquals(aLight.highlightTop, cLight.highlightTop)
+        assertEquals(aLight.border, bLight.border)
+        assertEquals(aLight.highlightTop, bLight.highlightTop)
+        assertTrue(aLight.highlightTop.alpha > cLight.highlightTop.alpha)
     }
 
     @Test

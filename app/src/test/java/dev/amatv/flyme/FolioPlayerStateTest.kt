@@ -1,6 +1,7 @@
 package dev.amatv.flyme
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.unit.dp
 import dev.amatv.core.LyricBackgroundStyle
 import dev.amatv.core.LyricsLoadPhase
@@ -547,8 +548,15 @@ class FolioPlayerStateTest {
     @Test
     fun motionTokensAndPosterCharacterLightingFollowH5TimingAndReducedMotion() {
         assertEquals(280, FolioPlayerMotionTokens.CTL_OPACITY_MS)
-        assertEquals(350, FolioPlayerMotionTokens.CTL_TRANSLATE_MS)
+        assertEquals(320, FolioPlayerMotionTokens.CTL_TRANSLATE_MS)
         assertEquals(14f, FolioPlayerMotionTokens.CTL_OFFSET_DP, 0.01f)
+        assertEquals(240, FolioPlayerMotionTokens.MENU_OPEN_MS)
+        assertEquals(180, FolioPlayerMotionTokens.MENU_CLOSE_MS)
+        assertEquals(240, FolioPlayerMotionTokens.QUEUE_POPOVER_OPEN_MS)
+        assertEquals(180, FolioPlayerMotionTokens.QUEUE_POPOVER_CLOSE_MS)
+        assertEquals(160, FolioPlayerMotionTokens.TOGGLE_PILL_MS)
+        assertEquals(200, FolioPlayerMotionTokens.PLAY_ICON_SWITCH_MS)
+        assertEquals(140, FolioPlayerMotionTokens.PLAY_ICON_SWITCH_OUT_MS)
         assertEquals(800, FolioPlayerMotionTokens.POSTER_LIQ_IN_MAIN_MS)
         assertEquals(700, FolioPlayerMotionTokens.POSTER_LIQ_IN_SUB_MS)
         assertEquals(600, FolioPlayerMotionTokens.POSTER_LIQ_OUT_MS)
@@ -1064,5 +1072,125 @@ class FolioPlayerStateTest {
                 0.01f,
             )
         }
+    }
+
+    @Test
+    fun pressFeedbackResolvesRestrainedScaleAndOverlay() {
+        assertEquals(
+            FolioPressDefaults.SCALE_CARD,
+            resolveFolioPressScale(
+                pressed = true,
+                enabled = true,
+                compact = false,
+                lowPerformance = false,
+                reducedMotion = false,
+            ),
+            0.001f,
+        )
+        assertEquals(
+            FolioPressDefaults.SCALE_COMPACT,
+            resolveFolioPressScale(
+                pressed = true,
+                enabled = true,
+                compact = true,
+                lowPerformance = false,
+                reducedMotion = false,
+            ),
+            0.001f,
+        )
+        assertEquals(
+            1f,
+            resolveFolioPressScale(
+                pressed = true,
+                enabled = true,
+                compact = true,
+                lowPerformance = true,
+                reducedMotion = false,
+            ),
+            0.001f,
+        )
+        assertEquals(
+            1f,
+            resolveFolioPressScale(
+                pressed = true,
+                enabled = true,
+                compact = false,
+                lowPerformance = false,
+                reducedMotion = true,
+            ),
+            0.001f,
+        )
+        assertEquals(
+            FolioPressDefaults.LIGHT_OVERLAY_ALPHA,
+            resolveFolioPressOverlayAlpha(pressed = true, enabled = true, isLight = true),
+            0.001f,
+        )
+        assertEquals(
+            FolioPressDefaults.DARK_OVERLAY_ALPHA,
+            resolveFolioPressOverlayAlpha(pressed = true, enabled = true, isLight = false),
+            0.001f,
+        )
+        assertEquals(0f, resolveFolioPressOverlayAlpha(pressed = false, enabled = true, isLight = true), 0.001f)
+    }
+
+    @Test
+    fun anchorTransformOriginAndLightTopScrimResolveAccurately() {
+        val origin = computeAnchorTransformOrigin(
+            anchorCenterX = 360f,
+            anchorCenterY = 480f,
+            panelWidth = 400f,
+            panelHeight = 400f,
+        )
+        assertEquals(0.90f, origin.pivotFractionX, 0.01f)
+        assertEquals(1.20f, origin.pivotFractionY, 0.01f)
+        assertEquals(
+            TransformOrigin.Center,
+            computeAnchorTransformOrigin(0f, 0f, 0f, 0f),
+        )
+
+        val lightBase = Color(0xFFF3EFF6)
+        val darkBg = Color(0xFF16151C)
+        assertEquals(
+            Color.Transparent,
+            resolvePosterTopScrimColor(
+                isLight = true,
+                useDarkHeaderInk = false,
+                lightBaseColor = lightBase,
+                darkBgColor = darkBg,
+            ),
+        )
+        assertEquals(
+            lightBase,
+            resolvePosterTopScrimColor(
+                isLight = true,
+                useDarkHeaderInk = true,
+                lightBaseColor = lightBase,
+                darkBgColor = darkBg,
+            ),
+        )
+        assertEquals(
+            darkBg,
+            resolvePosterTopScrimColor(
+                isLight = false,
+                useDarkHeaderInk = false,
+                lightBaseColor = lightBase,
+                darkBgColor = darkBg,
+            ),
+        )
+    }
+
+    @Test
+    fun lightThemeGlassAlphaReducedForTiersAAndBWhileCarAndDarkStayUnchanged() {
+        val lightA = resolveFolioGlassColors(FolioGlassTier.FullA, isLight = true)
+        val lightB = resolveFolioGlassColors(FolioGlassTier.BlurB, isLight = true)
+        val lightC = resolveFolioGlassColors(FolioGlassTier.FallbackC, isLight = true)
+        assertTrue(lightA.fill.alpha in 0.22f..0.28f)
+        assertTrue(lightB.fill.alpha in 0.22f..0.28f)
+        assertEquals(0.55f, lightC.fill.alpha, 0.001f)
+
+        val darkA = resolveFolioGlassColors(FolioGlassTier.FullA, isLight = false)
+        val darkC = resolveFolioGlassColors(FolioGlassTier.FallbackC, isLight = false)
+        assertEquals(0.35f, darkA.fill.alpha, 0.001f)
+        assertEquals(0.45f, darkC.fill.alpha, 0.001f)
     }
 }

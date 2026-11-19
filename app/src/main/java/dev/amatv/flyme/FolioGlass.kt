@@ -34,11 +34,13 @@ import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.inset
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -55,6 +57,7 @@ import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.highlight.HighlightStyle
+import com.kyant.backdrop.shadow.Shadow
 import dev.amatv.core.LyricBackgroundStyle
 import dev.amatv.model.Track
 import kotlin.math.max
@@ -111,7 +114,7 @@ fun resolveFolioGlassColors(
     val fill = when (tier) {
         FolioGlassTier.FullA,
         FolioGlassTier.BlurB -> if (isLight) {
-            Color.White.copy(alpha = 0.45f)
+            Color.White.copy(alpha = 0.24f)
         } else {
             Color(0xFF1A1621).copy(alpha = 0.35f)
         }
@@ -122,12 +125,16 @@ fun resolveFolioGlassColors(
             Color(0xFF1A1621).copy(alpha = 0.45f)
         }
     }
-    val border = if (isLight) {
-        Color(0xFF17151C).copy(alpha = 0.14f)
-    } else {
-        Color.White.copy(alpha = 0.22f)
+    val border = when {
+        isLight && tier != FolioGlassTier.FallbackC -> Color(0xFF17151C).copy(alpha = 0.12f)
+        isLight -> Color(0xFF17151C).copy(alpha = 0.14f)
+        else -> Color.White.copy(alpha = 0.22f)
     }
-    val highlightTop = Color.White.copy(alpha = if (isLight) 0.45f else 0.18f)
+    val highlightTop = when {
+        isLight && tier != FolioGlassTier.FallbackC -> Color.White.copy(alpha = 0.62f)
+        isLight -> Color.White.copy(alpha = 0.45f)
+        else -> Color.White.copy(alpha = 0.18f)
+    }
     return FolioGlassColors(
         fill = fill,
         border = border,
@@ -252,6 +259,19 @@ private object FolioBackdropPresets {
         )
     }
 
+    val TierAEffectsLight: BackdropEffectScope.() -> Unit = {
+        vibrancy()
+        blur(16.dp.toPx())
+        val rim = (size.minDimension * 0.28f).coerceAtMost(18.dp.toPx())
+        val refraction = (size.minDimension * 0.42f).coerceAtMost(28.dp.toPx())
+        lens(
+            refractionHeight = rim,
+            refractionAmount = refraction,
+            depthEffect = false,
+            chromaticAberration = false,
+        )
+    }
+
     val TierBEffects: BackdropEffectScope.() -> Unit = {
         vibrancy()
         blur(16.dp.toPx())
@@ -268,10 +288,10 @@ private object FolioBackdropPresets {
 
     val TierAHighlightLight: () -> Highlight = {
         Highlight(
-            width = 0.75.dp,
-            blurRadius = 0.5.dp,
-            alpha = 0.50f,
-            style = HighlightStyle.Ambient(intensity = 0.32f),
+            width = 1.dp,
+            blurRadius = 0.75.dp,
+            alpha = 0.78f,
+            style = HighlightStyle.Ambient(intensity = 0.48f),
         )
     }
 
@@ -281,6 +301,24 @@ private object FolioBackdropPresets {
             blurRadius = 0.5.dp,
             alpha = 0.55f,
             style = HighlightStyle.Plain,
+        )
+    }
+
+    val TierBHighlightLight: () -> Highlight = {
+        Highlight(
+            width = 1.dp,
+            blurRadius = 0.75.dp,
+            alpha = 0.70f,
+            style = HighlightStyle.Plain,
+        )
+    }
+
+    val TierLightShadow: () -> Shadow = {
+        Shadow(
+            radius = 12.dp,
+            offset = DpOffset(0.dp, 3.dp),
+            color = Color(0xFF17151C),
+            alpha = 0.08f,
         )
     }
 }
@@ -303,19 +341,21 @@ internal fun Modifier.folioPlayerGlass(
 
         if (env.tier != FolioGlassTier.FallbackC && layerBackdrop != null) {
             val shapeProvider = remember(shape) { { shape } }
-            val effects = if (env.tier == FolioGlassTier.FullA) {
-                FolioBackdropPresets.TierAEffects
-            } else {
-                FolioBackdropPresets.TierBEffects
+            val effects = when {
+                env.tier == FolioGlassTier.FullA && isLight -> FolioBackdropPresets.TierAEffectsLight
+                env.tier == FolioGlassTier.FullA -> FolioBackdropPresets.TierAEffects
+                else -> FolioBackdropPresets.TierBEffects
             }
             val highlightProvider = remember(env.tier, isLight) {
                 when {
                     env.tier == FolioGlassTier.FullA && isLight -> FolioBackdropPresets.TierAHighlightLight
                     env.tier == FolioGlassTier.FullA -> FolioBackdropPresets.TierAHighlightDark
+                    isLight -> FolioBackdropPresets.TierBHighlightLight
                     else -> FolioBackdropPresets.TierBHighlight
                 }
             }
-            val drawSurface = remember(colors, shape) {
+            val shadowProvider = if (isLight) FolioBackdropPresets.TierLightShadow else null
+            val drawSurface = remember(colors, shape, isLight) {
                 { scope: androidx.compose.ui.graphics.drawscope.DrawScope ->
                     with(scope) {
                         val outline = shape.createOutline(size, layoutDirection, this)
@@ -327,6 +367,16 @@ internal fun Modifier.folioPlayerGlass(
                                 0.34f to Color.Transparent,
                             ),
                         )
+                        if (isLight) {
+                            inset(1.dp.toPx()) {
+                                val innerOutline = shape.createOutline(size, layoutDirection, this@with)
+                                drawOutline(
+                                    outline = innerOutline,
+                                    color = Color.White.copy(alpha = 0.62f),
+                                    style = Stroke(width = 1.dp.toPx()),
+                                )
+                            }
+                        }
                         drawOutline(
                             outline = outline,
                             color = colors.border,
@@ -340,7 +390,7 @@ internal fun Modifier.folioPlayerGlass(
                 shape = shapeProvider,
                 effects = effects,
                 highlight = highlightProvider,
-                shadow = null,
+                shadow = shadowProvider,
                 onDrawSurface = drawSurface,
             )
         } else {
