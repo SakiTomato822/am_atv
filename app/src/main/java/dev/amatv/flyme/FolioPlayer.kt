@@ -39,7 +39,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -366,6 +365,7 @@ internal fun BoxScope.FolioPlayerLayer(
             revealControls()
             val delta = targetMs - playbackStore.currentPositionMs()
             playbackStore.seekPlaybackBy(delta)
+            if (canSeek) positionState.requestedSeek(playbackStore.state.value.positionAnchorMs)
         }
 
         val queueSnapshot = remember(queueState, playbackState) {
@@ -937,7 +937,7 @@ private fun UltrawidePlayerBody(
     displayedLines: List<dev.amatv.model.LyricLine>,
     lyricsState: dev.amatv.core.LyricsState,
     queueSnapshot: FolioQueueSnapshot,
-    positionState: State<Long>,
+    positionState: FolioPlaybackPosition,
     durationMs: Long,
     canSeek: Boolean,
     isLiveStream: Boolean,
@@ -1106,6 +1106,7 @@ private fun UltrawidePlayerBody(
                     fg = fg,
                     fg2 = fg2,
                     duetAccentColor = duetAccentColor,
+                    lowPerformance = lowPerformance,
                     reducedMotion = reducedMotion,
                 )
 
@@ -1157,7 +1158,7 @@ private fun VerticalPlayerBody(
     displayedLines: List<dev.amatv.model.LyricLine>,
     lyricsState: dev.amatv.core.LyricsState,
     queueSnapshot: FolioQueueSnapshot,
-    positionState: State<Long>,
+    positionState: FolioPlaybackPosition,
     offsetMs: Long,
     lowPerformance: Boolean,
     translationEnabled: Boolean,
@@ -1299,6 +1300,7 @@ private fun VerticalPlayerBody(
                                 fg = fg,
                                 fg2 = fg2,
                                 duetAccentColor = duetAccentColor,
+                                lowPerformance = lowPerformance,
                                 reducedMotion = reducedMotion,
                             )
 
@@ -1357,7 +1359,7 @@ private fun ShortPlayerLayout(
     displayedLines: List<dev.amatv.model.LyricLine>,
     lyricsState: dev.amatv.core.LyricsState,
     queueSnapshot: FolioQueueSnapshot,
-    positionState: State<Long>,
+    positionState: FolioPlaybackPosition,
     durationMs: Long,
     canSeek: Boolean,
     isLiveStream: Boolean,
@@ -1475,6 +1477,7 @@ private fun ShortPlayerLayout(
                             fg = fg,
                             fg2 = fg2,
                             duetAccentColor = duetAccentColor,
+                            lowPerformance = lowPerformance,
                             reducedMotion = reducedMotion,
                         )
 
@@ -1631,7 +1634,7 @@ private fun TwoColumnPlayerBody(
     displayedLines: List<dev.amatv.model.LyricLine>,
     lyricsState: dev.amatv.core.LyricsState,
     queueSnapshot: FolioQueueSnapshot,
-    positionState: State<Long>,
+    positionState: FolioPlaybackPosition,
     durationMs: Long,
     offsetMs: Long,
     lowPerformance: Boolean,
@@ -1890,6 +1893,7 @@ private fun TwoColumnPlayerBody(
                             fg = fg,
                             fg2 = fg2,
                             duetAccentColor = duetAccentColor,
+                            lowPerformance = lowPerformance,
                             reducedMotion = reducedMotion,
                         )
 
@@ -2118,24 +2122,25 @@ private fun rememberArtworkTopLuminance(url: String?, fallback: List<Color>): Fl
 private fun rememberFolioPlaybackPositionMs(
     playbackState: PlaybackState,
     active: Boolean,
-): State<Long> {
-    val state = remember { mutableLongStateOf(playbackState.positionAnchorMs) }
+): FolioPlaybackPosition {
+    val state = remember { FolioPlaybackPosition(playbackState.positionAnchorMs) }
     LaunchedEffect(
         active,
         playbackState.positionAnchorMs,
         playbackState.playStartedRealtimeMs,
         playbackState.isPlaying,
     ) {
-        state.longValue = if (playbackState.isPlaying) {
+        val positionMs = if (playbackState.isPlaying) {
             playbackState.positionAnchorMs + (SystemClock.elapsedRealtime() - playbackState.playStartedRealtimeMs).coerceAtLeast(0L)
         } else {
             playbackState.positionAnchorMs
         }
+        state.updateAnchor(playbackState.positionAnchorMs, positionMs)
         if (!active || !playbackState.isPlaying) return@LaunchedEffect
         while (true) {
             withFrameNanos {
-                state.longValue = playbackState.positionAnchorMs +
-                    (SystemClock.elapsedRealtime() - playbackState.playStartedRealtimeMs).coerceAtLeast(0L)
+                state.update(playbackState.positionAnchorMs +
+                    (SystemClock.elapsedRealtime() - playbackState.playStartedRealtimeMs).coerceAtLeast(0L))
             }
         }
     }
