@@ -3,9 +3,14 @@ package dev.amatv.core
 import dev.amatv.integration.LibraryCollection
 import dev.amatv.integration.LibraryPage
 import dev.amatv.integration.MusicConnectionState
+import dev.amatv.model.CatalogKind
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.Destination
 import dev.amatv.model.Track
+import dev.amatv.ui.LibrarySort
+import dev.amatv.ui.sortLibrary
+import java.text.Collator
+import java.util.Locale
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -126,6 +131,13 @@ class ContentStoreTest {
 
     private fun testScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
 
+    private fun libraryAlbum(id: String, title: String, dateAddedMs: Long) = testTrack(id, title).copy(
+        catalogKind = CatalogKind.Album,
+        resourceType = LibraryCollection.Albums.resourceType,
+        resourceId = id,
+        dateAddedMs = dateAddedMs,
+    )
+
     private fun testStore(ops: ContentOperations, scope: CoroutineScope, elapsedRealtimeMs: () -> Long = { 0L }) =
         ContentStore(ops, scope, Dispatchers.Unconfined, elapsedRealtimeMs)
 
@@ -187,6 +199,95 @@ class ContentStoreTest {
             assertFalse(store.state.value.isLoading(Destination.Library))
             assertTrue(store.state.value.shelvesFor(Destination.Library).any { it.id == "lib-recently-added" })
             assertTrue(store.state.value.shelvesFor(Destination.Library).none { it.id == "snap-1" })
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun recentAlbumsReplaceTheSnapshotHeadBeforeLibraryFirstPagesFinish() = runBlocking {
+        val scope = testScope()
+        try {
+            val recentGate = CompletableDeferred<Unit>()
+            val firstPageGate = CompletableDeferred<Unit>()
+            val old = libraryAlbum("old", "Aardvark", 1L)
+            val latest = libraryAlbum("latest", "petal", 4L)
+            val other = libraryAlbum("other", "Bee", 3L)
+            val continuation = libraryAlbum("continuation", "Aster", 2L)
+            val requests = mutableListOf<String?>()
+            val ops = FakeContentOperations().apply {
+                savedShelvesMap["Library"] = listOf(ContentShelf("lib-albums", "Albums", listOf(old)))
+                recentlyAddedHandler = {
+                    recentGate.await()
+                    listOf(other, testTrack("playlist").copy(resourceType = "library-playlists"), latest)
+                }
+                libraryAlbumsPageHandler = { page ->
+                    requests += page
+                    when (page) {
+                        null -> {
+                            firstPageGate.await()
+                            LibraryPage(listOf(old, other), "albums-next", "albums-first")
+                        }
+                        "albums-next" -> LibraryPage(listOf(continuation, latest.copy(id = "relinked")), null, page)
+                        else -> error("Unexpected page $page")
+                    }
+                }
+            }
+            val store = testStore(ops, scope)
+            val collator = Collator.getInstance(Locale.US)
+            fun sortedAlbums(sort: LibrarySort) = sortLibrary(
+                store.state.value.shelvesFor(Destination.Library).single { it.id == "lib-albums" }.items,
+                sort, sort.descendingFirst, collator,
+            )
+
+            store.loadDestination(Destination.Library, MusicConnectionState.SignedIn, 0, "en-US")
+            assertEquals(listOf(old), sortedAlbums(LibrarySort.DateAdded))
+            recentGate.complete(Unit)
+
+            assertTrue(store.state.value.isLoading(Destination.Library))
+            assertEquals(listOf(latest, other, old), sortedAlbums(LibrarySort.DateAdded))
+            assertEquals(listOf<String?>(null), requests)
+
+            firstPageGate.complete(Unit)
+            assertEquals(listOf(latest, other, old), sortedAlbums(LibrarySort.DateAdded))
+            assertEquals("albums-next", store.state.value.libraryNextPages["lib-albums"])
+            store.loadMoreLibraryShelf("lib-albums", MusicConnectionState.SignedIn)
+
+            assertEquals(listOf(null, "albums-next"), requests)
+            assertEquals(listOf(latest, other, continuation, old), sortedAlbums(LibrarySort.DateAdded))
+            assertEquals(listOf(old, continuation, other, latest), sortedAlbums(LibrarySort.Name))
+            assertEquals(listOf(old, continuation, other, latest), sortedAlbums(LibrarySort.Artist))
+            assertNull(store.state.value.libraryNextPages["lib-albums"])
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun recentAlbumsSurviveAnAlbumFirstPageFailureAndRetryWithoutASnapshot() = runBlocking {
+        val scope = testScope()
+        try {
+            val latest = libraryAlbum("latest", "petal", 4L)
+            val old = libraryAlbum("old", "Aardvark", 1L)
+            val ops = FakeContentOperations().apply {
+                recentlyAddedHandler = { listOf(latest) }
+                libraryAlbumsPageHandler = { error("Albums unavailable") }
+            }
+            val store = testStore(ops, scope)
+            fun albumItems() = store.state.value.shelvesFor(Destination.Library).single { it.id == "lib-albums" }.items
+
+            store.loadDestination(Destination.Library, MusicConnectionState.SignedIn, 0, "en-US")
+            assertEquals(listOf(latest), albumItems())
+            assertTrue("lib-albums" in store.state.value.libraryFailedShelves)
+
+            ops.libraryAlbumsPageHandler = { page ->
+                assertNull(page)
+                LibraryPage(listOf(old, latest), null, "albums-first")
+            }
+            store.loadMoreLibraryShelf("lib-albums", MusicConnectionState.SignedIn)
+
+            assertEquals(listOf(latest, old), albumItems())
+            assertFalse("lib-albums" in store.state.value.libraryFailedShelves)
         } finally {
             scope.cancel()
         }

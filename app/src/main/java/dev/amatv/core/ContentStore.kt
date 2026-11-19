@@ -188,7 +188,15 @@ class ContentStore(
                 val latest = _state.value
                 val shelves = latest.shelvesByDestination[Destination.Library].orEmpty().map { shelf ->
                     if (shelf.id != shelfId) shelf
-                    else shelf.copy(items = if (nextPage == null) page.items else mergeLibraryPage(shelf.items, page.items))
+                    else shelf.copy(items = when {
+                        nextPage != null -> mergeLibraryPage(shelf.items, page.items)
+                        shelfId == "lib-albums" -> mergeLibraryPage(
+                            latest.shelvesFor(Destination.Library).firstOrNull { it.id == "lib-recently-added" }
+                                ?.items.orEmpty().recentLibraryAlbums(),
+                            page.items,
+                        )
+                        else -> page.items
+                    })
                 }
                 _state.value = latest.copy(
                     shelvesByDestination = latest.shelvesByDestination + (Destination.Library to shelves),
@@ -218,6 +226,21 @@ class ContentStore(
     // An explicit first-page URL bypasses the in-memory playlist index used by detail pages.
     private suspend fun loadLibraryPlaylistsPage(nextPage: String? = null): LibraryPage =
         operations.libraryPlaylistsPage(nextPage ?: LibraryCollection.Playlists.request.firstPage)
+
+    private fun List<Track>.recentLibraryAlbums(): List<Track> =
+        filter { it.resourceType == LibraryCollection.Albums.resourceType }
+
+    private fun publishRecentLibraryAlbums(albums: List<Track>) {
+        val current = _state.value
+        val shelves = current.shelvesFor(Destination.Library)
+        val existing = shelves.firstOrNull { it.id == "lib-albums" }
+        val updated = existing?.copy(items = mergeLibraryPage(albums, existing.items))
+            ?: ContentShelf("lib-albums", AppText.text(R.string.app_library_albums), albums)
+        _state.value = current.copy(
+            shelvesByDestination = current.shelvesByDestination + (Destination.Library to
+                if (existing == null) shelves + updated else shelves.map { if (it.id == updated.id) updated else it }),
+        )
+    }
 
     private fun invalidateLibraryRefresh() {
         lastLibraryRefreshMs = null
@@ -494,22 +517,18 @@ class ContentStore(
                             val songs = async(ioDispatcher) { cancellableResult { operations.librarySongsPage() } }
                             val recentPlayed = async(ioDispatcher) { cancellableResult { operations.recentlyPlayedTracks() } }
 
+                            val recentItems = recentlyAdded.await().getOrElse { error ->
+                                errors += error
+                                emptyList()
+                            }
+                            val recentAlbums = recentItems.recentLibraryAlbums()
+                            if (recentAlbums.isNotEmpty()) publishRecentLibraryAlbums(recentAlbums)
+
                             buildList {
-                                recentlyAdded.await().fold(
-                                    onSuccess = { items ->
-                                        if (items.isNotEmpty()) {
-                                            add(
-                                                ContentShelf(
-                                                    id = "lib-recently-added",
-                                                    title = AppText.text(R.string.app_recently_added),
-                                                    items = items,
-                                                    featured = true,
-                                                ),
-                                            )
-                                        }
-                                    },
-                                    onFailure = errors::add,
-                                )
+                                if (recentItems.isNotEmpty()) {
+                                    add(ContentShelf("lib-recently-added", AppText.text(R.string.app_recently_added),
+                                        recentItems, featured = true))
+                                }
                                 artists.await().fold(
                                     onSuccess = { page ->
                                         libraryFirstPages["lib-artists"] = page
@@ -525,15 +544,16 @@ class ContentStore(
                                 albums.await().fold(
                                     onSuccess = { page ->
                                         libraryFirstPages["lib-albums"] = page
-                                        if (page.items.isNotEmpty() || page.nextPage != null) {
+                                        val items = mergeLibraryPage(recentAlbums, page.items)
+                                        if (items.isNotEmpty() || page.nextPage != null) {
                                             add(ContentShelf("lib-albums", AppText.text(R.string.app_library_albums),
-                                                page.items, featured = isEmpty()))
+                                                items, featured = isEmpty()))
                                         }
                                     },
                                     onFailure = { error ->
                                         errors += error
                                         libraryFailures += "lib-albums"
-                                        add(savedShelves["lib-albums"]
+                                        add(_state.value.shelvesFor(Destination.Library).firstOrNull { it.id == "lib-albums" }
                                             ?: ContentShelf("lib-albums", AppText.text(R.string.app_library_albums), emptyList()))
                                     },
                                 )
