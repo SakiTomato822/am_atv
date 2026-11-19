@@ -192,17 +192,17 @@ internal fun FolioSettingsPage(
                         showDivider = false,
                     ) {}
                     SettingsToggleRow(
-                        title = fadeOptionLabel(R.string.playback_fade_albums, settings.fadeAlbums),
+                        title = stringResource(R.string.playback_fade_albums),
                         checked = settings.fadeAlbums,
                         onCheckedChange = settingsStore::setFadeAlbums,
                     )
                     SettingsToggleRow(
-                        title = fadeOptionLabel(R.string.playback_fade_stations, settings.fadeStations),
+                        title = stringResource(R.string.playback_fade_stations),
                         checked = settings.fadeStations,
                         onCheckedChange = settingsStore::setFadeStations,
                     )
                     SettingsToggleRow(
-                        title = fadeOptionLabel(R.string.playback_fade_playlists, settings.fadePlaylists),
+                        title = stringResource(R.string.playback_fade_playlists),
                         checked = settings.fadePlaylists,
                         onCheckedChange = settingsStore::setFadePlaylists,
                     )
@@ -383,12 +383,6 @@ private fun SettingsGroup(
         content()
     }
 }
-
-@Composable
-private fun fadeOptionLabel(label: Int, enabled: Boolean): String = stringResource(
-    label,
-    stringResource(if (enabled) R.string.playback_option_on else R.string.playback_option_off),
-)
 
 @Composable
 private fun SettingsToggleRow(

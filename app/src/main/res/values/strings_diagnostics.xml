@@ -22,9 +22,9 @@
     <string name="playback_option_off">off</string>
     <string name="playback_fade_title">Fade between songs</string>
     <string name="playback_fade_summary">At a gapless change, the song fades out over its last 3 seconds and the next fades in over 2. Choose where.</string>
-    <string name="playback_fade_albums">Albums: %1$s</string>
-    <string name="playback_fade_stations">Stations: %1$s</string>
-    <string name="playback_fade_playlists">Playlists: %1$s</string>
+    <string name="playback_fade_albums">Albums</string>
+    <string name="playback_fade_stations">Stations</string>
+    <string name="playback_fade_playlists">Playlists</string>
     <string name="playback_station_mode_title">How stations play</string>
     <string name="playback_station_mode_summary">Many cars and TVs have no Widevine; song by song plays a station on the native player without it. Live radio always needs Widevine.</string>
     <string name="appearance_title">Appearance</string>
