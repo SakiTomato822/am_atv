@@ -1,5 +1,6 @@
 package dev.amatv.core
 
+import android.os.SystemClock
 import dev.amatv.R
 import dev.amatv.data.MockCatalog
 import dev.amatv.i18n.AppText
@@ -28,6 +29,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private const val LIBRARY_REFRESH_INTERVAL_MS = 10 * 60 * 1000L
 
 internal fun demoShelves(): Map<Destination, List<ContentShelf>> = mapOf(
     Destination.Home to listOf(
@@ -100,6 +103,7 @@ class ContentStore(
     private val operations: ContentOperations,
     private val coroutineScope: CoroutineScope,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val elapsedRealtimeMs: () -> Long = SystemClock::elapsedRealtime,
 ) {
     private val _state = MutableStateFlow(
         ContentState(
@@ -115,6 +119,7 @@ class ContentStore(
 
     private val shelfLoads = ShelfLoads(coroutineScope)
     private var shelvesLanguageTag: String? = null
+    private var lastLibraryRefreshMs: Long? = null
     private var libraryVisitedPages: Map<String, Set<String>> = emptyMap()
     private var libraryPagingGeneration: Long = 0L
     private val libraryPageJobs = mutableMapOf<String, Job>()
@@ -214,8 +219,14 @@ class ContentStore(
     private suspend fun loadLibraryPlaylistsPage(nextPage: String? = null): LibraryPage =
         operations.libraryPlaylistsPage(nextPage ?: LibraryCollection.Playlists.request.firstPage)
 
+    private fun invalidateLibraryRefresh() {
+        lastLibraryRefreshMs = null
+        if (loadKey?.first() == Destination.Library) loadJob?.cancel()
+    }
+
     fun refreshAll(current: Destination) {
         operations.clearDetailPages()
+        invalidateLibraryRefresh()
         resetLibraryPagination()
         _state.value = _state.value.copy(
             shelvesByDestination = emptyMap(),
@@ -226,6 +237,7 @@ class ContentStore(
     }
 
     fun onSignedIn() {
+        invalidateLibraryRefresh()
         resetLibraryPagination()
         _state.value = _state.value.copy(
             shelvesByDestination = emptyMap(),
@@ -235,6 +247,7 @@ class ContentStore(
     }
 
     fun onSignedOut() {
+        invalidateLibraryRefresh()
         _state.value = _state.value.copy(
             shelvesByDestination = emptyMap(),
             recentTracks = emptyList(),
@@ -260,6 +273,7 @@ class ContentStore(
         if (shelvesLanguageTag == null) {
             shelvesLanguageTag = contentLanguageTag
         } else if (shelvesLanguageTag != contentLanguageTag) {
+            lastLibraryRefreshMs = null
             resetLibraryPagination()
             // Section titles are presentation metadata. Invalidate only this
             // cache, retaining the selected song, queue, focus and account.
@@ -287,6 +301,10 @@ class ContentStore(
             )
             return
         }
+        val refreshedAt = lastLibraryRefreshMs
+        if (target == Destination.Library && refreshedAt != null &&
+            elapsedRealtimeMs() - refreshedAt < LIBRARY_REFRESH_INTERVAL_MS
+        ) return
 
         _state.value = _state.value.copy(
             loadingDestinations = _state.value.loadingDestinations + target,
@@ -593,6 +611,7 @@ class ContentStore(
                         }.toMap(),
                         libraryFailedShelves = libraryFailures,
                     )
+                    if (errors.isEmpty()) lastLibraryRefreshMs = elapsedRealtimeMs()
                 }
                 _state.value = updated
                 if (loadedShelves.isNotEmpty() && connectionState == MusicConnectionState.SignedIn) {
