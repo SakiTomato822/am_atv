@@ -13,6 +13,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -34,9 +35,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -48,10 +51,13 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -145,7 +151,11 @@ internal fun BoxScope.FolioPlayerLayer(
         val scope = rememberCoroutineScope()
 
         var queueOpen by FolioPlayerSession.queueOpenState
-        var posterPreferred by FolioPlayerSession.posterPreferredState
+        val posterOverride by FolioPlayerSession.posterOverrideState
+        val posterPreferred = resolveEffectivePosterPreferred(
+            settingsStyle = settings.lyricStyle,
+            sessionOverride = posterOverride,
+        )
         var controlsManualOpen by remember { mutableStateOf(true) }
         var revealPulse by remember { mutableLongStateOf(0L) }
         var navigationMessage by remember { mutableStateOf<String?>(null) }
@@ -185,10 +195,21 @@ internal fun BoxScope.FolioPlayerLayer(
             lyricsAvailability = lyricsAvailability,
             hasTimedLyrics = hasTimed,
         )
+        var lastNonQueueStyle by remember { mutableStateOf(settings.lyricStyle) }
+        val effectiveStyle = resolveEffectiveBackgroundStyle(
+            displayState = displayState,
+            settingsStyle = settings.lyricStyle,
+            lastContentBackgroundStyle = lastNonQueueStyle,
+        )
+        SideEffect {
+            if (displayState != FolioPlayerDisplayState.Queue) {
+                lastNonQueueStyle = effectiveStyle
+            }
+        }
         val queuePanelVisible = isQueuePanelVisible(tierSpec.tier, displayState)
         val alwaysOpen = alwaysOpenControls(
             tier = tierSpec.tier,
-            style = settings.lyricStyle,
+            style = effectiveStyle,
             hasLyricsOrPending = lyricsAvailability != FolioLyricsAvailability.Unavailable,
             displayState = displayState,
         )
@@ -237,10 +258,10 @@ internal fun BoxScope.FolioPlayerLayer(
         val duetAccentColor = remember(artworkPalette, baseColor, palette.isLight) {
             selectDuetAccentColor(artworkPalette, baseColor, palette.isLight)
         }
-        val headerColors = remember(tierSpec.tier, settings.lyricStyle, displayState, palette.isLight, topStripLuminance) {
+        val headerColors = remember(tierSpec.tier, effectiveStyle, displayState, palette.isLight, topStripLuminance) {
             val useDarkInk = resolveHeaderUseDarkInk(
                 tier = tierSpec.tier,
-                style = settings.lyricStyle,
+                style = effectiveStyle,
                 displayState = displayState,
                 themeIsLight = palette.isLight,
                 topStripLuminance = topStripLuminance,
@@ -302,9 +323,10 @@ internal fun BoxScope.FolioPlayerLayer(
             FolioPlayerBackdrop(
                 track = track,
                 artworkPalette = artworkPalette,
-                style = settings.lyricStyle,
+                style = effectiveStyle,
                 isLight = palette.isLight,
                 animateFlow = !settings.lowPerformanceMode,
+                reducedMotion = reducedMotion,
                 tierSpec = tierSpec,
                 displayState = displayState,
                 pullHandle = pullDown.handle,
@@ -316,6 +338,28 @@ internal fun BoxScope.FolioPlayerLayer(
                     }
                 },
             )
+
+            // C4 #5: Soft theme-colored vertical scrim behind the header in Poster mode so light cover art stays legible.
+            val posterScrimAlpha by animateFloatAsState(
+                targetValue = if (displayState == FolioPlayerDisplayState.Poster) 1f else 0f,
+                animationSpec = tween(if (reducedMotion) 0 else BACKDROP_STYLE_CROSSFADE_MS),
+                label = "poster-top-scrim-alpha",
+            )
+            if (posterScrimAlpha > 0.01f) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .height(160.dp)
+                        .graphicsLayer { alpha = posterScrimAlpha }
+                        .background(
+                            Brush.verticalGradient(
+                                0f to palette.bg.copy(alpha = 0.55f),
+                                1f to palette.bg.copy(alpha = 0f),
+                            ),
+                        ),
+                )
+            }
 
             val notice = navigationMessage ?: when (libraryState.notice) {
                 is LibraryNotice.AddedToLibrary -> stringResource(R.string.folio_player_in_library)
@@ -331,7 +375,7 @@ internal fun BoxScope.FolioPlayerLayer(
                 ShortPlayerLayout(
                     track = track,
                     tierSpec = tierSpec,
-                    style = settings.lyricStyle,
+                    style = effectiveStyle,
                     displayState = displayState,
                     queuePanelVisible = queuePanelVisible,
                     displayedLines = displayedLines,
@@ -380,7 +424,7 @@ internal fun BoxScope.FolioPlayerLayer(
                         if (queueOpen) {
                             queueOpen = false
                         } else if (hasTimed) {
-                            posterPreferred = !posterPreferred
+                            FolioPlayerSession.togglePosterPreference(posterPreferred)
                         }
                     },
                     onReveal = revealControls,
@@ -455,7 +499,7 @@ internal fun BoxScope.FolioPlayerLayer(
                             if (queueOpen) {
                                 queueOpen = false
                             } else if (hasTimed) {
-                                posterPreferred = !posterPreferred
+                                FolioPlayerSession.togglePosterPreference(posterPreferred)
                             }
                         },
                         onOpenAlbum = openAlbumDetail,
@@ -484,11 +528,12 @@ internal fun BoxScope.FolioPlayerLayer(
                     Spacer(Modifier.height(8.dp))
 
                     // Main content body tailored to each tier
-                    val collapsedLayout = resolveCollapsedLayout(tierSpec.tier, displayState)
-                    val overlayUnderCoverControls = tierSpec.tier == FolioTier.Wide &&
-                        !alwaysOpen &&
-                        collapsedLayout == FolioCollapsedLayout.UnderCoverInfo
-                    val renderControlsSlot: @Composable (Modifier) -> Unit = { slotModifier ->
+                    val overlayControlsInBody = tierSpec.tier == FolioTier.Wide && !alwaysOpen
+                    var wideCardHeightPx by remember { mutableIntStateOf(0) }
+                    val wideExpandedCardDp = with(LocalDensity.current) {
+                        if (wideCardHeightPx > 0) wideCardHeightPx.toDp() else 226.dp
+                    }
+                    val renderControlsSlot: @Composable (Modifier, Dp) -> Unit = { slotModifier, carWidthDp ->
                         FolioPlayerAnimatedControlsSlot(
                             controlsExpanded = controlsExpanded,
                             reducedMotion = reducedMotion,
@@ -538,10 +583,18 @@ internal fun BoxScope.FolioPlayerLayer(
                             } else {
                                 Alignment.BottomCenter
                             },
+                            carControlsWidthDp = carWidthDp,
+                            onCarControlsHeightPxChanged = { wideCardHeightPx = it },
                         )
                     }
 
-                    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        val wideCollapsedCoverDp = computeWideCarCollapsedCoverSizeDp(
+                            leftColumnWidthDp = maxWidth * 0.50f,
+                            bodyHeightDp = maxHeight,
+                        )
+                        val wideControlsWidthDp = computeWideCarControlsWidthDp(wideCollapsedCoverDp)
+
                         when (tierSpec.tier) {
                             FolioTier.Ultrawide -> {
                                 UltrawidePlayerBody(
@@ -594,7 +647,7 @@ internal fun BoxScope.FolioPlayerLayer(
                                 VerticalPlayerBody(
                                     track = track,
                                     tierSpec = tierSpec,
-                                    style = settings.lyricStyle,
+                                    style = effectiveStyle,
                                     displayState = displayState,
                                     queuePanelVisible = queuePanelVisible,
                                     displayedLines = displayedLines,
@@ -628,7 +681,7 @@ internal fun BoxScope.FolioPlayerLayer(
                                 TwoColumnPlayerBody(
                                     track = track,
                                     tierSpec = tierSpec,
-                                    style = settings.lyricStyle,
+                                    style = effectiveStyle,
                                     displayState = displayState,
                                     queuePanelVisible = queuePanelVisible,
                                     displayedLines = displayedLines,
@@ -646,6 +699,7 @@ internal fun BoxScope.FolioPlayerLayer(
                                     canSeek = canSeek,
                                     isLight = palette.isLight,
                                     isPlaying = playbackState.isPlaying,
+                                    expandedCarControlsHeightDp = wideExpandedCardDp,
                                     fg = fg,
                                     fg2 = fg2,
                                     duetAccentColor = duetAccentColor,
@@ -663,19 +717,20 @@ internal fun BoxScope.FolioPlayerLayer(
                             }
                         }
 
-                        if (overlayUnderCoverControls) {
+                        if (overlayControlsInBody) {
                             renderControlsSlot(
                                 Modifier
                                     .align(Alignment.BottomStart)
                                     .fillMaxWidth(),
+                                wideControlsWidthDp,
                             )
                         }
                     }
 
                     // Bottom controls slot for Narrow / Medium / non-overlay Wide
-                    if (tierSpec.tier != FolioTier.Ultrawide && !overlayUnderCoverControls) {
+                    if (tierSpec.tier != FolioTier.Ultrawide && !overlayControlsInBody) {
                         Spacer(Modifier.height(10.dp))
-                        renderControlsSlot(Modifier.fillMaxWidth())
+                        renderControlsSlot(Modifier.fillMaxWidth(), 464.dp)
                     }
                 }
             }
@@ -922,7 +977,7 @@ private fun VerticalPlayerBody(
                 .padding(top = topCoverClearance),
         ) {
             if (tierSpec.tier == FolioTier.Medium && style == LyricBackgroundStyle.Flow &&
-                displayState != FolioPlayerDisplayState.Queue
+                displayState == FolioPlayerDisplayState.None
             ) {
                 Row(
                     modifier = Modifier
@@ -1299,6 +1354,7 @@ private fun TwoColumnPlayerBody(
     canSeek: Boolean,
     isLight: Boolean,
     isPlaying: Boolean,
+    expandedCarControlsHeightDp: Dp = 226.dp,
     fg: Color,
     fg2: Color,
     duetAccentColor: Color,
@@ -1365,10 +1421,26 @@ private fun TwoColumnPlayerBody(
             ) {
                 if (isWideCar) {
                     if (showUnderCoverCollapsed) {
-                        val coverSize = min(
-                            (bodyHeight - 134.dp).coerceAtLeast(160.dp),
-                            min(leftColumnWidth * 0.78f, 400.dp),
+                        val collapsedCoverSize = computeWideCarCollapsedCoverSizeDp(
+                            leftColumnWidthDp = leftColumnWidth,
+                            bodyHeightDp = bodyHeight,
                         )
+                        val expandedCoverSize = computeWideCarExpandedCoverSizeDp(
+                            collapsedCoverDp = collapsedCoverSize,
+                            bodyHeightDp = bodyHeight,
+                            controlsCardHeightDp = expandedCarControlsHeightDp,
+                        )
+                        val coverShrinkFraction by animateFloatAsState(
+                            targetValue = if (controlsExpanded) 1f else 0f,
+                            animationSpec = tween(
+                                durationMillis = if (reducedMotion) 0 else FolioPlayerMotionTokens.CTL_TRANSLATE_MS,
+                                easing = FolioPlayerMotionTokens.EnterEasing,
+                            ),
+                            label = "wide-cover-shrink",
+                        )
+                        val targetScale = (expandedCoverSize / collapsedCoverSize).coerceIn(0.35f, 1f)
+                        val coverScale = 1f + (targetScale - 1f) * coverShrinkFraction
+
                         Column(
                             modifier = Modifier.padding(start = 36.dp, top = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -1377,7 +1449,12 @@ private fun TwoColumnPlayerBody(
                                 track = track,
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier
-                                    .size(coverSize)
+                                    .size(collapsedCoverSize)
+                                    .graphicsLayer {
+                                        scaleX = coverScale
+                                        scaleY = coverScale
+                                        transformOrigin = TransformOrigin(0f, 0f)
+                                    }
                                     .shadow(24.dp, RoundedCornerShape(14.dp))
                                     .clickable {
                                         if (controlsExpanded) onOpenAlbum() else onReveal()
@@ -1396,7 +1473,7 @@ private fun TwoColumnPlayerBody(
                                     onExpand = onReveal,
                                     onTogglePlay = onCollapsedPlayPause,
                                     modifier = Modifier
-                                        .width(coverSize)
+                                        .width(collapsedCoverSize)
                                         .graphicsLayer { alpha = pmetaAlpha },
                                 )
                             }

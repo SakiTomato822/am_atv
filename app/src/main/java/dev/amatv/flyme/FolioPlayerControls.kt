@@ -58,6 +58,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -375,6 +376,8 @@ internal fun FolioPlayerAnimatedControlsSlot(
     onOpenArtist: () -> Unit,
     modifier: Modifier = Modifier,
     contentAlignment: Alignment = Alignment.BottomStart,
+    carControlsWidthDp: Dp = 464.dp,
+    onCarControlsHeightPxChanged: (Int) -> Unit = {},
 ) {
     val ctlAlpha by animateFloatAsState(
         targetValue = if (controlsExpanded) 1f else 0f,
@@ -451,6 +454,13 @@ internal fun FolioPlayerAnimatedControlsSlot(
             }
         }
         val ctlDeck: @Composable () -> Unit = {
+            val widePlacement = if (tierSpec.tier == FolioTier.Wide) {
+                Modifier
+                    .padding(start = 4.dp, bottom = 4.dp)
+                    .onSizeChanged { onCarControlsHeightPxChanged(it.height) }
+            } else {
+                Modifier
+            }
             FolioPlayerExpandedControls(
                 track = track,
                 tierSpec = tierSpec,
@@ -467,6 +477,7 @@ internal fun FolioPlayerAnimatedControlsSlot(
                 fg = fg,
                 fg2 = fg2,
                 playEnabled = controlsExpanded,
+                carControlsWidthDp = carControlsWidthDp,
                 onSeekTo = onSeekTo,
                 onToggleTranslation = onToggleTranslation,
                 onPrevious = onPrevious,
@@ -475,7 +486,7 @@ internal fun FolioPlayerAnimatedControlsSlot(
                 onToggleQueue = onToggleQueue,
                 onOpenAlbum = onOpenAlbum,
                 onOpenArtist = onOpenArtist,
-                modifier = Modifier.graphicsLayer {
+                modifier = widePlacement.graphicsLayer {
                     alpha = ctlAlpha
                     translationY = FolioPlayerMotionTokens.CTL_OFFSET_DP.dp.toPx() * ctlOffsetFactor
                 },
@@ -953,6 +964,7 @@ internal fun FolioPlayerExpandedControls(
     onOpenArtist: () -> Unit,
     modifier: Modifier = Modifier,
     playEnabled: Boolean = true,
+    carControlsWidthDp: Dp = 464.dp,
 ) {
     val fontFamily = LocalFolioFontFamily.current
     val cardShape = RoundedCornerShape(22.dp)
@@ -961,15 +973,48 @@ internal fun FolioPlayerExpandedControls(
     val sideBg = if (isLight) Color(0xFF17151C).copy(alpha = 0.08f) else Color.White.copy(alpha = 0.14f)
 
     if (tierSpec.isHorizontalCarControls) {
-        Row(
+        // C4 Wide (e) compact left-column controls card: title/subtitle (no cover), seek bar, transport row.
+        Column(
             modifier = modifier
-                .fillMaxWidth()
+                .width(carControlsWidthDp)
                 .folioPlayerGlass(isLight = isLight, shape = cardShape)
-                .padding(horizontal = 24.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(28.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // Driver (left) side transport buttons
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = track.title,
+                    color = fg,
+                    fontFamily = fontFamily,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 20.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.clickable(enabled = playEnabled, onClick = onOpenAlbum),
+                )
+                FolioExpandedSubtitle(
+                    artist = track.artist,
+                    album = track.album,
+                    color = fg2,
+                    fontSize = 14.sp,
+                    onOpenArtist = onOpenArtist,
+                    onOpenAlbum = onOpenAlbum,
+                )
+            }
+
+            SeekSection(
+                positionState = positionState,
+                durationMs = durationMs,
+                canSeek = canSeek,
+                isLiveStream = isLiveStream,
+                fg = fg,
+                fg2 = fg2,
+                onSeekTo = onSeekTo,
+            )
+
             TransportRow(
                 tierSpec = tierSpec,
                 translationEnabled = translationEnabled,
@@ -987,59 +1032,9 @@ internal fun FolioPlayerExpandedControls(
                 onPlayPause = onPlayPause,
                 onNext = onNext,
                 onToggleQueue = onToggleQueue,
-                horizontalSpacing = 14.dp,
+                horizontalSpacing = null,
+                modifier = Modifier.fillMaxWidth(),
             )
-
-            // Right side track summary + seek bar
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    FolioArtwork(
-                        track = track,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .size(52.dp)
-                            .clickable(onClick = onOpenAlbum),
-                    )
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        Text(
-                            text = track.title,
-                            color = fg,
-                            fontFamily = fontFamily,
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 18.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.clickable(onClick = onOpenAlbum),
-                        )
-                        FolioExpandedSubtitle(
-                            artist = track.artist,
-                            album = track.album,
-                            color = fg2,
-                            fontSize = 14.sp,
-                            onOpenArtist = onOpenArtist,
-                            onOpenAlbum = onOpenAlbum,
-                        )
-                    }
-                }
-                SeekSection(
-                    positionState = positionState,
-                    durationMs = durationMs,
-                    canSeek = canSeek,
-                    isLiveStream = isLiveStream,
-                    fg = fg,
-                    fg2 = fg2,
-                    onSeekTo = onSeekTo,
-                )
-            }
         }
         return
     }
