@@ -31,7 +31,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Repeat
+import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -61,6 +67,8 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -76,6 +84,7 @@ import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
 import dev.amatv.R
 import dev.amatv.core.LyricsState
+import dev.amatv.integration.PlaybackRepeatMode
 import dev.amatv.model.LyricLine
 import dev.amatv.model.LyricTimeline
 import dev.amatv.model.LyricTiming
@@ -86,6 +95,7 @@ import dev.amatv.ui.DarkFlymePalette
 import dev.amatv.ui.InstrumentalInterludeRow
 import dev.amatv.ui.LightFlymePalette
 import dev.amatv.ui.LocalFlymePalette
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -902,6 +912,9 @@ internal fun FolioQueuePanel(
     isPlaying: Boolean,
     onSelectTimelineTrack: (Int) -> Unit,
     onPlayStationTrack: (Track) -> Unit,
+    onCycleRepeat: () -> Unit = {},
+    onToggleShuffle: () -> Unit = {},
+    onClearQueue: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val fontFamily = LocalFolioFontFamily.current
@@ -915,6 +928,11 @@ internal fun FolioQueuePanel(
         }
     }
 
+    val availability = resolveQueueControlAvailability(
+        isStation = snapshot.isStation,
+        upNextCount = snapshot.upNextCount,
+        autoplayCount = snapshot.autoplayCount,
+    )
     val rowBg = if (isLight) Color(0xFF17151C).copy(alpha = 0.06f) else Color.White.copy(alpha = 0.12f)
     val rowBorder = if (isLight) Color(0xFF17151C).copy(alpha = 0.12f) else Color.White.copy(alpha = 0.22f)
 
@@ -931,12 +949,27 @@ internal fun FolioQueuePanel(
     }
 
     if (tierSpec.isHorizontalQueue) {
-        Box(
+        Column(
             modifier = modifier
                 .fillMaxWidth()
                 .folioPlayerGlass(isLight = isLight, shape = RoundedCornerShape(22.dp))
                 .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            FolioQueueControlBar(
+                repeatMode = snapshot.repeatMode,
+                shuffleEnabled = snapshot.shuffleEnabled,
+                availability = availability,
+                isLight = isLight,
+                fg = fg,
+                accent = accent,
+                onCycleRepeat = onCycleRepeat,
+                onToggleShuffle = onToggleShuffle,
+                onClearQueue = onClearQueue,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+            )
             LazyRow(
                 state = listState,
                 modifier = Modifier.fillMaxWidth(),
@@ -1029,16 +1062,33 @@ internal fun FolioQueuePanel(
         }
     }
 
-    Box(
+    Column(
         modifier = modifier
             .fillMaxSize()
             .folioPlayerGlass(isLight = isLight, shape = RoundedCornerShape(22.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        FolioQueueControlBar(
+            repeatMode = snapshot.repeatMode,
+            shuffleEnabled = snapshot.shuffleEnabled,
+            availability = availability,
+            isLight = isLight,
+            fg = fg,
+            accent = accent,
+            onCycleRepeat = onCycleRepeat,
+            onToggleShuffle = onToggleShuffle,
+            onClearQueue = onClearQueue,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+        )
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = 6.dp, bottom = 140.dp),
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(top = 2.dp, bottom = 140.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
         groupedSections.forEach { (kind, rows) ->
@@ -1129,6 +1179,149 @@ internal fun FolioQueuePanel(
             }
         }
     }
+    }
+}
+
+@Composable
+private fun FolioQueueControlBar(
+    repeatMode: PlaybackRepeatMode,
+    shuffleEnabled: Boolean,
+    availability: FolioQueueControlAvailability,
+    isLight: Boolean,
+    fg: Color,
+    accent: Color,
+    onCycleRepeat: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onClearQueue: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val fontFamily = LocalFolioFontFamily.current
+    var pendingClearConfirm by remember { mutableStateOf(false) }
+    LaunchedEffect(pendingClearConfirm) {
+        if (pendingClearConfirm) {
+            delay(3_000L)
+            pendingClearConfirm = false
+        }
+    }
+    LaunchedEffect(availability.canClearQueue) {
+        if (!availability.canClearQueue) {
+            pendingClearConfirm = false
+        }
+    }
+
+    val inactiveBg = if (isLight) Color(0xFF17151C).copy(alpha = 0.08f) else Color.White.copy(alpha = 0.14f)
+    val activeBg = fg
+    val activeFg = if (isLight) Color.White else Color(0xFF17151C)
+    val repeatActive = repeatMode != PlaybackRepeatMode.Off
+    val repeatLabel = stringResource(
+        when (repeatMode) {
+            PlaybackRepeatMode.Off -> R.string.player_repeat_off
+            PlaybackRepeatMode.One -> R.string.player_repeat_one
+            PlaybackRepeatMode.All -> R.string.player_repeat_all
+        },
+    )
+
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(if (repeatActive && availability.canSetRepeat) activeBg else inactiveBg)
+                    .clickable(enabled = availability.canSetRepeat, role = Role.Button, onClick = onCycleRepeat)
+                    .semantics { selected = repeatActive },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = if (repeatMode == PlaybackRepeatMode.One) {
+                        Icons.Rounded.RepeatOne
+                    } else {
+                        Icons.Rounded.Repeat
+                    },
+                    contentDescription = repeatLabel,
+                    tint = when {
+                        !availability.canSetRepeat -> fg.copy(alpha = 0.34f)
+                        repeatActive -> activeFg
+                        else -> fg
+                    },
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(if (shuffleEnabled && availability.canSetShuffle) activeBg else inactiveBg)
+                    .clickable(enabled = availability.canSetShuffle, role = Role.Button, onClick = onToggleShuffle)
+                    .semantics { selected = shuffleEnabled },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Shuffle,
+                    contentDescription = stringResource(R.string.player_shuffle),
+                    tint = when {
+                        !availability.canSetShuffle -> fg.copy(alpha = 0.34f)
+                        shuffleEnabled -> activeFg
+                        else -> fg
+                    },
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+
+        val clearBg = when {
+            pendingClearConfirm && availability.canClearQueue -> accent.copy(alpha = 0.24f)
+            else -> inactiveBg
+        }
+        val clearFg = when {
+            !availability.canClearQueue -> fg.copy(alpha = 0.34f)
+            pendingClearConfirm -> fg
+            else -> fg
+        }
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(18.dp))
+                .background(clearBg)
+                .then(
+                    if (pendingClearConfirm && availability.canClearQueue) {
+                        Modifier.border(1.dp, accent.copy(alpha = 0.55f), RoundedCornerShape(18.dp))
+                    } else {
+                        Modifier
+                    },
+                )
+                .clickable(enabled = availability.canClearQueue, role = Role.Button) {
+                    if (!pendingClearConfirm) {
+                        pendingClearConfirm = true
+                    } else {
+                        pendingClearConfirm = false
+                        onClearQueue()
+                    }
+                }
+                .padding(horizontal = 14.dp, vertical = 9.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = stringResource(
+                    if (pendingClearConfirm) {
+                        R.string.folio_player_queue_clear_confirm
+                    } else {
+                        R.string.folio_player_queue_clear
+                    },
+                ),
+                color = clearFg,
+                fontFamily = fontFamily,
+                fontWeight = if (pendingClearConfirm) FontWeight.SemiBold else FontWeight.Medium,
+                fontSize = 13.sp,
+            )
+        }
     }
 }
 

@@ -15,6 +15,7 @@ import dev.amatv.core.LyricsLoadPhase
 import dev.amatv.core.LyricsState
 import dev.amatv.core.PlaybackState
 import dev.amatv.integration.LyricTextSize
+import dev.amatv.integration.PlaybackRepeatMode
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.LyricAgentType
 import dev.amatv.model.LyricLine
@@ -540,6 +541,68 @@ fun folioLyricsTextScaleMultiplier(
     defaultSize: LyricTextSize,
 ): Float = (selected.scale / defaultSize.scale).coerceIn(0.75f, 1.5f)
 
+const val FOLIO_LYRIC_OFFSET_MIN_MS: Long = -3000L
+const val FOLIO_LYRIC_OFFSET_MAX_MS: Long = 3000L
+
+/**
+ * Adjusts lyric timing offset clamped to `[-3000ms, +3000ms]`.
+ * Positive values shift lyric evaluation ahead of audio playback (advancing lyrics earlier);
+ * negative values delay lyrics later.
+ */
+fun adjustFolioLyricOffsetMs(
+    currentOffsetMs: Long,
+    deltaMs: Long,
+): Long = (currentOffsetMs + deltaMs).coerceIn(FOLIO_LYRIC_OFFSET_MIN_MS, FOLIO_LYRIC_OFFSET_MAX_MS)
+
+enum class FolioLyricOffsetDirection {
+    Unadjusted,
+    Advance,
+    Delay,
+}
+
+data class FolioLyricOffsetState(
+    val direction: FolioLyricOffsetDirection,
+    val magnitudeMs: Long,
+)
+
+fun resolveFolioLyricOffsetState(offsetMs: Long): FolioLyricOffsetState = when {
+    offsetMs > 0L -> FolioLyricOffsetState(FolioLyricOffsetDirection.Advance, offsetMs)
+    offsetMs < 0L -> FolioLyricOffsetState(FolioLyricOffsetDirection.Delay, -offsetMs)
+    else -> FolioLyricOffsetState(FolioLyricOffsetDirection.Unadjusted, 0L)
+}
+
+fun formatFolioLyricOffsetLabel(
+    offsetMs: Long,
+    advanceFormat: String,
+    delayFormat: String,
+    unadjustedLabel: String,
+): String {
+    val state = resolveFolioLyricOffsetState(offsetMs)
+    return when (state.direction) {
+        FolioLyricOffsetDirection.Advance -> String.format(advanceFormat, state.magnitudeMs)
+        FolioLyricOffsetDirection.Delay -> String.format(delayFormat, state.magnitudeMs)
+        FolioLyricOffsetDirection.Unadjusted -> unadjustedLabel
+    }
+}
+
+@Immutable
+data class FolioQueueControlAvailability(
+    val canSetRepeat: Boolean,
+    val canSetShuffle: Boolean,
+    val canClearQueue: Boolean,
+)
+
+/** Mirrors `AtvApp` queue mode rules: stations disable all 3; Clear requires upcoming items. */
+fun resolveQueueControlAvailability(
+    isStation: Boolean,
+    upNextCount: Int,
+    autoplayCount: Int,
+): FolioQueueControlAvailability = FolioQueueControlAvailability(
+    canSetRepeat = !isStation,
+    canSetShuffle = !isStation,
+    canClearQueue = !isStation && (upNextCount > 0 || autoplayCount > 0),
+)
+
 /** Soak displays the left artwork column on `m/t/e/u` even when a track has no lyrics. */
 fun showSoakArtworkStage(
     tier: FolioTier,
@@ -573,6 +636,8 @@ data class FolioQueueSnapshot(
     val upNextCount: Int,
     val autoplayCount: Int,
     val isStation: Boolean,
+    val repeatMode: PlaybackRepeatMode = PlaybackRepeatMode.Off,
+    val shuffleEnabled: Boolean = false,
     val autoplayEnabled: Boolean,
     val autoplayStatus: AutoplayStatus,
 )
@@ -616,6 +681,8 @@ fun buildFolioQueueSnapshot(
             upNextCount = 0,
             autoplayCount = 0,
             isStation = true,
+            repeatMode = PlaybackRepeatMode.Off,
+            shuffleEnabled = false,
             autoplayEnabled = false,
             autoplayStatus = AutoplayStatus.Idle,
         )
@@ -648,6 +715,8 @@ fun buildFolioQueueSnapshot(
         upNextCount = queueState.upNext.size,
         autoplayCount = queueState.autoplay.size,
         isStation = false,
+        repeatMode = queueState.repeat,
+        shuffleEnabled = queueState.shuffle,
         autoplayEnabled = queueState.infinite,
         autoplayStatus = queueState.autoplayStatus,
     )

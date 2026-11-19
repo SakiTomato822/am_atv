@@ -16,5 +16,11 @@
     <string name="folio_player_queue_similar">Similar music</string>
     <string name="folio_player_queue_loading">Picking similar music…</string>
     <string name="folio_player_queue_empty">Nothing queued next</string>
+    <string name="folio_player_queue_clear">Clear</string>
+    <string name="folio_player_queue_clear_confirm">Confirm clear?</string>
+    <string name="folio_player_offset_title">Lyrics offset</string>
+    <string name="folio_player_offset_advance">Lyrics earlier %1$d ms</string>
+    <string name="folio_player_offset_delay">Lyrics later %1$d ms</string>
+    <string name="folio_player_offset_unadjusted">Unadjusted</string>
     <string name="folio_player_controls_expand">Expand playback controls</string>
 </resources>

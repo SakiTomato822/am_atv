@@ -77,6 +77,7 @@ import dev.amatv.R
 import dev.amatv.core.LibraryNotice
 import dev.amatv.core.LyricBackgroundStyle
 import dev.amatv.core.PlaybackState
+import dev.amatv.core.StartupQueueAction
 import dev.amatv.integration.LyricTextSize
 import dev.amatv.integration.LyricsLocalizationRequest
 import dev.amatv.integration.MusicConnectionState
@@ -364,6 +365,24 @@ internal fun BoxScope.FolioPlayerLayer(
         val queueSnapshot = remember(queueState, playbackState) {
             buildFolioQueueSnapshot(queueState, playbackState)
         }
+        val cycleRepeat: () -> Unit = {
+            if (!queueSnapshot.isStation) {
+                revealControls()
+                playbackStore.dispatchQueueAction(StartupQueueAction.CycleRepeat)
+            }
+        }
+        val toggleShuffle: () -> Unit = {
+            if (!queueSnapshot.isStation) {
+                revealControls()
+                playbackStore.dispatchQueueAction(StartupQueueAction.ToggleShuffle)
+            }
+        }
+        val clearUpcoming: () -> Unit = {
+            if (!queueSnapshot.isStation) {
+                revealControls()
+                playbackStore.dispatchQueueAction(StartupQueueAction.ClearUpcoming)
+            }
+        }
 
         ProvideFolioGlassEnvironment(
             track = track,
@@ -525,6 +544,9 @@ internal fun BoxScope.FolioPlayerLayer(
                     },
                     onSelectTimelineTrack = playbackStore::selectQueueTrack,
                     onPlayStationTrack = { s -> playbackStore.playTrack(s, listOf(s)) },
+                    onCycleRepeat = cycleRepeat,
+                    onToggleShuffle = toggleShuffle,
+                    onClearQueue = clearUpcoming,
                     onRetryLyrics = playbackStore::retryCurrentLyrics,
                     onOpenAlbum = openAlbumDetail,
                     onOpenArtist = openArtistDetail,
@@ -737,6 +759,9 @@ internal fun BoxScope.FolioPlayerLayer(
                                     onToggleQueue = { revealControls() },
                                     onSelectTimelineTrack = playbackStore::selectQueueTrack,
                                     onPlayStationTrack = { s -> playbackStore.playTrack(s, listOf(s)) },
+                                    onCycleRepeat = cycleRepeat,
+                                    onToggleShuffle = toggleShuffle,
+                                    onClearQueue = clearUpcoming,
                                     onRetryLyrics = playbackStore::retryCurrentLyrics,
                                     onOpenAlbum = openAlbumDetail,
                                     onOpenArtist = openArtistDetail,
@@ -773,6 +798,9 @@ internal fun BoxScope.FolioPlayerLayer(
                                     onLineSeek = seekToMs,
                                     onSelectTimelineTrack = playbackStore::selectQueueTrack,
                                     onPlayStationTrack = { s -> playbackStore.playTrack(s, listOf(s)) },
+                                    onCycleRepeat = cycleRepeat,
+                                    onToggleShuffle = toggleShuffle,
+                                    onClearQueue = clearUpcoming,
                                     onRetryLyrics = playbackStore::retryCurrentLyrics,
                                     onOpenAlbum = openAlbumDetail,
                                     onOpenArtist = openArtistDetail,
@@ -814,6 +842,9 @@ internal fun BoxScope.FolioPlayerLayer(
                                     onLineSeek = seekToMs,
                                     onSelectTimelineTrack = playbackStore::selectQueueTrack,
                                     onPlayStationTrack = { s -> playbackStore.playTrack(s, listOf(s)) },
+                                    onCycleRepeat = cycleRepeat,
+                                    onToggleShuffle = toggleShuffle,
+                                    onClearQueue = clearUpcoming,
                                     onRetryLyrics = playbackStore::retryCurrentLyrics,
                                     onOpenAlbum = openAlbumDetail,
                                     onOpenArtist = openArtistDetail,
@@ -858,11 +889,13 @@ internal fun BoxScope.FolioPlayerLayer(
                     enhancementsReady = enhancementsReady,
                     enhancementsFailed = enhancementsFailed,
                     lyricTextSize = settings.lyricTextSize,
+                    lyricOffsetMs = settings.lyricOffsetMs,
                     onTranslationChange = settingsStore::setLyricTranslationEnabled,
                     onPronunciationChange = settingsStore::setLyricPronunciationEnabled,
                     onTranslationLanguageChange = settingsStore::setLyricTranslationLanguageTag,
                     onPronunciationLanguageChange = settingsStore::setLyricPronunciationLanguageTag,
                     onLyricTextSizeChange = settingsStore::setLyricTextSize,
+                    onLyricOffsetChange = settingsStore::setLyricOffsetMs,
                     onDismiss = { lyricsSettingsOpen = false },
                 )
             }
@@ -918,6 +951,9 @@ private fun UltrawidePlayerBody(
     onToggleQueue: () -> Unit,
     onSelectTimelineTrack: (Int) -> Unit,
     onPlayStationTrack: (Track) -> Unit,
+    onCycleRepeat: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onClearQueue: () -> Unit,
     onRetryLyrics: () -> Unit,
     onOpenAlbum: () -> Unit,
     onOpenArtist: () -> Unit,
@@ -1071,6 +1107,9 @@ private fun UltrawidePlayerBody(
                 isPlaying = isPlaying,
                 onSelectTimelineTrack = onSelectTimelineTrack,
                 onPlayStationTrack = onPlayStationTrack,
+                onCycleRepeat = onCycleRepeat,
+                onToggleShuffle = onToggleShuffle,
+                onClearQueue = onClearQueue,
             )
         }
     }
@@ -1106,6 +1145,9 @@ private fun VerticalPlayerBody(
     onLineSeek: (Long) -> Unit,
     onSelectTimelineTrack: (Int) -> Unit,
     onPlayStationTrack: (Track) -> Unit,
+    onCycleRepeat: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onClearQueue: () -> Unit,
     onRetryLyrics: () -> Unit,
     onOpenAlbum: () -> Unit,
     onOpenArtist: () -> Unit,
@@ -1185,6 +1227,9 @@ private fun VerticalPlayerBody(
                         isPlaying = isPlaying,
                         onSelectTimelineTrack = onSelectTimelineTrack,
                         onPlayStationTrack = onPlayStationTrack,
+                        onCycleRepeat = onCycleRepeat,
+                        onToggleShuffle = onToggleShuffle,
+                        onClearQueue = onClearQueue,
                     )
 
                     displayState == FolioPlayerDisplayState.Lyrics -> FolioScrollingLyricsPanel(
@@ -1297,6 +1342,9 @@ private fun ShortPlayerLayout(
     onToggleQueue: () -> Unit,
     onSelectTimelineTrack: (Int) -> Unit,
     onPlayStationTrack: (Track) -> Unit,
+    onCycleRepeat: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onClearQueue: () -> Unit,
     onRetryLyrics: () -> Unit,
     onOpenAlbum: () -> Unit,
     onOpenArtist: () -> Unit,
@@ -1329,6 +1377,9 @@ private fun ShortPlayerLayout(
                             isPlaying = isPlaying,
                             onSelectTimelineTrack = onSelectTimelineTrack,
                             onPlayStationTrack = onPlayStationTrack,
+                            onCycleRepeat = onCycleRepeat,
+                            onToggleShuffle = onToggleShuffle,
+                            onClearQueue = onClearQueue,
                         )
                     } else {
                         Column(
@@ -1355,6 +1406,9 @@ private fun ShortPlayerLayout(
                                 isPlaying = isPlaying,
                                 onSelectTimelineTrack = onSelectTimelineTrack,
                                 onPlayStationTrack = onPlayStationTrack,
+                                onCycleRepeat = onCycleRepeat,
+                                onToggleShuffle = onToggleShuffle,
+                                onClearQueue = onClearQueue,
                             )
                         }
                     }
@@ -1531,6 +1585,9 @@ private fun TwoColumnPlayerBody(
     onLineSeek: (Long) -> Unit,
     onSelectTimelineTrack: (Int) -> Unit,
     onPlayStationTrack: (Track) -> Unit,
+    onCycleRepeat: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onClearQueue: () -> Unit,
     onRetryLyrics: () -> Unit,
     onOpenAlbum: () -> Unit,
     onOpenArtist: () -> Unit,
@@ -1552,6 +1609,9 @@ private fun TwoColumnPlayerBody(
                 isPlaying = isPlaying,
                 onSelectTimelineTrack = onSelectTimelineTrack,
                 onPlayStationTrack = onPlayStationTrack,
+                onCycleRepeat = onCycleRepeat,
+                onToggleShuffle = onToggleShuffle,
+                onClearQueue = onClearQueue,
             )
         }
         return
@@ -1732,6 +1792,9 @@ private fun TwoColumnPlayerBody(
                             isPlaying = isPlaying,
                             onSelectTimelineTrack = onSelectTimelineTrack,
                             onPlayStationTrack = onPlayStationTrack,
+                            onCycleRepeat = onCycleRepeat,
+                            onToggleShuffle = onToggleShuffle,
+                            onClearQueue = onClearQueue,
                         )
                     }
 

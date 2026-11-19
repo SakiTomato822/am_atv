@@ -929,4 +929,100 @@ class FolioPlayerStateTest {
         assertEquals(FolioLyricsSettingsPlacement.BottomSheet, lyricsSettingsPlacementForTier(FolioTier.Short))
         assertEquals(FolioLyricsSettingsPlacement.BottomSheet, lyricsSettingsPlacementForTier(FolioTier.Medium))
     }
+
+    @Test
+    fun queueControlsAvailabilityAndSnapshotRepeatShuffleState() {
+        // Normal queue with upNext items enables all three controls.
+        val normalFull = resolveQueueControlAvailability(isStation = false, upNextCount = 2, autoplayCount = 0)
+        assertTrue(normalFull.canSetRepeat)
+        assertTrue(normalFull.canSetShuffle)
+        assertTrue(normalFull.canClearQueue)
+
+        // Normal queue with only autoplay recommendations also allows clearing upcoming.
+        val normalAutoplayOnly = resolveQueueControlAvailability(isStation = false, upNextCount = 0, autoplayCount = 3)
+        assertTrue(normalAutoplayOnly.canSetRepeat)
+        assertTrue(normalAutoplayOnly.canSetShuffle)
+        assertTrue(normalAutoplayOnly.canClearQueue)
+
+        // Normal queue with nothing upcoming disables Clear but keeps Repeat & Shuffle enabled.
+        val normalEmptyUpcoming = resolveQueueControlAvailability(isStation = false, upNextCount = 0, autoplayCount = 0)
+        assertTrue(normalEmptyUpcoming.canSetRepeat)
+        assertTrue(normalEmptyUpcoming.canSetShuffle)
+        assertFalse(normalEmptyUpcoming.canClearQueue)
+
+        // Station queues disable all three mode controls.
+        val station = resolveQueueControlAvailability(isStation = true, upNextCount = 5, autoplayCount = 5)
+        assertFalse(station.canSetRepeat)
+        assertFalse(station.canSetShuffle)
+        assertFalse(station.canClearQueue)
+
+        val current = QueueEntry(1L, sampleTrack("t1", "Song 1"), EntryOrigin.Context)
+        val basePlayback = PlaybackState(
+            track = current.track,
+            hasCurrentTrack = true,
+            positionAnchorMs = 0L,
+            playStartedRealtimeMs = 0L,
+            isPlaying = true,
+            playWhenReady = true,
+            playbackPrepared = true,
+            playbackMessage = null,
+            stationHistory = emptyList(),
+            snapshot = null,
+            startupSessionLoaded = true,
+        )
+        val snap = buildFolioQueueSnapshot(
+            queueState = QueueState(
+                current = current,
+                repeat = PlaybackRepeatMode.One,
+                shuffle = true,
+            ),
+            playbackState = basePlayback,
+        )
+        assertEquals(PlaybackRepeatMode.One, snap.repeatMode)
+        assertTrue(snap.shuffleEnabled)
+
+        val stationTrack = sampleTrack("st1", "Radio").copy(catalogKind = CatalogKind.Station)
+        val stationEntry = QueueEntry(2L, stationTrack, EntryOrigin.Context)
+        val stationSnap = buildFolioQueueSnapshot(
+            queueState = QueueState(
+                current = stationEntry,
+                repeat = PlaybackRepeatMode.All,
+                shuffle = true,
+            ),
+            playbackState = basePlayback,
+        )
+        assertTrue(stationSnap.isStation)
+        assertEquals(PlaybackRepeatMode.Off, stationSnap.repeatMode)
+        assertFalse(stationSnap.shuffleEnabled)
+    }
+
+    @Test
+    fun lyricOffsetClampsRangeAndFormatsAdvanceDelayLabels() {
+        assertEquals(-3000L, FOLIO_LYRIC_OFFSET_MIN_MS)
+        assertEquals(3000L, FOLIO_LYRIC_OFFSET_MAX_MS)
+
+        assertEquals(200L, adjustFolioLyricOffsetMs(currentOffsetMs = 100L, deltaMs = 100L))
+        assertEquals(-100L, adjustFolioLyricOffsetMs(currentOffsetMs = -50L, deltaMs = -50L))
+        assertEquals(3000L, adjustFolioLyricOffsetMs(currentOffsetMs = 2950L, deltaMs = 100L))
+        assertEquals(-3000L, adjustFolioLyricOffsetMs(currentOffsetMs = -2950L, deltaMs = -100L))
+
+        val advanceState = resolveFolioLyricOffsetState(200L)
+        assertEquals(FolioLyricOffsetDirection.Advance, advanceState.direction)
+        assertEquals(200L, advanceState.magnitudeMs)
+
+        val delayState = resolveFolioLyricOffsetState(-100L)
+        assertEquals(FolioLyricOffsetDirection.Delay, delayState.direction)
+        assertEquals(100L, delayState.magnitudeMs)
+
+        val zeroState = resolveFolioLyricOffsetState(0L)
+        assertEquals(FolioLyricOffsetDirection.Unadjusted, zeroState.direction)
+        assertEquals(0L, zeroState.magnitudeMs)
+
+        val advanceFmt = "歌词提前 %1\$d 毫秒"
+        val delayFmt = "歌词延后 %1\$d 毫秒"
+        val unadjusted = "未调整"
+        assertEquals("歌词提前 200 毫秒", formatFolioLyricOffsetLabel(200L, advanceFmt, delayFmt, unadjusted))
+        assertEquals("歌词延后 100 毫秒", formatFolioLyricOffsetLabel(-100L, advanceFmt, delayFmt, unadjusted))
+        assertEquals("未调整", formatFolioLyricOffsetLabel(0L, advanceFmt, delayFmt, unadjusted))
+    }
 }
