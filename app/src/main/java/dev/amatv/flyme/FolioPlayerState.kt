@@ -15,6 +15,7 @@ import dev.amatv.core.LyricsLoadPhase
 import dev.amatv.core.LyricsState
 import dev.amatv.core.PlaybackState
 import dev.amatv.model.CatalogKind
+import dev.amatv.model.LyricAgentType
 import dev.amatv.model.LyricLine
 import dev.amatv.model.Track
 import dev.amatv.model.renderLyricWords
@@ -509,14 +510,12 @@ fun isPosterBackingOnlyLine(line: LyricLine): Boolean =
 /**
  * Identifies whether a lyric line belongs to an opposite duet vocalist.
  *
- * Chorus/group or unattributed lines (`agentId` blank, `"v1000"`, or `"group"`) stay primary so
+ * Group chorus (`agentType == Group`) and unattributed lines (`agentId` blank) stay primary so
  * single-artist tracks and chorus refrains preserve standard foreground styling.
  */
 fun isOppositeSingerLine(line: LyricLine): Boolean {
-    val id = line.agentId?.trim().orEmpty()
-    if (!line.isOppositeAgent || id.isEmpty()) return false
-    if (id.equals("v1000", ignoreCase = true) || id.contains("group", ignoreCase = true)) return false
-    return true
+    if (line.agentId.isNullOrBlank() || line.agentType == LyricAgentType.Group) return false
+    return line.isOppositeAgent
 }
 
 @Immutable
