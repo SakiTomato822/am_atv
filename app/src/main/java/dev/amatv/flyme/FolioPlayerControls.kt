@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -48,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -60,9 +62,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.amatv.LocalHostWindow
@@ -96,6 +102,9 @@ internal fun FolioPlayerHeader(
     headerColors: HeaderColorScheme,
     favoriteAccent: Color,
     showHeaderTitle: Boolean,
+    controlsExpanded: Boolean,
+    displayState: FolioPlayerDisplayState,
+    reducedMotion: Boolean,
     isFavorite: Boolean,
     isInLibrary: Boolean,
     favoriteInProgress: Boolean,
@@ -104,6 +113,7 @@ internal fun FolioPlayerHeader(
     hasTimedLyrics: Boolean,
     pullHandle: Modifier,
     onClose: () -> Unit,
+    onExpandControls: () -> Unit,
     onToggleLibrary: () -> Unit,
     onToggleFavorite: () -> Unit,
     onTogglePosterMode: () -> Unit,
@@ -120,6 +130,15 @@ internal fun FolioPlayerHeader(
                 tierSpec.tier == FolioTier.Short
             )
     }
+    val collapsedMode = resolveCollapsedHeaderTitleMode(tierSpec.tier, displayState)
+    val collapsedAlpha by animateFloatAsState(
+        targetValue = if (!controlsExpanded && collapsedMode != FolioCollapsedHeaderTitleMode.None) 1f else 0f,
+        animationSpec = tween(if (reducedMotion) 0 else FolioPlayerMotionTokens.PMETA_OPACITY_MS),
+        label = "hdr-tt-alpha",
+    )
+    val showCollapsedTitle = collapsedMode != FolioCollapsedHeaderTitleMode.None &&
+        (!controlsExpanded || collapsedAlpha > 0.01f)
+    val expandCd = stringResource(R.string.folio_player_controls_expand)
 
     Column(
         modifier = modifier
@@ -138,7 +157,15 @@ internal fun FolioPlayerHeader(
             )
         }
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (collapsedMode == FolioCollapsedHeaderTitleMode.LargeWithCover) {
+                        Modifier.heightIn(min = 92.dp)
+                    } else {
+                        Modifier
+                    },
+                ),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -151,35 +178,93 @@ internal fun FolioPlayerHeader(
                 border = Color.Transparent,
                 onClick = onClose,
             )
-            if (showHeaderTitle) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Text(
-                        text = track.title,
-                        color = headerColors.fg,
-                        fontFamily = fontFamily,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 16.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.clickable(onClick = onOpenAlbum),
-                    )
-                    if (track.artist.isNotBlank()) {
+            when {
+                showHeaderTitle -> {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
                         Text(
-                            text = track.artist,
-                            color = headerColors.fg2,
+                            text = track.title,
+                            color = headerColors.fg,
                             fontFamily = fontFamily,
-                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 16.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.clickable(onClick = onOpenArtist),
+                            modifier = Modifier.clickable(onClick = onOpenAlbum),
+                        )
+                        FolioExpandedSubtitle(
+                            artist = track.artist,
+                            album = track.album,
+                            color = headerColors.fg2,
+                            fontSize = 13.sp,
+                            onOpenArtist = onOpenArtist,
+                            onOpenAlbum = onOpenAlbum,
                         )
                     }
                 }
-            } else {
-                Spacer(Modifier.weight(1f))
+
+                showCollapsedTitle -> {
+                    val subtitle = formatFolioPlayerSubtitle(track.artist, track.album)
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .graphicsLayer { alpha = collapsedAlpha }
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(
+                                enabled = !controlsExpanded,
+                                role = Role.Button,
+                                onClick = onExpandControls,
+                            )
+                            .semantics { contentDescription = expandCd }
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        if (collapsedMode == FolioCollapsedHeaderTitleMode.LargeWithCover) {
+                            FolioArtwork(
+                                track = track,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .size(84.dp)
+                                    .shadow(16.dp, RoundedCornerShape(8.dp)),
+                            )
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(
+                                if (collapsedMode == FolioCollapsedHeaderTitleMode.LargeWithCover) 3.dp else 2.dp,
+                            ),
+                        ) {
+                            val isLarge = collapsedMode == FolioCollapsedHeaderTitleMode.LargeWithCover
+                            Text(
+                                text = track.title,
+                                color = headerColors.fg,
+                                fontFamily = fontFamily,
+                                fontWeight = if (isLarge) FontWeight.SemiBold else FontWeight.Medium,
+                                fontSize = if (isLarge) 24.sp else 17.sp,
+                                lineHeight = if (isLarge) 28.sp else 20.sp,
+                                maxLines = if (isLarge) 2 else 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (subtitle.isNotEmpty()) {
+                                Text(
+                                    text = subtitle,
+                                    color = headerColors.fg2,
+                                    fontFamily = fontFamily,
+                                    fontSize = if (isLarge) 15.sp else 13.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                else -> {
+                    Spacer(Modifier.weight(1f))
+                }
             }
 
             PlayerIconPillButton(
@@ -280,6 +365,7 @@ internal fun FolioPlayerAnimatedControlsSlot(
     onToggleTranslation: () -> Unit,
     onPrevious: () -> Unit,
     onPlayPause: () -> Unit,
+    onCollapsedPlayPause: () -> Unit,
     onNext: () -> Unit,
     onToggleQueue: () -> Unit,
     onOpenAlbum: () -> Unit,
@@ -314,31 +400,52 @@ internal fun FolioPlayerAnimatedControlsSlot(
         label = "pmeta-offset",
     )
 
+    val collapsedLayout = resolveCollapsedLayout(tierSpec.tier, displayState)
     Box(modifier = modifier, contentAlignment = contentAlignment) {
-        val showPmeta = !controlsExpanded || pmetaAlpha > 0.01f
+        val showPmeta = collapsedLayout != FolioCollapsedLayout.UnderCoverInfo &&
+            (!controlsExpanded || pmetaAlpha > 0.01f)
         val showCtl = controlsExpanded || ctlAlpha > 0.01f
 
         val pmetaDeck: @Composable () -> Unit = {
-            FolioPlayerCollapsedCapsule(
-                track = track,
-                tierSpec = tierSpec,
-                showArtwork = showCollapsedCapsuleArtwork(tierSpec.tier, displayState),
-                positionState = positionState,
-                durationMs = durationMs,
-                playWhenReady = playWhenReady,
-                isLight = isLight,
-                fg = fg,
-                fg2 = fg2,
-                onExpand = onExpandCapsule,
-                onTogglePlay = onPlayPause,
-                modifier = Modifier.graphicsLayer {
-                    alpha = pmetaAlpha
-                    translationY = 8.dp.toPx() * pmetaOffsetFactor
-                    val sc = 1f - 0.02f * pmetaOffsetFactor
-                    scaleX = sc
-                    scaleY = sc
-                },
-            )
+            val animMod = Modifier.graphicsLayer {
+                alpha = pmetaAlpha
+                translationY = 8.dp.toPx() * pmetaOffsetFactor
+                val sc = 1f - 0.02f * pmetaOffsetFactor
+                scaleX = sc
+                scaleY = sc
+            }
+            when (collapsedLayout) {
+                FolioCollapsedLayout.Capsule -> FolioPlayerCollapsedCapsule(
+                    track = track,
+                    tierSpec = tierSpec,
+                    showArtwork = showCollapsedCapsuleArtwork(tierSpec.tier, displayState),
+                    positionState = positionState,
+                    durationMs = durationMs,
+                    playWhenReady = playWhenReady,
+                    isLight = isLight,
+                    fg = fg,
+                    fg2 = fg2,
+                    interactive = !controlsExpanded,
+                    onExpand = onExpandCapsule,
+                    onTogglePlay = onCollapsedPlayPause,
+                    modifier = animMod,
+                )
+
+                FolioCollapsedLayout.CircleButtonAndHairline -> FolioCirclePlayHairlineBar(
+                    buttonOnLeft = tierSpec.tier == FolioTier.Wide,
+                    positionState = positionState,
+                    durationMs = durationMs,
+                    playWhenReady = playWhenReady,
+                    isLight = isLight,
+                    fg = fg,
+                    interactive = !controlsExpanded,
+                    onExpand = onExpandCapsule,
+                    onTogglePlay = onCollapsedPlayPause,
+                    modifier = animMod.fillMaxWidth(),
+                )
+
+                FolioCollapsedLayout.UnderCoverInfo -> Unit
+            }
         }
         val ctlDeck: @Composable () -> Unit = {
             FolioPlayerExpandedControls(
@@ -356,6 +463,7 @@ internal fun FolioPlayerAnimatedControlsSlot(
                 isLight = isLight,
                 fg = fg,
                 fg2 = fg2,
+                playEnabled = controlsExpanded,
                 onSeekTo = onSeekTo,
                 onToggleTranslation = onToggleTranslation,
                 onPrevious = onPrevious,
@@ -382,6 +490,280 @@ internal fun FolioPlayerAnimatedControlsSlot(
 }
 
 @Composable
+internal fun FolioCircleGlassPlayButton(
+    size: Dp,
+    playWhenReady: Boolean,
+    isLight: Boolean,
+    fg: Color,
+    enabled: Boolean,
+    onTogglePlay: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .size(size)
+            .folioPlayerGlass(isLight = isLight, shape = CircleShape)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onTogglePlay),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = if (playWhenReady) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+            contentDescription = stringResource(
+                if (playWhenReady) R.string.player_pause else R.string.player_play,
+            ),
+            tint = fg,
+            modifier = Modifier.size(size * 0.44f),
+        )
+    }
+}
+
+@Composable
+internal fun FolioHairlineProgressBar(
+    positionState: State<Long>,
+    durationMs: Long,
+    fg: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier.height(3.dp)) {
+        val progress = if (durationMs > 0L) {
+            (positionState.value.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
+        val radius = CornerRadius(2.dp.toPx(), 2.dp.toPx())
+        drawRoundRect(
+            color = fg.copy(alpha = 0.14f),
+            size = size,
+            cornerRadius = radius,
+        )
+        if (progress > 0f) {
+            drawRoundRect(
+                color = fg.copy(alpha = 0.85f),
+                size = Size(size.width * progress, size.height),
+                cornerRadius = radius,
+            )
+        }
+    }
+}
+
+/** Layout ③ collapsed bottom bar: 64dp circular glass Play/Pause button + thin hairline progress bar. */
+@Composable
+internal fun FolioCirclePlayHairlineBar(
+    buttonOnLeft: Boolean,
+    positionState: State<Long>,
+    durationMs: Long,
+    playWhenReady: Boolean,
+    isLight: Boolean,
+    fg: Color,
+    interactive: Boolean,
+    onExpand: () -> Unit,
+    onTogglePlay: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val expandCd = stringResource(R.string.folio_player_controls_expand)
+    val startPad = if (buttonOnLeft) 36.dp else 20.dp
+    val endPad = if (buttonOnLeft) 28.dp else 0.dp
+    Row(
+        modifier = modifier.padding(start = startPad, end = endPad),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        if (buttonOnLeft) {
+            FolioCircleGlassPlayButton(
+                size = 64.dp,
+                playWhenReady = playWhenReady,
+                isLight = isLight,
+                fg = fg,
+                enabled = interactive,
+                onTogglePlay = onTogglePlay,
+            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(64.dp)
+                    .clickable(
+                        interactionSource = null,
+                        indication = null,
+                        enabled = interactive,
+                        onClick = onExpand,
+                    )
+                    .semantics { contentDescription = expandCd },
+                contentAlignment = Alignment.Center,
+            ) {
+                FolioHairlineProgressBar(
+                    positionState = positionState,
+                    durationMs = durationMs,
+                    fg = fg,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(64.dp)
+                    .clickable(
+                        interactionSource = null,
+                        indication = null,
+                        enabled = interactive,
+                        onClick = onExpand,
+                    )
+                    .semantics { contentDescription = expandCd },
+                contentAlignment = Alignment.Center,
+            ) {
+                FolioHairlineProgressBar(
+                    positionState = positionState,
+                    durationMs = durationMs,
+                    fg = fg,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            FolioCircleGlassPlayButton(
+                size = 64.dp,
+                playWhenReady = playWhenReady,
+                isLight = isLight,
+                fg = fg,
+                enabled = interactive,
+                onTogglePlay = onTogglePlay,
+            )
+        }
+    }
+}
+
+/** Layout ④ under-cover collapsed info on Wide car Scrolling Lyrics (no glass outer capsule). */
+@Composable
+internal fun FolioCarUnderCoverCollapsedBar(
+    track: Track,
+    positionState: State<Long>,
+    durationMs: Long,
+    playWhenReady: Boolean,
+    isLight: Boolean,
+    fg: Color,
+    fg2: Color,
+    interactive: Boolean,
+    onExpand: () -> Unit,
+    onTogglePlay: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val fontFamily = LocalFolioFontFamily.current
+    val expandCd = stringResource(R.string.folio_player_controls_expand)
+    val subtitle = formatFolioPlayerSubtitle(track.artist, track.album)
+
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable(
+                        enabled = interactive,
+                        role = Role.Button,
+                        onClick = onExpand,
+                    )
+                    .semantics { contentDescription = expandCd }
+                    .padding(vertical = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = track.title,
+                    color = fg,
+                    fontFamily = fontFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 26.sp,
+                    lineHeight = 30.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (subtitle.isNotEmpty()) {
+                    Text(
+                        text = subtitle,
+                        color = fg2,
+                        fontFamily = fontFamily,
+                        fontSize = 17.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            FolioCircleGlassPlayButton(
+                size = 56.dp,
+                playWhenReady = playWhenReady,
+                isLight = isLight,
+                fg = fg,
+                enabled = interactive,
+                onTogglePlay = onTogglePlay,
+            )
+        }
+        FolioHairlineProgressBar(
+            positionState = positionState,
+            durationMs = durationMs,
+            fg = fg,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+internal fun FolioExpandedSubtitle(
+    artist: String,
+    album: String,
+    color: Color,
+    fontSize: TextUnit,
+    onOpenArtist: () -> Unit,
+    onOpenAlbum: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val fontFamily = LocalFolioFontFamily.current
+    val cleanArtist = artist.trim()
+    val cleanAlbum = album.trim()
+    if (cleanArtist.isEmpty() && cleanAlbum.isEmpty()) return
+
+    val annotated = remember(cleanArtist, cleanAlbum, onOpenArtist, onOpenAlbum) {
+        buildAnnotatedString {
+            if (cleanArtist.isNotEmpty()) {
+                withLink(
+                    LinkAnnotation.Clickable(
+                        tag = "artist",
+                        linkInteractionListener = { onOpenArtist() },
+                    ),
+                ) {
+                    append(cleanArtist)
+                }
+            }
+            if (cleanArtist.isNotEmpty() && cleanAlbum.isNotEmpty()) {
+                append(" — ")
+            }
+            if (cleanAlbum.isNotEmpty()) {
+                withLink(
+                    LinkAnnotation.Clickable(
+                        tag = "album",
+                        linkInteractionListener = { onOpenAlbum() },
+                    ),
+                ) {
+                    append(cleanAlbum)
+                }
+            }
+        }
+    }
+    Text(
+        text = annotated,
+        color = color,
+        fontFamily = fontFamily,
+        fontSize = fontSize,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier,
+    )
+}
+
+@Composable
 internal fun FolioPlayerCollapsedCapsule(
     track: Track,
     tierSpec: FolioPlayerTierSpec,
@@ -392,6 +774,7 @@ internal fun FolioPlayerCollapsedCapsule(
     isLight: Boolean,
     fg: Color,
     fg2: Color,
+    interactive: Boolean,
     onExpand: () -> Unit,
     onTogglePlay: () -> Unit,
     modifier: Modifier = Modifier,
@@ -401,6 +784,7 @@ internal fun FolioPlayerCollapsedCapsule(
     val playIconBg = fg
     val playIconTint = if (isLight) Color.White else Color(0xFF17151C)
     val expandCd = stringResource(R.string.folio_player_controls_expand)
+    val subtitle = formatFolioPlayerSubtitle(track.artist, track.album)
 
     Box(
         modifier = modifier
@@ -429,9 +813,9 @@ internal fun FolioPlayerCollapsedCapsule(
                     .weight(1f)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(topStart = 999.dp, bottomStart = 999.dp, topEnd = 16.dp, bottomEnd = 16.dp))
-                    .clickable(role = Role.Button, onClick = onExpand)
+                    .clickable(enabled = interactive, role = Role.Button, onClick = onExpand)
                     .semantics { contentDescription = expandCd }
-                    .padding(start = if (showArtwork) 10.dp else 18.dp, end = 4.dp),
+                    .padding(start = collapsedCapsuleStartPaddingDp(showArtwork), end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -455,9 +839,9 @@ internal fun FolioPlayerCollapsedCapsule(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    if (track.artist.isNotBlank()) {
+                    if (subtitle.isNotEmpty()) {
                         Text(
-                            text = track.artist,
+                            text = subtitle,
                             color = fg2,
                             fontFamily = fontFamily,
                             fontSize = 12.sp,
@@ -472,7 +856,7 @@ internal fun FolioPlayerCollapsedCapsule(
                     .size(42.dp)
                     .clip(CircleShape)
                     .background(playIconBg)
-                    .clickable(role = Role.Button, onClick = onTogglePlay),
+                    .clickable(enabled = interactive, role = Role.Button, onClick = onTogglePlay),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -540,6 +924,7 @@ internal fun FolioPlayerExpandedControls(
     onOpenAlbum: () -> Unit,
     onOpenArtist: () -> Unit,
     modifier: Modifier = Modifier,
+    playEnabled: Boolean = true,
 ) {
     val fontFamily = LocalFolioFontFamily.current
     val cardShape = RoundedCornerShape(22.dp)
@@ -568,6 +953,7 @@ internal fun FolioPlayerExpandedControls(
                 playBg = playBg,
                 playFg = playFg,
                 sideBg = sideBg,
+                playEnabled = playEnabled,
                 onToggleTranslation = onToggleTranslation,
                 onPrevious = onPrevious,
                 onPlayPause = onPlayPause,
@@ -606,17 +992,14 @@ internal fun FolioPlayerExpandedControls(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.clickable(onClick = onOpenAlbum),
                         )
-                        if (track.artist.isNotBlank()) {
-                            Text(
-                                text = track.artist,
-                                color = fg2,
-                                fontFamily = fontFamily,
-                                fontSize = 14.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.clickable(onClick = onOpenArtist),
-                            )
-                        }
+                        FolioExpandedSubtitle(
+                            artist = track.artist,
+                            album = track.album,
+                            color = fg2,
+                            fontSize = 14.sp,
+                            onOpenArtist = onOpenArtist,
+                            onOpenAlbum = onOpenAlbum,
+                        )
                     }
                 }
                 SeekSection(
@@ -672,17 +1055,14 @@ internal fun FolioPlayerExpandedControls(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.clickable(onClick = onOpenAlbum),
                     )
-                    if (track.artist.isNotBlank()) {
-                        Text(
-                            text = track.artist,
-                            color = fg2,
-                            fontFamily = fontFamily,
-                            fontSize = 13.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.clickable(onClick = onOpenArtist),
-                        )
-                    }
+                    FolioExpandedSubtitle(
+                        artist = track.artist,
+                        album = track.album,
+                        color = fg2,
+                        fontSize = 13.sp,
+                        onOpenArtist = onOpenArtist,
+                        onOpenAlbum = onOpenAlbum,
+                    )
                 }
             }
         }
@@ -708,6 +1088,7 @@ internal fun FolioPlayerExpandedControls(
             playBg = playBg,
             playFg = playFg,
             sideBg = sideBg,
+            playEnabled = playEnabled,
             onToggleTranslation = onToggleTranslation,
             onPrevious = onPrevious,
             onPlayPause = onPlayPause,
@@ -731,6 +1112,7 @@ private fun TransportRow(
     playBg: Color,
     playFg: Color,
     sideBg: Color,
+    playEnabled: Boolean,
     onToggleTranslation: () -> Unit,
     onPrevious: () -> Unit,
     onPlayPause: () -> Unit,
@@ -784,7 +1166,7 @@ private fun TransportRow(
                 .size(tierSpec.pp)
                 .clip(CircleShape)
                 .background(playBg)
-                .clickable(role = Role.Button, onClick = onPlayPause),
+                .clickable(enabled = playEnabled, role = Role.Button, onClick = onPlayPause),
             contentAlignment = Alignment.Center,
         ) {
             Icon(

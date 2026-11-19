@@ -558,4 +558,93 @@ class FolioPlayerStateTest {
             }
         }
     }
+
+    @Test
+    fun collapsedLayoutResolvesMix5PerTierAndDisplayState() {
+        val allStates = listOf(
+            FolioPlayerDisplayState.Lyrics,
+            FolioPlayerDisplayState.Poster,
+            FolioPlayerDisplayState.Queue,
+            FolioPlayerDisplayState.None,
+        )
+        for (tier in listOf(FolioTier.Narrow, FolioTier.Short, FolioTier.Ultrawide)) {
+            for (state in allStates) {
+                assertEquals(
+                    "tier=$tier state=$state",
+                    FolioCollapsedLayout.Capsule,
+                    resolveCollapsedLayout(tier, state),
+                )
+            }
+        }
+        for (state in allStates) {
+            assertEquals(
+                "Medium state=$state",
+                FolioCollapsedLayout.CircleButtonAndHairline,
+                resolveCollapsedLayout(FolioTier.Medium, state),
+            )
+        }
+        assertEquals(
+            FolioCollapsedLayout.UnderCoverInfo,
+            resolveCollapsedLayout(FolioTier.Wide, FolioPlayerDisplayState.Lyrics),
+        )
+        for (state in listOf(FolioPlayerDisplayState.Poster, FolioPlayerDisplayState.Queue, FolioPlayerDisplayState.None)) {
+            assertEquals(
+                "Wide state=$state",
+                FolioCollapsedLayout.CircleButtonAndHairline,
+                resolveCollapsedLayout(FolioTier.Wide, state),
+            )
+        }
+    }
+
+    @Test
+    fun collapsedHeaderTitleModeFollowsMediumAndWideRules() {
+        assertEquals(
+            FolioCollapsedHeaderTitleMode.LargeWithCover,
+            resolveCollapsedHeaderTitleMode(FolioTier.Medium, FolioPlayerDisplayState.Lyrics),
+        )
+        assertEquals(
+            FolioCollapsedHeaderTitleMode.Compact,
+            resolveCollapsedHeaderTitleMode(FolioTier.Medium, FolioPlayerDisplayState.Poster),
+        )
+        assertEquals(
+            FolioCollapsedHeaderTitleMode.Compact,
+            resolveCollapsedHeaderTitleMode(FolioTier.Medium, FolioPlayerDisplayState.None),
+        )
+        assertEquals(
+            FolioCollapsedHeaderTitleMode.None,
+            resolveCollapsedHeaderTitleMode(FolioTier.Wide, FolioPlayerDisplayState.Lyrics),
+        )
+        assertEquals(
+            FolioCollapsedHeaderTitleMode.Compact,
+            resolveCollapsedHeaderTitleMode(FolioTier.Wide, FolioPlayerDisplayState.Poster),
+        )
+        assertEquals(
+            FolioCollapsedHeaderTitleMode.Compact,
+            resolveCollapsedHeaderTitleMode(FolioTier.Wide, FolioPlayerDisplayState.Queue),
+        )
+        for (tier in listOf(FolioTier.Narrow, FolioTier.Short, FolioTier.Ultrawide)) {
+            for (state in FolioPlayerDisplayState.entries) {
+                assertEquals(
+                    FolioCollapsedHeaderTitleMode.None,
+                    resolveCollapsedHeaderTitleMode(tier, state),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun collapsedCapsuleStartPaddingIs20DpWhenArtworkHidden() {
+        assertEquals(10f, collapsedCapsuleStartPaddingDp(showArtwork = true).value, 0.01f)
+        assertEquals(20f, collapsedCapsuleStartPaddingDp(showArtwork = false).value, 0.01f)
+    }
+
+    @Test
+    fun subtitleFormatsArtistAndAlbumWithEmDashOrOmitsSeparatorWhenBlank() {
+        assertEquals("Artist — Album", formatFolioPlayerSubtitle("Artist", "Album"))
+        assertEquals("Artist — Album", formatFolioPlayerSubtitle("  Artist  ", " Album "))
+        assertEquals("Artist", formatFolioPlayerSubtitle("Artist", ""))
+        assertEquals("Artist", formatFolioPlayerSubtitle("Artist", "   "))
+        assertEquals("Album", formatFolioPlayerSubtitle("", "Album"))
+        assertEquals("", formatFolioPlayerSubtitle("  ", ""))
+    }
 }

@@ -6,6 +6,7 @@ import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -397,6 +398,7 @@ internal fun BoxScope.FolioPlayerLayer(
                         revealControls()
                         playbackStore.togglePlayback()
                     },
+                    onCollapsedPlayPause = playbackStore::togglePlayback,
                     onNext = {
                         revealControls()
                         playbackStore.skip(1)
@@ -428,6 +430,9 @@ internal fun BoxScope.FolioPlayerLayer(
                         headerColors = headerColors,
                         favoriteAccent = accent,
                         showHeaderTitle = showHeaderTitle(tierSpec.tier, controlsExpanded, displayState),
+                        controlsExpanded = controlsExpanded,
+                        displayState = displayState,
+                        reducedMotion = reducedMotion,
                         isFavorite = libraryState.current.isFavorite == true,
                         isInLibrary = libraryState.current.isInLibrary == true,
                         favoriteInProgress = libraryState.current.isFavoriteInProgress,
@@ -436,6 +441,7 @@ internal fun BoxScope.FolioPlayerLayer(
                         hasTimedLyrics = hasTimed,
                         pullHandle = pullDown.handle,
                         onClose = onClose,
+                        onExpandControls = revealControls,
                         onToggleLibrary = {
                             revealControls()
                             libraryActions.addToLibrary()
@@ -478,6 +484,63 @@ internal fun BoxScope.FolioPlayerLayer(
                     Spacer(Modifier.height(8.dp))
 
                     // Main content body tailored to each tier
+                    val collapsedLayout = resolveCollapsedLayout(tierSpec.tier, displayState)
+                    val overlayUnderCoverControls = tierSpec.tier == FolioTier.Wide &&
+                        !alwaysOpen &&
+                        collapsedLayout == FolioCollapsedLayout.UnderCoverInfo
+                    val renderControlsSlot: @Composable (Modifier) -> Unit = { slotModifier ->
+                        FolioPlayerAnimatedControlsSlot(
+                            controlsExpanded = controlsExpanded,
+                            reducedMotion = reducedMotion,
+                            track = track,
+                            tierSpec = tierSpec,
+                            displayState = displayState,
+                            positionState = positionState,
+                            durationMs = durationMs,
+                            canSeek = canSeek,
+                            isLiveStream = isLiveStream,
+                            playWhenReady = playbackState.playWhenReady,
+                            translationEnabled = settings.lyricTranslationEnabled,
+                            queueOpen = queueOpen,
+                            canSkipPrevious = canSkipPrevious,
+                            canSkipNext = canSkipNext,
+                            isLight = palette.isLight,
+                            fg = fg,
+                            fg2 = fg2,
+                            onExpandCapsule = revealControls,
+                            onSeekTo = seekToMs,
+                            onToggleTranslation = {
+                                revealControls()
+                                settingsStore.setLyricTranslationEnabled(!settings.lyricTranslationEnabled)
+                            },
+                            onPrevious = {
+                                revealControls()
+                                playbackStore.skip(-1)
+                            },
+                            onPlayPause = {
+                                revealControls()
+                                playbackStore.togglePlayback()
+                            },
+                            onCollapsedPlayPause = playbackStore::togglePlayback,
+                            onNext = {
+                                revealControls()
+                                playbackStore.skip(1)
+                            },
+                            onToggleQueue = {
+                                revealControls()
+                                queueOpen = !queueOpen
+                            },
+                            onOpenAlbum = openAlbumDetail,
+                            onOpenArtist = openArtistDetail,
+                            modifier = slotModifier,
+                            contentAlignment = if (tierSpec.tier == FolioTier.Wide) {
+                                Alignment.BottomStart
+                            } else {
+                                Alignment.BottomCenter
+                            },
+                        )
+                    }
+
                     Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                         when (tierSpec.tier) {
                             FolioTier.Ultrawide -> {
@@ -572,10 +635,13 @@ internal fun BoxScope.FolioPlayerLayer(
                                     lyricsState = lyricsState,
                                     queueSnapshot = queueSnapshot,
                                     positionState = positionState,
+                                    durationMs = durationMs,
                                     offsetMs = settings.lyricOffsetMs,
                                     lowPerformance = settings.lowPerformanceMode,
                                     translationEnabled = settings.lyricTranslationEnabled,
                                     controlsExpanded = controlsExpanded,
+                                    alwaysOpen = alwaysOpen,
+                                    playWhenReady = playbackState.playWhenReady,
                                     reducedMotion = reducedMotion,
                                     canSeek = canSeek,
                                     isLight = palette.isLight,
@@ -586,6 +652,7 @@ internal fun BoxScope.FolioPlayerLayer(
                                     accent = accent,
                                     pullHandle = pullDown.handle,
                                     onReveal = revealControls,
+                                    onCollapsedPlayPause = playbackStore::togglePlayback,
                                     onLineSeek = seekToMs,
                                     onSelectTimelineTrack = playbackStore::selectQueueTrack,
                                     onPlayStationTrack = { s -> playbackStore.playTrack(s, listOf(s)) },
@@ -595,60 +662,20 @@ internal fun BoxScope.FolioPlayerLayer(
                                 )
                             }
                         }
+
+                        if (overlayUnderCoverControls) {
+                            renderControlsSlot(
+                                Modifier
+                                    .align(Alignment.BottomStart)
+                                    .fillMaxWidth(),
+                            )
+                        }
                     }
 
-                    // Bottom controls slot for Narrow / Medium / Wide
-                    if (tierSpec.tier != FolioTier.Ultrawide) {
+                    // Bottom controls slot for Narrow / Medium / non-overlay Wide
+                    if (tierSpec.tier != FolioTier.Ultrawide && !overlayUnderCoverControls) {
                         Spacer(Modifier.height(10.dp))
-                        FolioPlayerAnimatedControlsSlot(
-                            controlsExpanded = controlsExpanded,
-                            reducedMotion = reducedMotion,
-                            track = track,
-                            tierSpec = tierSpec,
-                            displayState = displayState,
-                            positionState = positionState,
-                            durationMs = durationMs,
-                            canSeek = canSeek,
-                            isLiveStream = isLiveStream,
-                            playWhenReady = playbackState.playWhenReady,
-                            translationEnabled = settings.lyricTranslationEnabled,
-                            queueOpen = queueOpen,
-                            canSkipPrevious = canSkipPrevious,
-                            canSkipNext = canSkipNext,
-                            isLight = palette.isLight,
-                            fg = fg,
-                            fg2 = fg2,
-                            onExpandCapsule = revealControls,
-                            onSeekTo = seekToMs,
-                            onToggleTranslation = {
-                                revealControls()
-                                settingsStore.setLyricTranslationEnabled(!settings.lyricTranslationEnabled)
-                            },
-                            onPrevious = {
-                                revealControls()
-                                playbackStore.skip(-1)
-                            },
-                            onPlayPause = {
-                                revealControls()
-                                playbackStore.togglePlayback()
-                            },
-                            onNext = {
-                                revealControls()
-                                playbackStore.skip(1)
-                            },
-                            onToggleQueue = {
-                                revealControls()
-                                queueOpen = !queueOpen
-                            },
-                            onOpenAlbum = openAlbumDetail,
-                            onOpenArtist = openArtistDetail,
-                            modifier = Modifier.fillMaxWidth(),
-                            contentAlignment = if (tierSpec.tier == FolioTier.Wide) {
-                                Alignment.BottomStart
-                            } else {
-                                Alignment.BottomCenter
-                            },
-                        )
+                        renderControlsSlot(Modifier.fillMaxWidth())
                     }
                 }
             }
@@ -772,6 +799,7 @@ private fun UltrawidePlayerBody(
                 onToggleTranslation = onToggleTranslation,
                 onPrevious = onPrevious,
                 onPlayPause = onPlayPause,
+                onCollapsedPlayPause = onPlayPause,
                 onNext = onNext,
                 onToggleQueue = onToggleQueue,
                 onOpenAlbum = onOpenAlbum,
@@ -926,17 +954,14 @@ private fun VerticalPlayerBody(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.clickable(onClick = onOpenAlbum),
                         )
-                        if (track.artist.isNotBlank()) {
-                            Text(
-                                text = track.artist,
-                                color = fg2,
-                                fontFamily = LocalFolioFontFamily.current,
-                                fontSize = 15.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.clickable(onClick = onOpenArtist),
-                            )
-                        }
+                        FolioExpandedSubtitle(
+                            artist = track.artist,
+                            album = track.album,
+                            color = fg2,
+                            fontSize = 15.sp,
+                            onOpenArtist = onOpenArtist,
+                            onOpenAlbum = onOpenAlbum,
+                        )
                     }
                 }
             }
@@ -1056,6 +1081,7 @@ private fun ShortPlayerLayout(
     onToggleTranslation: () -> Unit,
     onPrevious: () -> Unit,
     onPlayPause: () -> Unit,
+    onCollapsedPlayPause: () -> Unit,
     onNext: () -> Unit,
     onToggleQueue: () -> Unit,
     onSelectTimelineTrack: (Int) -> Unit,
@@ -1191,6 +1217,7 @@ private fun ShortPlayerLayout(
             onToggleTranslation = onToggleTranslation,
             onPrevious = onPrevious,
             onPlayPause = onPlayPause,
+            onCollapsedPlayPause = onCollapsedPlayPause,
             onNext = onNext,
             onToggleQueue = onToggleQueue,
             onOpenAlbum = onOpenAlbum,
@@ -1216,6 +1243,9 @@ private fun ShortPlayerLayout(
                 headerColors = headerColors,
                 favoriteAccent = accent,
                 showHeaderTitle = false,
+                controlsExpanded = controlsExpanded,
+                displayState = displayState,
+                reducedMotion = reducedMotion,
                 isFavorite = isFavorite,
                 isInLibrary = isInLibrary,
                 favoriteInProgress = favoriteInProgress,
@@ -1224,6 +1254,7 @@ private fun ShortPlayerLayout(
                 hasTimedLyrics = hasTimedLyrics,
                 pullHandle = pullHandle,
                 onClose = onClose,
+                onExpandControls = onReveal,
                 onToggleLibrary = onToggleLibrary,
                 onToggleFavorite = onToggleFavorite,
                 onTogglePosterMode = onTogglePosterMode,
@@ -1257,10 +1288,13 @@ private fun TwoColumnPlayerBody(
     lyricsState: dev.amatv.core.LyricsState,
     queueSnapshot: FolioQueueSnapshot,
     positionState: State<Long>,
+    durationMs: Long,
     offsetMs: Long,
     lowPerformance: Boolean,
     translationEnabled: Boolean,
     controlsExpanded: Boolean,
+    alwaysOpen: Boolean,
+    playWhenReady: Boolean,
     reducedMotion: Boolean,
     canSeek: Boolean,
     isLight: Boolean,
@@ -1271,6 +1305,7 @@ private fun TwoColumnPlayerBody(
     accent: Color,
     pullHandle: Modifier,
     onReveal: () -> Unit,
+    onCollapsedPlayPause: () -> Unit,
     onLineSeek: (Long) -> Unit,
     onSelectTimelineTrack: (Int) -> Unit,
     onPlayStationTrack: (Track) -> Unit,
@@ -1305,22 +1340,68 @@ private fun TwoColumnPlayerBody(
         // H5 `.t-e .lyr { left: 50%; right: 64px }`: Wide car tier splits 50/50 so lyrics stay in the right half.
         val leftColumnWidth = if (isWideCar) maxWidth * 0.50f else maxWidth * 0.38f
         val bodyHeight = maxHeight
+        val showUnderCoverCollapsed = isWideCar &&
+            !alwaysOpen &&
+            resolveCollapsedLayout(tierSpec.tier, displayState) == FolioCollapsedLayout.UnderCoverInfo
+        val pmetaAlpha by animateFloatAsState(
+            targetValue = if (showUnderCoverCollapsed && !controlsExpanded) 1f else 0f,
+            animationSpec = tween(if (reducedMotion) 0 else FolioPlayerMotionTokens.PMETA_OPACITY_MS),
+            label = "wide-undercover-alpha",
+        )
+
         Row(
             modifier = Modifier.fillMaxSize(),
             horizontalArrangement = Arrangement.spacedBy(if (isWideCar) 0.dp else 28.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Left column: Wide car rolling lyrics show only the large cover (Flow & Soak, no duplicate title/artist);
-            // Wide car Poster keeps left clean for backdrop color glow. Short tier keeps its existing layout.
+            // Left column: Wide car rolling lyrics show large cover (plus under-cover collapsed info when Soak & collapsed);
+            // Wide car Poster keeps left clean for backdrop color glow.
             Box(
                 modifier = Modifier
                     .width(leftColumnWidth)
                     .fillMaxHeight()
                     .then(pullHandle),
-                contentAlignment = Alignment.CenterStart,
+                contentAlignment = if (showUnderCoverCollapsed) Alignment.TopStart else Alignment.CenterStart,
             ) {
                 if (isWideCar) {
-                    if (displayState == FolioPlayerDisplayState.Lyrics ||
+                    if (showUnderCoverCollapsed) {
+                        val coverSize = min(
+                            (bodyHeight - 134.dp).coerceAtLeast(160.dp),
+                            min(leftColumnWidth * 0.78f, 400.dp),
+                        )
+                        Column(
+                            modifier = Modifier.padding(start = 36.dp, top = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(18.dp),
+                        ) {
+                            FolioArtwork(
+                                track = track,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .size(coverSize)
+                                    .shadow(24.dp, RoundedCornerShape(14.dp))
+                                    .clickable {
+                                        if (controlsExpanded) onOpenAlbum() else onReveal()
+                                    },
+                            )
+                            if (!controlsExpanded || pmetaAlpha > 0.01f) {
+                                FolioCarUnderCoverCollapsedBar(
+                                    track = track,
+                                    positionState = positionState,
+                                    durationMs = durationMs,
+                                    playWhenReady = playWhenReady,
+                                    isLight = isLight,
+                                    fg = fg,
+                                    fg2 = fg2,
+                                    interactive = !controlsExpanded,
+                                    onExpand = onReveal,
+                                    onTogglePlay = onCollapsedPlayPause,
+                                    modifier = Modifier
+                                        .width(coverSize)
+                                        .graphicsLayer { alpha = pmetaAlpha },
+                                )
+                            }
+                        }
+                    } else if (displayState == FolioPlayerDisplayState.Lyrics ||
                         (displayState == FolioPlayerDisplayState.None && style == LyricBackgroundStyle.Flow)
                     ) {
                         val coverSize = min((bodyHeight - 16.dp).coerceAtLeast(120.dp), min(leftColumnWidth * 0.78f, 400.dp))

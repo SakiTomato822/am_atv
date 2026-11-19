@@ -263,6 +263,80 @@ fun isQueuePanelVisible(
 fun shortTierLyricsStartDp(windowWidthDp: Float): Dp =
     if (windowWidthDp >= 680f) 384.dp else 360.dp
 
+/** H5 layout variant for collapsed Now Playing controls per tier and display mode (`⑤`). */
+enum class FolioCollapsedLayout {
+    Capsule,
+    CircleButtonAndHairline,
+    UnderCoverInfo,
+}
+
+/**
+ * Resolves the collapsed controls variant:
+ * - `Narrow` / `Short` / `Ultrawide`: classic bottom capsule (`①`)
+ * - `Medium`: right-bottom 64dp circular glass button + left hairline progress bar (`③`)
+ * - `Wide` in `Lyrics`: under-cover info + 56dp circular glass button + 400dp hairline (`④`)
+ * - `Wide` in `Poster` / `Queue` / `None`: left-bottom 64dp circular glass button + right hairline (`③`)
+ */
+fun resolveCollapsedLayout(
+    tier: FolioTier,
+    displayState: FolioPlayerDisplayState,
+): FolioCollapsedLayout = when (tier) {
+    FolioTier.Medium -> FolioCollapsedLayout.CircleButtonAndHairline
+    FolioTier.Wide -> if (displayState == FolioPlayerDisplayState.Lyrics) {
+        FolioCollapsedLayout.UnderCoverInfo
+    } else {
+        FolioCollapsedLayout.CircleButtonAndHairline
+    }
+    FolioTier.Narrow,
+    FolioTier.Short,
+    FolioTier.Ultrawide -> FolioCollapsedLayout.Capsule
+}
+
+/** Persistent collapsed title mode inside `.hdr .tt` on `Medium` (`③`) and `Wide` Poster/fallback (`③`). */
+enum class FolioCollapsedHeaderTitleMode {
+    None,
+    Compact,
+    LargeWithCover,
+}
+
+/** Resolves `.hdr .tt` collapsed header appearance (hidden while expanded or on `c`/`m`/`u` and `e` Lyrics). */
+fun resolveCollapsedHeaderTitleMode(
+    tier: FolioTier,
+    displayState: FolioPlayerDisplayState,
+): FolioCollapsedHeaderTitleMode = when (tier) {
+    FolioTier.Medium -> if (displayState == FolioPlayerDisplayState.Lyrics) {
+        FolioCollapsedHeaderTitleMode.LargeWithCover
+    } else {
+        FolioCollapsedHeaderTitleMode.Compact
+    }
+    FolioTier.Wide -> if (displayState != FolioPlayerDisplayState.Lyrics) {
+        FolioCollapsedHeaderTitleMode.Compact
+    } else {
+        FolioCollapsedHeaderTitleMode.None
+    }
+    FolioTier.Narrow,
+    FolioTier.Short,
+    FolioTier.Ultrawide -> FolioCollapsedHeaderTitleMode.None
+}
+
+/** Left start padding inside collapsed `.pmeta` capsule: keeps text off the rounded edge when thumbnail is hidden. */
+fun collapsedCapsuleStartPaddingDp(showArtwork: Boolean): Dp =
+    if (showArtwork) 10.dp else 20.dp
+
+/** Unified second line `"歌手 — 专辑"`, omitting separator when album is blank (matching H5 `A(t.artist).name + ' — ' + album`). */
+fun formatFolioPlayerSubtitle(
+    artist: String,
+    album: String,
+): String {
+    val cleanArtist = artist.trim()
+    val cleanAlbum = album.trim()
+    return when {
+        cleanArtist.isNotEmpty() && cleanAlbum.isNotEmpty() -> "$cleanArtist — $cleanAlbum"
+        cleanArtist.isNotEmpty() -> cleanArtist
+        else -> cleanAlbum
+    }
+}
+
 /**
  * Collapsed capsule `.pmeta .pc` shows thumbnail ONLY on portrait tiers (`Narrow` / `Medium`) when
  * not in Poster mode, matching H5 `.player.s-poster .pmeta .pc,.t-m/.t-e/.t-u .player .pmeta .pc{display:none}`.
