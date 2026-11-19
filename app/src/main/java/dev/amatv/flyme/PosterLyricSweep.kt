@@ -2,13 +2,9 @@ package dev.amatv.flyme
 
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.style.ResolvedTextDirection
@@ -73,7 +69,7 @@ internal fun posterSweepWordsOnRow(
 }
 
 internal class PosterSweepRow(
-    val words: List<KaraokeSweepWord>,
+    words: List<KaraokeSweepWord>,
     width: Float,
     featherPx: Float,
     val isRtl: Boolean,
@@ -131,7 +127,6 @@ internal class PosterLyricSweep(
             Row(layout.getLineTop(index), layout.getLineBottom(index), sweep)
         }.asReversed()
     }
-    private val emphasisClip = Path()
 
     fun draw(scope: DrawScope, positionMs: Long, ink: Color) = with(scope) {
         val time = positionMs - LyricTimeline.KARAOKE_WORD_OFFSET_MS
@@ -142,28 +137,8 @@ internal class PosterLyricSweep(
 
         for (row in rows) {
             val highlight = row.sweep.highlightAt(positionMs)
-            val word = row.sweep.words.lastOrNull { it.word.startMs <= time }
-            val lift = if (word == null || time >= word.word.endMs + WORD_RELEASE_MS) 0f else {
-                val release = ((word.word.endMs + WORD_RELEASE_MS - time).toFloat() / WORD_RELEASE_MS)
-                    .coerceIn(0f, 1f)
-                LyricTimeline.wordLiftFraction(
-                    time, word.word.startMs, word.word.endMs, release,
-                    MotionTokens.KaraokeSpringDampingRatio, MotionTokens.KaraokeSpringStiffness,
-                )
-            }
             clipRect(top = row.top, bottom = row.bottom) {
-                if (lift > 0f && word != null) {
-                    emphasisClip.reset()
-                    emphasisClip.addRect(Rect(word.left, row.top, word.right, row.bottom))
-                    clipPath(emphasisClip, ClipOp.Difference) { drawRow(highlight, row.sweep.isRtl, ink) }
-                } else {
-                    drawRow(highlight, row.sweep.isRtl, ink)
-                }
-            }
-            if (lift > 0f && word != null) {
-                translate(top = MotionTokens.KaraokeWordLiftDp.dp.toPx() * lift) {
-                    clipPath(emphasisClip) { drawRow(highlight, row.sweep.isRtl, ink, lift) }
-                }
+                drawRow(highlight, row.sweep.isRtl, ink)
             }
         }
     }
@@ -172,17 +147,15 @@ internal class PosterLyricSweep(
         highlight: KaraokeRowHighlight,
         isRtl: Boolean,
         ink: Color,
-        emphasis: Float = 0f,
     ) {
-        val lit = ink.copy(alpha = ink.alpha + (1f - ink.alpha) * emphasis * 0.12f)
-        val unlit = ink.copy(alpha = ink.alpha * (0.40f + 0.10f * emphasis))
+        val unlit = ink.copy(alpha = ink.alpha * 0.40f)
         when (highlight) {
             KaraokeRowHighlight.Unlit -> drawText(layout, color = unlit)
-            KaraokeRowHighlight.Lit -> drawText(layout, color = lit)
+            KaraokeRowHighlight.Lit -> drawText(layout, color = ink)
             is KaraokeRowHighlight.Partial -> {
                 val (start, end) = highlight.ramp
-                val first = if (isRtl) unlit else lit
-                val last = if (isRtl) lit else unlit
+                val first = if (isRtl) unlit else ink
+                val last = if (isRtl) ink else unlit
                 if (start == end) {
                     drawText(layout, color = if (start <= 0f) last else first)
                 } else {
@@ -197,9 +170,5 @@ internal class PosterLyricSweep(
                 }
             }
         }
-    }
-
-    private companion object {
-        const val WORD_RELEASE_MS = 100L
     }
 }

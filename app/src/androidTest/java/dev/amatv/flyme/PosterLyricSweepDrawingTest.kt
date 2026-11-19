@@ -18,7 +18,6 @@ import androidx.test.platform.app.InstrumentationRegistry
 import dev.amatv.model.LyricLine
 import dev.amatv.model.LyricWord
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import kotlin.math.roundToInt
@@ -50,29 +49,35 @@ class PosterLyricSweepDrawingTest {
                 sweep.draw(this, positionMs, ink)
             }
         }
-        fun glyphAlpha(row: Int, offset: Int): Int {
+        fun glyphScanlines(row: Int, offset: Int): List<Int> {
             val bounds = layout.getBoundingBox(layout.getLineStart(row) + offset)
-            return (bounds.left.roundToInt() until bounds.right.roundToInt()).maxOf { x ->
-                (layout.getLineTop(row).roundToInt() until layout.getLineBottom(row).roundToInt()).maxOf { y ->
-                    bitmap.getPixel(x, y) ushr 24
+            return (layout.getLineTop(row).roundToInt() until layout.getLineBottom(row).roundToInt()).map { pixelY ->
+                (bounds.left.roundToInt() until bounds.right.roundToInt()).maxOf { pixelX ->
+                    bitmap.getPixel(pixelX, pixelY) ushr 24
                 }
             }
         }
+        fun glyphAlpha(row: Int, offset: Int): Int = glyphScanlines(row, offset).max()
+        fun glyphTop(row: Int): Int = glyphScanlines(row, offset = 0).indexOfFirst { it > 0 }
 
         try {
             for (ink in listOf(Color.White, Color.Black)) {
                 draw(0, ink)
                 assertEquals(102, glyphAlpha(row = 0, offset = 0))
+                val firstRowTop = glyphTop(row = 0)
+                val secondRowTop = glyphTop(row = 1)
 
                 draw(1_500, ink)
                 assertEquals(255, glyphAlpha(row = 0, offset = 0))
-                assertTrue(glyphAlpha(row = 0, offset = 5) in 102..128)
+                assertEquals(102, glyphAlpha(row = 0, offset = 5))
+                assertEquals(firstRowTop, glyphTop(row = 0))
                 assertEquals(102, glyphAlpha(row = 1, offset = 0))
 
                 draw(2_500, ink)
                 assertEquals(255, glyphAlpha(row = 0, offset = 0))
                 assertEquals(255, glyphAlpha(row = 1, offset = 0))
-                assertTrue(glyphAlpha(row = 1, offset = 5) in 102..128)
+                assertEquals(102, glyphAlpha(row = 1, offset = 5))
+                assertEquals(secondRowTop, glyphTop(row = 1))
             }
         } finally {
             bitmap.recycle()
