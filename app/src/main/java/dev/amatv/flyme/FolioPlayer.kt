@@ -56,8 +56,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import com.kyant.backdrop.backdrops.layerBackdrop
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -315,29 +317,48 @@ internal fun BoxScope.FolioPlayerLayer(
             buildFolioQueueSnapshot(queueState, playbackState)
         }
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .then(pullDown.layer),
-        ) {
-            FolioPlayerBackdrop(
-                track = track,
-                artworkPalette = artworkPalette,
-                style = effectiveStyle,
-                isLight = palette.isLight,
-                animateFlow = !settings.lowPerformanceMode,
-                reducedMotion = reducedMotion,
-                tierSpec = tierSpec,
-                displayState = displayState,
-                pullHandle = pullDown.handle,
-                onRevealTap = {
-                    if (controlsExpanded && !alwaysOpen && playbackState.playWhenReady && !queueOpen) {
-                        controlsManualOpen = false
+        ProvideFolioGlassEnvironment(
+            track = track,
+            tierSpec = tierSpec,
+            effectiveStyle = effectiveStyle,
+            displayState = displayState,
+            baseColor = baseColor,
+        ) { glassEnv ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (glassEnv.coordHolder != null) {
+                            Modifier.onPlaced { glassEnv.coordHolder.rootCoords = it }
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .then(pullDown.layer),
+            ) {
+                FolioPlayerBackdrop(
+                    track = track,
+                    artworkPalette = artworkPalette,
+                    style = effectiveStyle,
+                    isLight = palette.isLight,
+                    animateFlow = !settings.lowPerformanceMode,
+                    reducedMotion = reducedMotion,
+                    tierSpec = tierSpec,
+                    displayState = displayState,
+                    pullHandle = pullDown.handle,
+                    onRevealTap = {
+                        if (controlsExpanded && !alwaysOpen && playbackState.playWhenReady && !queueOpen) {
+                            controlsManualOpen = false
+                        } else {
+                            revealControls()
+                        }
+                    },
+                    modifier = if (glassEnv.layerBackdrop != null) {
+                        Modifier.layerBackdrop(glassEnv.layerBackdrop)
                     } else {
-                        revealControls()
-                    }
-                },
-            )
+                        Modifier
+                    },
+                )
 
             // C4 #5: Soft theme-colored vertical scrim behind the header in Poster mode so light cover art stays legible.
             val posterScrimAlpha by animateFloatAsState(
@@ -734,6 +755,7 @@ internal fun BoxScope.FolioPlayerLayer(
                     }
                 }
             }
+        }
         }
     }
 }
