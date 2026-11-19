@@ -221,7 +221,10 @@ internal fun FolioSettingsPage(
                                 LyricBackgroundStyle.Soak to stringResource(R.string.flyme_lyric_soak),
                             ),
                             selected = settings.lyricStyle,
-                            onSelect = settingsStore::setLyricStyle,
+                            onSelect = { style ->
+                                settingsStore.setLyricStyle(style)
+                                FolioPlayerSession.syncDefaultDisplayFromSetting(style)
+                            },
                         )
                     }
                     SettingsToggleRow(

@@ -1,5 +1,7 @@
 package dev.amatv.flyme
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
@@ -28,6 +30,7 @@ internal fun FolioPlayerBackdrop(
     style: LyricBackgroundStyle,
     isLight: Boolean,
     animateFlow: Boolean,
+    reducedMotion: Boolean = false,
     tierSpec: FolioPlayerTierSpec,
     displayState: FolioPlayerDisplayState,
     pullHandle: Modifier,
@@ -41,102 +44,111 @@ internal fun FolioPlayerBackdrop(
             .background(baseColor)
             .pointerInput(Unit) { detectTapGestures { onRevealTap() } },
     ) {
-        if (style == LyricBackgroundStyle.Flow) {
-            CarLyricFlow(track = track, palette = artworkPalette, animate = animateFlow)
-            val veil = if (isLight) Color(0xFFF6F4F9).copy(alpha = 0.72f) else Color.Black.copy(alpha = 0.24f)
-            Box(Modifier.fillMaxSize().background(veil))
-            return@BoxWithConstraints
-        }
+        val containerWidth = maxWidth
+        val containerHeight = maxHeight
+        Crossfade(
+            targetState = style,
+            animationSpec = tween(if (reducedMotion) 0 else BACKDROP_STYLE_CROSSFADE_MS),
+            label = "backdrop-style-crossfade",
+        ) { activeStyle ->
+            Box(Modifier.fillMaxSize()) {
+                if (activeStyle == LyricBackgroundStyle.Flow) {
+                    CarLyricFlow(track = track, palette = artworkPalette, animate = animateFlow)
+                    val veil = if (isLight) Color(0xFFF6F4F9).copy(alpha = 0.72f) else Color.Black.copy(alpha = 0.24f)
+                    Box(Modifier.fillMaxSize().background(veil))
+                } else {
+                    // Soak style ("海报（封面背景）")
+                    val showBleedArtwork = showSoakArtworkStage(tierSpec.tier, activeStyle, displayState)
+                    if (showBleedArtwork) {
+                        val isVerticalBleed = tierSpec.tier == FolioTier.Narrow || tierSpec.tier == FolioTier.Medium
+                        if (isVerticalBleed) {
+                            val bleedHeight = containerHeight * tierSpec.soakCoverHeightFraction
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(bleedHeight)
+                                    .then(pullHandle),
+                            ) {
+                                MotionArtwork(
+                                    track = track,
+                                    modifier = Modifier.fillMaxSize(),
+                                    animate = false,
+                                    cornerRadius = 0.dp,
+                                )
+                                Box(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .background(
+                                            Brush.verticalGradient(
+                                                0f to Color.Transparent,
+                                                0.34f to Color.Transparent,
+                                                0.66f to baseColor.copy(alpha = 0.56f),
+                                                0.88f to baseColor.copy(alpha = 0.92f),
+                                                1f to baseColor,
+                                            ),
+                                        ),
+                                )
+                            }
+                        } else {
+                            val bleedWidth = tierSpec.soakCoverWidth.coerceAtMost(containerWidth * 0.68f)
+                            Box(
+                                modifier = Modifier
+                                    .width(bleedWidth)
+                                    .fillMaxHeight()
+                                    .then(pullHandle),
+                            ) {
+                                MotionArtwork(
+                                    track = track,
+                                    modifier = Modifier.fillMaxSize(),
+                                    animate = false,
+                                    cornerRadius = 0.dp,
+                                )
+                                Box(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .background(
+                                            Brush.horizontalGradient(
+                                                0f to Color.Transparent,
+                                                0.40f to Color.Transparent,
+                                                0.64f to baseColor.copy(alpha = 0.38f),
+                                                0.84f to baseColor.copy(alpha = 0.78f),
+                                                0.95f to baseColor.copy(alpha = 0.96f),
+                                                1f to baseColor,
+                                            ),
+                                        ),
+                                )
+                            }
+                        }
+                    }
 
-        // Soak style ("取色渐隐")
-        val showBleedArtwork = showSoakArtworkStage(tierSpec.tier, style, displayState)
-        if (showBleedArtwork) {
-            val isVerticalBleed = tierSpec.tier == FolioTier.Narrow || tierSpec.tier == FolioTier.Medium
-            if (isVerticalBleed) {
-                val bleedHeight = maxHeight * tierSpec.soakCoverHeightFraction
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(bleedHeight)
-                        .then(pullHandle),
-                ) {
-                    MotionArtwork(
-                        track = track,
-                        modifier = Modifier.fillMaxSize(),
-                        animate = false,
-                        cornerRadius = 0.dp,
-                    )
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    0f to Color.Transparent,
-                                    0.34f to Color.Transparent,
-                                    0.66f to baseColor.copy(alpha = 0.56f),
-                                    0.88f to baseColor.copy(alpha = 0.92f),
-                                    1f to baseColor,
+                    if (isLight) {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.verticalGradient(
+                                        0f to Color.White.copy(alpha = 0.10f),
+                                        0.5f to baseColor.copy(alpha = 0.16f),
+                                        1f to baseColor.copy(alpha = 0.28f),
+                                    ),
                                 ),
-                            ),
-                    )
-                }
-            } else {
-                val bleedWidth = tierSpec.soakCoverWidth.coerceAtMost(maxWidth * 0.68f)
-                Box(
-                    modifier = Modifier
-                        .width(bleedWidth)
-                        .fillMaxHeight()
-                        .then(pullHandle),
-                ) {
-                    MotionArtwork(
-                        track = track,
-                        modifier = Modifier.fillMaxSize(),
-                        animate = false,
-                        cornerRadius = 0.dp,
-                    )
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.horizontalGradient(
-                                    0f to Color.Transparent,
-                                    0.40f to Color.Transparent,
-                                    0.64f to baseColor.copy(alpha = 0.38f),
-                                    0.84f to baseColor.copy(alpha = 0.78f),
-                                    0.95f to baseColor.copy(alpha = 0.96f),
-                                    1f to baseColor,
+                        )
+                    } else {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.verticalGradient(
+                                        0f to Color.Black.copy(alpha = 0.18f),
+                                        0.32f to Color.Transparent,
+                                        1f to Color.Black.copy(alpha = 0.28f),
+                                    ),
                                 ),
-                            ),
-                    )
+                        )
+                        SoakGlow(artworkPalette)
+                    }
                 }
             }
-        }
-
-        if (isLight) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            0f to Color.White.copy(alpha = 0.10f),
-                            0.5f to baseColor.copy(alpha = 0.16f),
-                            1f to baseColor.copy(alpha = 0.28f),
-                        ),
-                    ),
-            )
-        } else {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            0f to Color.Black.copy(alpha = 0.18f),
-                            0.32f to Color.Transparent,
-                            1f to Color.Black.copy(alpha = 0.28f),
-                        ),
-                    ),
-            )
-            SoakGlow(artworkPalette)
         }
     }
 }

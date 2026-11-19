@@ -37,11 +37,25 @@ object FolioPlayerSession {
     val openState: MutableState<Boolean> = mutableStateOf(false)
     val queueOpenState: MutableState<Boolean> = mutableStateOf(false)
     val posterPreferredState: MutableState<Boolean> = mutableStateOf(false)
+    val posterOverrideState: MutableState<Boolean?> = mutableStateOf(null)
 
     fun reset() {
         openState.value = false
         queueOpenState.value = false
         posterPreferredState.value = false
+        posterOverrideState.value = null
+    }
+
+    fun syncDefaultDisplayFromSetting(style: LyricBackgroundStyle) {
+        posterOverrideState.value = null
+        posterPreferredState.value = (style == LyricBackgroundStyle.Soak)
+    }
+
+    fun togglePosterPreference(current: Boolean): Boolean {
+        val next = !current
+        posterOverrideState.value = next
+        posterPreferredState.value = next
+        return next
     }
 }
 
@@ -348,19 +362,76 @@ fun showCollapsedCapsuleArtwork(
 ): Boolean = (tier == FolioTier.Narrow || tier == FolioTier.Medium) &&
     displayState != FolioPlayerDisplayState.Poster
 
-/** Mirrors H5 `alwaysOpen` controls rule. */
+/**
+ * Always-open controls rule:
+ * - `Ultrawide` in `Flow` keeps Column 1 controls pinned open.
+ * - `Narrow` with no lyrics keeps controls open unless viewing Queue.
+ * - `Medium` and `Wide` stay collapsible in both `Lyrics` (`Flow`) and `Poster` (`Soak`) so C3 ③/④
+ *   collapsed states and C4 compact left-column controls remain reachable.
+ */
 fun alwaysOpenControls(
     tier: FolioTier,
     style: LyricBackgroundStyle,
     hasLyricsOrPending: Boolean,
     displayState: FolioPlayerDisplayState,
 ): Boolean {
-    val flowMultiCol = style == LyricBackgroundStyle.Flow &&
-        (tier == FolioTier.Wide || tier == FolioTier.Ultrawide || tier == FolioTier.Medium)
+    val flowUltrawide = style == LyricBackgroundStyle.Flow && tier == FolioTier.Ultrawide
     val narrowNoLyrics = tier == FolioTier.Narrow &&
         !hasLyricsOrPending &&
         displayState != FolioPlayerDisplayState.Queue
-    return flowMultiCol || narrowNoLyrics
+    return flowUltrawide || narrowNoLyrics
+}
+
+/**
+ * Resolves the effective player backdrop style bound to the active display mode:
+ * - `Poster` always uses `Soak` (cover backdrop)
+ * - `Lyrics` always uses `Flow` (animated flowing backdrop)
+ * - `Queue` keeps the last style active before opening Queue (falling back to [settingsStyle])
+ * - `None` (no lyrics) follows [settingsStyle]
+ */
+fun resolveEffectiveBackgroundStyle(
+    displayState: FolioPlayerDisplayState,
+    settingsStyle: LyricBackgroundStyle,
+    lastContentBackgroundStyle: LyricBackgroundStyle = settingsStyle,
+): LyricBackgroundStyle = when (displayState) {
+    FolioPlayerDisplayState.Poster -> LyricBackgroundStyle.Soak
+    FolioPlayerDisplayState.Lyrics -> LyricBackgroundStyle.Flow
+    FolioPlayerDisplayState.Queue -> lastContentBackgroundStyle
+    FolioPlayerDisplayState.None -> settingsStyle
+}
+
+/**
+ * Resolves whether Poster display is preferred: uses process session override if the user
+ * explicitly toggled `Tt`, otherwise initializes from the default display setting (`Soak -> true`).
+ */
+fun resolveEffectivePosterPreferred(
+    settingsStyle: LyricBackgroundStyle,
+    sessionOverride: Boolean?,
+): Boolean = sessionOverride ?: (settingsStyle == LyricBackgroundStyle.Soak)
+
+/** Collapsed cover size for Wide (`e`) car / tablet landscape (`<= 400.dp`). */
+fun computeWideCarCollapsedCoverSizeDp(
+    leftColumnWidthDp: Dp,
+    bodyHeightDp: Dp,
+): Dp = (bodyHeightDp - 134.dp)
+    .coerceAtLeast(160.dp)
+    .coerceAtMost((leftColumnWidthDp * 0.78f).coerceAtMost(400.dp))
+
+/** Compact Wide (`e`) controls card width = collapsed cover width + 64dp (464dp for 400dp cover). */
+fun computeWideCarControlsWidthDp(collapsedCoverWidthDp: Dp): Dp = collapsedCoverWidthDp + 64.dp
+
+/** Target expanded cover size on Wide (`e`) Scrolling Lyrics so cover bottom clears card top by >= 24dp. */
+fun computeWideCarExpandedCoverSizeDp(
+    collapsedCoverDp: Dp,
+    bodyHeightDp: Dp,
+    controlsCardHeightDp: Dp,
+    coverTopDp: Dp = 8.dp,
+    controlsBottomExtraDp: Dp = 4.dp,
+    minGapDp: Dp = 24.dp,
+): Dp {
+    val maxCoverBottom = bodyHeightDp - controlsBottomExtraDp - controlsCardHeightDp - minGapDp
+    val available = (maxCoverBottom - coverTopDp).coerceAtLeast(140.dp)
+    return collapsedCoverDp.coerceAtMost(available)
 }
 
 fun areControlsExpanded(
@@ -847,10 +918,54 @@ data class PosterTypographySpec(
     val nextLineHeightSp: Float,
 )
 
+val posterUpcomingAlphas: List<Float> = listOf(0.50f, 0.32f, 0.18f)
+
+const val POSTER_ROLL_DURATION_MS: Int = 550
+const val BACKDROP_STYLE_CROSSFADE_MS: Int = 400
+
+enum class PosterLyricRole {
+    ExitingPrevious,
+    Previous,
+    Focus,
+    Upcoming0,
+    Upcoming1,
+    Upcoming2,
+    EnteringBelow,
+}
+
+fun posterRoleScale(
+    role: PosterLyricRole,
+    typo: PosterTypographySpec,
+): Float {
+    val safeMain = typo.mainSp.coerceAtLeast(1f)
+    return when (role) {
+        PosterLyricRole.Focus -> 1f
+        PosterLyricRole.Previous -> typo.prevSp / safeMain
+        PosterLyricRole.ExitingPrevious -> (typo.prevSp / safeMain) * 0.94f
+        PosterLyricRole.Upcoming0,
+        PosterLyricRole.Upcoming1,
+        PosterLyricRole.Upcoming2,
+        PosterLyricRole.EnteringBelow -> typo.nextSp / safeMain
+    }
+}
+
+fun posterRoleAlpha(
+    role: PosterLyricRole,
+    previousAlpha: Float,
+): Float = when (role) {
+    PosterLyricRole.ExitingPrevious,
+    PosterLyricRole.EnteringBelow -> 0f
+    PosterLyricRole.Previous -> previousAlpha
+    PosterLyricRole.Focus -> 1f
+    PosterLyricRole.Upcoming0 -> posterUpcomingAlphas[0]
+    PosterLyricRole.Upcoming1 -> posterUpcomingAlphas[1]
+    PosterLyricRole.Upcoming2 -> posterUpcomingAlphas[2]
+}
+
 /**
- * Computes Poster typography matching H5 `--pfs` ratios:
+ * Computes Poster typography matching C4 + H5 `--pfs` ratios:
  * - `.pn`: [baseSp..1.3x] sized by longest lead line in song, `line-height: 1.16`, weight 800
- * - `.pv`: `baseSp * 0.42`, `.pbv`: `baseSp * 0.50`, `.pt`: `baseSp * 0.38`, `.px p`: `baseSp * 0.46`
+ * - `.pv`: `baseSp * 0.42`, `.pbv`: `baseSp * 0.50`, `.pt`: `mainSp * 0.40`, `.px p`: `baseSp * 0.46`
  */
 fun posterTypographyFor(
     lines: List<LyricLine>,
@@ -864,7 +979,7 @@ fun posterTypographyFor(
     )
     val prevSp = baseSp * 0.42f
     val backingSp = baseSp * 0.50f
-    val transSp = baseSp * 0.38f
+    val transSp = mainSp * 0.40f
     val nextSp = baseSp * 0.46f
     return PosterTypographySpec(
         mainSp = mainSp,
@@ -874,7 +989,7 @@ fun posterTypographyFor(
         backingSp = backingSp,
         backingLineHeightSp = backingSp * 1.30f,
         translationSp = transSp,
-        translationLineHeightSp = transSp * 1.35f,
+        translationLineHeightSp = transSp * 1.30f,
         nextSp = nextSp,
         nextLineHeightSp = nextSp * 1.35f,
     )
