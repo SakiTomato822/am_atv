@@ -138,6 +138,7 @@ class PlaybackStore(
     private var lastPlaybackNotice: String? = null
     private var gaplessLookahead: Pair<Long, Track>? = null
     private var adoptingGaplessEntryId: Long? = null
+    private var navigatingQueue = false
     private var advancingEndedTrackId: String? = null
     private var pendingRestore: PlaybackSession? =
         startupCheckpoint?.takeIf { initialTrack.catalogId != null }
@@ -373,12 +374,13 @@ class PlaybackStore(
                             next.second.catalogKind != CatalogKind.Song ||
                             next.second.catalogId == current.catalogId
                         ) {
-                            if (gaplessLookahead != null) player.setLookahead(null)
+                            if (prepared && gaplessLookahead != null) player.setLookahead(null)
                             gaplessLookahead = null
                             return@collectLatest
                         }
-                        // Let the current song settle before loading another stream.
-                        delayFn(1_500L)
+                        // Fresh prepares get time to settle. A natural continuation is already loaded.
+                        val continued = _state.value.snapshot?.gaplessAdvanceCatalogId
+                        if (continued == null || continued != current.catalogId) delayFn(1_500L)
                         val resolved = cancellableResult { player.resolvePlayableTrack(next.second) }
                             .getOrNull() ?: return@collectLatest
                         if (resolved.catalogId != next.second.catalogId) {
@@ -555,7 +557,7 @@ class PlaybackStore(
         else advanced.coerceAtMost(current.track.durationMs.coerceAtLeast(1L))
     }
 
-    private fun launchNativePlayback(nextTrack: Track, resumePositionMs: Long = 0L) {
+    private fun launchNativePlayback(nextTrack: Track, resumePositionMs: Long = 0L, reuseQueue: Boolean = false) {
         setHasUserPlaybackRequest(true)
         _state.value = _state.value.copy(
             playbackPrepared = false,
@@ -572,15 +574,23 @@ class PlaybackStore(
         pendingRequestedSongCatalogId = nextTrack.catalogId.takeIf { nextTrack.catalogKind == CatalogKind.Song }
         playbackRequestJob = coroutineScope.launch {
             try {
-                val resolved = player.resolvePlayableTrack(nextTrack)
-                if (selection != selectionGeneration) return@launch
-                val playableTrack = acceptResolvedTrack(nextTrack, resolved)
-                pendingRequestedSongCatalogId = playableTrack.catalogId.takeIf {
-                    playableTrack.catalogKind == CatalogKind.Song
+                var nativeGeneration = if (reuseQueue) player.playQueuedSong(nextTrack) else null
+                if (nativeGeneration == null) {
+                    val resolved = player.resolvePlayableTrack(nextTrack)
+                    if (selection != selectionGeneration) return@launch
+                    val playableTrack = acceptResolvedTrack(nextTrack, resolved)
+                    pendingRequestedSongCatalogId = playableTrack.catalogId.takeIf {
+                        playableTrack.catalogKind == CatalogKind.Song
+                    }
+                    if (reuseQueue && playableTrack.catalogId != nextTrack.catalogId) {
+                        nativeGeneration = player.playQueuedSong(playableTrack)
+                    }
+                    if (nativeGeneration == null) {
+                        if (reuseQueue) player.pause()
+                        nativeGeneration = player.preparePlayback(playableTrack, resumePositionMs, playWhenReady = false)
+                    }
                 }
-                // Authorize/prepare silently. Re-read the latest user intent after
-                // token I/O, so a pause during preparation cannot be overwritten.
-                val nativeGeneration = player.preparePlayback(playableTrack, resumePositionMs, playWhenReady = false)
+                // Re-read the user intent after playback and authorization work.
                 if (selection != selectionGeneration) return@launch
                 setExpectedPlaybackGeneration(nativeGeneration)
                 if (_state.value.playWhenReady) player.play() else player.pause()
@@ -686,6 +696,8 @@ class PlaybackStore(
         val initialTrack = withCachedLyrics(nextTrack)
         advancingEndedTrackId = null
         val ready = _state.value.playWhenReady
+        val reuseQueue = flymeAuto && navigatingQueue && ready && !isStationPlayback() &&
+            nextTrack.catalogKind == CatalogKind.Song
         updateTrack(initialTrack)
         _state.value = _state.value.copy(
             positionAnchorMs = 0L,
@@ -707,9 +719,9 @@ class PlaybackStore(
             pendingRequestedSongCatalogId = null
         } else if (nextTrack.catalogId != null) {
             // Stop the previous song while authorization/preparation is pending.
-            player.pause()
+            if (!reuseQueue) player.pause()
             if (ready) {
-                launchNativePlayback(initialTrack)
+                launchNativePlayback(initialTrack, reuseQueue = reuseQueue)
             } else {
                 setExpectedPlaybackGeneration(0L)
                 pendingRequestedSongCatalogId = null
@@ -779,9 +791,19 @@ class PlaybackStore(
         return true
     }
 
-    fun dispatchQueueAction(action: StartupQueueAction): Boolean =
-        if (!_state.value.startupSessionLoaded && selectionGeneration == 0L) startupQueueActions.enqueue(action)
-        else applyQueueAction(action)
+    fun dispatchQueueAction(action: StartupQueueAction): Boolean {
+        if (!_state.value.startupSessionLoaded && selectionGeneration == 0L) return startupQueueActions.enqueue(action)
+        when (action) {
+            StartupQueueAction.Next, StartupQueueAction.Previous, is StartupQueueAction.Select -> Unit
+            else -> return applyQueueAction(action)
+        }
+        navigatingQueue = true
+        try {
+            return applyQueueAction(action)
+        } finally {
+            navigatingQueue = false
+        }
+    }
 
     private fun supersedeStartupQueueWithNewContext() {
         // A catalog play action deliberately replaces the old rail. Keep pending
@@ -911,17 +933,6 @@ class PlaybackStore(
             val canSkip = if (relative > 0) snapshot.canSkipNext else snapshot.canSkipPrevious
             if (!canSkip) return
             if (relative > 0) player.skipToNext() else player.skipToPrevious()
-            return
-        }
-        // Next onto the gapless lookahead: MusicKit already buffered it, so no new prepare.
-        val queued = gaplessLookahead
-        val lookaheadId = queued?.second?.catalogId
-        val current = _state.value
-        if (relative > 0 && lookaheadId != null && current.playbackPrepared && current.isPlaying &&
-            queueController.peekAutoNext()?.entryId == queued.first &&
-            player.skipToQueuedLookahead(lookaheadId)
-        ) {
-            _state.value = _state.value.copy(playWhenReady = true)
             return
         }
         dispatchQueueAction(if (relative > 0) StartupQueueAction.Next else StartupQueueAction.Previous)

@@ -1,6 +1,7 @@
 package dev.amatv.integration
 
 import android.content.Context
+import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,6 +33,14 @@ class PlaybackDiagnostics private constructor(context: Context) {
         }
     }
 
+    internal fun logQueueMove(generation: Long, catalogId: String, command: String, fromIndex: Int, toIndex: Int) {
+        Log.i(TAG, "Queue move generation=$generation catalog=$catalogId command=$command from=$fromIndex to=$toIndex")
+    }
+
+    internal fun logQueueSound(generation: Long, catalogId: String?, command: String, waitedMs: Long) {
+        Log.i(TAG, "Queue sound generation=$generation catalog=$catalogId command=$command waitedMs=$waitedMs")
+    }
+
     fun clear() {
         synchronized(this) {
             mutableEntries.value = emptyList()
@@ -52,6 +61,7 @@ class PlaybackDiagnostics private constructor(context: Context) {
     }.toString()
 
     companion object {
+        private const val TAG = "AMATV-PlaybackDiagnostics"
         private const val KEY = "entries"
         private const val MAX_ENTRIES = 30
 
