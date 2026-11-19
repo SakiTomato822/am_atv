@@ -5,6 +5,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -906,13 +907,24 @@ fun projectPosterLyrics(
     )
 }
 
-/** H5 + C1 player motion constants matching CSS durations and cubic-bezier curves. */
+/** H5 + C1 + M1 player motion constants (`180..320ms` interactive transitions). */
 object FolioPlayerMotionTokens {
     const val CTL_OPACITY_MS: Int = 280
-    const val CTL_TRANSLATE_MS: Int = 350
+    const val CTL_TRANSLATE_MS: Int = 320
     const val CTL_OFFSET_DP: Float = 14f
     const val PMETA_OPACITY_MS: Int = 250
     const val PMETA_TRANSLATE_MS: Int = 300
+    const val MENU_OPEN_MS: Int = 240
+    const val MENU_CLOSE_MS: Int = 180
+    const val MENU_CLOSED_SCALE: Float = 0.92f
+    const val MENU_BOTTOM_OFFSET_DP: Float = 24f
+    const val QUEUE_POPOVER_OPEN_MS: Int = 240
+    const val QUEUE_POPOVER_CLOSE_MS: Int = 180
+    const val QUEUE_WIDE_SLIDE_DP: Float = 16f
+    const val PLAY_ICON_SWITCH_MS: Int = 200
+    const val PLAY_ICON_SWITCH_OUT_MS: Int = 140
+    const val PLAY_ICON_SWITCH_SCALE: Float = 0.8f
+    const val TOGGLE_PILL_MS: Int = 160
     const val POSTER_LIQ_IN_MAIN_MS: Int = 800
     const val POSTER_LIQ_IN_SUB_MS: Int = 700
     const val POSTER_LIQ_OUT_MS: Int = 600
@@ -1251,4 +1263,37 @@ fun folioPlayerBaseColor(
         // Deepen dominant color for Soak/Flow dark ambient backdrop, matching FlymeCarLyrics.
         lerp(dominant, Color.Black, 0.58f)
     }
+}
+
+/**
+ * Resolves the normalized [TransformOrigin] inside a popover panel pointing back toward an anchor
+ * button's center (used so the Lyrics menu and Queue sheet grow smoothly out of their button).
+ */
+fun computeAnchorTransformOrigin(
+    anchorCenterX: Float,
+    anchorCenterY: Float,
+    panelWidth: Float,
+    panelHeight: Float,
+    defaultOrigin: TransformOrigin = TransformOrigin.Center,
+): TransformOrigin {
+    if (panelWidth <= 1f || panelHeight <= 1f) return defaultOrigin
+    return TransformOrigin(
+        pivotFractionX = (anchorCenterX / panelWidth).coerceIn(-0.5f, 1.5f),
+        pivotFractionY = (anchorCenterY / panelHeight).coerceIn(-0.5f, 1.5f),
+    )
+}
+
+/**
+ * Selects the Poster header scrim color so Light mode never paints a dark scrim over the status
+ * bar, using [lightBaseColor] over bright cover art and omitting milky haze over dark covers.
+ */
+fun resolvePosterTopScrimColor(
+    isLight: Boolean,
+    useDarkHeaderInk: Boolean,
+    lightBaseColor: Color,
+    darkBgColor: Color,
+): Color = if (isLight) {
+    if (useDarkHeaderInk) lightBaseColor else Color.Transparent
+} else {
+    darkBgColor
 }

@@ -1,17 +1,18 @@
 package dev.amatv.flyme
 
 import android.os.Build
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -797,7 +798,8 @@ internal fun FolioNoLyricsStateBox(
                     modifier = Modifier
                         .size(coverSide)
                         .shadow(20.dp, RoundedCornerShape(16.dp))
-                        .clickable(onClick = onOpenAlbum),
+                        .clip(RoundedCornerShape(16.dp))
+                        .folioPressable(onClick = onOpenAlbum),
                 )
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -813,7 +815,9 @@ internal fun FolioNoLyricsStateBox(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier.clickable(onClick = onOpenAlbum),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .folioPressable(onClick = onOpenAlbum),
                     )
                     if (track.artist.isNotBlank()) {
                         Text(
@@ -825,7 +829,9 @@ internal fun FolioNoLyricsStateBox(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             textAlign = TextAlign.Center,
-                            modifier = Modifier.clickable(onClick = onOpenArtist),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .folioPressable(onClick = onOpenArtist),
                         )
                     }
                 }
@@ -885,7 +891,7 @@ private fun RetryLyricsPill(
             .clip(shape)
             .background(pillBg)
             .border(1.dp, pillBorder, shape)
-            .clickable(role = Role.Button, onClick = onClick)
+            .folioPressable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
         Text(
@@ -912,6 +918,8 @@ internal fun FolioQueuePanel(
     onCycleRepeat: () -> Unit = {},
     onToggleShuffle: () -> Unit = {},
     onClearQueue: () -> Unit = {},
+    lowPerformance: Boolean = false,
+    reducedMotion: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val fontFamily = LocalFolioFontFamily.current
@@ -919,9 +927,15 @@ internal fun FolioQueuePanel(
         snapshot.rows.indexOfFirst { it.isCurrent }.coerceAtLeast(0)
     }
     val listState = rememberLazyListState()
+    var hasScrolledOnce by remember { mutableStateOf(false) }
     LaunchedEffect(currentRowIndex, snapshot.rows.size) {
         if (snapshot.rows.isNotEmpty() && currentRowIndex in snapshot.rows.indices) {
-            listState.scrollToItem(currentRowIndex)
+            if (!hasScrolledOnce || reducedMotion || lowPerformance) {
+                listState.scrollToItem(currentRowIndex)
+                hasScrolledOnce = true
+            } else {
+                listState.animateScrollToItem(currentRowIndex)
+            }
         }
     }
     var previousHorizontalViewportWidth by remember { mutableIntStateOf(0) }
@@ -936,7 +950,11 @@ internal fun FolioQueuePanel(
                         visibleItem.offset >= info.viewportStartOffset &&
                         visibleItem.offset + visibleItem.size <= info.viewportEndOffset
                     if (!inView && currentRowIndex in snapshot.rows.indices) {
-                        listState.scrollToItem(currentRowIndex)
+                        if (reducedMotion || lowPerformance) {
+                            listState.scrollToItem(currentRowIndex)
+                        } else {
+                            listState.animateScrollToItem(currentRowIndex)
+                        }
                     }
                 }
                 if (viewportWidth > 0) previousHorizontalViewportWidth = viewportWidth
@@ -978,6 +996,7 @@ internal fun FolioQueuePanel(
                 isLight = isLight,
                 fg = fg,
                 accent = accent,
+                reducedMotion = reducedMotion,
                 onCycleRepeat = onCycleRepeat,
                 onToggleShuffle = onToggleShuffle,
                 onClearQueue = onClearQueue,
@@ -1008,7 +1027,7 @@ internal fun FolioQueuePanel(
                                     Modifier.background(Color.Transparent)
                                 },
                             )
-                            .clickable(enabled = clickable) {
+                            .folioPressable(enabled = clickable, role = Role.Button) {
                                 val idx = row.timelineIndex
                                 if (idx != null) {
                                     onSelectTimelineTrack(idx)
@@ -1091,6 +1110,7 @@ internal fun FolioQueuePanel(
             isLight = isLight,
             fg = fg,
             accent = accent,
+            reducedMotion = reducedMotion,
             onCycleRepeat = onCycleRepeat,
             onToggleShuffle = onToggleShuffle,
             onClearQueue = onClearQueue,
@@ -1145,7 +1165,7 @@ internal fun FolioQueuePanel(
                                     Modifier
                                 },
                             )
-                            .clickable(enabled = clickable) {
+                            .folioPressable(enabled = clickable, role = Role.Button) {
                                 val idx = row.timelineIndex
                                 if (idx != null) {
                                     onSelectTimelineTrack(idx)
@@ -1205,6 +1225,7 @@ private fun FolioQueueControlBar(
     isLight: Boolean,
     fg: Color,
     accent: Color,
+    reducedMotion: Boolean,
     onCycleRepeat: () -> Unit,
     onToggleShuffle: () -> Unit,
     onClearQueue: () -> Unit,
@@ -1228,6 +1249,35 @@ private fun FolioQueueControlBar(
     val activeBg = fg
     val activeFg = if (isLight) Color.White else Color(0xFF17151C)
     val repeatActive = repeatMode != PlaybackRepeatMode.Off
+    val toggleFadeMs = if (reducedMotion) 0 else FolioPlayerMotionTokens.TOGGLE_PILL_MS
+    val repeatBg by animateColorAsState(
+        targetValue = if (repeatActive && availability.canSetRepeat) activeBg else inactiveBg,
+        animationSpec = tween(toggleFadeMs),
+        label = "queue-repeat-bg",
+    )
+    val repeatTint by animateColorAsState(
+        targetValue = when {
+            !availability.canSetRepeat -> fg.copy(alpha = 0.34f)
+            repeatActive -> activeFg
+            else -> fg
+        },
+        animationSpec = tween(toggleFadeMs),
+        label = "queue-repeat-tint",
+    )
+    val shuffleBg by animateColorAsState(
+        targetValue = if (shuffleEnabled && availability.canSetShuffle) activeBg else inactiveBg,
+        animationSpec = tween(toggleFadeMs),
+        label = "queue-shuffle-bg",
+    )
+    val shuffleTint by animateColorAsState(
+        targetValue = when {
+            !availability.canSetShuffle -> fg.copy(alpha = 0.34f)
+            shuffleEnabled -> activeFg
+            else -> fg
+        },
+        animationSpec = tween(toggleFadeMs),
+        label = "queue-shuffle-tint",
+    )
     val repeatLabel = stringResource(
         when (repeatMode) {
             PlaybackRepeatMode.Off -> R.string.player_repeat_off
@@ -1249,8 +1299,13 @@ private fun FolioQueueControlBar(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(CircleShape)
-                    .background(if (repeatActive && availability.canSetRepeat) activeBg else inactiveBg)
-                    .clickable(enabled = availability.canSetRepeat, role = Role.Button, onClick = onCycleRepeat)
+                    .background(repeatBg)
+                    .folioPressable(
+                        enabled = availability.canSetRepeat,
+                        compact = true,
+                        role = Role.Button,
+                        onClick = onCycleRepeat,
+                    )
                     .semantics { selected = repeatActive },
                 contentAlignment = Alignment.Center,
             ) {
@@ -1261,11 +1316,7 @@ private fun FolioQueueControlBar(
                         Icons.Rounded.Repeat
                     },
                     contentDescription = repeatLabel,
-                    tint = when {
-                        !availability.canSetRepeat -> fg.copy(alpha = 0.34f)
-                        repeatActive -> activeFg
-                        else -> fg
-                    },
+                    tint = repeatTint,
                     modifier = Modifier.size(20.dp),
                 )
             }
@@ -1274,19 +1325,20 @@ private fun FolioQueueControlBar(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(CircleShape)
-                    .background(if (shuffleEnabled && availability.canSetShuffle) activeBg else inactiveBg)
-                    .clickable(enabled = availability.canSetShuffle, role = Role.Button, onClick = onToggleShuffle)
+                    .background(shuffleBg)
+                    .folioPressable(
+                        enabled = availability.canSetShuffle,
+                        compact = true,
+                        role = Role.Button,
+                        onClick = onToggleShuffle,
+                    )
                     .semantics { selected = shuffleEnabled },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Shuffle,
                     contentDescription = stringResource(R.string.player_shuffle),
-                    tint = when {
-                        !availability.canSetShuffle -> fg.copy(alpha = 0.34f)
-                        shuffleEnabled -> activeFg
-                        else -> fg
-                    },
+                    tint = shuffleTint,
                     modifier = Modifier.size(20.dp),
                 )
             }
@@ -1312,7 +1364,7 @@ private fun FolioQueueControlBar(
                         Modifier
                     },
                 )
-                .clickable(enabled = availability.canClearQueue, role = Role.Button) {
+                .folioPressable(enabled = availability.canClearQueue, role = Role.Button) {
                     if (!pendingClearConfirm) {
                         pendingClearConfirm = true
                     } else {

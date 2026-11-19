@@ -1,7 +1,18 @@
 package dev.amatv.flyme
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -44,6 +55,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -58,9 +70,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -76,6 +91,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
@@ -86,6 +102,58 @@ import dev.amatv.integration.LyricTextSize
 import dev.amatv.model.Track
 import java.util.Locale
 import kotlin.math.roundToLong
+
+internal class FolioPlayerAnchorCoordsHolder {
+    var translateButtonCoords by mutableStateOf<LayoutCoordinates?>(null)
+    var queueButtonCoords by mutableStateOf<LayoutCoordinates?>(null)
+}
+
+internal val LocalFolioPlayerAnchors = compositionLocalOf<FolioPlayerAnchorCoordsHolder?> { null }
+
+@Composable
+internal fun FolioAnimatedPlayPauseIcon(
+    playWhenReady: Boolean,
+    tint: Color,
+    modifier: Modifier = Modifier,
+) {
+    val reducedMotion = LocalFolioReducedMotion.current
+    val lowPerformance = LocalFolioLowPerformance.current
+    val enterMs = if (reducedMotion) 0 else FolioPlayerMotionTokens.PLAY_ICON_SWITCH_MS
+    val exitMs = if (reducedMotion) 0 else FolioPlayerMotionTokens.PLAY_ICON_SWITCH_OUT_MS
+    val playCd = stringResource(R.string.player_play)
+    val pauseCd = stringResource(R.string.player_pause)
+
+    AnimatedContent(
+        targetState = playWhenReady,
+        transitionSpec = {
+            if (reducedMotion) {
+                EnterTransition.None togetherWith ExitTransition.None
+            } else if (lowPerformance) {
+                fadeIn(tween(enterMs, easing = FolioPlayerMotionTokens.EnterEasing)) togetherWith
+                    fadeOut(tween(exitMs, easing = FolioPlayerMotionTokens.ExitEasing))
+            } else {
+                (fadeIn(tween(enterMs, easing = FolioPlayerMotionTokens.EnterEasing)) +
+                    scaleIn(
+                        initialScale = FolioPlayerMotionTokens.PLAY_ICON_SWITCH_SCALE,
+                        animationSpec = tween(enterMs, easing = FolioPlayerMotionTokens.EnterEasing),
+                    )) togetherWith
+                    (fadeOut(tween(exitMs, easing = FolioPlayerMotionTokens.ExitEasing)) +
+                        scaleOut(
+                            targetScale = FolioPlayerMotionTokens.PLAY_ICON_SWITCH_SCALE,
+                            animationSpec = tween(exitMs, easing = FolioPlayerMotionTokens.ExitEasing),
+                        ))
+            }.using(SizeTransform(clip = false))
+        },
+        label = "play-pause-icon",
+    ) { isPlaying ->
+        Icon(
+            imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+            contentDescription = if (isPlaying) pauseCd else playCd,
+            tint = tint,
+            modifier = modifier,
+        )
+    }
+}
 
 @Composable
 internal fun FolioPlayerHeader(
@@ -169,6 +237,7 @@ internal fun FolioPlayerHeader(
                 border = Color.Transparent,
                 onClick = onClose,
             )
+            val headerGlassLight = headerColors.fg != Color.White
             when {
                 showHeaderTitle -> {
                     Column(
@@ -183,7 +252,9 @@ internal fun FolioPlayerHeader(
                             fontSize = 16.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.clickable(onClick = onOpenAlbum),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .folioPressable(isLight = headerGlassLight, onClick = onOpenAlbum),
                         )
                         FolioExpandedSubtitle(
                             artist = track.artist,
@@ -203,8 +274,9 @@ internal fun FolioPlayerHeader(
                             .weight(1f)
                             .graphicsLayer { alpha = collapsedAlpha }
                             .clip(RoundedCornerShape(10.dp))
-                            .clickable(
+                            .folioPressable(
                                 enabled = !controlsExpanded,
+                                isLight = headerGlassLight,
                                 role = Role.Button,
                                 onClick = onExpandControls,
                             )
@@ -277,7 +349,6 @@ internal fun FolioPlayerHeader(
                 )
             }
 
-            val headerGlassLight = headerColors.fg != Color.White
             val modeCd = stringResource(
                 if (isPosterMode) R.string.folio_player_toggle_lyrics else R.string.folio_player_toggle_poster,
             )
@@ -290,7 +361,13 @@ internal fun FolioPlayerHeader(
                         enabled = isPosterMode,
                     )
                     .clip(CircleShape)
-                    .clickable(enabled = hasTimedLyrics, role = Role.Button, onClick = onTogglePosterMode)
+                    .folioPressable(
+                        enabled = hasTimedLyrics,
+                        compact = true,
+                        isLight = headerGlassLight,
+                        role = Role.Button,
+                        onClick = onTogglePosterMode,
+                    )
                     .semantics { contentDescription = modeCd },
                 contentAlignment = Alignment.Center,
             ) {
@@ -365,12 +442,13 @@ internal fun FolioPlayerAnimatedControlsSlot(
     carControlsWidthDp: Dp = 464.dp,
     onCarControlsHeightPxChanged: (Int) -> Unit = {},
 ) {
-    val ctlAlpha by animateFloatAsState(
+    val lowPerformance = LocalFolioLowPerformance.current
+    val ctlAlphaState = animateFloatAsState(
         targetValue = if (controlsExpanded) 1f else 0f,
         animationSpec = tween(if (reducedMotion) 0 else FolioPlayerMotionTokens.CTL_OPACITY_MS),
         label = "ctl-alpha",
     )
-    val ctlOffsetFactor by animateFloatAsState(
+    val ctlOffsetState = animateFloatAsState(
         targetValue = if (controlsExpanded) 0f else 1f,
         animationSpec = tween(
             durationMillis = if (reducedMotion) 0 else FolioPlayerMotionTokens.CTL_TRANSLATE_MS,
@@ -378,12 +456,12 @@ internal fun FolioPlayerAnimatedControlsSlot(
         ),
         label = "ctl-offset",
     )
-    val pmetaAlpha by animateFloatAsState(
+    val pmetaAlphaState = animateFloatAsState(
         targetValue = if (controlsExpanded) 0f else 1f,
         animationSpec = tween(if (reducedMotion) 0 else FolioPlayerMotionTokens.PMETA_OPACITY_MS),
         label = "pmeta-alpha",
     )
-    val pmetaOffsetFactor by animateFloatAsState(
+    val pmetaOffsetState = animateFloatAsState(
         targetValue = if (controlsExpanded) 1f else 0f,
         animationSpec = tween(
             durationMillis = if (reducedMotion) 0 else FolioPlayerMotionTokens.PMETA_TRANSLATE_MS,
@@ -395,16 +473,19 @@ internal fun FolioPlayerAnimatedControlsSlot(
     val collapsedLayout = resolveCollapsedLayout(tierSpec.tier, displayState)
     Box(modifier = modifier, contentAlignment = contentAlignment) {
         val showPmeta = collapsedLayout != FolioCollapsedLayout.UnderCoverInfo &&
-            (!controlsExpanded || pmetaAlpha > 0.01f)
-        val showCtl = controlsExpanded || ctlAlpha > 0.01f
+            (!controlsExpanded || pmetaAlphaState.value > 0.01f)
+        val showCtl = controlsExpanded || ctlAlphaState.value > 0.01f
 
         val pmetaDeck: @Composable () -> Unit = {
             val animMod = Modifier.graphicsLayer {
-                alpha = pmetaAlpha
-                translationY = 8.dp.toPx() * pmetaOffsetFactor
-                val sc = 1f - 0.02f * pmetaOffsetFactor
-                scaleX = sc
-                scaleY = sc
+                alpha = pmetaAlphaState.value
+                if (!lowPerformance && !reducedMotion) {
+                    val f = pmetaOffsetState.value
+                    translationY = 8.dp.toPx() * f
+                    val sc = 1f - 0.02f * f
+                    scaleX = sc
+                    scaleY = sc
+                }
             }
             when (collapsedLayout) {
                 FolioCollapsedLayout.Capsule -> FolioPlayerCollapsedCapsule(
@@ -480,8 +561,10 @@ internal fun FolioPlayerAnimatedControlsSlot(
                 onOpenAlbum = onOpenAlbum,
                 onOpenArtist = onOpenArtist,
                 modifier = widePlacement.graphicsLayer {
-                    alpha = ctlAlpha
-                    translationY = FolioPlayerMotionTokens.CTL_OFFSET_DP.dp.toPx() * ctlOffsetFactor
+                    alpha = ctlAlphaState.value
+                    if (!lowPerformance && !reducedMotion) {
+                        translationY = FolioPlayerMotionTokens.CTL_OFFSET_DP.dp.toPx() * ctlOffsetState.value
+                    }
                 },
             )
         }
@@ -510,14 +593,18 @@ internal fun FolioCircleGlassPlayButton(
         modifier = modifier
             .size(size)
             .folioPlayerGlass(isLight = isLight, shape = CircleShape)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onTogglePlay),
+            .clip(CircleShape)
+            .folioPressable(
+                enabled = enabled,
+                compact = true,
+                isLight = isLight,
+                role = Role.Button,
+                onClick = onTogglePlay,
+            ),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = if (playWhenReady) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-            contentDescription = stringResource(
-                if (playWhenReady) R.string.player_pause else R.string.player_play,
-            ),
+        FolioAnimatedPlayPauseIcon(
+            playWhenReady = playWhenReady,
             tint = fg,
             modifier = Modifier.size(size * 0.44f),
         )
@@ -669,8 +756,9 @@ internal fun FolioCarUnderCoverCollapsedBar(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(10.dp))
-                    .clickable(
+                    .folioPressable(
                         enabled = interactive,
+                        isLight = isLight,
                         role = Role.Button,
                         onClick = onExpand,
                     )
@@ -818,6 +906,8 @@ internal fun FolioPlayerCollapsedCapsule(
     val expandCd = stringResource(R.string.folio_player_controls_expand)
     val subtitle = formatFolioPlayerSubtitle(track.artist, track.album)
 
+    val expandInteraction = remember { MutableInteractionSource() }
+
     Box(
         modifier = modifier
             .then(
@@ -828,7 +918,13 @@ internal fun FolioPlayerCollapsedCapsule(
                 },
             )
             .height(64.dp)
-            .folioPlayerGlass(isLight = isLight, shape = shape),
+            .folioPlayerGlass(isLight = isLight, shape = shape)
+            .clip(shape)
+            .folioPressFeedback(
+                interactionSource = expandInteraction,
+                enabled = interactive,
+                isLight = isLight,
+            ),
     ) {
         Row(
             modifier = Modifier
@@ -839,13 +935,19 @@ internal fun FolioPlayerCollapsedCapsule(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             // Mirror H5 `.pmeta` (.pc + .ptx) and B1a `FolioMiniPlayerCapsule`: tapping the track
-            // summary region expands the full control deck while Play/Pause stays independent.
+            // summary region expands the full control deck while Play/Pause stays independent and
+            // does not press-scale the outer capsule.
             Row(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .clip(RoundedCornerShape(topStart = 999.dp, bottomStart = 999.dp, topEnd = 16.dp, bottomEnd = 16.dp))
-                    .clickable(enabled = interactive, role = Role.Button, onClick = onExpand)
+                    .clickable(
+                        interactionSource = expandInteraction,
+                        indication = null,
+                        enabled = interactive,
+                        role = Role.Button,
+                        onClick = onExpand,
+                    )
                     .semantics { contentDescription = expandCd }
                     .padding(start = collapsedCapsuleStartPaddingDp(showArtwork), end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -888,14 +990,17 @@ internal fun FolioPlayerCollapsedCapsule(
                     .size(42.dp)
                     .clip(CircleShape)
                     .background(playIconBg)
-                    .clickable(enabled = interactive, role = Role.Button, onClick = onTogglePlay),
+                    .folioPressable(
+                        enabled = interactive,
+                        compact = true,
+                        isLight = !isLight,
+                        role = Role.Button,
+                        onClick = onTogglePlay,
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    imageVector = if (playWhenReady) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                    contentDescription = stringResource(
-                        if (playWhenReady) R.string.player_pause else R.string.player_play,
-                    ),
+                FolioAnimatedPlayPauseIcon(
+                    playWhenReady = playWhenReady,
                     tint = playIconTint,
                     modifier = Modifier.size(22.dp),
                 )
@@ -993,7 +1098,9 @@ internal fun FolioPlayerExpandedControls(
                     fontSize = 20.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.clickable(enabled = playEnabled, onClick = onOpenAlbum),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .folioPressable(enabled = playEnabled, isLight = isLight, onClick = onOpenAlbum),
                 )
                 FolioExpandedSubtitle(
                     artist = track.artist,
@@ -1062,7 +1169,8 @@ internal fun FolioPlayerExpandedControls(
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
                         .size(48.dp)
-                        .clickable(onClick = onOpenAlbum),
+                        .clip(RoundedCornerShape(10.dp))
+                        .folioPressable(isLight = isLight, onClick = onOpenAlbum),
                 )
                 Column(
                     modifier = Modifier.weight(1f),
@@ -1076,7 +1184,9 @@ internal fun FolioPlayerExpandedControls(
                         fontSize = 16.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.clickable(onClick = onOpenAlbum),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .folioPressable(isLight = isLight, onClick = onOpenAlbum),
                     )
                     FolioExpandedSubtitle(
                         artist = track.artist,
@@ -1169,6 +1279,8 @@ private fun TransportRow(
     modifier: Modifier = Modifier,
 ) {
     val fontFamily = LocalFolioFontFamily.current
+    val anchors = LocalFolioPlayerAnchors.current
+    val isPaletteLight = LocalFolioPalette.current.isLight
     val translateCd = stringResource(R.string.player_lyrics_display_settings)
     Row(
         modifier = modifier,
@@ -1182,9 +1294,14 @@ private fun TransportRow(
         Box(
             modifier = Modifier
                 .size(tierSpec.pib)
+                .onPlaced { anchors?.translateButtonCoords = it }
                 .clip(CircleShape)
                 .background(if (lyricsDisplayActive) sideBg else Color.Transparent)
-                .clickable(role = Role.Button, onClick = onOpenLyricsSettings)
+                .folioPressable(
+                    compact = true,
+                    role = Role.Button,
+                    onClick = onOpenLyricsSettings,
+                )
                 .semantics {
                     contentDescription = translateCd
                     selected = lyricsDisplayActive
@@ -1216,14 +1333,17 @@ private fun TransportRow(
                 .size(tierSpec.pp)
                 .clip(CircleShape)
                 .background(playBg)
-                .clickable(enabled = playEnabled, role = Role.Button, onClick = onPlayPause),
+                .folioPressable(
+                    enabled = playEnabled,
+                    compact = true,
+                    isLight = !isPaletteLight,
+                    role = Role.Button,
+                    onClick = onPlayPause,
+                ),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                imageVector = if (playWhenReady) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                contentDescription = stringResource(
-                    if (playWhenReady) R.string.player_pause else R.string.player_play,
-                ),
+            FolioAnimatedPlayPauseIcon(
+                playWhenReady = playWhenReady,
                 tint = playFg,
                 modifier = Modifier.size(tierSpec.pp * 0.48f),
             )
@@ -1248,6 +1368,7 @@ private fun TransportRow(
             bg = if (queueOpen) playBg else sideBg,
             border = Color.Transparent,
             onClick = onToggleQueue,
+            modifier = Modifier.onPlaced { anchors?.queueButtonCoords = it },
         )
     }
 }
@@ -1373,14 +1494,16 @@ private fun PlayerIconPillButton(
     bg: Color,
     border: Color,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     enabled: Boolean = true,
     dimDisabled: Boolean = true,
     useGlass: Boolean = false,
     glassIsLight: Boolean = false,
 ) {
     val alpha = if (enabled || !dimDisabled) 1f else 0.36f
+    val resolvedLight = if (useGlass) glassIsLight else LocalFolioPalette.current.isLight
     Box(
-        modifier = Modifier
+        modifier = modifier
             .size(size)
             .then(
                 if (useGlass) {
@@ -1393,7 +1516,13 @@ private fun PlayerIconPillButton(
                 },
             )
             .clip(CircleShape)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+            .folioPressable(
+                enabled = enabled,
+                compact = true,
+                isLight = resolvedLight,
+                role = Role.Button,
+                onClick = onClick,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
@@ -1458,6 +1587,9 @@ private enum class FolioLyricsLanguagePicker {
 
 @Composable
 internal fun FolioLyricsDisplaySettingsOverlay(
+    open: Boolean,
+    lowPerformance: Boolean,
+    reducedMotion: Boolean,
     tier: FolioTier,
     isLight: Boolean,
     fg: Color,
@@ -1483,6 +1615,28 @@ internal fun FolioLyricsDisplaySettingsOverlay(
     onLyricOffsetChange: (Long) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val transition = updateTransition(targetState = open, label = "lyrics-menu")
+    if (!transition.currentState && !transition.targetState) return
+
+    val progressState = transition.animateFloat(
+        transitionSpec = {
+            if (reducedMotion) {
+                tween(0)
+            } else if (targetState) {
+                tween(
+                    durationMillis = FolioPlayerMotionTokens.MENU_OPEN_MS,
+                    easing = FolioPlayerMotionTokens.EnterEasing,
+                )
+            } else {
+                tween(
+                    durationMillis = FolioPlayerMotionTokens.MENU_CLOSE_MS,
+                    easing = FolioPlayerMotionTokens.ExitEasing,
+                )
+            }
+        },
+        label = "lyrics-menu-progress",
+    ) { if (it) 1f else 0f }
+
     var languagePicker by remember { mutableStateOf<FolioLyricsLanguagePicker?>(null) }
     val fontFamily = LocalFolioFontFamily.current
     val effectiveTranslationTag = translationLanguageTag.ifBlank { appLanguageTag }
@@ -1502,12 +1656,16 @@ internal fun FolioLyricsDisplaySettingsOverlay(
     val pillActiveFg = if (isLight) Color.White else Color(0xFF17151C)
     val pillInactiveBg = if (isLight) Color(0xFF17151C).copy(alpha = 0.10f) else Color.White.copy(alpha = 0.14f)
     val glassBacking = if (isLight) Color.White.copy(alpha = 0.56f) else Color(0xFF16151C).copy(alpha = 0.56f)
+    val anchors = LocalFolioPlayerAnchors.current
+    var anchorOrigin by remember { mutableStateOf(TransformOrigin(0.15f, 1f)) }
 
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
+            .graphicsLayer { alpha = progressState.value }
             .background(Color.Black.copy(alpha = 0.28f))
             .clickable(
+                enabled = open,
                 indication = null,
                 interactionSource = remember { MutableInteractionSource() },
                 onClick = onDismiss,
@@ -1523,12 +1681,43 @@ internal fun FolioLyricsDisplaySettingsOverlay(
                 .align(panelAlignment)
                 .padding(start = 24.dp, bottom = navBottom + 20.dp)
                 .width(min(440.dp, (maxWidth - 48.dp).coerceAtLeast(280.dp)))
+                .onPlaced { panelCoords ->
+                    val btn = anchors?.translateButtonCoords
+                    if (btn != null && btn.isAttached && panelCoords.isAttached) {
+                        val btnPos = panelCoords.localPositionOf(btn, Offset.Zero)
+                        anchorOrigin = computeAnchorTransformOrigin(
+                            anchorCenterX = btnPos.x + btn.size.width * 0.5f,
+                            anchorCenterY = btnPos.y + btn.size.height * 0.5f,
+                            panelWidth = panelCoords.size.width.toFloat(),
+                            panelHeight = panelCoords.size.height.toFloat(),
+                            defaultOrigin = TransformOrigin(0.15f, 1f),
+                        )
+                    }
+                }
+                .graphicsLayer {
+                    val p = progressState.value
+                    alpha = p
+                    if (!lowPerformance && !reducedMotion) {
+                        val s = FolioPlayerMotionTokens.MENU_CLOSED_SCALE +
+                            (1f - FolioPlayerMotionTokens.MENU_CLOSED_SCALE) * p
+                        scaleX = s
+                        scaleY = s
+                        transformOrigin = anchorOrigin
+                    }
+                }
             FolioLyricsSettingsPlacement.BottomSheet -> Modifier
                 .align(panelAlignment)
                 .padding(horizontal = 16.dp, vertical = 12.dp)
                 .padding(bottom = navBottom)
                 .widthIn(max = 520.dp)
                 .fillMaxWidth()
+                .graphicsLayer {
+                    val p = progressState.value
+                    alpha = p
+                    if (!lowPerformance && !reducedMotion) {
+                        translationY = FolioPlayerMotionTokens.MENU_BOTTOM_OFFSET_DP.dp.toPx() * (1f - p)
+                    }
+                }
         }
 
         Column(
@@ -1536,6 +1725,7 @@ internal fun FolioLyricsDisplaySettingsOverlay(
                 .heightIn(max = availableHeight)
                 .folioPlayerGlass(isLight = isLight, shape = sheetShape)
                 .background(glassBacking, sheetShape)
+                .clip(sheetShape)
                 .clickable(
                     indication = null,
                     interactionSource = remember { MutableInteractionSource() },
@@ -1569,9 +1759,12 @@ internal fun FolioLyricsDisplaySettingsOverlay(
                     modifier = Modifier
                         .clip(RoundedCornerShape(16.dp))
                         .background(rowBg)
-                        .clickable(role = Role.Button) {
-                            if (languagePicker != null) languagePicker = null else onDismiss()
-                        }
+                        .folioPressable(
+                            compact = true,
+                            isLight = isLight,
+                            role = Role.Button,
+                            onClick = { if (languagePicker != null) languagePicker = null else onDismiss() },
+                        )
                         .padding(horizontal = 14.dp, vertical = 7.dp),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -1808,7 +2001,7 @@ private fun FolioLyricsToggleRow(
             .fillMaxWidth()
             .clip(shape)
             .background(bg)
-            .clickable(role = Role.Switch, onClick = onClick)
+            .folioPressable(role = Role.Switch, onClick = onClick)
             .semantics { selected = enabled }
             .padding(horizontal = 14.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1868,7 +2061,7 @@ private fun FolioLyricsValueRow(
             .fillMaxWidth()
             .clip(shape)
             .background(bg)
-            .clickable(role = Role.Button, onClick = onClick)
+            .folioPressable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 13.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
@@ -1908,7 +2101,7 @@ private fun FolioLyricsChoiceRow(
             .fillMaxWidth()
             .clip(shape)
             .background(if (selected) selectedBg else normalBg)
-            .clickable(role = Role.RadioButton, onClick = onClick)
+            .folioPressable(role = Role.RadioButton, onClick = onClick)
             .semantics { this.selected = selected }
             .padding(horizontal = 14.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -2031,7 +2224,7 @@ private fun FolioOffsetStepButton(
             .height(34.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(bg.copy(alpha = if (enabled) bg.alpha else bg.alpha * 0.45f))
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+            .folioPressable(enabled = enabled, compact = true, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(
