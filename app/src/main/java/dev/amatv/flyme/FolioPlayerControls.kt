@@ -8,12 +8,15 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -21,13 +24,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PictureInPictureAlt
@@ -61,6 +65,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -73,10 +78,13 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
 import dev.amatv.LocalHostWindow
 import dev.amatv.R
+import dev.amatv.integration.LyricTextSize
 import dev.amatv.model.Track
+import java.util.Locale
 import kotlin.math.roundToLong
 
 @Composable
@@ -107,12 +115,11 @@ internal fun FolioPlayerHeader(
 ) {
     val fontFamily = LocalFolioFontFamily.current
     val pipWindow = LocalHostWindow.current?.takeIf {
-        it.canOpenMini && (
-            it.mini ||
-                tierSpec.tier == FolioTier.Wide ||
-                tierSpec.tier == FolioTier.Ultrawide ||
-                tierSpec.tier == FolioTier.Short
-            )
+        shouldShowMiniWindowButton(
+            canOpenMini = it.canOpenMini,
+            isMiniWindow = it.mini,
+            tier = tierSpec.tier,
+        )
     }
     val collapsedMode = resolveCollapsedHeaderTitleMode(tierSpec.tier, displayState)
     val collapsedAlpha by animateFloatAsState(
@@ -251,32 +258,24 @@ internal fun FolioPlayerHeader(
                 }
             }
 
-            PlayerIconPillButton(
-                icon = if (isInLibrary) Icons.Rounded.Check else Icons.Rounded.Add,
-                contentDescription = stringResource(
-                    if (isInLibrary) R.string.folio_player_in_library else R.string.folio_player_add_library,
-                ),
-                size = tierSpec.pib,
-                iconTint = headerColors.fg,
-                bg = Color.Transparent,
-                border = Color.Transparent,
-                enabled = !libraryInProgress && !isInLibrary,
-                dimDisabled = libraryInProgress,
-                onClick = onToggleLibrary,
-            )
+            if (trackActionLocationForTier(tierSpec.tier) == FolioTrackActionLocation.Header) {
+                AddToLibraryIconButton(
+                    isInLibrary = isInLibrary,
+                    inProgress = libraryInProgress,
+                    size = tierSpec.pib,
+                    iconTint = headerColors.fg,
+                    onClick = onToggleLibrary,
+                )
 
-            PlayerIconPillButton(
-                icon = if (isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
-                contentDescription = stringResource(
-                    if (isFavorite) R.string.player_favorite_remove else R.string.player_favorite_add,
-                ),
-                size = tierSpec.pib,
-                iconTint = if (isFavorite) favoriteAccent else headerColors.fg,
-                bg = Color.Transparent,
-                border = Color.Transparent,
-                enabled = !favoriteInProgress,
-                onClick = onToggleFavorite,
-            )
+                FavoriteIconButton(
+                    isFavorite = isFavorite,
+                    inProgress = favoriteInProgress,
+                    size = tierSpec.pib,
+                    favoriteAccent = favoriteAccent,
+                    defaultTint = headerColors.fg,
+                    onClick = onToggleFavorite,
+                )
+            }
 
             val headerGlassLight = headerColors.fg != Color.White
             val modeCd = stringResource(
@@ -306,17 +305,15 @@ internal fun FolioPlayerHeader(
 
             if (pipWindow != null) {
                 PlayerIconPillButton(
-                    icon = if (pipWindow.mini) Icons.Rounded.Fullscreen else Icons.Rounded.PictureInPictureAlt,
-                    contentDescription = stringResource(
-                        if (pipWindow.mini) R.string.flyme_open_full_screen else R.string.flyme_open_mini_window,
-                    ),
+                    icon = Icons.Rounded.PictureInPictureAlt,
+                    contentDescription = stringResource(R.string.flyme_open_mini_window),
                     size = tierSpec.pib,
                     iconTint = headerColors.fg,
                     bg = headerColors.glassBg,
                     border = headerColors.glassBorder,
                     useGlass = true,
                     glassIsLight = headerGlassLight,
-                    onClick = { pipWindow.switchTo(!pipWindow.mini) },
+                    onClick = { pipWindow.switchTo(true) },
                 )
             }
         }
@@ -339,16 +336,23 @@ internal fun FolioPlayerAnimatedControlsSlot(
     canSeek: Boolean,
     isLiveStream: Boolean,
     playWhenReady: Boolean,
-    translationEnabled: Boolean,
+    lyricsDisplayActive: Boolean,
     queueOpen: Boolean,
     canSkipPrevious: Boolean,
     canSkipNext: Boolean,
+    isFavorite: Boolean,
+    isInLibrary: Boolean,
+    favoriteInProgress: Boolean,
+    libraryInProgress: Boolean,
     isLight: Boolean,
     fg: Color,
     fg2: Color,
+    favoriteAccent: Color,
     onExpandCapsule: () -> Unit,
     onSeekTo: (Long) -> Unit,
-    onToggleTranslation: () -> Unit,
+    onOpenLyricsSettings: () -> Unit,
+    onToggleLibrary: () -> Unit,
+    onToggleFavorite: () -> Unit,
     onPrevious: () -> Unit,
     onPlayPause: () -> Unit,
     onCollapsedPlayPause: () -> Unit,
@@ -451,17 +455,24 @@ internal fun FolioPlayerAnimatedControlsSlot(
                 canSeek = canSeek,
                 isLiveStream = isLiveStream,
                 playWhenReady = playWhenReady,
-                translationEnabled = translationEnabled,
+                lyricsDisplayActive = lyricsDisplayActive,
                 queueOpen = queueOpen,
                 canSkipPrevious = canSkipPrevious,
                 canSkipNext = canSkipNext,
+                isFavorite = isFavorite,
+                isInLibrary = isInLibrary,
+                favoriteInProgress = favoriteInProgress,
+                libraryInProgress = libraryInProgress,
                 isLight = isLight,
                 fg = fg,
                 fg2 = fg2,
+                favoriteAccent = favoriteAccent,
                 playEnabled = controlsExpanded,
                 carControlsWidthDp = carControlsWidthDp,
                 onSeekTo = onSeekTo,
-                onToggleTranslation = onToggleTranslation,
+                onOpenLyricsSettings = onOpenLyricsSettings,
+                onToggleLibrary = onToggleLibrary,
+                onToggleFavorite = onToggleFavorite,
                 onPrevious = onPrevious,
                 onPlayPause = onPlayPause,
                 onNext = onNext,
@@ -929,15 +940,22 @@ internal fun FolioPlayerExpandedControls(
     canSeek: Boolean,
     isLiveStream: Boolean,
     playWhenReady: Boolean,
-    translationEnabled: Boolean,
+    lyricsDisplayActive: Boolean,
     queueOpen: Boolean,
     canSkipPrevious: Boolean,
     canSkipNext: Boolean,
+    isFavorite: Boolean,
+    isInLibrary: Boolean,
+    favoriteInProgress: Boolean,
+    libraryInProgress: Boolean,
     isLight: Boolean,
     fg: Color,
     fg2: Color,
+    favoriteAccent: Color,
     onSeekTo: (Long) -> Unit,
-    onToggleTranslation: () -> Unit,
+    onOpenLyricsSettings: () -> Unit,
+    onToggleLibrary: () -> Unit,
+    onToggleFavorite: () -> Unit,
     onPrevious: () -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
@@ -999,7 +1017,7 @@ internal fun FolioPlayerExpandedControls(
 
             TransportRow(
                 tierSpec = tierSpec,
-                translationEnabled = translationEnabled,
+                lyricsDisplayActive = lyricsDisplayActive,
                 queueOpen = queueOpen,
                 playWhenReady = playWhenReady,
                 canSkipPrevious = canSkipPrevious,
@@ -1009,7 +1027,7 @@ internal fun FolioPlayerExpandedControls(
                 playFg = playFg,
                 sideBg = sideBg,
                 playEnabled = playEnabled,
-                onToggleTranslation = onToggleTranslation,
+                onOpenLyricsSettings = onOpenLyricsSettings,
                 onPrevious = onPrevious,
                 onPlayPause = onPlayPause,
                 onNext = onNext,
@@ -1072,6 +1090,30 @@ internal fun FolioPlayerExpandedControls(
             }
         }
 
+        if (trackActionLocationForTier(tierSpec.tier) == FolioTrackActionLocation.ControlsCard) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AddToLibraryIconButton(
+                    isInLibrary = isInLibrary,
+                    inProgress = libraryInProgress,
+                    size = 40.dp,
+                    iconTint = fg,
+                    onClick = onToggleLibrary,
+                )
+                FavoriteIconButton(
+                    isFavorite = isFavorite,
+                    inProgress = favoriteInProgress,
+                    size = 40.dp,
+                    favoriteAccent = favoriteAccent,
+                    defaultTint = fg,
+                    onClick = onToggleFavorite,
+                )
+            }
+        }
+
         SeekSection(
             positionState = positionState,
             durationMs = durationMs,
@@ -1084,7 +1126,7 @@ internal fun FolioPlayerExpandedControls(
 
         TransportRow(
             tierSpec = tierSpec,
-            translationEnabled = translationEnabled,
+            lyricsDisplayActive = lyricsDisplayActive,
             queueOpen = queueOpen,
             playWhenReady = playWhenReady,
             canSkipPrevious = canSkipPrevious,
@@ -1094,7 +1136,7 @@ internal fun FolioPlayerExpandedControls(
             playFg = playFg,
             sideBg = sideBg,
             playEnabled = playEnabled,
-            onToggleTranslation = onToggleTranslation,
+            onOpenLyricsSettings = onOpenLyricsSettings,
             onPrevious = onPrevious,
             onPlayPause = onPlayPause,
             onNext = onNext,
@@ -1108,7 +1150,7 @@ internal fun FolioPlayerExpandedControls(
 @Composable
 private fun TransportRow(
     tierSpec: FolioPlayerTierSpec,
-    translationEnabled: Boolean,
+    lyricsDisplayActive: Boolean,
     queueOpen: Boolean,
     playWhenReady: Boolean,
     canSkipPrevious: Boolean,
@@ -1118,7 +1160,7 @@ private fun TransportRow(
     playFg: Color,
     sideBg: Color,
     playEnabled: Boolean,
-    onToggleTranslation: () -> Unit,
+    onOpenLyricsSettings: () -> Unit,
     onPrevious: () -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
@@ -1127,7 +1169,7 @@ private fun TransportRow(
     modifier: Modifier = Modifier,
 ) {
     val fontFamily = LocalFolioFontFamily.current
-    val translateCd = stringResource(R.string.folio_player_translate_toggle)
+    val translateCd = stringResource(R.string.player_lyrics_display_settings)
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
@@ -1141,14 +1183,17 @@ private fun TransportRow(
             modifier = Modifier
                 .size(tierSpec.pib)
                 .clip(CircleShape)
-                .background(if (translationEnabled) sideBg else Color.Transparent)
-                .clickable(role = Role.Button, onClick = onToggleTranslation)
-                .semantics { contentDescription = translateCd },
+                .background(if (lyricsDisplayActive) sideBg else Color.Transparent)
+                .clickable(role = Role.Button, onClick = onOpenLyricsSettings)
+                .semantics {
+                    contentDescription = translateCd
+                    selected = lyricsDisplayActive
+                },
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 text = stringResource(R.string.folio_player_translate_short),
-                color = fg.copy(alpha = if (translationEnabled) 1f else 0.45f),
+                color = fg.copy(alpha = if (lyricsDisplayActive) 1f else 0.45f),
                 fontFamily = fontFamily,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 17.sp,
@@ -1357,5 +1402,521 @@ private fun PlayerIconPillButton(
             tint = iconTint.copy(alpha = alpha),
             modifier = Modifier.size(size * 0.46f),
         )
+    }
+}
+
+@Composable
+private fun AddToLibraryIconButton(
+    isInLibrary: Boolean,
+    inProgress: Boolean,
+    size: Dp,
+    iconTint: Color,
+    onClick: () -> Unit,
+) {
+    PlayerIconPillButton(
+        icon = if (isInLibrary) Icons.Rounded.Check else Icons.Rounded.Add,
+        contentDescription = stringResource(
+            if (isInLibrary) R.string.folio_player_in_library else R.string.folio_player_add_library,
+        ),
+        size = size,
+        iconTint = iconTint,
+        bg = Color.Transparent,
+        border = Color.Transparent,
+        enabled = !inProgress && !isInLibrary,
+        dimDisabled = inProgress,
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun FavoriteIconButton(
+    isFavorite: Boolean,
+    inProgress: Boolean,
+    size: Dp,
+    favoriteAccent: Color,
+    defaultTint: Color,
+    onClick: () -> Unit,
+) {
+    PlayerIconPillButton(
+        icon = if (isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+        contentDescription = stringResource(
+            if (isFavorite) R.string.player_favorite_remove else R.string.player_favorite_add,
+        ),
+        size = size,
+        iconTint = if (isFavorite) favoriteAccent else defaultTint,
+        bg = Color.Transparent,
+        border = Color.Transparent,
+        enabled = !inProgress,
+        onClick = onClick,
+    )
+}
+
+private enum class FolioLyricsLanguagePicker {
+    Translation,
+    Pronunciation,
+}
+
+@Composable
+internal fun FolioLyricsDisplaySettingsOverlay(
+    tier: FolioTier,
+    isLight: Boolean,
+    fg: Color,
+    fg2: Color,
+    statusTop: Dp,
+    navBottom: Dp,
+    translationEnabled: Boolean,
+    pronunciationEnabled: Boolean,
+    translationAvailable: Boolean,
+    pronunciationAvailable: Boolean,
+    translationLanguageTag: String,
+    pronunciationLanguageTag: String,
+    appLanguageTag: String,
+    enhancementsReady: Boolean,
+    enhancementsFailed: Boolean,
+    lyricTextSize: LyricTextSize,
+    onTranslationChange: (Boolean) -> Unit,
+    onPronunciationChange: (Boolean) -> Unit,
+    onTranslationLanguageChange: (String) -> Unit,
+    onPronunciationLanguageChange: (String) -> Unit,
+    onLyricTextSizeChange: (LyricTextSize) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var languagePicker by remember { mutableStateOf<FolioLyricsLanguagePicker?>(null) }
+    val fontFamily = LocalFolioFontFamily.current
+    val effectiveTranslationTag = translationLanguageTag.ifBlank { appLanguageTag }
+    val appLocale = remember(appLanguageTag) {
+        Locale.forLanguageTag(appLanguageTag).takeUnless { it.language.isBlank() } ?: Locale.getDefault()
+    }
+    fun languageName(tag: String): String = Locale.forLanguageTag(tag)
+        .getDisplayName(appLocale)
+        .replaceFirstChar { if (it.isLowerCase()) it.titlecase(appLocale) else it.toString() }
+
+    val placement = lyricsSettingsPlacementForTier(tier)
+    val sheetShape = RoundedCornerShape(24.dp)
+    val rowShape = RoundedCornerShape(14.dp)
+    val rowBg = if (isLight) Color(0xFF17151C).copy(alpha = 0.06f) else Color.White.copy(alpha = 0.09f)
+    val rowSelectedBg = if (isLight) Color(0xFF17151C).copy(alpha = 0.14f) else Color.White.copy(alpha = 0.18f)
+    val pillActiveBg = fg
+    val pillActiveFg = if (isLight) Color.White else Color(0xFF17151C)
+    val pillInactiveBg = if (isLight) Color(0xFF17151C).copy(alpha = 0.10f) else Color.White.copy(alpha = 0.14f)
+    val glassBacking = if (isLight) Color.White.copy(alpha = 0.56f) else Color(0xFF16151C).copy(alpha = 0.56f)
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.28f))
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+                onClick = onDismiss,
+            ),
+    ) {
+        val availableHeight = (maxHeight - statusTop - navBottom - 32.dp).coerceAtLeast(220.dp)
+        val panelAlignment = when (placement) {
+            FolioLyricsSettingsPlacement.AnchoredPopover -> Alignment.BottomStart
+            FolioLyricsSettingsPlacement.BottomSheet -> Alignment.BottomCenter
+        }
+        val panelModifier = when (placement) {
+            FolioLyricsSettingsPlacement.AnchoredPopover -> Modifier
+                .align(panelAlignment)
+                .padding(start = 24.dp, bottom = navBottom + 20.dp)
+                .width(min(440.dp, (maxWidth - 48.dp).coerceAtLeast(280.dp)))
+            FolioLyricsSettingsPlacement.BottomSheet -> Modifier
+                .align(panelAlignment)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .padding(bottom = navBottom)
+                .widthIn(max = 520.dp)
+                .fillMaxWidth()
+        }
+
+        Column(
+            modifier = panelModifier
+                .heightIn(max = availableHeight)
+                .folioPlayerGlass(isLight = isLight, shape = sheetShape)
+                .background(glassBacking, sheetShape)
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                    onClick = {},
+                )
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(
+                        when (languagePicker) {
+                            FolioLyricsLanguagePicker.Translation -> R.string.player_lyrics_choose_translation_language
+                            FolioLyricsLanguagePicker.Pronunciation -> R.string.player_lyrics_choose_pronunciation_script
+                            null -> R.string.player_lyrics_display_title
+                        },
+                    ),
+                    color = fg,
+                    fontFamily = fontFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 18.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).padding(end = 12.dp),
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(rowBg)
+                        .clickable(role = Role.Button) {
+                            if (languagePicker != null) languagePicker = null else onDismiss()
+                        }
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(
+                            if (languagePicker == null) R.string.player_lyrics_display_done
+                            else R.string.player_lyrics_language_back,
+                        ),
+                        color = fg,
+                        fontFamily = fontFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                when (languagePicker) {
+                    FolioLyricsLanguagePicker.Translation -> {
+                        FolioTranslationLanguageTags.forEach { tag ->
+                            val effectiveTag = tag.ifBlank { appLanguageTag }
+                            val label = if (tag.isBlank()) {
+                                stringResource(
+                                    R.string.player_lyrics_language_follow_app_format,
+                                    languageName(effectiveTag),
+                                )
+                            } else {
+                                languageName(tag)
+                            }
+                            FolioLyricsChoiceRow(
+                                label = label,
+                                selected = tag == translationLanguageTag,
+                                fg = fg,
+                                selectedBg = rowSelectedBg,
+                                normalBg = rowBg,
+                                shape = rowShape,
+                                onClick = {
+                                    onTranslationLanguageChange(tag)
+                                    languagePicker = null
+                                },
+                            )
+                        }
+                    }
+
+                    FolioLyricsLanguagePicker.Pronunciation -> {
+                        folioPronunciationLanguageTags(appLanguageTag).forEach { tag ->
+                            val label = if (tag == "en-US") {
+                                stringResource(R.string.player_lyrics_pronunciation_latin)
+                            } else {
+                                stringResource(
+                                    R.string.player_lyrics_pronunciation_app_script_format,
+                                    languageName(tag),
+                                )
+                            }
+                            FolioLyricsChoiceRow(
+                                label = label,
+                                selected = tag == pronunciationLanguageTag,
+                                fg = fg,
+                                selectedBg = rowSelectedBg,
+                                normalBg = rowBg,
+                                shape = rowShape,
+                                onClick = {
+                                    onPronunciationLanguageChange(tag)
+                                    languagePicker = null
+                                },
+                            )
+                        }
+                    }
+
+                    null -> {
+                        FolioLyricsValueRow(
+                            title = stringResource(R.string.flyme_lyrics_text_size),
+                            value = stringResource(
+                                when (lyricTextSize) {
+                                    LyricTextSize.Standard -> R.string.flyme_text_standard
+                                    LyricTextSize.Large -> R.string.flyme_text_large
+                                    LyricTextSize.ExtraLarge -> R.string.flyme_text_extra_large
+                                },
+                            ),
+                            fg = fg,
+                            fg2 = fg2,
+                            bg = rowBg,
+                            shape = rowShape,
+                            onClick = { onLyricTextSizeChange(lyricTextSize.next()) },
+                        )
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 2.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = stringResource(R.string.player_lyrics_source_language),
+                                color = fg2,
+                                fontFamily = fontFamily,
+                                fontSize = 13.sp,
+                            )
+                            Text(
+                                text = stringResource(R.string.player_lyrics_source_auto),
+                                color = fg.copy(alpha = 0.85f),
+                                fontFamily = fontFamily,
+                                fontSize = 13.sp,
+                            )
+                        }
+
+                        val translationStatus = resolveLyricsOptionStatus(
+                            optionEnabled = translationEnabled,
+                            optionAvailable = translationAvailable,
+                            enhancementsReady = enhancementsReady,
+                            enhancementsFailed = enhancementsFailed,
+                        )
+                        FolioLyricsToggleRow(
+                            title = stringResource(R.string.player_lyrics_translation),
+                            description = stringResource(
+                                when (translationStatus) {
+                                    FolioLyricsOptionStatus.LoadFailed -> R.string.player_lyrics_enhancement_load_failed
+                                    FolioLyricsOptionStatus.Loading -> R.string.player_lyrics_enhancement_loading
+                                    FolioLyricsOptionStatus.Unavailable -> R.string.player_lyrics_translation_unavailable
+                                    FolioLyricsOptionStatus.Hint -> R.string.player_lyrics_translation_hint
+                                },
+                            ),
+                            enabled = translationEnabled,
+                            fg = fg,
+                            fg2 = fg2,
+                            bg = rowBg,
+                            pillActiveBg = pillActiveBg,
+                            pillActiveFg = pillActiveFg,
+                            pillInactiveBg = pillInactiveBg,
+                            shape = rowShape,
+                            onClick = { onTranslationChange(!translationEnabled) },
+                        )
+
+                        FolioLyricsValueRow(
+                            title = stringResource(R.string.player_lyrics_translate_to),
+                            value = if (translationLanguageTag.isBlank()) {
+                                stringResource(
+                                    R.string.player_lyrics_language_follow_app_format,
+                                    languageName(effectiveTranslationTag),
+                                )
+                            } else {
+                                languageName(effectiveTranslationTag)
+                            },
+                            fg = fg,
+                            fg2 = fg2,
+                            bg = rowBg,
+                            shape = rowShape,
+                            onClick = { languagePicker = FolioLyricsLanguagePicker.Translation },
+                        )
+
+                        val pronunciationStatus = resolveLyricsOptionStatus(
+                            optionEnabled = pronunciationEnabled,
+                            optionAvailable = pronunciationAvailable,
+                            enhancementsReady = enhancementsReady,
+                            enhancementsFailed = enhancementsFailed,
+                        )
+                        FolioLyricsToggleRow(
+                            title = stringResource(R.string.player_lyrics_pronunciation),
+                            description = stringResource(
+                                when (pronunciationStatus) {
+                                    FolioLyricsOptionStatus.LoadFailed -> R.string.player_lyrics_enhancement_load_failed
+                                    FolioLyricsOptionStatus.Loading -> R.string.player_lyrics_enhancement_loading
+                                    FolioLyricsOptionStatus.Unavailable -> R.string.player_lyrics_pronunciation_unavailable
+                                    FolioLyricsOptionStatus.Hint -> R.string.player_lyrics_pronunciation_hint
+                                },
+                            ),
+                            enabled = pronunciationEnabled,
+                            fg = fg,
+                            fg2 = fg2,
+                            bg = rowBg,
+                            pillActiveBg = pillActiveBg,
+                            pillActiveFg = pillActiveFg,
+                            pillInactiveBg = pillInactiveBg,
+                            shape = rowShape,
+                            onClick = { onPronunciationChange(!pronunciationEnabled) },
+                        )
+
+                        FolioLyricsValueRow(
+                            title = stringResource(R.string.player_lyrics_pronunciation_script),
+                            value = if (pronunciationLanguageTag == "en-US") {
+                                stringResource(R.string.player_lyrics_pronunciation_latin)
+                            } else {
+                                stringResource(
+                                    R.string.player_lyrics_pronunciation_app_script_format,
+                                    languageName(pronunciationLanguageTag),
+                                )
+                            },
+                            fg = fg,
+                            fg2 = fg2,
+                            bg = rowBg,
+                            shape = rowShape,
+                            onClick = { languagePicker = FolioLyricsLanguagePicker.Pronunciation },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FolioLyricsToggleRow(
+    title: String,
+    description: String,
+    enabled: Boolean,
+    fg: Color,
+    fg2: Color,
+    bg: Color,
+    pillActiveBg: Color,
+    pillActiveFg: Color,
+    pillInactiveBg: Color,
+    shape: Shape,
+    onClick: () -> Unit,
+) {
+    val fontFamily = LocalFolioFontFamily.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(bg)
+            .clickable(role = Role.Switch, onClick = onClick)
+            .semantics { selected = enabled }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = title,
+                color = fg,
+                fontFamily = fontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = 15.sp,
+            )
+            Text(
+                text = description,
+                color = fg2,
+                fontFamily = fontFamily,
+                fontSize = 12.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .padding(start = 12.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (enabled) pillActiveBg else pillInactiveBg)
+                .padding(horizontal = 12.dp, vertical = 5.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = stringResource(
+                    if (enabled) R.string.player_lyrics_display_on else R.string.player_lyrics_display_off,
+                ),
+                color = if (enabled) pillActiveFg else fg.copy(alpha = 0.72f),
+                fontFamily = fontFamily,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 12.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun FolioLyricsValueRow(
+    title: String,
+    value: String,
+    fg: Color,
+    fg2: Color,
+    bg: Color,
+    shape: Shape,
+    onClick: () -> Unit,
+) {
+    val fontFamily = LocalFolioFontFamily.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(bg)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 13.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            color = fg,
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = 15.sp,
+        )
+        Text(
+            text = value,
+            color = fg2,
+            fontFamily = fontFamily,
+            fontSize = 13.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 16.dp),
+        )
+    }
+}
+
+@Composable
+private fun FolioLyricsChoiceRow(
+    label: String,
+    selected: Boolean,
+    fg: Color,
+    selectedBg: Color,
+    normalBg: Color,
+    shape: Shape,
+    onClick: () -> Unit,
+) {
+    val fontFamily = LocalFolioFontFamily.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(if (selected) selectedBg else normalBg)
+            .clickable(role = Role.RadioButton, onClick = onClick)
+            .semantics { this.selected = selected }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            color = fg,
+            fontFamily = fontFamily,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            fontSize = 14.sp,
+            modifier = Modifier.weight(1f),
+        )
+        if (selected) {
+            Icon(
+                imageVector = Icons.Rounded.Check,
+                contentDescription = null,
+                tint = fg,
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
 }

@@ -14,6 +14,7 @@ import dev.amatv.core.LyricBackgroundStyle
 import dev.amatv.core.LyricsLoadPhase
 import dev.amatv.core.LyricsState
 import dev.amatv.core.PlaybackState
+import dev.amatv.integration.LyricTextSize
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.LyricAgentType
 import dev.amatv.model.LyricLine
@@ -451,6 +452,94 @@ fun showHeaderTitle(
 
 fun showCardMeta(tier: FolioTier): Boolean = tier != FolioTier.Narrow
 
+enum class FolioTrackActionLocation {
+    Header,
+    ControlsCard,
+}
+
+/** Narrow (`c`) moves Add/Favorite out of the top bar into the expanded controls card. */
+fun trackActionLocationForTier(tier: FolioTier): FolioTrackActionLocation =
+    if (tier == FolioTier.Narrow) FolioTrackActionLocation.ControlsCard else FolioTrackActionLocation.Header
+
+fun canSupportMiniWindow(
+    hasFlymeWindowMode: Boolean,
+    isUiPreview: Boolean,
+): Boolean = hasFlymeWindowMode || isUiPreview
+
+fun shouldShowMiniWindowButton(
+    canOpenMini: Boolean,
+    isMiniWindow: Boolean,
+    tier: FolioTier,
+): Boolean = canOpenMini && !isMiniWindow && (
+    tier == FolioTier.Wide ||
+        tier == FolioTier.Ultrawide ||
+        tier == FolioTier.Short
+    )
+
+enum class FolioLyricsOptionStatus {
+    Hint,
+    Unavailable,
+    Loading,
+    LoadFailed,
+}
+
+enum class FolioLyricsSettingsPlacement {
+    AnchoredPopover,
+    BottomSheet,
+}
+
+val FolioTranslationLanguageTags: List<String> = listOf(
+    "", "zh-TW", "zh-CN", "en-US", "ja-JP", "ko-KR", "es-ES", "fr-FR", "de-DE",
+)
+
+fun folioPronunciationLanguageTags(appLanguageTag: String): List<String> =
+    listOf("en-US", appLanguageTag).distinct()
+
+fun isLyricDisplayActive(
+    translationEnabled: Boolean,
+    pronunciationEnabled: Boolean,
+): Boolean = translationEnabled || pronunciationEnabled
+
+fun lyricTranslationAvailable(
+    lines: List<LyricLine>,
+    enhancementsReady: Boolean,
+): Boolean = enhancementsReady && lines.any {
+    !it.translation.isNullOrBlank() || !it.backgroundTranslation.isNullOrBlank()
+}
+
+fun lyricPronunciationAvailable(
+    lines: List<LyricLine>,
+    enhancementsReady: Boolean,
+): Boolean = enhancementsReady && lines.any { line ->
+    !line.pronunciationText.isNullOrBlank() || !line.backgroundPronunciationText.isNullOrBlank() ||
+        line.words.any { !it.pronunciationText.isNullOrBlank() } ||
+        line.backgroundWords.any { !it.pronunciationText.isNullOrBlank() }
+}
+
+fun resolveLyricsOptionStatus(
+    optionEnabled: Boolean,
+    optionAvailable: Boolean,
+    enhancementsReady: Boolean,
+    enhancementsFailed: Boolean,
+): FolioLyricsOptionStatus = when {
+    optionEnabled && enhancementsFailed -> FolioLyricsOptionStatus.LoadFailed
+    optionEnabled && !enhancementsReady -> FolioLyricsOptionStatus.Loading
+    optionEnabled && !optionAvailable -> FolioLyricsOptionStatus.Unavailable
+    else -> FolioLyricsOptionStatus.Hint
+}
+
+fun lyricsSettingsPlacementForTier(tier: FolioTier): FolioLyricsSettingsPlacement =
+    if (tier == FolioTier.Wide || tier == FolioTier.Ultrawide) {
+        FolioLyricsSettingsPlacement.AnchoredPopover
+    } else {
+        FolioLyricsSettingsPlacement.BottomSheet
+    }
+
+fun folioLyricsTextScaleMultiplier(
+    selected: LyricTextSize,
+    defaultSize: LyricTextSize,
+): Float = (selected.scale / defaultSize.scale).coerceIn(0.75f, 1.5f)
+
 /** Soak displays the left artwork column on `m/t/e/u` even when a track has no lyrics. */
 fun showSoakArtworkStage(
     tier: FolioTier,
@@ -566,6 +655,13 @@ fun buildFolioQueueSnapshot(
 
 fun posterLeadText(line: LyricLine): String =
     renderLyricWords(line.words, line.joinWithSpaces).trim()
+
+fun posterPronunciationText(line: LyricLine): String {
+    val linePron = line.pronunciationText?.trim().orEmpty()
+    if (linePron.isNotEmpty()) return linePron
+    return line.words.mapNotNull { it.pronunciationText?.trim()?.takeIf(String::isNotEmpty) }
+        .joinToString(" ")
+}
 
 fun posterBackingText(line: LyricLine): String {
     val raw = renderLyricWords(line.backgroundWords, line.joinWithSpaces).trim()
@@ -948,6 +1044,29 @@ fun posterRoleScale(
         PosterLyricRole.EnteringBelow -> typo.nextSp / safeMain
     }
 }
+
+/**
+ * Unscaled layout width for a Poster role so scaling by [scale] fits [panelWidthPx] without
+ * wrapping early at the large Focus font size.
+ */
+fun computePosterRoleLayoutWidthPx(
+    panelWidthPx: Int,
+    scale: Float,
+): Int {
+    val safePanelWidth = panelWidthPx.coerceAtLeast(1)
+    val safeScale = scale.coerceIn(0.1f, 4f)
+    return (safePanelWidth / safeScale).roundToInt().coerceAtLeast(1)
+}
+
+/**
+ * Keeps the narrower width between source and target roles during a roll transition so the line
+ * neither overflows horizontally while zooming nor reflows mid-flight, re-wrapping only once settled.
+ */
+fun resolvePosterTransitionLayoutWidthPx(
+    currentWidthPx: Int,
+    targetWidthPx: Int,
+    isTransitioning: Boolean,
+): Int = if (isTransitioning) minOf(currentWidthPx, targetWidthPx) else targetWidthPx
 
 fun posterRoleAlpha(
     role: PosterLyricRole,
