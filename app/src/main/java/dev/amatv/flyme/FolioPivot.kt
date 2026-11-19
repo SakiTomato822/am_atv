@@ -1,7 +1,5 @@
 package dev.amatv.flyme
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -123,12 +121,9 @@ internal fun FolioPivotBar(
                     val lowAlpha = tabAlphaForPage(index, lower)
                     val highAlpha = tabAlphaForPage(index, upper)
                     val tabAlpha = lowAlpha + (highAlpha - lowAlpha) * fraction
-                    val interaction = remember { MutableInteractionSource() }
                     Box(
                         modifier = Modifier
-                            .clickable(
-                                interactionSource = interaction,
-                                indication = null,
+                            .folioBrowsePressable(
                                 role = Role.Tab,
                                 onClick = { onSelectPage(index) },
                             )
