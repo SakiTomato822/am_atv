@@ -179,6 +179,8 @@ data class LyricLine(
     val songwriters: List<String> = emptyList(),
     /** Stable Apple `itunes:key` used only to attach localized text to the canonical line. */
     val sourceKey: String? = null,
+    /** Type declared for this line's TTML agent. */
+    val agentType: LyricAgentType = LyricAgentType.None,
 ) {
     val startMs: Long = lineStartMs
             ?: words.firstOrNull()?.startMs

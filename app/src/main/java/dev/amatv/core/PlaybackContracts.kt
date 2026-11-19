@@ -21,7 +21,7 @@ interface PlayerOperations : RecommendationProvider {
     fun seekTo(positionMs: Long)
     fun skipToNext()
     fun skipToPrevious()
-    fun skipToQueuedLookahead(catalogId: String): Boolean
+    suspend fun playQueuedSong(track: Track): Long?
     fun setLookahead(next: Track?)
     fun setFadeEnabled(enabled: Boolean)
     suspend fun stationSongs(stationId: String): List<Track>

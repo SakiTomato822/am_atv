@@ -385,7 +385,9 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
     override fun setFadeEnabled(enabled: Boolean) { bridge.fadeEnabled = enabled }
     /** A station's next songs, to play it on the native player without Widevine. */
     override suspend fun stationSongs(stationId: String): List<Track> = api.stationNextTracks(stationId)
-    override fun skipToQueuedLookahead(catalogId: String): Boolean = !stationEngineActive && bridge.skipToQueuedLookahead(catalogId)
+    override suspend fun playQueuedSong(track: Track): Long? = playbackPreparation.withLock {
+        if (stationEngineActive) null else bridge.playQueuedSong(track)
+    }
     // The app queue owns repeat, shuffle and autoplay. Each native queue contains
     // one selected track, so enabling a second queue engine would race the app.
     fun playbackSnapshot(): PlaybackSnapshot? =

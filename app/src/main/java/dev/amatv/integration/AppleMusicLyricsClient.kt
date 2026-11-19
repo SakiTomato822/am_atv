@@ -512,6 +512,7 @@ internal object AppleTtmlParser {
                 parseLine(
                     paragraph = paragraph,
                     declaredTiming = declaredTiming,
+                    agents = agents,
                     primaryPersonAgentId = primaryPersonAgentId,
                     isMultiAgentSong = isMultiAgentSong,
                     songwriters = songwriters,
@@ -541,6 +542,7 @@ internal object AppleTtmlParser {
     private fun parseLine(
         paragraph: Element,
         declaredTiming: LyricTiming?,
+        agents: Map<String, LyricAgentType>,
         primaryPersonAgentId: String?,
         isMultiAgentSong: Boolean,
         songwriters: List<String>,
@@ -552,6 +554,7 @@ internal object AppleTtmlParser {
         val lineEnd = paragraph.time("end")
         val lineKey = paragraph.lineKey()
         val agentId = paragraph.resolveAgentId()
+        val agentType = agents[agentId] ?: LyricAgentType.None
         val isOppositeAgent = !agentId.isNullOrBlank() &&
             primaryPersonAgentId != null &&
             agentId != primaryPersonAgentId
@@ -705,6 +708,7 @@ internal object AppleTtmlParser {
                 lineStartMs = lineStart,
                 lineEndMs = lineEnd,
                 agentId = agentId,
+                agentType = agentType,
                 isOppositeAgent = isOppositeAgent,
                 isMultiAgentSong = isMultiAgentSong,
                 timing = if (isStaticLine) LyricTiming.None else LyricTiming.Line,
@@ -733,6 +737,7 @@ internal object AppleTtmlParser {
             lineStartMs = lineStart,
             lineEndMs = lineEnd,
             agentId = agentId,
+            agentType = agentType,
             isOppositeAgent = isOppositeAgent,
             isMultiAgentSong = isMultiAgentSong,
             timing = effectiveTiming,

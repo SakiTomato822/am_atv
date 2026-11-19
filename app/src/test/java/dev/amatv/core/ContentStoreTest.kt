@@ -3,9 +3,14 @@ package dev.amatv.core
 import dev.amatv.integration.LibraryCollection
 import dev.amatv.integration.LibraryPage
 import dev.amatv.integration.MusicConnectionState
+import dev.amatv.model.CatalogKind
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.Destination
 import dev.amatv.model.Track
+import dev.amatv.ui.LibrarySort
+import dev.amatv.ui.sortLibrary
+import java.text.Collator
+import java.util.Locale
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +36,7 @@ class ContentStoreTest {
         var libraryRequestCount = 0
         var clearDetailPagesCalled = false
         var savedSnapshotCalls = mutableListOf<Triple<String, String, List<ContentShelf>>>()
+        var beforeSaveShelves: suspend (String) -> Unit = {}
 
         var recommendationShelvesHandler: suspend () -> List<ContentShelf> = { emptyList() }
         var recentlyPlayedTracksHandler: suspend () -> List<Track> = { emptyList() }
@@ -56,6 +62,7 @@ class ContentStoreTest {
             savedShelvesMap["$name:$languageTag"] ?: savedShelvesMap[name]
 
         override suspend fun saveShelves(name: String, languageTag: String, shelves: List<ContentShelf>) {
+            beforeSaveShelves(name)
             savedSnapshotCalls.add(Triple(name, languageTag, shelves))
             savedShelvesMap["$name:$languageTag"] = shelves
         }
@@ -126,8 +133,150 @@ class ContentStoreTest {
 
     private fun testScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
 
+    private fun libraryAlbum(id: String, title: String, dateAddedMs: Long) = testTrack(id, title).copy(
+        catalogKind = CatalogKind.Album,
+        resourceType = LibraryCollection.Albums.resourceType,
+        resourceId = id,
+        dateAddedMs = dateAddedMs,
+    )
+
     private fun testStore(ops: ContentOperations, scope: CoroutineScope, elapsedRealtimeMs: () -> Long = { 0L }) =
         ContentStore(ops, scope, Dispatchers.Unconfined, elapsedRealtimeMs)
+
+    @Test
+    fun signedInStartupRefreshesLibraryOnceAfterHomeWithoutOpeningLibrary() = runBlocking {
+        val scope = testScope()
+        try {
+            val homeGate = CompletableDeferred<Unit>()
+            val home = ContentShelf("for-you", "For You", listOf(testTrack("home")))
+            val latest = libraryAlbum("latest", "petal", 4L)
+            val ops = FakeContentOperations().apply {
+                recommendationShelvesHandler = {
+                    homeGate.await()
+                    listOf(home)
+                }
+                recentlyAddedHandler = { listOf(latest) }
+            }
+            val store = testStore(ops, scope)
+
+            store.startSignedInContent(MusicConnectionState.SignedIn, "en-US")
+            store.loadDestination(Destination.Home, MusicConnectionState.SignedIn, 0, "en-US")
+            assertEquals(1, ops.recommendationShelvesCallCount)
+            assertEquals(1, ops.libraryRequestCount) // Only Home's recently played request.
+            assertTrue(store.state.value.isLoading(Destination.Home))
+
+            homeGate.complete(Unit)
+            assertEquals(listOf(home), store.state.value.shelvesFor(Destination.Home))
+            assertEquals(7, ops.libraryRequestCount)
+            assertEquals(listOf(latest), store.state.value.shelvesFor(Destination.Library)
+                .single { it.id == "lib-albums" }.items)
+            assertFalse(store.state.value.isLoading(Destination.Library))
+
+            store.startSignedInContent(MusicConnectionState.SignedIn, "en-US")
+            store.loadDestination(Destination.Library, MusicConnectionState.SignedIn, 0, "en-US")
+            assertEquals(7, ops.libraryRequestCount)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun openingLibraryReusesQueuedAndRunningStartupRefreshAcrossNavigation() = runBlocking {
+        val scope = testScope()
+        try {
+            val homeGate = CompletableDeferred<Unit>()
+            val libraryGate = CompletableDeferred<Unit>()
+            val ops = FakeContentOperations().apply {
+                recommendationShelvesHandler = {
+                    homeGate.await()
+                    listOf(ContentShelf("for-you", "For You", listOf(testTrack("home"))))
+                }
+                recentlyAddedHandler = {
+                    libraryGate.await()
+                    listOf(libraryAlbum("latest", "petal", 4L))
+                }
+            }
+            val store = testStore(ops, scope)
+            fun open(destination: Destination) = store.loadDestination(destination, MusicConnectionState.SignedIn, 0, "en-US")
+
+            store.startSignedInContent(MusicConnectionState.SignedIn, "en-US")
+            open(Destination.Library)
+            assertEquals(1, ops.libraryRequestCount)
+
+            homeGate.complete(Unit)
+            assertTrue(store.state.value.isLoading(Destination.Library))
+            assertEquals(7, ops.libraryRequestCount)
+
+            open(Destination.Browse)
+            open(Destination.Library)
+            assertTrue(store.state.value.isLoading(Destination.Library))
+            assertEquals(7, ops.libraryRequestCount)
+
+            libraryGate.complete(Unit)
+            assertFalse(store.state.value.isLoading(Destination.Library))
+            assertTrue(store.state.value.shelvesFor(Destination.Library).any { it.id == "lib-albums" })
+            assertEquals(7, ops.libraryRequestCount)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun librarySnapshotsAreSavedInPublicationOrderWithoutBlockingRefresh() = runBlocking {
+        val scope = testScope()
+        try {
+            val pageGate = CompletableDeferred<Unit>()
+            val snapshotGate = CompletableDeferred<Unit>()
+            val old = libraryAlbum("old", "Aardvark", 1L)
+            val latest = libraryAlbum("latest", "petal", 4L)
+            val ops = FakeContentOperations().apply {
+                savedShelvesMap["Library"] = listOf(ContentShelf("lib-albums", "Albums", listOf(old)))
+                recentlyAddedHandler = { listOf(latest) }
+                libraryAlbumsPageHandler = {
+                    pageGate.await()
+                    LibraryPage(listOf(old), null, "albums-first")
+                }
+                beforeSaveShelves = { snapshotGate.await() }
+            }
+            val store = testStore(ops, scope)
+
+            store.loadDestination(Destination.Library, MusicConnectionState.SignedIn, 0, "en-US")
+            val merged = store.state.value.shelvesFor(Destination.Library)
+            assertEquals(listOf(latest, old), merged.single().items)
+            assertTrue(store.state.value.isLoading(Destination.Library))
+
+            pageGate.complete(Unit)
+            val refreshed = store.state.value.shelvesFor(Destination.Library)
+            assertFalse(store.state.value.isLoading(Destination.Library))
+            assertTrue(ops.savedSnapshotCalls.isEmpty())
+
+            snapshotGate.complete(Unit)
+            assertEquals(listOf(Triple("Library", "en-US", merged), Triple("Library", "en-US", refreshed)),
+                ops.savedSnapshotCalls)
+            assertEquals(refreshed, ops.savedShelvesMap["Library:en-US"])
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun signedOutStartupDoesNotRefreshLibrary() = runBlocking {
+        val scope = testScope()
+        try {
+            val ops = FakeContentOperations()
+            val store = testStore(ops, scope)
+
+            store.startSignedInContent(MusicConnectionState.ReadyToSignIn, "en-US")
+            store.loadDestination(Destination.Library, MusicConnectionState.ReadyToSignIn, 0, "en-US")
+
+            assertEquals(0, ops.libraryRequestCount)
+            assertEquals(0, ops.recommendationShelvesCallCount)
+            assertFalse(store.state.value.isLoading(Destination.Library))
+            assertTrue(ops.savedSnapshotCalls.isEmpty())
+        } finally {
+            scope.cancel()
+        }
+    }
 
     @Test
     fun switchingDestinationsDoesNotReloadExistingContent() = runBlocking {
@@ -187,6 +336,95 @@ class ContentStoreTest {
             assertFalse(store.state.value.isLoading(Destination.Library))
             assertTrue(store.state.value.shelvesFor(Destination.Library).any { it.id == "lib-recently-added" })
             assertTrue(store.state.value.shelvesFor(Destination.Library).none { it.id == "snap-1" })
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun recentAlbumsReplaceTheSnapshotHeadBeforeLibraryFirstPagesFinish() = runBlocking {
+        val scope = testScope()
+        try {
+            val recentGate = CompletableDeferred<Unit>()
+            val firstPageGate = CompletableDeferred<Unit>()
+            val old = libraryAlbum("old", "Aardvark", 1L)
+            val latest = libraryAlbum("latest", "petal", 4L)
+            val other = libraryAlbum("other", "Bee", 3L)
+            val continuation = libraryAlbum("continuation", "Aster", 2L)
+            val requests = mutableListOf<String?>()
+            val ops = FakeContentOperations().apply {
+                savedShelvesMap["Library"] = listOf(ContentShelf("lib-albums", "Albums", listOf(old)))
+                recentlyAddedHandler = {
+                    recentGate.await()
+                    listOf(other, testTrack("playlist").copy(resourceType = "library-playlists"), latest)
+                }
+                libraryAlbumsPageHandler = { page ->
+                    requests += page
+                    when (page) {
+                        null -> {
+                            firstPageGate.await()
+                            LibraryPage(listOf(old, other), "albums-next", "albums-first")
+                        }
+                        "albums-next" -> LibraryPage(listOf(continuation, latest.copy(id = "relinked")), null, page)
+                        else -> error("Unexpected page $page")
+                    }
+                }
+            }
+            val store = testStore(ops, scope)
+            val collator = Collator.getInstance(Locale.US)
+            fun sortedAlbums(sort: LibrarySort) = sortLibrary(
+                store.state.value.shelvesFor(Destination.Library).single { it.id == "lib-albums" }.items,
+                sort, sort.descendingFirst, collator,
+            )
+
+            store.loadDestination(Destination.Library, MusicConnectionState.SignedIn, 0, "en-US")
+            assertEquals(listOf(old), sortedAlbums(LibrarySort.DateAdded))
+            recentGate.complete(Unit)
+
+            assertTrue(store.state.value.isLoading(Destination.Library))
+            assertEquals(listOf(latest, other, old), sortedAlbums(LibrarySort.DateAdded))
+            assertEquals(listOf<String?>(null), requests)
+
+            firstPageGate.complete(Unit)
+            assertEquals(listOf(latest, other, old), sortedAlbums(LibrarySort.DateAdded))
+            assertEquals("albums-next", store.state.value.libraryNextPages["lib-albums"])
+            store.loadMoreLibraryShelf("lib-albums", MusicConnectionState.SignedIn)
+
+            assertEquals(listOf(null, "albums-next"), requests)
+            assertEquals(listOf(latest, other, continuation, old), sortedAlbums(LibrarySort.DateAdded))
+            assertEquals(listOf(old, continuation, other, latest), sortedAlbums(LibrarySort.Name))
+            assertEquals(listOf(old, continuation, other, latest), sortedAlbums(LibrarySort.Artist))
+            assertNull(store.state.value.libraryNextPages["lib-albums"])
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun recentAlbumsSurviveAnAlbumFirstPageFailureAndRetryWithoutASnapshot() = runBlocking {
+        val scope = testScope()
+        try {
+            val latest = libraryAlbum("latest", "petal", 4L)
+            val old = libraryAlbum("old", "Aardvark", 1L)
+            val ops = FakeContentOperations().apply {
+                recentlyAddedHandler = { listOf(latest) }
+                libraryAlbumsPageHandler = { error("Albums unavailable") }
+            }
+            val store = testStore(ops, scope)
+            fun albumItems() = store.state.value.shelvesFor(Destination.Library).single { it.id == "lib-albums" }.items
+
+            store.loadDestination(Destination.Library, MusicConnectionState.SignedIn, 0, "en-US")
+            assertEquals(listOf(latest), albumItems())
+            assertTrue("lib-albums" in store.state.value.libraryFailedShelves)
+
+            ops.libraryAlbumsPageHandler = { page ->
+                assertNull(page)
+                LibraryPage(listOf(old, latest), null, "albums-first")
+            }
+            store.loadMoreLibraryShelf("lib-albums", MusicConnectionState.SignedIn)
+
+            assertEquals(listOf(latest, old), albumItems())
+            assertFalse("lib-albums" in store.state.value.libraryFailedShelves)
         } finally {
             scope.cancel()
         }

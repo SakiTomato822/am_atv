@@ -16,7 +16,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -28,6 +27,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 private const val LIBRARY_REFRESH_INTERVAL_MS = 10 * 60 * 1000L
@@ -117,14 +118,21 @@ class ContentStore(
     private val _messages = MutableSharedFlow<String?>(extraBufferCapacity = 16)
     val messages: SharedFlow<String?> = _messages.asSharedFlow()
 
-    private val shelfLoads = ShelfLoads(coroutineScope)
-    private var shelvesLanguageTag: String? = null
+    private data class LoadInputs(
+        val connectionState: MusicConnectionState,
+        val reloadGeneration: Int,
+        val languageTag: String,
+    )
+
+    private var loadInputs: LoadInputs? = null
+    private var activeDestination = Destination.Home
+    private var startupRefreshScheduled = false
+    private val shelfJobs = mutableMapOf<Destination, Job>()
+    private val librarySnapshotWrites = Mutex()
     private var lastLibraryRefreshMs: Long? = null
     private var libraryVisitedPages: Map<String, Set<String>> = emptyMap()
     private var libraryPagingGeneration: Long = 0L
     private val libraryPageJobs = mutableMapOf<String, Job>()
-    private var loadJob: Job? = null
-    private var loadKey: List<Any?>? = null
     private var searchJob: Job? = null
 
     fun resetLibraryPagination() {
@@ -188,7 +196,15 @@ class ContentStore(
                 val latest = _state.value
                 val shelves = latest.shelvesByDestination[Destination.Library].orEmpty().map { shelf ->
                     if (shelf.id != shelfId) shelf
-                    else shelf.copy(items = if (nextPage == null) page.items else mergeLibraryPage(shelf.items, page.items))
+                    else shelf.copy(items = when {
+                        nextPage != null -> mergeLibraryPage(shelf.items, page.items)
+                        shelfId == "lib-albums" -> mergeLibraryPage(
+                            latest.shelvesFor(Destination.Library).firstOrNull { it.id == "lib-recently-added" }
+                                ?.items.orEmpty().recentLibraryAlbums(),
+                            page.items,
+                        )
+                        else -> page.items
+                    })
                 }
                 _state.value = latest.copy(
                     shelvesByDestination = latest.shelvesByDestination + (Destination.Library to shelves),
@@ -219,14 +235,30 @@ class ContentStore(
     private suspend fun loadLibraryPlaylistsPage(nextPage: String? = null): LibraryPage =
         operations.libraryPlaylistsPage(nextPage ?: LibraryCollection.Playlists.request.firstPage)
 
-    private fun invalidateLibraryRefresh() {
+    private fun List<Track>.recentLibraryAlbums(): List<Track> =
+        filter { it.resourceType == LibraryCollection.Albums.resourceType }
+
+    private fun publishRecentLibraryAlbums(albums: List<Track>) {
+        val current = _state.value
+        val shelves = current.shelvesFor(Destination.Library)
+        val existing = shelves.firstOrNull { it.id == "lib-albums" }
+        val updated = existing?.copy(items = mergeLibraryPage(albums, existing.items))
+            ?: ContentShelf("lib-albums", AppText.text(R.string.app_library_albums), albums)
+        _state.value = current.copy(
+            shelvesByDestination = current.shelvesByDestination + (Destination.Library to
+                if (existing == null) shelves + updated else shelves.map { if (it.id == updated.id) updated else it }),
+        )
+    }
+
+    private fun cancelShelfLoads() {
+        shelfJobs.values.forEach(Job::cancel)
+        shelfJobs.clear()
         lastLibraryRefreshMs = null
-        if (loadKey?.first() == Destination.Library) loadJob?.cancel()
     }
 
     fun refreshAll(current: Destination) {
         operations.clearDetailPages()
-        invalidateLibraryRefresh()
+        cancelShelfLoads()
         resetLibraryPagination()
         _state.value = _state.value.copy(
             shelvesByDestination = emptyMap(),
@@ -237,7 +269,7 @@ class ContentStore(
     }
 
     fun onSignedIn() {
-        invalidateLibraryRefresh()
+        cancelShelfLoads()
         resetLibraryPagination()
         _state.value = _state.value.copy(
             shelvesByDestination = emptyMap(),
@@ -247,12 +279,24 @@ class ContentStore(
     }
 
     fun onSignedOut() {
-        invalidateLibraryRefresh()
+        cancelShelfLoads()
         _state.value = _state.value.copy(
             shelvesByDestination = emptyMap(),
+            loadingDestinations = emptySet(),
             recentTracks = emptyList(),
             reloadGeneration = _state.value.reloadGeneration + 1,
         )
+    }
+
+    fun startSignedInContent(connectionState: MusicConnectionState, contentLanguageTag: String) {
+        if (startupRefreshScheduled || connectionState != MusicConnectionState.SignedIn ||
+            !operations.isCatalogConfigured
+        ) return
+        startupRefreshScheduled = true
+        val inputs = LoadInputs(connectionState, _state.value.reloadGeneration, contentLanguageTag)
+        prepareShelfLoads(inputs)
+        loadShelvesFor(Destination.Home, inputs)
+        loadShelvesFor(Destination.Library, inputs, after = shelfJobs[Destination.Home])
     }
 
     fun loadDestination(
@@ -261,19 +305,20 @@ class ContentStore(
         reloadGeneration: Int,
         contentLanguageTag: String,
     ) {
-        val key = listOf(destination, connectionState, reloadGeneration, contentLanguageTag)
-        if (key == loadKey && loadJob?.isActive == true) return
-        loadJob?.cancel()
-        if (loadKey?.first() == Destination.Library) {
-            _state.value = _state.value.copy(
-                loadingDestinations = _state.value.loadingDestinations - Destination.Library,
-            )
-        }
-        loadKey = key
-        if (shelvesLanguageTag == null) {
-            shelvesLanguageTag = contentLanguageTag
-        } else if (shelvesLanguageTag != contentLanguageTag) {
-            lastLibraryRefreshMs = null
+        activeDestination = destination
+        val inputs = LoadInputs(connectionState, reloadGeneration, contentLanguageTag)
+        prepareShelfLoads(inputs)
+        loadShelvesFor(destination, inputs)
+    }
+
+    private fun prepareShelfLoads(inputs: LoadInputs) {
+        val previous = loadInputs
+        if (previous == inputs) return
+        loadInputs = inputs
+        if (previous == null) return
+        val loadingDestinations = _state.value.loadingDestinations - shelfJobs.keys
+        cancelShelfLoads()
+        if (previous.languageTag != inputs.languageTag) {
             resetLibraryPagination()
             // Section titles are presentation metadata. Invalidate only this
             // cache, retaining the selected song, queue, focus and account.
@@ -281,10 +326,30 @@ class ContentStore(
                 shelvesByDestination = if (operations.isCatalogConfigured) emptyMap() else demoShelves(),
                 loadingDestinations = emptySet(),
             )
-            shelvesLanguageTag = contentLanguageTag
+        } else {
+            _state.value = _state.value.copy(
+                loadingDestinations = loadingDestinations,
+            )
         }
+    }
+
+    private fun saveLibrarySnapshot(inputs: LoadInputs, shelves: List<ContentShelf>) {
+        coroutineScope.launch {
+            // Keep the intermediate snapshot from overwriting the completed refresh.
+            librarySnapshotWrites.withLock {
+                if (loadInputs == inputs && _state.value.reloadGeneration == inputs.reloadGeneration) {
+                    withContext(ioDispatcher) {
+                        cancellableResult { operations.saveShelves(Destination.Library.name, inputs.languageTag, shelves) }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun loadShelvesFor(target: Destination, inputs: LoadInputs, after: Job? = null) {
         if (!operations.isCatalogConfigured) return
-        val target = destination
+        if (shelfJobs[target]?.isActive == true) return
+        val (connectionState, _, contentLanguageTag) = inputs
         if (
             target != Destination.Home &&
             target != Destination.Browse &&
@@ -310,6 +375,7 @@ class ContentStore(
             loadingDestinations = _state.value.loadingDestinations + target,
         )
         val job = coroutineScope.launch(start = CoroutineStart.LAZY) {
+            after?.join()
             // Show the last session's shelves at once; the network load below replaces them. The library
             // is kept whole too: its playlist index alone left an old, partial list on screen every launch.
             val snapshotName = target.name
@@ -494,22 +560,21 @@ class ContentStore(
                             val songs = async(ioDispatcher) { cancellableResult { operations.librarySongsPage() } }
                             val recentPlayed = async(ioDispatcher) { cancellableResult { operations.recentlyPlayedTracks() } }
 
+                            val recentItems = recentlyAdded.await().getOrElse { error ->
+                                errors += error
+                                emptyList()
+                            }
+                            val recentAlbums = recentItems.recentLibraryAlbums()
+                            if (recentAlbums.isNotEmpty()) {
+                                publishRecentLibraryAlbums(recentAlbums)
+                                saveLibrarySnapshot(inputs, _state.value.shelvesFor(Destination.Library))
+                            }
+
                             buildList {
-                                recentlyAdded.await().fold(
-                                    onSuccess = { items ->
-                                        if (items.isNotEmpty()) {
-                                            add(
-                                                ContentShelf(
-                                                    id = "lib-recently-added",
-                                                    title = AppText.text(R.string.app_recently_added),
-                                                    items = items,
-                                                    featured = true,
-                                                ),
-                                            )
-                                        }
-                                    },
-                                    onFailure = errors::add,
-                                )
+                                if (recentItems.isNotEmpty()) {
+                                    add(ContentShelf("lib-recently-added", AppText.text(R.string.app_recently_added),
+                                        recentItems, featured = true))
+                                }
                                 artists.await().fold(
                                     onSuccess = { page ->
                                         libraryFirstPages["lib-artists"] = page
@@ -525,15 +590,16 @@ class ContentStore(
                                 albums.await().fold(
                                     onSuccess = { page ->
                                         libraryFirstPages["lib-albums"] = page
-                                        if (page.items.isNotEmpty() || page.nextPage != null) {
+                                        val items = mergeLibraryPage(recentAlbums, page.items)
+                                        if (items.isNotEmpty() || page.nextPage != null) {
                                             add(ContentShelf("lib-albums", AppText.text(R.string.app_library_albums),
-                                                page.items, featured = isEmpty()))
+                                                items, featured = isEmpty()))
                                         }
                                     },
                                     onFailure = { error ->
                                         errors += error
                                         libraryFailures += "lib-albums"
-                                        add(savedShelves["lib-albums"]
+                                        add(_state.value.shelvesFor(Destination.Library).firstOrNull { it.id == "lib-albums" }
                                             ?: ContentShelf("lib-albums", AppText.text(R.string.app_library_albums), emptyList()))
                                     },
                                 )
@@ -594,8 +660,7 @@ class ContentStore(
                     }
                 } to errors
             }
-            // Library pagination belongs to this refresh. Cancel it with the destination load.
-            val (loadedShelves, errors) = if (target == Destination.Library) loadShelves() else shelfLoads.load(key, loadShelves)
+            val (loadedShelves, errors) = loadShelves()
             val keepSaved = loadedShelves.isEmpty() && target in _state.value.savedShelfDestinations
             if (!keepSaved) {
                 var updated = _state.value.copy(
@@ -614,7 +679,9 @@ class ContentStore(
                     if (errors.isEmpty()) lastLibraryRefreshMs = elapsedRealtimeMs()
                 }
                 _state.value = updated
-                if (loadedShelves.isNotEmpty() && connectionState == MusicConnectionState.SignedIn) {
+                if (target == Destination.Library) {
+                    saveLibrarySnapshot(inputs, loadedShelves)
+                } else if (loadedShelves.isNotEmpty() && connectionState == MusicConnectionState.SignedIn) {
                     coroutineScope.launch(ioDispatcher) {
                         cancellableResult { operations.saveShelves(snapshotName, contentLanguageTag, loadedShelves) }
                     }
@@ -629,9 +696,9 @@ class ContentStore(
             } else {
                 null
             }
-            _messages.tryEmit(msg)
+            if (activeDestination == target) _messages.tryEmit(msg)
         }
-        loadJob = job
+        shelfJobs[target] = job
         job.start()
     }
 
@@ -673,30 +740,6 @@ class ContentStore(
         }
         searchJob = job
         job.start()
-    }
-}
-
-/**
- * One shelf load per destination and inputs. Startup recomposition can restart the loading effect
- * with unchanged inputs; the restarted effect awaits the running load instead of requesting every
- * Apple Music endpoint again. A load for the same destination with other inputs is superseded.
- */
-private class ShelfLoads(private val scope: CoroutineScope) {
-    private val running = mutableMapOf<List<Any?>, Deferred<Pair<List<ContentShelf>, List<Throwable>>>>()
-
-    suspend fun load(
-        key: List<Any?>,
-        block: suspend () -> Pair<List<ContentShelf>, List<Throwable>>,
-    ): Pair<List<ContentShelf>, List<Throwable>> {
-        val deferred = running[key]?.takeIf { it.isActive } ?: run {
-            running.keys.filter { it.first() == key.first() && it != key }.forEach { running.remove(it)?.cancel() }
-            scope.async { block() }.also { running[key] = it }
-        }
-        return try {
-            deferred.await()
-        } finally {
-            if (!deferred.isActive && running[key] === deferred) running.remove(key)
-        }
     }
 }
 
