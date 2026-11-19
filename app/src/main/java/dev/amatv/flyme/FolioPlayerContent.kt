@@ -4,9 +4,11 @@ import android.os.Build
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -37,6 +39,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,19 +48,28 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
@@ -115,12 +127,67 @@ internal fun FolioScrollingLyricsPanel(
     }
 }
 
-private data class GhostPosterFocus(
-    val target: Any,
-    val isOppositeSinger: Boolean,
-    val hasStarted: Boolean,
-    val frozenPosMs: Long,
-)
+private sealed interface PosterRollKey {
+    val sortOrder: Int
+
+    data class Gap(
+        val beforeLineIndex: Int,
+        val startMs: Long,
+    ) : PosterRollKey {
+        override val sortOrder: Int get() = beforeLineIndex * 2
+    }
+
+    data class Lead(
+        val lineIndex: Int,
+    ) : PosterRollKey {
+        override val sortOrder: Int get() = lineIndex * 2 + 1
+    }
+}
+
+private data class PosterStageKey(
+    val prevKey: PosterRollKey?,
+    val focusKey: PosterRollKey,
+    val upcomingKeys: List<PosterRollKey>,
+) {
+    fun visibleKeys(): List<PosterRollKey> = buildList {
+        prevKey?.let(::add)
+        add(focusKey)
+        addAll(upcomingKeys)
+    }
+
+    fun roleFor(key: PosterRollKey): PosterLyricRole = when {
+        key == prevKey -> PosterLyricRole.Previous
+        key == focusKey -> PosterLyricRole.Focus
+        upcomingKeys.getOrNull(0) == key -> PosterLyricRole.Upcoming0
+        upcomingKeys.getOrNull(1) == key -> PosterLyricRole.Upcoming1
+        upcomingKeys.getOrNull(2) == key -> PosterLyricRole.Upcoming2
+        key.sortOrder < focusKey.sortOrder -> PosterLyricRole.ExitingPrevious
+        else -> PosterLyricRole.EnteringBelow
+    }
+}
+
+private data class PosterRollStage(
+    val key: PosterStageKey,
+    val gapTarget: LyricTimeline.InstrumentalGap?,
+    val focusTopY: Float,
+    val prevY: Float,
+    val upcomingYs: List<Float>,
+    val exitAboveY: Float,
+    val enterBelowY: Float,
+) {
+    fun targetY(itemKey: PosterRollKey): Float = when (key.roleFor(itemKey)) {
+        PosterLyricRole.ExitingPrevious -> exitAboveY
+        PosterLyricRole.Previous -> prevY
+        PosterLyricRole.Focus -> focusTopY
+        PosterLyricRole.Upcoming0 -> upcomingYs.getOrElse(0) { enterBelowY }
+        PosterLyricRole.Upcoming1 -> upcomingYs.getOrElse(1) { enterBelowY }
+        PosterLyricRole.Upcoming2 -> upcomingYs.getOrElse(2) { enterBelowY }
+        PosterLyricRole.EnteringBelow -> enterBelowY
+    }
+
+    override fun equals(other: Any?): Boolean = other is PosterRollStage && other.key == key
+    override fun hashCode(): Int = key.hashCode()
+}
 
 private data class CharTimingEntry(
     val char: Char,
@@ -148,11 +215,14 @@ internal fun FolioPosterLyricsPanel(
 
     val fontFamily = LocalFolioFontFamily.current
     val schedule = remember(lines) { LyricTimeline.Schedule(lines) }
-    val snapshot by remember(schedule, offsetMs, positionState) {
-        derivedStateOf { schedule.snapshotAt((positionState.value + offsetMs).coerceAtLeast(0L)) }
-    }
     val lyricPosition = remember(positionState, offsetMs) {
         derivedStateOf { (positionState.value + offsetMs).coerceAtLeast(0L) }
+    }
+    val snapshot by remember(schedule, lyricPosition) {
+        derivedStateOf { schedule.snapshotAt(lyricPosition.value) }
+    }
+    val leadIndices = remember(lines) {
+        lines.indices.filter { idx -> !isPosterBackingOnlyLine(lines[idx]) && posterLeadText(lines[idx]).isNotEmpty() }
     }
     val waiting = snapshot.instrumentalScrollAnchor
     val projection by remember(lines, snapshot, lyricPosition) {
@@ -167,75 +237,30 @@ internal fun FolioPosterLyricsPanel(
         }
     }
 
-    val currentTarget: Any = waiting ?: lines[projection.focusLeadIndex]
-    val mainIn = remember { Animatable(1f) }
-    val subIn = remember { Animatable(1f) }
-    val ghostOut = remember { Animatable(1f) }
-    var shownTarget by remember(lines) { mutableStateOf(currentTarget) }
-    var shownOpposite by remember(lines) { mutableStateOf(projection.isFocusOppositeSinger) }
-    var shownStarted by remember(lines) { mutableStateOf(projection.hasStartedLead) }
-    var ghost by remember(lines) { mutableStateOf<GhostPosterFocus?>(null) }
-
-    LaunchedEffect(currentTarget, reducedMotion) {
-        if (currentTarget == shownTarget) return@LaunchedEffect
-        val outgoing = shownTarget
-        val outgoingOpposite = shownOpposite
-        val outgoingStarted = shownStarted
-        val frozenPos = lyricPosition.value
-        shownTarget = currentTarget
-        shownOpposite = projection.isFocusOppositeSinger
-        shownStarted = projection.hasStartedLead
-
-        if (reducedMotion) {
-            ghost = null
-            mainIn.snapTo(1f)
-            subIn.snapTo(1f)
-            return@LaunchedEffect
-        }
-
-        ghost = GhostPosterFocus(
-            target = outgoing,
-            isOppositeSinger = outgoingOpposite,
-            hasStarted = outgoingStarted,
-            frozenPosMs = frozenPos,
-        )
-        launch {
-            ghostOut.snapTo(0f)
-            ghostOut.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(
-                    durationMillis = FolioPlayerMotionTokens.POSTER_LIQ_OUT_MS,
-                    easing = FolioPlayerMotionTokens.ExitEasing,
-                ),
-            )
-            ghost = null
-        }
-        launch {
-            mainIn.snapTo(0f)
-            mainIn.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(
-                    durationMillis = FolioPlayerMotionTokens.POSTER_LIQ_IN_MAIN_MS,
-                    easing = FolioPlayerMotionTokens.EnterEasing,
-                ),
-            )
-        }
-        launch {
-            subIn.snapTo(0f)
-            subIn.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(
-                    durationMillis = FolioPlayerMotionTokens.POSTER_LIQ_IN_SUB_MS,
-                    easing = FolioPlayerMotionTokens.EnterEasing,
-                ),
-            )
-        }
-    }
-
     CompositionLocalProvider(
         LocalFlymePalette provides if (isLight) LightFlymePalette else DarkFlymePalette,
     ) {
-        BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        BoxWithConstraints(
+            modifier = modifier
+                .fillMaxSize()
+                .clipToBounds()
+                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                .drawWithContent {
+                    drawContent()
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            0.08f to Color.Black,
+                            0.90f to Color.Black,
+                            1f to Color.Transparent,
+                        ),
+                        blendMode = BlendMode.DstIn,
+                    )
+                },
+        ) {
+            val density = LocalDensity.current
+            val widthPx = constraints.maxWidth.coerceAtLeast(1)
+            val heightPx = constraints.maxHeight.toFloat().coerceAtLeast(1f)
             val typo = remember(lines, maxWidth, baseSp) {
                 posterTypographyFor(
                     lines = lines,
@@ -243,203 +268,345 @@ internal fun FolioPosterLyricsPanel(
                     baseSp = baseSp,
                 )
             }
+            val textMeasurer = rememberTextMeasurer()
+            val leadTextStyle = remember(fontFamily, typo) {
+                TextStyle(
+                    fontFamily = fontFamily,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = typo.mainSp.sp,
+                    lineHeight = typo.mainLineHeightSp.sp,
+                )
+            }
+            val transTextStyle = remember(fontFamily, typo) {
+                TextStyle(
+                    fontFamily = fontFamily,
+                    fontWeight = FontWeight.Normal,
+                    fontSize = typo.translationSp.sp,
+                    lineHeight = typo.translationLineHeightSp.sp,
+                )
+            }
+            val backingTextStyle = remember(fontFamily, typo) {
+                TextStyle(
+                    fontFamily = fontFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = typo.backingSp.sp,
+                    lineHeight = typo.backingLineHeightSp.sp,
+                )
+            }
+            val leadHeightCache = remember(lines, widthPx, leadTextStyle) { HashMap<Int, Float>() }
+            val transHeightCache = remember(lines, widthPx, transTextStyle) { HashMap<Int, Float>() }
+            val gapHeightPx = with(density) { 56.dp.toPx() }
+            val transGapPx = with(density) { 4.dp.toPx() }
+            val smallLineGapPx = with(density) { 6.dp.toPx() }
+            val prevGapPx = with(density) { 20.dp.toPx() }
+            val nextBlockGapPx = with(density) { 28.dp.toPx() }
+            val upcomingGapPx = with(density) { 14.dp.toPx() }
+            val exitSlidePx = with(density) { 28.dp.toPx() }
+            val enterSlidePx = with(density) { 24.dp.toPx() }
+            val focusTopY = heightPx * 0.40f
+            val prevScale = posterRoleScale(PosterLyricRole.Previous, typo)
+            val nextScale = posterRoleScale(PosterLyricRole.Upcoming0, typo)
 
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
-            ) {
-                projection.previousLine?.let { prev ->
-                    Text(
-                        text = prev.text,
-                        color = if (prev.isOppositeSinger) duetAccentColor.copy(alpha = 0.72f) else fg2,
-                        fontFamily = fontFamily,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = typo.prevSp.sp,
-                        lineHeight = typo.prevLineHeightSp.sp,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.posterLiquidIn(progress = subIn.value),
-                    )
+            fun measureLeadHeightPx(lineIndex: Int): Float = leadHeightCache.getOrPut(lineIndex) {
+                textMeasurer.measure(
+                    text = posterLeadText(lines[lineIndex]),
+                    style = leadTextStyle,
+                    constraints = Constraints(maxWidth = widthPx),
+                ).size.height.toFloat()
+            }
+
+            fun measureItemHeightPx(itemKey: PosterRollKey): Float = when (itemKey) {
+                is PosterRollKey.Gap -> gapHeightPx
+                is PosterRollKey.Lead -> measureLeadHeightPx(itemKey.lineIndex)
+            }
+
+            fun measureFocusTransHeightPx(itemKey: PosterRollKey): Float {
+                if (!translationEnabled || itemKey !is PosterRollKey.Lead) return 0f
+                val trans = lines[itemKey.lineIndex].translation?.trim().orEmpty()
+                if (trans.isEmpty()) return 0f
+                return transHeightCache.getOrPut(itemKey.lineIndex) {
+                    transGapPx + textMeasurer.measure(
+                        text = trans,
+                        style = transTextStyle,
+                        constraints = Constraints(maxWidth = widthPx),
+                    ).size.height.toFloat()
                 }
+            }
 
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    ghost?.let { g ->
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .posterLiquidOut(progress = ghostOut.value),
-                        ) {
-                            when (val target = g.target) {
-                                is LyricTimeline.InstrumentalGap -> {
-                                    Box(
-                                        Modifier.graphicsLayer {
-                                            scaleX = 1.65f
-                                            scaleY = 1.65f
-                                            transformOrigin = TransformOrigin(0f, 0.5f)
-                                        },
-                                    ) {
-                                        val frozenState = remember(g.frozenPosMs) {
-                                            mutableLongStateOf(g.frozenPosMs)
-                                        }
-                                        InstrumentalInterludeRow(
-                                            gap = target,
-                                            positionState = frozenState,
-                                            isUserScrolling = false,
-                                        )
-                                    }
-                                }
-                                is LyricLine -> {
-                                    val frozenState = remember(g.frozenPosMs) {
-                                        mutableLongStateOf(g.frozenPosMs)
-                                    }
-                                    PosterLeadLineText(
-                                        line = target,
-                                        positionState = frozenState,
-                                        hasStartedLead = g.hasStarted,
-                                        fontSizeSp = typo.mainSp,
-                                        lineHeightSp = typo.mainLineHeightSp,
-                                        fontFamily = fontFamily,
-                                        baseColor = if (g.isOppositeSinger) duetAccentColor else fg,
-                                        reducedMotion = reducedMotion,
-                                    )
-                                }
-                            }
-                        }
+            // Compute discrete role assignment from live projection synchronously (no coroutine delay).
+            val stageKey = run {
+                val activeLeadPos = leadIndices.indexOf(projection.focusLeadIndex)
+                val focusKey: PosterRollKey = if (waiting != null) {
+                    PosterRollKey.Gap(waiting.beforeLineIndex, waiting.startMs)
+                } else {
+                    PosterRollKey.Lead(projection.focusLeadIndex)
+                }
+                val prevKey: PosterRollKey? = if (
+                    waiting == null &&
+                    projection.hasStartedLead &&
+                    activeLeadPos > 0
+                ) {
+                    PosterRollKey.Lead(leadIndices[activeLeadPos - 1])
+                } else {
+                    null
+                }
+                val activeLeads = leadIndices
+                    .filter { it in snapshot.activeLineIndices }
+                    .sortedWith(compareBy<Int>({ lines[it].startMs }, { it }))
+                val maxConsumedActiveLead = activeLeads.maxOrNull()
+                val upcomingIndices = when {
+                    waiting != null -> leadIndices.filter { it >= waiting.beforeLineIndex }.take(3)
+                    maxConsumedActiveLead != null && activeLeads.size > 1 ->
+                        leadIndices.filter { it > maxConsumedActiveLead }.take(3)
+                    projection.hasStartedLead && activeLeadPos >= 0 ->
+                        leadIndices.drop(activeLeadPos + 1).take(3)
+                    else -> leadIndices.drop(1).take(3)
+                }
+                PosterStageKey(
+                    prevKey = prevKey,
+                    focusKey = focusKey,
+                    upcomingKeys = upcomingIndices.map { PosterRollKey.Lead(it) },
+                )
+            }
+
+            val currentStage = remember(stageKey, widthPx, heightPx, typo, translationEnabled) {
+                val focusMainH = measureItemHeightPx(stageKey.focusKey)
+                val focusTransH = measureFocusTransHeightPx(stageKey.focusKey)
+                val prevH = stageKey.prevKey?.let { measureItemHeightPx(it) * prevScale } ?: 0f
+                val prevY = focusTopY - prevGapPx - prevH
+                val exitAboveY = (if (stageKey.prevKey != null) prevY else focusTopY - prevGapPx) - exitSlidePx
+                val upcoming0Y = focusTopY + focusMainH + focusTransH + nextBlockGapPx
+                var cursorY = upcoming0Y
+                val upcomingYs = stageKey.upcomingKeys.map { uKey ->
+                    val y = cursorY
+                    cursorY += measureItemHeightPx(uKey) * nextScale + upcomingGapPx
+                    y
+                }
+                val enterBelowY = (cursorY - upcomingGapPx).coerceAtLeast(upcoming0Y) + enterSlidePx
+                PosterRollStage(
+                    key = stageKey,
+                    gapTarget = waiting,
+                    focusTopY = focusTopY,
+                    prevY = prevY,
+                    upcomingYs = upcomingYs,
+                    exitAboveY = exitAboveY,
+                    enterBelowY = enterBelowY,
+                )
+            }
+
+            // Smooth offset when active backing/overlap smallLines chime in mid-line so Upcoming never snaps.
+            val targetSmallLinesExtraPx = remember(projection.smallLines, widthPx, backingTextStyle) {
+                if (projection.smallLines.isEmpty()) {
+                    0f
+                } else {
+                    projection.smallLines.sumOf { small ->
+                        (smallLineGapPx + textMeasurer.measure(
+                            text = small.text,
+                            style = backingTextStyle,
+                            constraints = Constraints(maxWidth = widthPx),
+                        ).size.height.toFloat()).toDouble()
+                    }.toFloat()
+                }
+            }
+            val smoothSmallLinesExtraPx by animateFloatAsState(
+                targetValue = targetSmallLinesExtraPx,
+                animationSpec = tween(
+                    durationMillis = if (reducedMotion) 0 else FolioPlayerMotionTokens.CTL_OPACITY_MS,
+                    easing = FolioPlayerMotionTokens.EnterEasing,
+                ),
+                label = "poster-small-extra",
+            )
+
+            key(lines) {
+                val transition = updateTransition(targetState = currentStage, label = "poster-roll")
+                val itemsToRender = remember(
+                    transition.currentState.key,
+                    transition.targetState.key,
+                    reducedMotion,
+                ) {
+                    if (reducedMotion || transition.currentState == transition.targetState) {
+                        transition.targetState.key.visibleKeys()
+                    } else {
+                        (transition.currentState.key.visibleKeys() + transition.targetState.key.visibleKeys()).distinct()
                     }
+                }
+                val animDuration = if (reducedMotion) 0 else POSTER_ROLL_DURATION_MS
+                val rollSpec = tween<Float>(durationMillis = animDuration, easing = FolioPlayerMotionTokens.EnterEasing)
+                val extrasFadeOutSpec = tween<Float>(
+                    durationMillis = if (reducedMotion) 0 else (POSTER_ROLL_DURATION_MS / 2),
+                    easing = FolioPlayerMotionTokens.ExitEasing,
+                )
 
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .posterLiquidIn(progress = mainIn.value),
-                    ) {
-                        when (val activeTarget = currentTarget) {
-                            is LyricTimeline.InstrumentalGap -> {
-                                Box(
-                                    Modifier.graphicsLayer {
-                                        scaleX = 1.65f
-                                        scaleY = 1.65f
-                                        transformOrigin = TransformOrigin(0f, 0.5f)
-                                    },
-                                ) {
-                                    InstrumentalInterludeRow(
-                                        gap = activeTarget,
-                                        positionState = lyricPosition,
-                                        isUserScrolling = false,
-                                    )
-                                }
+                Box(modifier = Modifier.fillMaxSize()) {
+                    for (itemKey in itemsToRender) {
+                        key(itemKey) {
+                            val isOpposite = when (itemKey) {
+                                is PosterRollKey.Gap -> false
+                                is PosterRollKey.Lead -> isOppositeSingerLine(lines[itemKey.lineIndex])
                             }
-                            is LyricLine -> {
-                                val mainColor = if (projection.isFocusOppositeSinger) duetAccentColor else fg
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    PosterLeadLineText(
-                                        line = activeTarget,
-                                        positionState = lyricPosition,
-                                        hasStartedLead = projection.hasStartedLead,
-                                        fontSizeSp = typo.mainSp,
-                                        lineHeightSp = typo.mainLineHeightSp,
-                                        fontFamily = fontFamily,
-                                        baseColor = mainColor,
-                                        reducedMotion = reducedMotion,
-                                    )
-                                    for (small in projection.smallLines) {
-                                        Text(
-                                            text = small.text,
-                                            color = if (small.isOppositeSinger) {
-                                                duetAccentColor.copy(alpha = 0.78f)
-                                            } else {
-                                                fg2
-                                            },
-                                            fontFamily = fontFamily,
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = typo.backingSp.sp,
-                                            lineHeight = typo.backingLineHeightSp.sp,
-                                        )
+                            val targetRole = transition.targetState.key.roleFor(itemKey)
+
+                            val animatedY by transition.animateFloat(
+                                transitionSpec = { rollSpec },
+                                label = "poster-y",
+                            ) { st -> st.targetY(itemKey) }
+
+                            val animatedScale by transition.animateFloat(
+                                transitionSpec = { rollSpec },
+                                label = "poster-scale",
+                            ) { st -> posterRoleScale(st.key.roleFor(itemKey), typo) }
+
+                            val animatedAlpha by transition.animateFloat(
+                                transitionSpec = { rollSpec },
+                                label = "poster-alpha",
+                            ) { st -> posterRoleAlpha(st.key.roleFor(itemKey), fg2.alpha) }
+
+                            val focusWeight by transition.animateFloat(
+                                transitionSpec = {
+                                    if (targetRole == PosterLyricRole.Focus) rollSpec else extrasFadeOutSpec
+                                },
+                                label = "poster-focus-weight",
+                            ) { st -> if (st.key.roleFor(itemKey) == PosterLyricRole.Focus) 1f else 0f }
+
+                            val exitBlurDp by transition.animateFloat(
+                                transitionSpec = { rollSpec },
+                                label = "poster-exit-blur",
+                            ) { st ->
+                                if (st.key.roleFor(itemKey) == PosterLyricRole.ExitingPrevious) 12f else 0f
+                            }
+
+                            val isUpcomingRank = targetRole == PosterLyricRole.Upcoming0 ||
+                                targetRole == PosterLyricRole.Upcoming1 ||
+                                targetRole == PosterLyricRole.Upcoming2 ||
+                                targetRole == PosterLyricRole.EnteringBelow
+                            val smallPushPx = if (isUpcomingRank) smoothSmallLinesExtraPx else 0f
+
+                            // Only the exiting previous line uses blur on API 31+; API 30 car units rely cleanly on slide/scale/alpha.
+                            val blurMod = if (
+                                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                                !reducedMotion &&
+                                targetRole == PosterLyricRole.ExitingPrevious &&
+                                exitBlurDp > 0.25f
+                            ) {
+                                Modifier.blur(exitBlurDp.dp)
+                            } else {
+                                Modifier
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .graphicsLayer {
+                                        translationY = animatedY + smallPushPx
+                                    },
+                            ) {
+                                when (itemKey) {
+                                    is PosterRollKey.Gap -> {
+                                        val gap = transition.targetState.gapTarget
+                                            ?: transition.currentState.gapTarget
+                                            ?: waiting
+                                        if (gap != null) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .graphicsLayer {
+                                                        alpha = animatedAlpha
+                                                        scaleX = 1.65f * animatedScale
+                                                        scaleY = 1.65f * animatedScale
+                                                        translationX = (-28).dp.toPx()
+                                                        transformOrigin = TransformOrigin(0f, 0.5f)
+                                                    }
+                                                    .then(blurMod),
+                                            ) {
+                                                InstrumentalInterludeRow(
+                                                    gap = gap,
+                                                    positionState = lyricPosition,
+                                                    isUserScrolling = false,
+                                                )
+                                            }
+                                        }
                                     }
-                                    if (translationEnabled) {
-                                        activeTarget.translation?.takeIf { it.isNotBlank() }?.let { trans ->
-                                            Text(
-                                                text = trans,
-                                                color = if (projection.isFocusOppositeSinger) {
-                                                    duetAccentColor.copy(alpha = 0.72f)
+
+                                    is PosterRollKey.Lead -> {
+                                        val line = lines[itemKey.lineIndex]
+                                        val mainColor = if (isOpposite) duetAccentColor else fg
+                                        val mainScaledH = measureLeadHeightPx(itemKey.lineIndex) * animatedScale
+                                        val transText = line.translation?.trim().orEmpty()
+                                        val showTrans = translationEnabled && transText.isNotEmpty() && focusWeight > 0.01f
+                                        val showSmallLines = targetRole == PosterLyricRole.Focus &&
+                                            projection.smallLines.isNotEmpty() &&
+                                            focusWeight > 0.01f
+
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .graphicsLayer {
+                                                    alpha = animatedAlpha
+                                                    scaleX = animatedScale
+                                                    scaleY = animatedScale
+                                                    transformOrigin = TransformOrigin(0f, 0f)
+                                                }
+                                                .then(blurMod),
+                                        ) {
+                                            PosterLeadLineText(
+                                                line = line,
+                                                positionState = lyricPosition,
+                                                hasStartedLead = if (itemKey == stageKey.focusKey) {
+                                                    projection.hasStartedLead
                                                 } else {
-                                                    fg2
+                                                    true
                                                 },
-                                                fontFamily = fontFamily,
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = typo.translationSp.sp,
-                                                lineHeight = typo.translationLineHeightSp.sp,
+                                                focusWeight = focusWeight,
+                                                textStyle = leadTextStyle,
+                                                baseColor = mainColor,
+                                                reducedMotion = reducedMotion,
                                             )
                                         }
+
+                                        if (showTrans || showSmallLines) {
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .graphicsLayer {
+                                                        translationY = mainScaledH + transGapPx
+                                                        alpha = focusWeight
+                                                    },
+                                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                            ) {
+                                                if (showTrans) {
+                                                    Text(
+                                                        text = transText,
+                                                        color = if (isOpposite) {
+                                                            duetAccentColor.copy(alpha = 0.60f)
+                                                        } else {
+                                                            fg2
+                                                        },
+                                                        style = transTextStyle,
+                                                    )
+                                                }
+                                                if (showSmallLines) {
+                                                    for (small in projection.smallLines) {
+                                                        Text(
+                                                            text = small.text,
+                                                            color = if (small.isOppositeSinger) {
+                                                                duetAccentColor.copy(alpha = 0.78f)
+                                                            } else {
+                                                                fg2
+                                                            },
+                                                            style = backingTextStyle,
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
-                        }
-                    }
-                }
-
-                if (projection.upcomingLines.isNotEmpty()) {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.posterLiquidIn(progress = subIn.value),
-                    ) {
-                        val alphas = listOf(0.62f, 0.42f, 0.26f)
-                        projection.upcomingLines.forEachIndexed { idx, next ->
-                            val alpha = alphas.getOrElse(idx) { 0.26f }
-                            val lineColor = if (next.isOppositeSinger) {
-                                duetAccentColor.copy(alpha = alpha.coerceAtLeast(0.38f))
-                            } else {
-                                fg.copy(alpha = alpha)
-                            }
-                            Text(
-                                text = next.text,
-                                color = lineColor,
-                                fontFamily = fontFamily,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = typo.nextSp.sp,
-                                lineHeight = typo.nextLineHeightSp.sp,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
                         }
                     }
                 }
             }
         }
-    }
-}
-
-private fun Modifier.posterLiquidIn(progress: Float): Modifier {
-    if (progress >= 0.999f) return this
-    val remaining = (1f - progress).coerceIn(0f, 1f)
-    val blurDp = 16f * remaining
-    val motion = graphicsLayer {
-        alpha = progress.coerceIn(0f, 1f)
-        translationY = 14.dp.toPx() * remaining
-        val scale = 0.98f + 0.02f * progress.coerceIn(0f, 1f)
-        scaleX = scale
-        scaleY = scale
-    }
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && blurDp > 0.25f) {
-        motion.blur(blurDp.dp)
-    } else {
-        motion
-    }
-}
-
-private fun Modifier.posterLiquidOut(progress: Float): Modifier {
-    val p = progress.coerceIn(0f, 1f)
-    val blurDp = 14f * p
-    val motion = graphicsLayer {
-        alpha = (1f - p).coerceIn(0f, 1f)
-        translationY = -16.dp.toPx() * p
-        val scale = 1f + 0.03f * p
-        scaleX = scale
-        scaleY = scale
-    }
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && blurDp > 0.25f) {
-        motion.blur(blurDp.dp)
-    } else {
-        motion
     }
 }
 
@@ -448,9 +615,8 @@ private fun PosterLeadLineText(
     line: LyricLine,
     positionState: State<Long>,
     hasStartedLead: Boolean,
-    fontSizeSp: Float,
-    lineHeightSp: Float,
-    fontFamily: FontFamily,
+    focusWeight: Float,
+    textStyle: TextStyle,
     baseColor: Color,
     reducedMotion: Boolean,
 ) {
@@ -478,10 +644,16 @@ private fun PosterLeadLineText(
         }
     }
 
+    val fw = focusWeight.coerceIn(0f, 1f)
     val posMs = positionState.value
     val annotated = buildAnnotatedString {
-        if (!hasStartedLead || charEntries.isEmpty()) {
-            val alpha = if (!hasStartedLead) 0.40f else 1f
+        if (fw <= 0.001f) {
+            withStyle(SpanStyle(color = baseColor)) {
+                append(posterLeadText(line))
+            }
+        } else if (!hasStartedLead || charEntries.isEmpty()) {
+            val rawAlpha = if (!hasStartedLead) 0.40f else 1f
+            val alpha = rawAlpha + (1f - rawAlpha) * (1f - fw)
             withStyle(SpanStyle(color = baseColor.copy(alpha = alpha))) {
                 append(posterLeadText(line))
             }
@@ -491,14 +663,15 @@ private fun PosterLeadLineText(
                     append(' ')
                     continue
                 }
-                val charAlpha = posterCharAlpha(
+                val rawCharAlpha = posterCharAlpha(
                     posMs = posMs,
                     charStartMs = entry.startMs,
                     litAlpha = 1f,
                     unlitAlpha = 0.40f,
                     reducedMotion = reducedMotion,
                 )
-                withStyle(SpanStyle(color = baseColor.copy(alpha = charAlpha))) {
+                val blendedAlpha = rawCharAlpha + (1f - rawCharAlpha) * (1f - fw)
+                withStyle(SpanStyle(color = baseColor.copy(alpha = blendedAlpha))) {
                     append(entry.char)
                 }
             }
@@ -506,10 +679,7 @@ private fun PosterLeadLineText(
     }
     Text(
         text = annotated,
-        fontFamily = fontFamily,
-        fontWeight = FontWeight.ExtraBold,
-        fontSize = fontSizeSp.sp,
-        lineHeight = lineHeightSp.sp,
+        style = textStyle,
     )
 }
 

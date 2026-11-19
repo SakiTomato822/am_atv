@@ -1,6 +1,7 @@
 package dev.amatv.flyme
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import dev.amatv.core.LyricBackgroundStyle
 import dev.amatv.core.LyricsLoadPhase
 import dev.amatv.core.LyricsState
@@ -120,8 +121,8 @@ class FolioPlayerStateTest {
 
     @Test
     fun alwaysOpenControlsFollowsFlowAndNoLyricsRules() {
-        assertTrue(alwaysOpenControls(FolioTier.Wide, LyricBackgroundStyle.Flow, hasLyricsOrPending = true, FolioPlayerDisplayState.Lyrics))
-        assertTrue(alwaysOpenControls(FolioTier.Medium, LyricBackgroundStyle.Flow, hasLyricsOrPending = true, FolioPlayerDisplayState.Lyrics))
+        assertFalse(alwaysOpenControls(FolioTier.Wide, LyricBackgroundStyle.Flow, hasLyricsOrPending = true, FolioPlayerDisplayState.Lyrics))
+        assertFalse(alwaysOpenControls(FolioTier.Medium, LyricBackgroundStyle.Flow, hasLyricsOrPending = true, FolioPlayerDisplayState.Lyrics))
         assertTrue(alwaysOpenControls(FolioTier.Ultrawide, LyricBackgroundStyle.Flow, hasLyricsOrPending = true, FolioPlayerDisplayState.Lyrics))
         assertFalse(alwaysOpenControls(FolioTier.Short, LyricBackgroundStyle.Flow, hasLyricsOrPending = true, FolioPlayerDisplayState.Lyrics))
         assertFalse(alwaysOpenControls(FolioTier.Wide, LyricBackgroundStyle.Soak, hasLyricsOrPending = true, FolioPlayerDisplayState.Lyrics))
@@ -257,13 +258,14 @@ class FolioPlayerStateTest {
         assertEquals(56f * 1.16f, carTypo.mainLineHeightSp, 0.01f)
         assertEquals(56f * 0.42f, carTypo.prevSp, 0.01f)
         assertEquals(56f * 0.50f, carTypo.backingSp, 0.01f)
-        assertEquals(56f * 0.38f, carTypo.translationSp, 0.01f)
+        assertEquals(56f * 0.40f, carTypo.translationSp, 0.01f)
         assertEquals(56f * 0.46f, carTypo.nextSp, 0.01f)
 
-        // Short-lined song on Wide grows up to 1.3x (--pfs * 1.3 = 72.8sp).
+        // Short-lined song on Wide grows up to 1.3x (--pfs * 1.3 = 72.8sp), and translation tracks 0.4x mainSp.
         val shortOnlyCar = listOf(LyricLine(words = listOf(LyricWord("慢一点", 0L, 1000L))))
         val shortCarTypo = posterTypographyFor(shortOnlyCar, availableWidthDp = 576f, baseSp = carSpec.pfs.value)
         assertEquals(56f * 1.3f, shortCarTypo.mainSp, 0.01f)
+        assertEquals(shortCarTypo.mainSp * 0.40f, shortCarTypo.translationSp, 0.01f)
 
         // Phone Narrow (--pfs = 40sp, width ~354dp)
         val phoneSpec = playerSpecForTier(FolioTier.Narrow)
@@ -673,5 +675,130 @@ class FolioPlayerStateTest {
         assertEquals("Artist", formatFolioPlayerSubtitle("Artist", "   "))
         assertEquals("Album", formatFolioPlayerSubtitle("", "Album"))
         assertEquals("", formatFolioPlayerSubtitle("  ", ""))
+    }
+
+    @Test
+    fun effectiveBackgroundStyleFollowsDisplayModeAndPreservesQueueEntryStyle() {
+        // Poster always forces Soak; Lyrics always forces Flow, regardless of settings.
+        assertEquals(
+            LyricBackgroundStyle.Soak,
+            resolveEffectiveBackgroundStyle(
+                displayState = FolioPlayerDisplayState.Poster,
+                settingsStyle = LyricBackgroundStyle.Flow,
+            ),
+        )
+        assertEquals(
+            LyricBackgroundStyle.Flow,
+            resolveEffectiveBackgroundStyle(
+                displayState = FolioPlayerDisplayState.Lyrics,
+                settingsStyle = LyricBackgroundStyle.Soak,
+            ),
+        )
+        // Queue preserves the style entered from (Soak from Poster, Flow from Lyrics).
+        assertEquals(
+            LyricBackgroundStyle.Soak,
+            resolveEffectiveBackgroundStyle(
+                displayState = FolioPlayerDisplayState.Queue,
+                settingsStyle = LyricBackgroundStyle.Flow,
+                lastContentBackgroundStyle = LyricBackgroundStyle.Soak,
+            ),
+        )
+        assertEquals(
+            LyricBackgroundStyle.Flow,
+            resolveEffectiveBackgroundStyle(
+                displayState = FolioPlayerDisplayState.Queue,
+                settingsStyle = LyricBackgroundStyle.Soak,
+                lastContentBackgroundStyle = LyricBackgroundStyle.Flow,
+            ),
+        )
+        // None uses settings style.
+        assertEquals(
+            LyricBackgroundStyle.Soak,
+            resolveEffectiveBackgroundStyle(
+                displayState = FolioPlayerDisplayState.None,
+                settingsStyle = LyricBackgroundStyle.Soak,
+            ),
+        )
+        assertEquals(
+            LyricBackgroundStyle.Flow,
+            resolveEffectiveBackgroundStyle(
+                displayState = FolioPlayerDisplayState.None,
+                settingsStyle = LyricBackgroundStyle.Flow,
+            ),
+        )
+    }
+
+    @Test
+    fun posterPreferredInitializesFromDisplaySettingAndRespectsSessionOverride() {
+        // Without session override: Soak setting -> starts Poster; Flow setting -> starts Scrolling Lyrics.
+        assertTrue(resolveEffectivePosterPreferred(LyricBackgroundStyle.Soak, sessionOverride = null))
+        assertFalse(resolveEffectivePosterPreferred(LyricBackgroundStyle.Flow, sessionOverride = null))
+
+        // Session Tt toggle overrides setting for the rest of the process.
+        val afterToggleFromSoak = FolioPlayerSession.togglePosterPreference(current = true)
+        assertFalse(afterToggleFromSoak)
+        assertFalse(
+            resolveEffectivePosterPreferred(
+                settingsStyle = LyricBackgroundStyle.Soak,
+                sessionOverride = FolioPlayerSession.posterOverrideState.value,
+            ),
+        )
+
+        // Changing default display setting clears session override so next open uses the setting.
+        FolioPlayerSession.syncDefaultDisplayFromSetting(LyricBackgroundStyle.Soak)
+        assertNull(FolioPlayerSession.posterOverrideState.value)
+        assertTrue(
+            resolveEffectivePosterPreferred(
+                settingsStyle = LyricBackgroundStyle.Soak,
+                sessionOverride = FolioPlayerSession.posterOverrideState.value,
+            ),
+        )
+    }
+
+    @Test
+    fun wideCarControlsWidthAndExpandedCoverShrinkClearance() {
+        val collapsedCover = computeWideCarCollapsedCoverSizeDp(leftColumnWidthDp = 604.dp, bodyHeightDp = 594.dp)
+        assertEquals(400f, collapsedCover.value, 0.01f)
+        assertEquals(464f, computeWideCarControlsWidthDp(collapsedCover).value, 0.01f)
+
+        // On 594dp body height and 226dp expanded card, cover shrinks so bottom clears card top by >= 24dp.
+        val expandedCover = computeWideCarExpandedCoverSizeDp(
+            collapsedCoverDp = collapsedCover,
+            bodyHeightDp = 594.dp,
+            controlsCardHeightDp = 226.dp,
+        )
+        val coverBottom = 8f + expandedCover.value
+        val cardTop = 594f - 4f - 226f
+        assertTrue("coverBottom=$coverBottom cardTop=$cardTop", cardTop - coverBottom >= 24f - 0.01f)
+        assertTrue(expandedCover < collapsedCover)
+
+        // Taller screens (>= 672dp body height) keep full 400dp cover without shrinking.
+        val tallExpandedCover = computeWideCarExpandedCoverSizeDp(
+            collapsedCoverDp = collapsedCover,
+            bodyHeightDp = 700.dp,
+            controlsCardHeightDp = 226.dp,
+        )
+        assertEquals(400f, tallExpandedCover.value, 0.01f)
+    }
+
+    @Test
+    fun posterLyricRolesMatchUpcomingAlphasAndScaleRatios() {
+        assertEquals(listOf(0.50f, 0.32f, 0.18f), posterUpcomingAlphas)
+        assertEquals(0f, posterRoleAlpha(PosterLyricRole.ExitingPrevious, previousAlpha = 0.68f), 0.001f)
+        assertEquals(0f, posterRoleAlpha(PosterLyricRole.EnteringBelow, previousAlpha = 0.68f), 0.001f)
+        assertEquals(0.68f, posterRoleAlpha(PosterLyricRole.Previous, previousAlpha = 0.68f), 0.001f)
+        assertEquals(1f, posterRoleAlpha(PosterLyricRole.Focus, previousAlpha = 0.68f), 0.001f)
+        assertEquals(0.50f, posterRoleAlpha(PosterLyricRole.Upcoming0, previousAlpha = 0.68f), 0.001f)
+        assertEquals(0.32f, posterRoleAlpha(PosterLyricRole.Upcoming1, previousAlpha = 0.68f), 0.001f)
+        assertEquals(0.18f, posterRoleAlpha(PosterLyricRole.Upcoming2, previousAlpha = 0.68f), 0.001f)
+
+        val typo = posterTypographyFor(
+            lines = listOf(LyricLine(words = listOf(LyricWord("这是一句比较长的中文主唱歌词测试缩放比例", 0L, 1000L)))),
+            availableWidthDp = 576f,
+            baseSp = 56f,
+        )
+        assertEquals(1f, posterRoleScale(PosterLyricRole.Focus, typo), 0.001f)
+        assertEquals(typo.prevSp / typo.mainSp, posterRoleScale(PosterLyricRole.Previous, typo), 0.001f)
+        assertEquals(typo.nextSp / typo.mainSp, posterRoleScale(PosterLyricRole.Upcoming0, typo), 0.001f)
     }
 }
