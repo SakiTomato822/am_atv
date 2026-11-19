@@ -1,7 +1,7 @@
 package dev.amatv.flyme
 
 import dev.amatv.model.LyricLine
-import dev.amatv.model.LyricTiming
+import androidx.compose.ui.geometry.Rect
 import dev.amatv.model.LyricWord
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -18,17 +18,20 @@ class PosterLyricSweepTest {
         assertEquals(listOf("Welcome", "jungle"), units.map {
             posterLeadText(line).substring(it.startOffset, it.endOffset)
         })
-        assertEquals(listOf(1_000L, 1_700L), units.map { it.startMs })
-        assertEquals(listOf(1_500L, 2_100L), units.map { it.endMs })
+        assertEquals(listOf(1_000L, 1_700L), units.map { it.word.startMs })
+        assertEquals(listOf(1_500L, 2_100L), units.map { it.word.endMs })
     }
 
     @Test
-    fun latinSyllableGroupsSweepAsOneWord() {
+    fun latinSyllableGroupsKeepTheSeparateTimingsUsedByScrollingLyrics() {
         val line = LyricLine(words = listOf(
             LyricWord("Jun", 1_000, 1_200, emphasisGroupId = 1, hasTrailingWhitespace = false),
             LyricWord("gle", 1_200, 1_800, emphasisGroupId = 1),
         ))
-        assertEquals(listOf(PosterSweepUnit(0, 6, 1_000, 1_800)), posterSweepUnits(line))
+        assertEquals(
+            listOf(PosterSweepUnit(0, 3, line.words[0]), PosterSweepUnit(3, 6, line.words[1])),
+            posterSweepUnits(line),
+        )
     }
 
     @Test
@@ -39,7 +42,7 @@ class PosterLyricSweepTest {
         ), joinWithSpaces = false)
         val units = posterSweepUnits(line)
         assertEquals(
-            listOf(PosterSweepUnit(0, 2, 1_000, 1_400), PosterSweepUnit(2, 5, 1_400, 1_800)),
+            listOf(PosterSweepUnit(0, 2, line.words[0]), PosterSweepUnit(2, 5, line.words[1])),
             units,
         )
     }
@@ -51,74 +54,109 @@ class PosterLyricSweepTest {
             joinWithSpaces = false,
         )
         assertEquals(
-            listOf(PosterSweepUnit(0, 2, 1_000, 1_200), PosterSweepUnit(2, 4, 1_200, 1_400)),
+            listOf(PosterSweepUnit(0, 2, line.words[0]), PosterSweepUnit(2, 4, line.words[1])),
             posterSweepUnits(line),
         )
     }
 
     @Test
-    fun lineTimingSweepsAtAConstantRateForTheExplicitLineDuration() {
-        val words = listOf(LyricWord("Jungle", 1_000, 2_000))
-        val line = LyricLine(words, lineStartMs = 900, lineEndMs = 2_400, timing = LyricTiming.Line)
-        assertTrue(posterSweepUnits(line).isEmpty())
-        assertEquals(listOf(PosterSweepUnit(0, 6, 1_000, 2_000)), posterSweepUnits(LyricLine(words, timing = LyricTiming.Word)))
-        val sweep = PosterSweepAxis(line.startMs, posterLeadEndMs(line), 150f, emptyList())
-        assertEquals(0f, sweep.positionAt(890), 0f)
-        for (time in 900L..2_400L step 10L) {
-            assertEquals((time - 900) / 10f, sweep.positionAt(time), 0.001f)
+    fun sharedSweepAdvancesWithinWordsAndHoldsDuringARealPause() {
+        val words = listOf(
+            KaraokeSweepWord(LyricWord("one", 1_000, 1_100), 0f, 60f),
+            KaraokeSweepWord(LyricWord("two", 1_400, 1_800), 100f, 160f),
+        )
+        val scrolling = KaraokeRowSweep(words, 260f, 30f, isRtl = false)
+        val poster = PosterSweepRow(words, 200f, 30f, isRtl = false, nextRowStartMs = null)
+
+        val settled = poster.highlightAt(1_100)
+        for (time in 1_100L until 1_400L step 10) {
+            assertEquals(settled, poster.highlightAt(time))
+            assertEquals(scrolling.highlightAt(1_100), scrolling.highlightAt(time))
         }
-        assertEquals(150f, sweep.positionAt(2_410), 0f)
+        fun ramp(time: Long) = (poster.highlightAt(time) as KaraokeRowHighlight.Partial).ramp
+        assertTrue(ramp(1_090).end > ramp(1_010).end)
+        assertTrue(ramp(1_700).end > ramp(1_500).end)
+        assertEquals(30f, ramp(1_700).end - ramp(1_700).start, 0.001f)
     }
 
     @Test
-    fun featherClearsTheFirstRowBeforeStartingTheNextRow() {
-        val width = 80f
-        val feather = 24f
-        for (pixel in 0..80) {
-            var last = 0f
-            for (step in 0..80) {
-                val ramp = posterSweepRamp(step.toFloat(), width, feather)
-                val lit = 1f - ramp.fractionAt(pixel.toFloat())
-                if (step == 0) assertEquals(0f, lit, 0.001f)
-                assertTrue(lit >= last)
-                last = lit
+    fun rtlRowsUseTheSameFeatherInTheOppositeDirection() {
+        val word = LyricWord("test", 1_000, 2_000)
+        val row = PosterSweepRow(
+            listOf(KaraokeSweepWord(word, 0f, 100f)), 100f, 30f,
+            isRtl = true, nextRowStartMs = null,
+        )
+        val ramp = (row.highlightAt(1_500) as KaraokeRowHighlight.Partial).ramp
+        assertEquals(30f, ramp.end - ramp.start, 0.001f)
+        assertEquals(1f, ramp.fractionAt(100f), 0.001f)
+        assertEquals(0f, ramp.fractionAt(0f), 0.001f)
+    }
+
+    @Test
+    fun splitWordKeepsItsOriginalDurationAcrossTwoVisualRows() {
+        val line = LyricLine(listOf(LyricWord("abcdefgh", 1_000, 1_800)))
+        val units = posterSweepUnits(line)
+        val first = posterSweepWordsOnRow(units, 0, 3) { glyphBounds(it) }.single()
+        val second = posterSweepWordsOnRow(units, 3, 8) { glyphBounds(it - 3) }.single()
+        assertEquals(first.word.startMs + 300, first.word.endMs)
+        assertEquals(first.word.endMs, second.word.startMs)
+        assertEquals(line.words.single().endMs, second.word.endMs)
+    }
+
+    @Test
+    fun phonePortraitCompletesTheFirstOfThreeRows() {
+        assertMiddleRowHighlight(widthPx = 280, expectedWordCounts = listOf(3, 3, 3))
+    }
+
+    @Test
+    fun carLandscapeCompletesTheFirstOfThreeRows() {
+        assertMiddleRowHighlight(widthPx = 400, expectedWordCounts = listOf(4, 4, 1))
+    }
+
+    private fun assertMiddleRowHighlight(widthPx: Int, expectedWordCounts: List<Int>) {
+        val line = LyricLine(listOf(
+            LyricWord("abcdefgh", 1_000, 1_300),
+            LyricWord("ijklmnop", 1_300, 1_600),
+            LyricWord("qrstuvwx", 1_900, 3_000),
+            LyricWord("yzabcdef", 1_900, 3_000),
+            LyricWord("ghijklmn", 1_900, 2_500),
+            LyricWord("opqrstuv", 3_000, 3_300),
+            LyricWord("wxyzabcd", 3_300, 3_600),
+            LyricWord("efghijkl", 3_600, 3_900),
+            LyricWord("mnopqrst", 3_900, 4_200),
+        ))
+        val units = posterSweepUnits(line)
+        // Fixed advances make the two wrap patterns repeatable without Android fonts.
+        val wordsByRow = buildList {
+            var first = 0
+            while (first < units.size) {
+                val start = units[first].startOffset
+                val last = units.indexOfLast { (it.endOffset - start) * GLYPH_PX <= widthPx }
+                add(posterSweepWordsOnRow(units, start, units[last].endOffset) { glyphBounds(it - start) })
+                first = last + 1
             }
-            assertEquals(1f, last, 0.001f)
         }
-        val firstRowEnd = posterSweepRamp(width, width, feather)
-        val secondRowStart = posterSweepRamp(0f, 50f, feather)
-        assertEquals(width, firstRowEnd.start, 0f)
-        assertEquals(0f, secondRowStart.end, 0f)
-    }
-
-    @Test
-    fun sweepPixelsKeepIncreasingEveryTenMillisecondsIncludingBetweenWords() {
-        val sweep = PosterSweepAxis(1_000, 2_100, 150f, listOf(
-            PosterSweepSpan(PosterSweepUnit(0, 7, 1_000, 1_500), 0f, 80f),
-            PosterSweepSpan(PosterSweepUnit(9, 15, 1_700, 2_100), 96f, 150f),
-        ))
-        var previousPx = 0f
-        for (time in 1_010L..2_100L step 10L) {
-            val px = sweep.positionAt(time)
-            assertTrue("Sweep stopped or reversed at $time ms", px > previousPx)
-            previousPx = px
+        assertEquals(expectedWordCounts, wordsByRow.map { it.size })
+        val rows = wordsByRow.mapIndexed { index, words ->
+            PosterSweepRow(
+                words, widthPx.toFloat(), 30f, isRtl = false,
+                nextRowStartMs = wordsByRow.getOrNull(index + 1)?.first()?.word?.startMs,
+            )
         }
-        for (time in 1_500L..1_700L step 10L) {
-            assertEquals(80f + (time - 1_500) * 0.08f, sweep.positionAt(time), 0.001f)
+        assertTrue(rows[0].highlightAt(1_899) is KaraokeRowHighlight.Partial)
+        val middleRow = wordsByRow[1]
+        val midpoint = (middleRow.first().word.startMs + middleRow.last().word.endMs) / 2
+        for (time in listOf(2_050L, midpoint)) {
+            assertEquals(KaraokeRowHighlight.Lit, rows[0].highlightAt(time))
+            assertTrue(rows[1].highlightAt(time) is KaraokeRowHighlight.Partial)
+            assertEquals(KaraokeRowHighlight.Unlit, rows[2].highlightAt(time))
         }
     }
 
-    @Test
-    fun touchingWordBoundsAndOverlappingTimesKeepTheSweepMoving() {
-        val sweep = PosterSweepAxis(1_000, 2_000, 160f, listOf(
-            PosterSweepSpan(PosterSweepUnit(0, 2, 1_000, 1_350), 0f, 40f),
-            PosterSweepSpan(PosterSweepUnit(2, 4, 1_500, 1_800), 40f, 80f),
-            PosterSweepSpan(PosterSweepUnit(5, 9, 1_700, 2_000), 85f, 160f),
-        ))
-        for (time in 1_010L..2_000L step 10L) {
-            assertTrue(sweep.positionAt(time) > sweep.positionAt(time - 10))
-        }
-        assertEquals(40f, sweep.positionAt(1_350), 0f)
-        assertEquals(80f, sweep.positionAt(1_700), 0f)
+    private fun glyphBounds(offset: Int) =
+        Rect(offset * GLYPH_PX, 0f, (offset + 1) * GLYPH_PX, 20f)
+
+    private companion object {
+        const val GLYPH_PX = 10f
     }
 }

@@ -14,6 +14,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
@@ -43,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.amatv.model.LyricLine
 import dev.amatv.model.LyricTimeline
+import dev.amatv.model.LyricTiming
 
 private sealed interface PosterRollKey {
     val order: Int
@@ -368,8 +370,22 @@ internal fun FolioPosterLyricsPanel(
                 val tracks = roll?.drawings ?: staticStage.mapValues { (_, row) ->
                     row.drawings.mapValues { (_, pose) -> pose to pose }
                 }
-                for ((order, drawings) in tracks) {
-                    for ((drawing, poses) in drawings) key(order, drawing) {
+                for ((order, drawings) in tracks) key(order) {
+                    val lead = drawings.keys.filterIsInstance<PosterDrawing.Lead>().firstOrNull()
+                    val line = lead?.let { lines[it.index] }
+                    val isCurrent = lead != null && lead.index == currentFocus
+                    val previousEnd = projection.previousLeadSweepEndMs.takeIf {
+                        animate && lead != null && lead.index == projection.previousLeadIndex
+                    }
+                    // Keep the whole-line fade keyed to the lyric across its two roll layouts.
+                    val linePresence = if (animate && line?.timing == LyricTiming.Line) {
+                        val active = isCurrent && hasStarted
+                        val singing by remember(active, previousEnd, line, drawPosition) {
+                            derivedStateOf { previousEnd != null || (active && drawPosition.longValue < line.mainEndMs) }
+                        }
+                        rememberLineSyncedVocalPresence(singing, "poster-line-presence")
+                    } else null
+                    for ((drawing, poses) in drawings) key(drawing) {
                         val layer = Modifier.graphicsLayer {
                             val pose = if (roll == null) poses.first else {
                                 val time = roll.progress.value
@@ -391,15 +407,15 @@ internal fun FolioPosterLyricsPanel(
                             is PosterDrawing.Lead -> {
                                 val line = lines[drawing.index]
                                 val isCurrent = drawing.focus && drawing.index == currentFocus
-                                val previousSweepEnd = projection.previousLeadSweepEndMs.takeIf {
-                                    animate && drawing.index == projection.previousLeadIndex && (drawing.focus || drawing.previous)
-                                }
+                                val previousSweepEnd = previousEnd.takeIf { drawing.focus || drawing.previous }
                                 val ink = if (isOppositeSingerLine(line)) duetAccentColor else fg
                                 PosterLeadLineText(
                                     drawing.layout, line, drawPosition,
                                     (isCurrent && animate && hasStarted) || previousSweepEnd != null,
-                                    if (isCurrent && !hasStarted) ink.copy(alpha = 0.40f) else ink,
-                                    layer.posterTextSemantics(drawing.layout, poses.second.opacity > 0f),
+                                    linePresence = linePresence.takeIf { drawing.focus || previousSweepEnd != null },
+                                    awaitingStart = isCurrent && !hasStarted,
+                                    ink = ink,
+                                    modifier = layer.posterTextSemantics(drawing.layout, poses.second.opacity > 0f),
                                     previousAlpha = if (drawing.previous) fg2.alpha else 1f,
                                     previousSweepEnd = previousSweepEnd,
                                 )
@@ -425,26 +441,29 @@ private fun PosterLeadLineText(
     line: LyricLine,
     position: State<Long>,
     sweepEnabled: Boolean,
+    linePresence: State<Float>?,
+    awaitingStart: Boolean,
     ink: Color,
     modifier: Modifier,
     previousAlpha: Float,
     previousSweepEnd: Long?,
 ) {
-    val sweep = if (sweepEnabled) remember(layout, line) {
-        val featherPx = with(layout.layoutInput.density) { layout.layoutInput.style.fontSize.toPx() * 0.6f }
-        PosterLyricSweep(layout, line, featherPx)
+    val sweep = if (sweepEnabled && line.timing == LyricTiming.Word) remember(layout, line) {
+        PosterLyricSweep(layout, line)
     } else null
     val height = with(LocalDensity.current) { layout.size.height.toDp() }
     Canvas(modifier.fillMaxWidth().height(height)) {
-        if (sweep == null) {
-            drawText(layout, color = ink.copy(alpha = ink.alpha * previousAlpha))
-        } else {
-            val positionMs = position.value
-            val fade = if (previousSweepEnd != null) {
-                ((positionMs - previousSweepEnd).toFloat() / POSTER_PREVIOUS_FADE_MS).coerceIn(0f, 1f)
-            } else 0f
-            val opacity = 1f + (previousAlpha - 1f) * fade
-            sweep.draw(this, positionMs, ink.copy(alpha = ink.alpha * opacity))
+        val opacity = if (previousSweepEnd != null) {
+            val fade = ((position.value - previousSweepEnd).toFloat() / POSTER_PREVIOUS_FADE_MS).coerceIn(0f, 1f)
+            1f + (previousAlpha - 1f) * fade
+        } else previousAlpha
+        val color = ink.copy(alpha = ink.alpha * opacity)
+        val presence = linePresence?.value
+        when {
+            sweep != null -> sweep.draw(this, position.value, color)
+            presence != null -> drawText(layout, color = color.copy(alpha = color.alpha * (0.40f + 0.60f * presence)))
+            awaitingStart -> drawText(layout, color = color.copy(alpha = color.alpha * 0.40f))
+            else -> drawText(layout, color = color)
         }
     }
 }

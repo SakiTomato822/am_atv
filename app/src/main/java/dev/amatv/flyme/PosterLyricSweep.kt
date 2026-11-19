@@ -1,163 +1,200 @@
 package dev.amatv.flyme
 
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.style.ResolvedTextDirection
+import androidx.compose.ui.unit.dp
 import dev.amatv.model.LyricLine
-import dev.amatv.model.LyricTiming
+import dev.amatv.model.LyricTimeline
+import dev.amatv.model.LyricWord
+import dev.amatv.model.renderLyricWords
 
-internal data class PosterSweepUnit(
-    val startOffset: Int,
-    val endOffset: Int,
-    val startMs: Long,
-    val endMs: Long,
-)
+internal data class PosterSweepUnit(val startOffset: Int, val endOffset: Int, val word: LyricWord)
 
-/** Text offsets follow renderLyricWords, including the exact whitespace from TTML. */
+/** Offsets refer to the same trimmed lyric string used to measure the poster. */
 internal fun posterSweepUnits(line: LyricLine): List<PosterSweepUnit> {
-    if (line.timing != LyricTiming.Word) return emptyList()
     val words = line.words.filterNot { it.isBackgroundVocal }
-    val text = StringBuilder()
-    val units = mutableListOf<PosterSweepUnit>()
-    for ((index, word) in words.withIndex()) {
-        val start = text.length
-        text.append(word.displayText)
-        val end = text.length
-        val previous = words.getOrNull(index - 1)
-        if (word.emphasisGroupId != null && previous?.emphasisGroupId == word.emphasisGroupId) {
-            val unit = units.last()
-            units[units.lastIndex] = unit.copy(endOffset = end, endMs = maxOf(unit.endMs, word.endMs))
-        } else {
-            units += PosterSweepUnit(start, end, word.startMs, word.endMs)
-        }
-        if (word.displayText == word.text && line.joinWithSpaces && word.hasTrailingWhitespace &&
+    val trimStart = renderLyricWords(words, line.joinWithSpaces).takeWhile { it.isWhitespace() }.length
+    var offset = -trimStart
+    return words.mapIndexedNotNull { index, word ->
+        val display = word.displayText
+        val start = offset
+        offset += display.length
+        if (display == word.text && line.joinWithSpaces && word.hasTrailingWhitespace &&
             index < words.lastIndex
-        ) text.append(' ')
-    }
-    val trimStart = text.indexOfFirst { !it.isWhitespace() }
-    if (trimStart < 0) return emptyList()
-    return units.mapNotNull { unit ->
-        val display = text.substring(unit.startOffset, unit.endOffset)
-        val start = display.indexOfFirst { !it.isWhitespace() }
-        if (start < 0) return@mapNotNull null
-        unit.copy(
-            startOffset = unit.startOffset + start - trimStart,
-            endOffset = unit.startOffset + display.indexOfLast { !it.isWhitespace() } + 1 - trimStart,
+        ) offset++
+
+        val first = display.indexOfFirst { !it.isWhitespace() }
+        if (first < 0) null else PosterSweepUnit(
+            start + first,
+            start + display.indexOfLast { !it.isWhitespace() } + 1,
+            word,
         )
     }
 }
 
-internal data class PosterSweepSpan(val timing: PosterSweepUnit, val startPx: Float, val endPx: Float)
+internal fun posterSweepWordsOnRow(
+    units: List<PosterSweepUnit>,
+    rowStart: Int,
+    rowEnd: Int,
+    bounds: (Int) -> Rect,
+): List<KaraokeSweepWord> = units.mapNotNull { unit ->
+    val start = maxOf(rowStart, unit.startOffset)
+    val end = minOf(rowEnd, unit.endOffset)
+    if (start >= end) return@mapNotNull null
 
-/** A single axis through all the visual rows of a lyric, in their reading order. */
-internal class PosterSweepAxis(startMs: Long, endMs: Long, private val width: Float, spans: List<PosterSweepSpan>) {
-    private data class Point(val timeMs: Long, val px: Float)
-
-    private val points = buildList {
-        add(Point(startMs, 0f))
-        fun anchor(timeMs: Long, px: Float) {
-            // Coincident boundaries (e.g. adjacent Hanzi or a wrap) share the neighboring slope.
-            if (timeMs > last().timeMs && timeMs < endMs && px > last().px && px < width) {
-                add(Point(timeMs, px))
-            }
-        }
-        for ((index, span) in spans.withIndex()) {
-            val timing = span.timing
-            val nextStart = spans.getOrNull(index + 1)?.timing?.startMs ?: endMs
-            anchor(timing.startMs, span.startPx)
-            anchor(minOf(timing.endMs, nextStart), span.endPx)
-        }
-        add(Point(endMs, width))
+    var left = Float.POSITIVE_INFINITY
+    var right = Float.NEGATIVE_INFINITY
+    for (offset in start until end) {
+        val box = bounds(offset)
+        if (box.width <= 0f) continue
+        left = minOf(left, box.left)
+        right = maxOf(right, box.right)
     }
+    if (left >= right) return@mapNotNull null
 
-    fun positionAt(positionMs: Long): Float {
-        if (positionMs >= points.last().timeMs) return width
-        if (positionMs <= points.first().timeMs) return 0f
-        val index = points.binarySearchBy(positionMs) { it.timeMs }
-        if (index >= 0) return points[index].px
-        val next = -index - 1
-        val start = points[next - 1]
-        val end = points[next]
-        val fraction = (positionMs - start.timeMs).toFloat() / (end.timeMs - start.timeMs)
-        return start.px + (end.px - start.px) * fraction
+    val word = unit.word
+    if (start == unit.startOffset && end == unit.endOffset) {
+        return@mapNotNull KaraokeSweepWord(word, left, right)
     }
+    val length = unit.endOffset - unit.startOffset
+    val startMs = word.startMs + word.durationMs * (start - unit.startOffset) / length
+    val endMs = word.startMs + word.durationMs * (end - unit.startOffset) / length
+    KaraokeSweepWord(word.copy(startMs = startMs, endMs = endMs), left, right)
 }
 
-/** Reserve room for the feather to clear the row before the next row starts. */
-internal fun posterSweepRamp(positionPx: Float, rowWidth: Float, featherPx: Float): KaraokeMaskRamp {
-    val edge = positionPx / rowWidth * (rowWidth + featherPx)
-    return KaraokeMaskRamp(edge - featherPx, edge)
+internal class PosterSweepRow(
+    val words: List<KaraokeSweepWord>,
+    width: Float,
+    featherPx: Float,
+    val isRtl: Boolean,
+    private val nextRowStartMs: Long?,
+) {
+    // Give the full feather room beyond either edge of the measured text.
+    private val sweep = if (words.isEmpty()) null else KaraokeRowSweep(
+        words.map { it.copy(left = it.left + featherPx, right = it.right + featherPx) },
+        width + 2f * featherPx, featherPx, isRtl,
+    )
+    private val padding = featherPx
+
+    fun highlightAt(positionMs: Long): KaraokeRowHighlight {
+        if (nextRowStartMs != null &&
+            positionMs - LyricTimeline.KARAOKE_WORD_OFFSET_MS >= nextRowStartMs
+        ) return KaraokeRowHighlight.Lit
+        return when (val highlight = sweep?.highlightAt(positionMs)) {
+            null -> KaraokeRowHighlight.Unlit
+            is KaraokeRowHighlight.Partial -> KaraokeRowHighlight.Partial(
+                KaraokeMaskRamp(highlight.ramp.start - padding, highlight.ramp.end - padding),
+            )
+            else -> highlight
+        }
+    }
 }
 
 internal class PosterLyricSweep(
     private val layout: TextLayoutResult,
     line: LyricLine,
-    private val featherPx: Float,
 ) {
-    private data class Row(
-        val left: Float,
-        val top: Float,
-        val bottom: Float,
-        val width: Float,
-        val startPx: Float,
-    ) {
-        val endPx: Float get() = startPx + width
-    }
+    private data class Row(val top: Float, val bottom: Float, val sweep: PosterSweepRow)
 
-    private val rows = buildList<Row> {
-        for (index in 0 until layout.lineCount) {
-            val left = layout.getLineLeft(index)
-            add(Row(
-                left, layout.getLineTop(index), layout.getLineBottom(index),
-                layout.getLineRight(index) - left, lastOrNull()?.endPx ?: 0f,
-            ))
-        }
+    private val endMs = posterLeadEndMs(line)
+    private val featherPx = with(layout.layoutInput.density) {
+        MotionTokens.KaraokeGradientFeatherDp.dp.toPx() *
+            (layout.layoutInput.style.fontSize.value / MotionTokens.KaraokeMainFontSizeSp)
     }
-    private val width = rows.last().endPx
-    private val axis: PosterSweepAxis
-
-    init {
+    private val rows = run {
         val units = posterSweepUnits(line)
-        val lastRow = rows.lastIndex
-        val visibleEnd = layout.getLineEnd(lastRow, visibleEnd = layout.isLineEllipsized(lastRow))
-        val spans = units.mapNotNull { unit ->
-            var start = Float.POSITIVE_INFINITY
-            var end = 0f
-            for (offset in unit.startOffset until minOf(unit.endOffset, visibleEnd)) {
-                val row = rows[layout.getLineForOffset(offset)]
-                val box = layout.getBoundingBox(offset)
-                if (box.width > 0f) {
-                    start = minOf(start, row.startPx + (box.left - row.left).coerceIn(0f, row.width))
-                    end = maxOf(end, row.startPx + (box.right - row.left).coerceIn(0f, row.width))
-                }
-            }
-            if (end > start) PosterSweepSpan(unit, start, end) else null
+        val wordsByRow = List(layout.lineCount) { index ->
+            posterSweepWordsOnRow(
+                units, layout.getLineStart(index), layout.getLineEnd(index, visibleEnd = true),
+                layout::getBoundingBox,
+            )
         }
-        axis = PosterSweepAxis(units.firstOrNull()?.startMs ?: line.startMs, posterLeadEndMs(line), width, spans)
+        var nextRowStartMs: Long? = null
+        wordsByRow.indices.reversed().map { index ->
+            val words = wordsByRow[index]
+            val sweep = PosterSweepRow(
+                words, layout.size.width.toFloat(), featherPx,
+                layout.getParagraphDirection(layout.getLineStart(index)) == ResolvedTextDirection.Rtl,
+                nextRowStartMs,
+            )
+            nextRowStartMs = words.firstOrNull()?.word?.startMs ?: nextRowStartMs
+            Row(layout.getLineTop(index), layout.getLineBottom(index), sweep)
+        }.asReversed()
     }
+    private val emphasisClip = Path()
 
-    fun draw(scope: DrawScope, positionMs: Long, color: Color) = with(scope) {
-        val positionPx = axis.positionAt(positionMs)
-        if (positionPx >= width) {
-            drawText(layout, color = color)
+    fun draw(scope: DrawScope, positionMs: Long, ink: Color) = with(scope) {
+        val time = positionMs - LyricTimeline.KARAOKE_WORD_OFFSET_MS
+        if (time >= endMs + MotionTokens.KaraokeRushGradientMillis) {
+            drawText(layout, color = ink)
             return@with
         }
-        drawText(layout, color = color.copy(alpha = color.alpha * 0.40f))
-        if (positionPx <= 0f) return@with
 
-        val row = rows.first { positionPx < it.endPx }
-        if (row.startPx > 0f) {
-            clipRect(bottom = row.top) { drawText(layout, color = color) }
+        for (row in rows) {
+            val highlight = row.sweep.highlightAt(positionMs)
+            val word = row.sweep.words.lastOrNull { it.word.startMs <= time }
+            val lift = if (word == null || time >= word.word.endMs + WORD_RELEASE_MS) 0f else {
+                val release = ((word.word.endMs + WORD_RELEASE_MS - time).toFloat() / WORD_RELEASE_MS)
+                    .coerceIn(0f, 1f)
+                LyricTimeline.wordLiftFraction(
+                    time, word.word.startMs, word.word.endMs, release,
+                    MotionTokens.KaraokeSpringDampingRatio, MotionTokens.KaraokeSpringStiffness,
+                )
+            }
+            clipRect(top = row.top, bottom = row.bottom) {
+                if (lift > 0f && word != null) {
+                    emphasisClip.reset()
+                    emphasisClip.addRect(Rect(word.left, row.top, word.right, row.bottom))
+                    clipPath(emphasisClip, ClipOp.Difference) { drawRow(highlight, row.sweep.isRtl, ink) }
+                } else {
+                    drawRow(highlight, row.sweep.isRtl, ink)
+                }
+            }
+            if (lift > 0f && word != null) {
+                translate(top = MotionTokens.KaraokeWordLiftDp.dp.toPx() * lift) {
+                    clipPath(emphasisClip) { drawRow(highlight, row.sweep.isRtl, ink, lift) }
+                }
+            }
         }
-        val ramp = posterSweepRamp(positionPx - row.startPx, row.width, featherPx)
-        val brush = Brush.horizontalGradient(
-            colors = listOf(color, color.copy(alpha = 0f)),
-            startX = row.left + ramp.start,
-            endX = row.left + ramp.end,
-        )
-        clipRect(top = row.top, bottom = row.bottom) { drawText(layout, brush = brush) }
+    }
+
+    private fun DrawScope.drawRow(
+        highlight: KaraokeRowHighlight,
+        isRtl: Boolean,
+        ink: Color,
+        emphasis: Float = 0f,
+    ) {
+        val lit = ink.copy(alpha = ink.alpha + (1f - ink.alpha) * emphasis * 0.12f)
+        val unlit = ink.copy(alpha = ink.alpha * (0.40f + 0.10f * emphasis))
+        when (highlight) {
+            KaraokeRowHighlight.Unlit -> drawText(layout, color = unlit)
+            KaraokeRowHighlight.Lit -> drawText(layout, color = lit)
+            is KaraokeRowHighlight.Partial -> {
+                val (start, end) = highlight.ramp
+                val first = if (isRtl) unlit else lit
+                val last = if (isRtl) lit else unlit
+                if (start == end) {
+                    drawText(layout, color = if (start <= 0f) last else first)
+                } else {
+                    drawText(layout, brush = Brush.horizontalGradient(
+                        colors = listOf(first, last), startX = start, endX = end,
+                    ))
+                }
+            }
+        }
+    }
+
+    private companion object {
+        const val WORD_RELEASE_MS = 100L
     }
 }

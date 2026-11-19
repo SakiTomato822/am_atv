@@ -30,15 +30,16 @@ class PosterLyricsTimelineTest {
         assertEquals(0, overlap.previousLeadIndex)
         assertTrue(overlap.smallLines.isEmpty())
         assertEquals(3_700L, overlap.previousLeadSweepEndMs)
-        val sweep = PosterSweepAxis(1_000, 3_700, 120f, posterSweepUnits(lines[0]).mapIndexed { index, unit ->
-            if (index == 0) PosterSweepSpan(unit, 0f, 40f) else PosterSweepSpan(unit, 48f, 120f)
-        })
-        val handoffPx = sweep.positionAt(1_800)
+        val sweep = PosterSweepRow(
+            listOf(KaraokeSweepWord(lines[0].words[0], 0f, 40f), KaraokeSweepWord(lines[0].words[1], 48f, 120f)),
+            120f, 30f, isRtl = false, nextRowStartMs = null,
+        )
+        val handoffPx = sweep.leadingEdgeAt(1_800)
         assertTrue(handoffPx > 48f && handoffPx < 120f)
-        assertTrue(sweep.positionAt(2_000) > handoffPx)
+        assertTrue(sweep.leadingEdgeAt(2_000) > handoffPx)
         assertTrue(timeline.at(2_000).smallLines.isEmpty())
         assertEquals(1, timeline.at(2_210).focusLeadIndex)
-        assertEquals(120f, sweep.positionAt(3_700), 0f)
+        assertTrue(sweep.leadingEdgeAt(3_700) >= 150f - 0.001f)
         assertTrue(timeline.at(3_700).smallLines.isEmpty())
         assertEquals(3_700L, timeline.at(3_899).previousLeadSweepEndMs)
         assertNull(timeline.at(3_900).previousLeadSweepEndMs)
@@ -122,14 +123,15 @@ class PosterLyricsTimelineTest {
         val lyric = LyricLine(words = listOf(word("one", 1_500, 1_800), word("two", 1_800, 2_200)))
         val timeline = PosterLyricsTimeline(listOf(line("Before", 200, 1_500), lyric))
         val clock = PosterPlaybackClock(1_470)
-        val sweep = PosterSweepAxis(1_500, 2_200, 70f, posterSweepUnits(lyric).mapIndexed { index, unit ->
-            if (index == 0) PosterSweepSpan(unit, 0f, 30f) else PosterSweepSpan(unit, 35f, 70f)
-        })
-        var previousPx = 0f
+        val sweep = PosterSweepRow(
+            listOf(KaraokeSweepWord(lyric.words[0], 0f, 30f), KaraokeSweepWord(lyric.words[1], 35f, 70f)),
+            70f, 30f, isRtl = false, nextRowStartMs = null,
+        )
+        var previousPx = Float.NEGATIVE_INFINITY
         for (sample in (1_500L..1_900L step 10L).toList() + listOf(1_510L, 1_490L, 1_990L, 990L)) {
             val position = clock.sample(sample)
             assertEquals(1, timeline.at(position).focusLeadIndex)
-            val px = sweep.positionAt(position)
+            val px = sweep.leadingEdgeAt(position)
             assertTrue(px >= previousPx)
             previousPx = px
         }
@@ -163,6 +165,9 @@ class PosterLyricsTimelineTest {
     }
 
     private fun PosterLyricsTimeline.at(position: Long) = projectionAt(boundaryAt(position))
+
+    private fun PosterSweepRow.leadingEdgeAt(position: Long): Float =
+        (highlightAt(position) as KaraokeRowHighlight.Partial).ramp.end
 
     private fun line(text: String, start: Long, end: Long) =
         LyricLine(words = listOf(word(text, start, end)), timing = LyricTiming.Line)
