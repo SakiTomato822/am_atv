@@ -54,3 +54,13 @@
   - `FolioPlayerStateTest`：**22** 个测试全部通过（0 跳过、0 失败、0 错误）。
   - 全量 `:app:testFlymeGeckoUnitTest`（83 个测试套件）：**562** 个测试全部通过（`FAILURES=0`、`SKIPPED=0`）。
 - **编译组装结果**：`:app:assembleFlymeGecko` 返回 `BUILD SUCCESSFUL`（3m 1s）。
+
+## 第二轮
+
+1. **展开态「歌手 — 专辑」去除超链接样式**
+   - 在 [`FolioPlayerControls.kt`](file:///D:/Data%20for%20Apps%20and%20etc/Codex/am_atv_a0/app/src/main/java/dev/amatv/flyme/FolioPlayerControls.kt) 的 `FolioExpandedSubtitle` 中，为 `LinkAnnotation.Clickable` 显式传入 `TextLinkStyles`：常规态、聚焦态、悬停态均固定为传入次要文字颜色 `color`（`--pfg2`）、`FontWeight.Normal`、`TextDecoration.None`（消除 Material3 默认紫色与下划线）；`pressedStyle` 仅降低透明度（`alpha * 0.45f`，下限 `0.15f`）提供按压反馈，同时保留「歌手」与「专辑」各自独立的点击跳转区域。
+2. **对唱合唱判断改用 `LyricAgentType`**
+   - 在 [`FolioPlayerState.kt`](file:///D:/Data%20for%20Apps%20and%20etc/Codex/am_atv_a0/app/src/main/java/dev/amatv/flyme/FolioPlayerState.kt) 中重构 `isOppositeSingerLine`：移除 `"v1000"` 与 `"group"` 字符串猜测，改为 `line.agentId.isNullOrBlank() || line.agentType == LyricAgentType.Group` 时归为主唱（返回 `false`），其余按 `line.isOppositeAgent` 返回。
+   - 在 [`FolioPlayerStateTest.kt`](file:///D:/Data%20for%20Apps%20and%20etc/Codex/am_atv_a0/app/src/test/java/dev/amatv/flyme/FolioPlayerStateTest.kt) 的 `duetPosterColorsBySingerHandlesChorusAsPrimaryAndMovesLaterOverlapToSmallLines` 中补充验证：`Group` 均为主唱，而 `Person` / `Character` 即使带 `"v1000"` 或 `"group_lead"` ID 仍按 `isOppositeAgent` 判定，空白 `agentId` 固定归为主唱。
+3. **第二轮验证结果**
+   - 同一命令验证：`FolioPlayerStateTest` **22/22** 通过，全量 `:app:testFlymeGeckoUnitTest`（84 个测试套件）**573/573** 通过（0 失败、0 跳过），`:app:assembleFlymeGecko` 返回 **`BUILD SUCCESSFUL`**（3m 49s）。
