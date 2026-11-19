@@ -77,7 +77,12 @@ private sealed interface PosterDrawing {
     val width: Float
     val height: Float
 
-    data class Lead(val index: Int, val layout: TextLayoutResult, val focus: Boolean) : PosterDrawing {
+    data class Lead(
+        val index: Int,
+        val layout: TextLayoutResult,
+        val focus: Boolean,
+        val previous: Boolean,
+    ) : PosterDrawing {
         override val width: Float get() = layout.size.width.toFloat()
         override val height: Float get() = layout.size.height.toFloat()
     }
@@ -278,7 +283,8 @@ internal fun FolioPosterLyricsPanel(
             fun row(item: PosterRollKey, top: Float): PosterRollRow {
                 val role = roles.roleFor(item)
                 val scale = posterRoleScale(role, typo)
-                val opacity = posterRoleAlpha(role, fg2.alpha)
+                // Previous ink fades in its Canvas so this pose stays independent of the playback clock.
+                val opacity = if (role == PosterLyricRole.Previous) 1f else posterRoleAlpha(role, fg2.alpha)
                 val parts = when (item) {
                     is PosterRollKey.Gap -> listOf(with(density) {
                         val dotWidth = 66.dp.toPx()
@@ -287,7 +293,9 @@ internal fun FolioPosterLyricsPanel(
                     })
                     is PosterRollKey.Lead -> {
                         val isFocus = role == PosterLyricRole.Focus
-                        val lead = PosterDrawing.Lead(item.index, layouts.getValue(item), isFocus)
+                        val lead = PosterDrawing.Lead(
+                            item.index, layouts.getValue(item), isFocus, previous = role == PosterLyricRole.Previous,
+                        )
                         if (isFocus) buildList<PosterDrawing> {
                             val localInk = if (isOppositeSingerLine(lines[item.index])) {
                                 duetAccentColor.copy(alpha = 0.60f)
@@ -383,11 +391,17 @@ internal fun FolioPosterLyricsPanel(
                             is PosterDrawing.Lead -> {
                                 val line = lines[drawing.index]
                                 val isCurrent = drawing.focus && drawing.index == currentFocus
+                                val previousSweepEnd = projection.previousLeadSweepEndMs.takeIf {
+                                    animate && drawing.index == projection.previousLeadIndex && (drawing.focus || drawing.previous)
+                                }
                                 val ink = if (isOppositeSingerLine(line)) duetAccentColor else fg
                                 PosterLeadLineText(
-                                    drawing.layout, line, drawPosition, isCurrent && animate && hasStarted,
+                                    drawing.layout, line, drawPosition,
+                                    (isCurrent && animate && hasStarted) || previousSweepEnd != null,
                                     if (isCurrent && !hasStarted) ink.copy(alpha = 0.40f) else ink,
                                     layer.posterTextSemantics(drawing.layout, poses.second.opacity > 0f),
+                                    previousAlpha = if (drawing.previous) fg2.alpha else 1f,
+                                    previousSweepEnd = previousSweepEnd,
                                 )
                             }
                             is PosterDrawing.Local -> PosterMeasuredText(
@@ -413,13 +427,24 @@ private fun PosterLeadLineText(
     sweepEnabled: Boolean,
     ink: Color,
     modifier: Modifier,
+    previousAlpha: Float,
+    previousSweepEnd: Long?,
 ) {
     val sweep = if (sweepEnabled) remember(layout, line) {
         posterSweepUnits(line).takeIf { it.isNotEmpty() }?.let { PosterLyricSweep(layout, it) }
     } else null
     val height = with(LocalDensity.current) { layout.size.height.toDp() }
     Canvas(modifier.fillMaxWidth().height(height)) {
-        if (sweep == null) drawText(layout, color = ink) else sweep.draw(this, position.value, ink)
+        if (sweep == null) {
+            drawText(layout, color = ink.copy(alpha = ink.alpha * previousAlpha))
+        } else {
+            val positionMs = position.value
+            val fade = if (previousSweepEnd != null) {
+                ((positionMs - previousSweepEnd).toFloat() / POSTER_PREVIOUS_FADE_MS).coerceIn(0f, 1f)
+            } else 0f
+            val opacity = 1f + (previousAlpha - 1f) * fade
+            sweep.draw(this, positionMs, ink.copy(alpha = ink.alpha * opacity))
+        }
     }
 }
 

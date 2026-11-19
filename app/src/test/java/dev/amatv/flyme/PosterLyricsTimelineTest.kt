@@ -12,26 +12,58 @@ import org.junit.Test
 
 class PosterLyricsTimelineTest {
     @Test
-    fun overlappingLeadsAdvanceAtStartAndKeepOnlyTheUnfinishedWordsBelow() {
+    fun overlappingLeadsAdvanceAtStartAndKeepTheSweepOnThePreviousLine() {
         val lines = listOf(
             LyricLine(
-                words = listOf(word("first", 1_000, 1_500), word("still", 1_500, 2_000), word("singing", 2_000, 3_700)),
+                words = listOf(word("still", 1_000, 1_500), word("singing", 1_500, 3_700)),
                 agentId = "second",
                 isOppositeAgent = true,
             ),
             line("Next", 1_800, 2_200),
-            line("Last", 3_900, 4_100),
+            line("Last", 4_000, 4_100),
         )
         val timeline = PosterLyricsTimeline(lines)
         assertMonotonicFocus(timeline, 4_300)
         assertEquals(0, timeline.at(1_790).focusLeadIndex)
-        assertEquals(1, timeline.at(1_800).focusLeadIndex)
-        assertEquals(0, timeline.at(1_800).previousLeadIndex)
-        assertEquals(listOf(PosterTextLine("still singing", true)), timeline.at(1_800).smallLines)
-        assertEquals(listOf(PosterTextLine("singing", true)), timeline.at(2_000).smallLines)
+        val overlap = timeline.at(1_800)
+        assertEquals(1, overlap.focusLeadIndex)
+        assertEquals(0, overlap.previousLeadIndex)
+        assertTrue(overlap.smallLines.isEmpty())
+        assertEquals(3_700L, overlap.previousLeadSweepEndMs)
+        val lastWord = posterSweepUnits(lines[0]).last()
+        val handoffProgress = lastWord.progressAt(1_800)
+        assertTrue(handoffProgress > 0f && handoffProgress < 1f)
+        assertTrue(lastWord.progressAt(2_000) > handoffProgress)
+        assertTrue(timeline.at(2_000).smallLines.isEmpty())
         assertEquals(1, timeline.at(2_210).focusLeadIndex)
+        assertEquals(1f, lastWord.progressAt(3_700), 0f)
         assertTrue(timeline.at(3_700).smallLines.isEmpty())
-        assertEquals(2, timeline.at(3_900).focusLeadIndex)
+        assertEquals(3_700L, timeline.at(3_899).previousLeadSweepEndMs)
+        assertNull(timeline.at(3_900).previousLeadSweepEndMs)
+        assertEquals(0, timeline.at(3_900).previousLeadIndex)
+        assertEquals(2, timeline.at(4_000).focusLeadIndex)
+    }
+
+    @Test
+    fun onlyAnIndependentOverlappingSingerAppearsBelowAsAWholeLine() {
+        val otherSinger = LyricLine(
+            words = listOf(word("still", 1_000, 1_400), word("here", 1_400, 3_000)),
+            agentId = "second",
+            isOppositeAgent = true,
+        )
+        val timeline = PosterLyricsTimeline(
+            listOf(
+                otherSinger,
+                line("Earlier solo", 1_100, 3_000),
+                line("Previous", 1_500, 2_600),
+                line("Focus", 2_000, 3_500),
+            ),
+        )
+        val overlap = timeline.at(2_100)
+        assertEquals(3, overlap.focusLeadIndex)
+        assertEquals(2, overlap.previousLeadIndex)
+        assertEquals(listOf(PosterTextLine("still here", true)), overlap.smallLines)
+        assertTrue(timeline.at(3_000).smallLines.isEmpty())
     }
 
     @Test

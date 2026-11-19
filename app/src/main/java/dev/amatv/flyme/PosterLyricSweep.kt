@@ -128,10 +128,12 @@ internal class PosterLyricSweep(
     private data class Fragment(val bounds: Rect, val rtl: Boolean)
     private data class Word(val timing: PosterSweepUnit, val fragments: List<Fragment>, val width: Float)
 
+    private val lastLayoutRow = layout.lineCount - 1
+    private val visibleEnd = layout.getLineEnd(lastLayoutRow, visibleEnd = layout.isLineEllipsized(lastLayoutRow))
     private val words = timing.map { unit ->
         val fragments = buildList<Fragment> {
             var lastRow = -1
-            for (offset in unit.startOffset until unit.endOffset) {
+            for (offset in unit.startOffset until minOf(unit.endOffset, visibleEnd)) {
                 val bounds = layout.getBoundingBox(offset)
                 if (bounds.width <= 0f) continue
                 val row = layout.getLineForOffset(offset)

@@ -61,10 +61,13 @@ internal class PosterPlaybackClock(initialPositionMs: Long) {
 
 internal data class PosterTextLine(val text: String, val isOppositeSinger: Boolean)
 
+internal const val POSTER_PREVIOUS_FADE_MS = 200L
+
 internal data class PosterLyricsProjection(
     val focusLeadIndex: Int?,
     val hasStartedLead: Boolean,
     val previousLeadIndex: Int?,
+    val previousLeadSweepEndMs: Long?,
     val smallLines: List<PosterTextLine>,
     val upcomingLeadIndices: List<Int>,
     val gap: LyricTimeline.InstrumentalGap?,
@@ -73,6 +76,9 @@ internal data class PosterLyricsProjection(
 /** All inputs to a projection are constant between adjacent boundaries. */
 internal class PosterLyricsTimeline(private val lines: List<LyricLine>) {
     private val leadTexts = lines.map(::posterLeadText)
+    private val leadEnds = lines.map { line ->
+        line.words.filterNot { it.isBackgroundVocal }.maxOfOrNull { it.endMs } ?: line.startMs
+    }
     private val leadIndices = lines.indices.filter {
         leadTexts[it].isNotEmpty() && lines[it].agentType != LyricAgentType.Group && !lines[it].isStatic
     }
@@ -93,17 +99,16 @@ internal class PosterLyricsTimeline(private val lines: List<LyricLine>) {
         add(0L)
         for ((index, line) in lines.withIndex()) {
             add(line.startMs)
-            add(line.mainEndMs)
-            if (line.timing == LyricTiming.Word && index in leadIndices) {
-                val nextStart = leadIndices.firstOrNull { it > index }?.let { lines[it].startMs }
-                if (nextStart != null && nextStart < line.mainEndMs) {
-                    line.words.filter { !it.isBackgroundVocal && it.endMs > nextStart }.forEach { add(it.endMs) }
-                }
-            }
+            add(leadEnds[index])
             val (interval) = backing[index]
             if (!interval.isEmpty()) {
                 add(interval.first)
                 add(interval.last + 1)
+            }
+        }
+        for ((index, next) in leadIndices.zipWithNext()) {
+            if (lines[index].timing == LyricTiming.Word && leadEnds[index] > lines[next].startMs) {
+                add(leadEnds[index] + POSTER_PREVIOUS_FADE_MS)
             }
         }
         for (gap in gaps) {
@@ -124,24 +129,23 @@ internal class PosterLyricsTimeline(private val lines: List<LyricLine>) {
         val startedLead = leadIndices.indexOfLast { lines[it].startMs <= positionMs }
         val gap = gaps.firstOrNull { positionMs in it.startMs until it.endMs }
         val focus = leadIndices.getOrNull(startedLead.coerceAtLeast(0))
-        val previous = leadIndices.getOrNull(startedLead - 1)
+        val focusLine = focus?.let { lines[it] }
+        val previous = leadIndices.getOrNull(startedLead - 1).takeIf { gap == null }
+        val previousSweepEnd = if (previous != null && focusLine != null && lines[previous].timing == LyricTiming.Word) {
+            leadEnds[previous].takeIf { end -> end > focusLine.startMs && positionMs < end + POSTER_PREVIOUS_FADE_MS }
+        } else null
         val smallLines = buildList {
             if (gap == null) {
                 for ((index, line) in lines.withIndex()) {
                     if (line.isStatic) continue
                     val opposite = isOppositeSingerLine(line)
-                    if (index != focus && (focus == null || index < focus || line.agentType == LyricAgentType.Group) &&
-                        leadTexts[index].isNotEmpty() && positionMs in line.startMs until line.mainEndMs
+                    if (line.agentType == LyricAgentType.Group ||
+                        (focusLine != null && index != focus && index != previous && isDifferentSinger(line, focusLine))
                     ) {
-                        val text = if (line.timing == LyricTiming.Word) {
-                            renderLyricWords(
-                                line.words.filter { !it.isBackgroundVocal && it.endMs > positionMs },
-                                line.joinWithSpaces,
-                            ).trim()
-                        } else {
-                            leadTexts[index]
+                        val lead = leadTexts[index]
+                        if (lead.isNotEmpty() && positionMs in line.startMs until leadEnds[index]) {
+                            add(PosterTextLine(lead, opposite))
                         }
-                        if (text.isNotEmpty()) add(PosterTextLine(text, opposite))
                     }
                     val (interval, text) = backing[index]
                     if (positionMs in interval && text.isNotEmpty()) add(PosterTextLine(text, opposite))
@@ -151,7 +155,8 @@ internal class PosterLyricsTimeline(private val lines: List<LyricLine>) {
         return PosterLyricsProjection(
             focusLeadIndex = focus,
             hasStartedLead = startedLead >= 0,
-            previousLeadIndex = previous.takeIf { gap == null },
+            previousLeadIndex = previous,
+            previousLeadSweepEndMs = previousSweepEnd,
             smallLines = smallLines,
             upcomingLeadIndices = if (gap == null) {
                 leadIndices.drop(startedLead.coerceAtLeast(0) + 1).take(3)
@@ -161,4 +166,11 @@ internal class PosterLyricsTimeline(private val lines: List<LyricLine>) {
             gap = gap,
         )
     }
+}
+
+private fun isDifferentSinger(line: LyricLine, focus: LyricLine): Boolean {
+    val agent = line.agentId
+    val focusAgent = focus.agentId
+    return if (!agent.isNullOrBlank() && !focusAgent.isNullOrBlank()) agent != focusAgent
+    else isOppositeSingerLine(line) != isOppositeSingerLine(focus)
 }
