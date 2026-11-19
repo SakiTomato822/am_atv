@@ -1,8 +1,8 @@
 package dev.amatv.ui
 
 import dev.amatv.R
-import dev.amatv.integration.LibraryCollection
-import dev.amatv.model.CatalogKind
+import dev.amatv.core.canShowFullAlbum
+import dev.amatv.core.catalogAlbum
 import dev.amatv.model.CatalogOpenAction
 import dev.amatv.model.Track
 import dev.amatv.model.openAction
@@ -27,16 +27,12 @@ internal data class CollectionBrowserState(
 ) {
     /** Like Apple Music: a saved album lists saved songs and offers the complete release. */
     val canShowFullAlbum: Boolean
-        get() = collection?.catalogKind == CatalogKind.Album &&
-            collection.resourceType == LibraryCollection.Albums.resourceType && collection.catalogId != null
+        get() = collection?.canShowFullAlbum == true
 
     /** The collection the visible tracks belong to; the catalog album once expanded. */
     val playbackCollection: Track?
         get() = if (fullAlbum) collection?.catalogAlbum() else collection
 }
-
-/** The catalog release behind a saved album: collection requests then read the catalog. */
-internal fun Track.catalogAlbum(): Track = copy(resourceId = null, resourceType = "albums")
 
 /** Browsing never touches the playback queue. A dismissed request cannot reopen the page. */
 internal class CollectionBrowser(

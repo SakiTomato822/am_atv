@@ -8,7 +8,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -18,6 +22,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.amatv.R
 import dev.amatv.core.PlaybackState
+import dev.amatv.core.canShowFullAlbum
+import dev.amatv.core.catalogAlbum
 import dev.amatv.integration.LibraryCollection
 import dev.amatv.integration.MusicServices
 import dev.amatv.model.CatalogKind
@@ -38,10 +44,14 @@ internal fun FolioCollectionDetail(
 ) {
     val spec = LocalFolioTierSpec.current
     val album = collection.catalogKind == CatalogKind.Album
-    val (data, retry) = rememberFolioDetailData(
-        cached = { services.cachedCollectionTracks(collection) },
-        saved = { services.savedCollectionTracks(collection) },
-    ) { services.collectionTracks(collection) }
+    var fullAlbum by remember { mutableStateOf(false) }
+    val playbackCollection = if (fullAlbum) collection.catalogAlbum() else collection
+    val (data, retry) = key(playbackCollection) {
+        rememberFolioDetailData(
+            cached = { services.cachedCollectionTracks(playbackCollection) },
+            saved = { services.savedCollectionTracks(playbackCollection) },
+        ) { services.collectionTracks(playbackCollection) }
+    }
     val songs = data.value.orEmpty()
     val related = if (album && collection.catalogId != null) {
         rememberFolioDetailData(
@@ -79,7 +89,7 @@ internal fun FolioCollectionDetail(
                     layout = layout,
                     meta = meta,
                     playable = songs.isNotEmpty(),
-                    onPlay = { shuffle -> onPlayCollection(collection, songs, 0, shuffle) },
+                    onPlay = { shuffle -> onPlayCollection(playbackCollection, songs, 0, shuffle) },
                     byline = {
                         if (album && byline.isNotBlank()) {
                             val open = if (linkedArtist != null) {
@@ -116,7 +126,17 @@ internal fun FolioCollectionDetail(
                 }
             }
             folioDetailSongs(songs, layout.collectionColumns, 40.dp, playback, false, !album) { index ->
-                onPlayCollection(collection, songs, index, false)
+                onPlayCollection(playbackCollection, songs, index, false)
+            }
+            if (collection.canShowFullAlbum && songs.isNotEmpty()) {
+                item(key = "full-album") {
+                    FolioChip(
+                        label = stringResource(if (fullAlbum) R.string.album_show_library else R.string.album_show_complete),
+                        selected = false,
+                        onClick = { fullAlbum = !fullAlbum },
+                        modifier = Modifier.padding(top = 14.dp),
+                    )
+                }
             }
             if (otherAlbums != null && otherAlbums.first.isNotEmpty() && linkedArtist != null) {
                 item(key = "related") {
