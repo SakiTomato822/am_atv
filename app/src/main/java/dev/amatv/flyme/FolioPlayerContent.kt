@@ -1,15 +1,12 @@
 package dev.amatv.flyme
 
-import androidx.compose.animation.AnimatedContent
+import android.os.Build
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -40,9 +37,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -72,6 +73,7 @@ import dev.amatv.ui.DarkFlymePalette
 import dev.amatv.ui.InstrumentalInterludeRow
 import dev.amatv.ui.LightFlymePalette
 import dev.amatv.ui.LocalFlymePalette
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun FolioScrollingLyricsPanel(
@@ -88,6 +90,10 @@ internal fun FolioScrollingLyricsPanel(
     onLineSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    if (lines.isEmpty()) {
+        Box(modifier = modifier.fillMaxSize())
+        return
+    }
     CompositionLocalProvider(
         LocalFlymePalette provides if (isLight) LightFlymePalette else DarkFlymePalette,
     ) {
@@ -109,6 +115,18 @@ internal fun FolioScrollingLyricsPanel(
     }
 }
 
+private data class GhostPosterFocus(
+    val target: Any,
+    val isOppositeSinger: Boolean,
+    val hasStarted: Boolean,
+    val frozenPosMs: Long,
+)
+
+private data class CharTimingEntry(
+    val char: Char,
+    val startMs: Long,
+)
+
 @Composable
 internal fun FolioPosterLyricsPanel(
     lines: List<LyricLine>,
@@ -119,8 +137,15 @@ internal fun FolioPosterLyricsPanel(
     isLight: Boolean,
     fg: Color,
     fg2: Color,
+    duetAccentColor: Color,
+    reducedMotion: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    if (lines.isEmpty()) {
+        Box(modifier = modifier.fillMaxSize())
+        return
+    }
+
     val fontFamily = LocalFolioFontFamily.current
     val schedule = remember(lines) { LyricTimeline.Schedule(lines) }
     val snapshot by remember(schedule, offsetMs, positionState) {
@@ -142,6 +167,71 @@ internal fun FolioPosterLyricsPanel(
         }
     }
 
+    val currentTarget: Any = waiting ?: lines[projection.focusLeadIndex]
+    val mainIn = remember { Animatable(1f) }
+    val subIn = remember { Animatable(1f) }
+    val ghostOut = remember { Animatable(1f) }
+    var shownTarget by remember(lines) { mutableStateOf(currentTarget) }
+    var shownOpposite by remember(lines) { mutableStateOf(projection.isFocusOppositeSinger) }
+    var shownStarted by remember(lines) { mutableStateOf(projection.hasStartedLead) }
+    var ghost by remember(lines) { mutableStateOf<GhostPosterFocus?>(null) }
+
+    LaunchedEffect(currentTarget, reducedMotion) {
+        if (currentTarget == shownTarget) return@LaunchedEffect
+        val outgoing = shownTarget
+        val outgoingOpposite = shownOpposite
+        val outgoingStarted = shownStarted
+        val frozenPos = lyricPosition.value
+        shownTarget = currentTarget
+        shownOpposite = projection.isFocusOppositeSinger
+        shownStarted = projection.hasStartedLead
+
+        if (reducedMotion) {
+            ghost = null
+            mainIn.snapTo(1f)
+            subIn.snapTo(1f)
+            return@LaunchedEffect
+        }
+
+        ghost = GhostPosterFocus(
+            target = outgoing,
+            isOppositeSinger = outgoingOpposite,
+            hasStarted = outgoingStarted,
+            frozenPosMs = frozenPos,
+        )
+        launch {
+            ghostOut.snapTo(0f)
+            ghostOut.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = FolioPlayerMotionTokens.POSTER_LIQ_OUT_MS,
+                    easing = FolioPlayerMotionTokens.ExitEasing,
+                ),
+            )
+            ghost = null
+        }
+        launch {
+            mainIn.snapTo(0f)
+            mainIn.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = FolioPlayerMotionTokens.POSTER_LIQ_IN_MAIN_MS,
+                    easing = FolioPlayerMotionTokens.EnterEasing,
+                ),
+            )
+        }
+        launch {
+            subIn.snapTo(0f)
+            subIn.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = FolioPlayerMotionTokens.POSTER_LIQ_IN_SUB_MS,
+                    easing = FolioPlayerMotionTokens.EnterEasing,
+                ),
+            )
+        }
+    }
+
     CompositionLocalProvider(
         LocalFlymePalette provides if (isLight) LightFlymePalette else DarkFlymePalette,
     ) {
@@ -158,97 +248,198 @@ internal fun FolioPosterLyricsPanel(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
             ) {
-                if (projection.previousLeadText.isNotEmpty()) {
+                projection.previousLine?.let { prev ->
                     Text(
-                        text = projection.previousLeadText,
-                        color = fg2,
+                        text = prev.text,
+                        color = if (prev.isOppositeSinger) duetAccentColor.copy(alpha = 0.72f) else fg2,
                         fontFamily = fontFamily,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = typo.prevSp.sp,
                         lineHeight = typo.prevLineHeightSp.sp,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.posterLiquidIn(progress = subIn.value),
                     )
                 }
 
-                AnimatedContent(
-                    targetState = waiting ?: lines[projection.focusLeadIndex],
-                    label = "folio-poster-focus",
-                    transitionSpec = {
-                        (fadeIn(tween(380)) + slideInVertically(tween(380)) { it / 4 }) togetherWith
-                            fadeOut(tween(180))
-                    },
-                ) { shown ->
-                    if (shown is LyricTimeline.InstrumentalGap) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    ghost?.let { g ->
                         Box(
-                            Modifier.graphicsLayer {
-                                scaleX = 1.65f
-                                scaleY = 1.65f
-                                transformOrigin = TransformOrigin(0f, 0.5f)
-                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .posterLiquidOut(progress = ghostOut.value),
                         ) {
-                            InstrumentalInterludeRow(
-                                gap = shown,
-                                positionState = lyricPosition,
-                                isUserScrolling = false,
-                            )
+                            when (val target = g.target) {
+                                is LyricTimeline.InstrumentalGap -> {
+                                    Box(
+                                        Modifier.graphicsLayer {
+                                            scaleX = 1.65f
+                                            scaleY = 1.65f
+                                            transformOrigin = TransformOrigin(0f, 0.5f)
+                                        },
+                                    ) {
+                                        val frozenState = remember(g.frozenPosMs) {
+                                            mutableLongStateOf(g.frozenPosMs)
+                                        }
+                                        InstrumentalInterludeRow(
+                                            gap = target,
+                                            positionState = frozenState,
+                                            isUserScrolling = false,
+                                        )
+                                    }
+                                }
+                                is LyricLine -> {
+                                    val frozenState = remember(g.frozenPosMs) {
+                                        mutableLongStateOf(g.frozenPosMs)
+                                    }
+                                    PosterLeadLineText(
+                                        line = target,
+                                        positionState = frozenState,
+                                        hasStartedLead = g.hasStarted,
+                                        fontSizeSp = typo.mainSp,
+                                        lineHeightSp = typo.mainLineHeightSp,
+                                        fontFamily = fontFamily,
+                                        baseColor = if (g.isOppositeSinger) duetAccentColor else fg,
+                                        reducedMotion = reducedMotion,
+                                    )
+                                }
+                            }
                         }
-                        return@AnimatedContent
                     }
-                    val line = shown as LyricLine
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        PosterLeadLineText(
-                            line = line,
-                            positionState = lyricPosition,
-                            hasStartedLead = projection.hasStartedLead,
-                            fontSizeSp = typo.mainSp,
-                            lineHeightSp = typo.mainLineHeightSp,
-                            fontFamily = fontFamily,
-                            fg = fg,
-                        )
-                        if (projection.activeBackingText.isNotEmpty()) {
-                            Text(
-                                text = projection.activeBackingText,
-                                color = fg2,
-                                fontFamily = fontFamily,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = typo.backingSp.sp,
-                                lineHeight = typo.backingLineHeightSp.sp,
-                            )
-                        }
-                        if (translationEnabled) {
-                            line.translation?.takeIf { it.isNotBlank() }?.let { trans ->
-                                Text(
-                                    text = trans,
-                                    color = fg2,
-                                    fontFamily = fontFamily,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = typo.translationSp.sp,
-                                    lineHeight = typo.translationLineHeightSp.sp,
-                                )
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .posterLiquidIn(progress = mainIn.value),
+                    ) {
+                        when (val activeTarget = currentTarget) {
+                            is LyricTimeline.InstrumentalGap -> {
+                                Box(
+                                    Modifier.graphicsLayer {
+                                        scaleX = 1.65f
+                                        scaleY = 1.65f
+                                        transformOrigin = TransformOrigin(0f, 0.5f)
+                                    },
+                                ) {
+                                    InstrumentalInterludeRow(
+                                        gap = activeTarget,
+                                        positionState = lyricPosition,
+                                        isUserScrolling = false,
+                                    )
+                                }
+                            }
+                            is LyricLine -> {
+                                val mainColor = if (projection.isFocusOppositeSinger) duetAccentColor else fg
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    PosterLeadLineText(
+                                        line = activeTarget,
+                                        positionState = lyricPosition,
+                                        hasStartedLead = projection.hasStartedLead,
+                                        fontSizeSp = typo.mainSp,
+                                        lineHeightSp = typo.mainLineHeightSp,
+                                        fontFamily = fontFamily,
+                                        baseColor = mainColor,
+                                        reducedMotion = reducedMotion,
+                                    )
+                                    for (small in projection.smallLines) {
+                                        Text(
+                                            text = small.text,
+                                            color = if (small.isOppositeSinger) {
+                                                duetAccentColor.copy(alpha = 0.78f)
+                                            } else {
+                                                fg2
+                                            },
+                                            fontFamily = fontFamily,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = typo.backingSp.sp,
+                                            lineHeight = typo.backingLineHeightSp.sp,
+                                        )
+                                    }
+                                    if (translationEnabled) {
+                                        activeTarget.translation?.takeIf { it.isNotBlank() }?.let { trans ->
+                                            Text(
+                                                text = trans,
+                                                color = if (projection.isFocusOppositeSinger) {
+                                                    duetAccentColor.copy(alpha = 0.72f)
+                                                } else {
+                                                    fg2
+                                                },
+                                                fontFamily = fontFamily,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = typo.translationSp.sp,
+                                                lineHeight = typo.translationLineHeightSp.sp,
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
 
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    val alphas = listOf(0.62f, 0.42f, 0.26f)
-                    projection.upcomingLeadTexts.forEachIndexed { idx, nextText ->
-                        val alpha = alphas.getOrElse(idx) { 0.26f }
-                        Text(
-                            text = nextText,
-                            color = fg.copy(alpha = alpha),
-                            fontFamily = fontFamily,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = typo.nextSp.sp,
-                            lineHeight = typo.nextLineHeightSp.sp,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                if (projection.upcomingLines.isNotEmpty()) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.posterLiquidIn(progress = subIn.value),
+                    ) {
+                        val alphas = listOf(0.62f, 0.42f, 0.26f)
+                        projection.upcomingLines.forEachIndexed { idx, next ->
+                            val alpha = alphas.getOrElse(idx) { 0.26f }
+                            val lineColor = if (next.isOppositeSinger) {
+                                duetAccentColor.copy(alpha = alpha.coerceAtLeast(0.38f))
+                            } else {
+                                fg.copy(alpha = alpha)
+                            }
+                            Text(
+                                text = next.text,
+                                color = lineColor,
+                                fontFamily = fontFamily,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = typo.nextSp.sp,
+                                lineHeight = typo.nextLineHeightSp.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+private fun Modifier.posterLiquidIn(progress: Float): Modifier {
+    if (progress >= 0.999f) return this
+    val remaining = (1f - progress).coerceIn(0f, 1f)
+    val blurDp = 16f * remaining
+    val motion = graphicsLayer {
+        alpha = progress.coerceIn(0f, 1f)
+        translationY = 14.dp.toPx() * remaining
+        val scale = 0.98f + 0.02f * progress.coerceIn(0f, 1f)
+        scaleX = scale
+        scaleY = scale
+    }
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && blurDp > 0.25f) {
+        motion.blur(blurDp.dp)
+    } else {
+        motion
+    }
+}
+
+private fun Modifier.posterLiquidOut(progress: Float): Modifier {
+    val p = progress.coerceIn(0f, 1f)
+    val blurDp = 14f * p
+    val motion = graphicsLayer {
+        alpha = (1f - p).coerceIn(0f, 1f)
+        translationY = -16.dp.toPx() * p
+        val scale = 1f + 0.03f * p
+        scaleX = scale
+        scaleY = scale
+    }
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && blurDp > 0.25f) {
+        motion.blur(blurDp.dp)
+    } else {
+        motion
     }
 }
 
@@ -260,34 +451,55 @@ private fun PosterLeadLineText(
     fontSizeSp: Float,
     lineHeightSp: Float,
     fontFamily: FontFamily,
-    fg: Color,
+    baseColor: Color,
+    reducedMotion: Boolean,
 ) {
+    val charEntries = remember(line) {
+        if (line.timing != LyricTiming.Word || line.words.size <= 1) {
+            emptyList()
+        } else {
+            buildList {
+                line.words.forEachIndexed { index, word ->
+                    val wordText = if (word.displayText != word.text) {
+                        word.displayText
+                    } else if (line.joinWithSpaces && word.hasTrailingWhitespace && index < line.words.lastIndex) {
+                        "${word.text} "
+                    } else {
+                        word.text
+                    }
+                    val charCount = wordText.length.coerceAtLeast(1)
+                    val spanMs = (word.endMs - word.startMs).coerceAtLeast(0L)
+                    for (charIdx in wordText.indices) {
+                        val t = word.startMs + (spanMs * charIdx) / charCount
+                        add(CharTimingEntry(wordText[charIdx], t))
+                    }
+                }
+            }
+        }
+    }
+
     val posMs = positionState.value
     val annotated = buildAnnotatedString {
-        if (!hasStartedLead || line.words.size <= 1 || line.timing != LyricTiming.Word) {
-            val alpha = if (!hasStartedLead) 0.42f else 1f
-            withStyle(SpanStyle(color = fg.copy(alpha = alpha))) {
+        if (!hasStartedLead || charEntries.isEmpty()) {
+            val alpha = if (!hasStartedLead) 0.40f else 1f
+            withStyle(SpanStyle(color = baseColor.copy(alpha = alpha))) {
                 append(posterLeadText(line))
             }
         } else {
-            line.words.forEachIndexed { index, word ->
-                val wordAlpha = when {
-                    posMs >= word.endMs -> 1f
-                    posMs <= word.startMs -> 0.40f
-                    else -> {
-                        val span = (word.endMs - word.startMs).coerceAtLeast(1L).toFloat()
-                        0.40f + 0.60f * ((posMs - word.startMs).toFloat() / span).coerceIn(0f, 1f)
-                    }
+            for (entry in charEntries) {
+                if (entry.char == ' ') {
+                    append(' ')
+                    continue
                 }
-                withStyle(SpanStyle(color = fg.copy(alpha = wordAlpha))) {
-                    if (word.displayText != word.text) {
-                        append(word.displayText)
-                    } else if (line.joinWithSpaces && word.hasTrailingWhitespace && index < line.words.lastIndex) {
-                        append(word.text)
-                        append(' ')
-                    } else {
-                        append(word.text)
-                    }
+                val charAlpha = posterCharAlpha(
+                    posMs = posMs,
+                    charStartMs = entry.startMs,
+                    litAlpha = 1f,
+                    unlitAlpha = 0.40f,
+                    reducedMotion = reducedMotion,
+                )
+                withStyle(SpanStyle(color = baseColor.copy(alpha = charAlpha))) {
+                    append(entry.char)
                 }
             }
         }

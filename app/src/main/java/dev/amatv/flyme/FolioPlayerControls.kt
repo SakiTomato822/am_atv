@@ -1,6 +1,7 @@
 package dev.amatv.flyme
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -52,6 +53,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
@@ -91,10 +93,8 @@ internal fun Modifier.folioPlayerGlass(
 internal fun FolioPlayerHeader(
     track: Track,
     tierSpec: FolioPlayerTierSpec,
-    fg: Color,
-    fg2: Color,
-    accent: Color,
-    isLight: Boolean,
+    headerColors: HeaderColorScheme,
+    favoriteAccent: Color,
     showHeaderTitle: Boolean,
     isFavorite: Boolean,
     isInLibrary: Boolean,
@@ -120,8 +120,6 @@ internal fun FolioPlayerHeader(
                 tierSpec.tier == FolioTier.Short
             )
     }
-    val pillBg = if (isLight) Color.White.copy(alpha = 0.82f) else Color.White.copy(alpha = 0.14f)
-    val pillBorder = if (isLight) Color(0xFF17151C).copy(alpha = 0.12f) else Color.White.copy(alpha = 0.22f)
 
     Column(
         modifier = modifier
@@ -136,7 +134,7 @@ internal fun FolioPlayerHeader(
                     .width(42.dp)
                     .height(4.dp)
                     .clip(CircleShape)
-                    .background(fg.copy(alpha = 0.26f)),
+                    .background(headerColors.fg.copy(alpha = 0.28f)),
             )
         }
         Row(
@@ -148,7 +146,7 @@ internal fun FolioPlayerHeader(
                 icon = Icons.Rounded.KeyboardArrowDown,
                 contentDescription = stringResource(R.string.folio_player_close),
                 size = tierSpec.pib,
-                iconTint = fg,
+                iconTint = headerColors.fg,
                 bg = Color.Transparent,
                 border = Color.Transparent,
                 onClick = onClose,
@@ -160,7 +158,7 @@ internal fun FolioPlayerHeader(
                 ) {
                     Text(
                         text = track.title,
-                        color = fg,
+                        color = headerColors.fg,
                         fontFamily = fontFamily,
                         fontWeight = FontWeight.Medium,
                         fontSize = 16.sp,
@@ -171,7 +169,7 @@ internal fun FolioPlayerHeader(
                     if (track.artist.isNotBlank()) {
                         Text(
                             text = track.artist,
-                            color = fg2,
+                            color = headerColors.fg2,
                             fontFamily = fontFamily,
                             fontSize = 13.sp,
                             maxLines = 1,
@@ -190,10 +188,11 @@ internal fun FolioPlayerHeader(
                     if (isInLibrary) R.string.folio_player_in_library else R.string.folio_player_add_library,
                 ),
                 size = tierSpec.pib,
-                iconTint = if (isInLibrary) accent else fg,
+                iconTint = headerColors.fg,
                 bg = Color.Transparent,
                 border = Color.Transparent,
                 enabled = !libraryInProgress && !isInLibrary,
+                dimDisabled = libraryInProgress,
                 onClick = onToggleLibrary,
             )
 
@@ -203,7 +202,7 @@ internal fun FolioPlayerHeader(
                     if (isFavorite) R.string.player_favorite_remove else R.string.player_favorite_add,
                 ),
                 size = tierSpec.pib,
-                iconTint = if (isFavorite) accent else fg,
+                iconTint = if (isFavorite) favoriteAccent else headerColors.fg,
                 bg = Color.Transparent,
                 border = Color.Transparent,
                 enabled = !favoriteInProgress,
@@ -211,7 +210,7 @@ internal fun FolioPlayerHeader(
             )
 
             val modeBg by animateColorAsState(
-                targetValue = if (isPosterMode) fg.copy(alpha = 0.16f) else Color.Transparent,
+                targetValue = if (isPosterMode) headerColors.posterActiveBg else Color.Transparent,
                 animationSpec = tween(FolioMotion.FAST_MS),
                 label = "player-mode-bg",
             )
@@ -229,7 +228,7 @@ internal fun FolioPlayerHeader(
             ) {
                 Text(
                     text = "Tt",
-                    color = fg.copy(alpha = if (hasTimedLyrics) 1f else 0.36f),
+                    color = headerColors.fg.copy(alpha = if (hasTimedLyrics) 1f else 0.36f),
                     fontFamily = fontFamily,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 15.sp,
@@ -243,12 +242,139 @@ internal fun FolioPlayerHeader(
                         if (pipWindow.mini) R.string.flyme_open_full_screen else R.string.flyme_open_mini_window,
                     ),
                     size = tierSpec.pib,
-                    iconTint = fg,
-                    bg = pillBg,
-                    border = pillBorder,
+                    iconTint = headerColors.fg,
+                    bg = headerColors.glassBg,
+                    border = headerColors.glassBorder,
                     onClick = { pipWindow.switchTo(!pipWindow.mini) },
                 )
             }
+        }
+    }
+}
+
+/**
+ * Animates between `.ctl` expanded controls (`opacity 280ms`, `translateY 14dp 350ms`) and
+ * `.pmeta` collapsed capsule (`opacity 250ms`, `translateY 8dp 300ms`), respecting `reducedMotion`.
+ */
+@Composable
+internal fun FolioPlayerAnimatedControlsSlot(
+    controlsExpanded: Boolean,
+    reducedMotion: Boolean,
+    track: Track,
+    tierSpec: FolioPlayerTierSpec,
+    positionState: State<Long>,
+    durationMs: Long,
+    canSeek: Boolean,
+    isLiveStream: Boolean,
+    playWhenReady: Boolean,
+    translationEnabled: Boolean,
+    queueOpen: Boolean,
+    canSkipPrevious: Boolean,
+    canSkipNext: Boolean,
+    isLight: Boolean,
+    fg: Color,
+    fg2: Color,
+    onExpandCapsule: () -> Unit,
+    onSeekTo: (Long) -> Unit,
+    onToggleTranslation: () -> Unit,
+    onPrevious: () -> Unit,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit,
+    onToggleQueue: () -> Unit,
+    onOpenAlbum: () -> Unit,
+    onOpenArtist: () -> Unit,
+    modifier: Modifier = Modifier,
+    contentAlignment: Alignment = Alignment.BottomStart,
+) {
+    val ctlAlpha by animateFloatAsState(
+        targetValue = if (controlsExpanded) 1f else 0f,
+        animationSpec = tween(if (reducedMotion) 0 else FolioPlayerMotionTokens.CTL_OPACITY_MS),
+        label = "ctl-alpha",
+    )
+    val ctlOffsetFactor by animateFloatAsState(
+        targetValue = if (controlsExpanded) 0f else 1f,
+        animationSpec = tween(
+            durationMillis = if (reducedMotion) 0 else FolioPlayerMotionTokens.CTL_TRANSLATE_MS,
+            easing = FolioPlayerMotionTokens.EnterEasing,
+        ),
+        label = "ctl-offset",
+    )
+    val pmetaAlpha by animateFloatAsState(
+        targetValue = if (controlsExpanded) 0f else 1f,
+        animationSpec = tween(if (reducedMotion) 0 else FolioPlayerMotionTokens.PMETA_OPACITY_MS),
+        label = "pmeta-alpha",
+    )
+    val pmetaOffsetFactor by animateFloatAsState(
+        targetValue = if (controlsExpanded) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = if (reducedMotion) 0 else FolioPlayerMotionTokens.PMETA_TRANSLATE_MS,
+            easing = FolioPlayerMotionTokens.EnterEasing,
+        ),
+        label = "pmeta-offset",
+    )
+
+    Box(modifier = modifier, contentAlignment = contentAlignment) {
+        val showPmeta = !controlsExpanded || pmetaAlpha > 0.01f
+        val showCtl = controlsExpanded || ctlAlpha > 0.01f
+
+        val pmetaDeck: @Composable () -> Unit = {
+            FolioPlayerCollapsedCapsule(
+                track = track,
+                tierSpec = tierSpec,
+                positionState = positionState,
+                durationMs = durationMs,
+                playWhenReady = playWhenReady,
+                isLight = isLight,
+                fg = fg,
+                fg2 = fg2,
+                onExpand = onExpandCapsule,
+                onTogglePlay = onPlayPause,
+                modifier = Modifier.graphicsLayer {
+                    alpha = pmetaAlpha
+                    translationY = 8.dp.toPx() * pmetaOffsetFactor
+                    val sc = 1f - 0.02f * pmetaOffsetFactor
+                    scaleX = sc
+                    scaleY = sc
+                },
+            )
+        }
+        val ctlDeck: @Composable () -> Unit = {
+            FolioPlayerExpandedControls(
+                track = track,
+                tierSpec = tierSpec,
+                positionState = positionState,
+                durationMs = durationMs,
+                canSeek = canSeek,
+                isLiveStream = isLiveStream,
+                playWhenReady = playWhenReady,
+                translationEnabled = translationEnabled,
+                queueOpen = queueOpen,
+                canSkipPrevious = canSkipPrevious,
+                canSkipNext = canSkipNext,
+                isLight = isLight,
+                fg = fg,
+                fg2 = fg2,
+                onSeekTo = onSeekTo,
+                onToggleTranslation = onToggleTranslation,
+                onPrevious = onPrevious,
+                onPlayPause = onPlayPause,
+                onNext = onNext,
+                onToggleQueue = onToggleQueue,
+                onOpenAlbum = onOpenAlbum,
+                onOpenArtist = onOpenArtist,
+                modifier = Modifier.graphicsLayer {
+                    alpha = ctlAlpha
+                    translationY = FolioPlayerMotionTokens.CTL_OFFSET_DP.dp.toPx() * ctlOffsetFactor
+                },
+            )
+        }
+
+        if (controlsExpanded) {
+            if (showPmeta) pmetaDeck()
+            if (showCtl) ctlDeck()
+        } else {
+            if (showCtl) ctlDeck()
+            if (showPmeta) pmetaDeck()
         }
     }
 }
@@ -811,7 +937,9 @@ private fun PlayerIconPillButton(
     border: Color,
     onClick: () -> Unit,
     enabled: Boolean = true,
+    dimDisabled: Boolean = true,
 ) {
+    val alpha = if (enabled || !dimDisabled) 1f else 0.36f
     Box(
         modifier = Modifier
             .size(size)
@@ -824,7 +952,7 @@ private fun PlayerIconPillButton(
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = iconTint.copy(alpha = if (enabled) 1f else 0.36f),
+            tint = iconTint.copy(alpha = alpha),
             modifier = Modifier.size(size * 0.46f),
         )
     }
