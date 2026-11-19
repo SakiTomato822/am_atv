@@ -442,7 +442,7 @@ internal fun FolioPlayerAnimatedControlsSlot(
         val ctlDeck: @Composable () -> Unit = {
             val widePlacement = if (tierSpec.tier == FolioTier.Wide) {
                 Modifier
-                    .padding(start = 4.dp, bottom = 4.dp)
+                    .padding(start = WIDE_CAR_CONTROLS_START_OFFSET_DP.dp, bottom = 4.dp)
                     .onSizeChanged { onCarControlsHeightPxChanged(it.height) }
             } else {
                 Modifier

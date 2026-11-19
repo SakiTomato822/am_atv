@@ -6,6 +6,7 @@ import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -832,6 +833,7 @@ internal fun BoxScope.FolioPlayerLayer(
                                     isLight = palette.isLight,
                                     isPlaying = playbackState.isPlaying,
                                     expandedCarControlsHeightDp = wideExpandedCardDp,
+                                    carControlsWidthDp = wideControlsWidthDp,
                                     fg = fg,
                                     fg2 = fg2,
                                     duetAccentColor = duetAccentColor,
@@ -1575,6 +1577,7 @@ private fun TwoColumnPlayerBody(
     isLight: Boolean,
     isPlaying: Boolean,
     expandedCarControlsHeightDp: Dp = 226.dp,
+    carControlsWidthDp: Dp = 464.dp,
     fg: Color,
     fg2: Color,
     duetAccentColor: Color,
@@ -1595,8 +1598,23 @@ private fun TwoColumnPlayerBody(
     val fontFamily = LocalFolioFontFamily.current
 
     if (displayState == FolioPlayerDisplayState.Queue) {
+        val targetQueueStartDp = computeWideQueueStartPaddingDp(
+            tier = tierSpec.tier,
+            controlsExpanded = controlsExpanded,
+            controlsCardWidthDp = carControlsWidthDp,
+        )
+        val animatedQueueStartDp by animateDpAsState(
+            targetValue = targetQueueStartDp,
+            animationSpec = tween(
+                durationMillis = if (reducedMotion) 0 else FolioPlayerMotionTokens.CTL_TRANSLATE_MS,
+                easing = FolioPlayerMotionTokens.EnterEasing,
+            ),
+            label = "wide-queue-start-pad",
+        )
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = animatedQueueStartDp),
             verticalArrangement = Arrangement.Center,
         ) {
             FolioQueuePanel(

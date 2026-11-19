@@ -46,10 +46,12 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -926,6 +928,24 @@ internal fun FolioQueuePanel(
         if (snapshot.rows.isNotEmpty() && currentRowIndex in snapshot.rows.indices) {
             listState.scrollToItem(currentRowIndex)
         }
+    }
+    var previousHorizontalViewportWidth by remember { mutableIntStateOf(0) }
+    LaunchedEffect(tierSpec.isHorizontalQueue, listState, currentRowIndex, snapshot.rows.size) {
+        if (!tierSpec.isHorizontalQueue) return@LaunchedEffect
+        snapshotFlow { listState.layoutInfo.viewportSize.width }
+            .collect { viewportWidth ->
+                if (viewportWidth > 0 && previousHorizontalViewportWidth > 0 && viewportWidth != previousHorizontalViewportWidth) {
+                    val info = listState.layoutInfo
+                    val visibleItem = info.visibleItemsInfo.firstOrNull { it.index == currentRowIndex }
+                    val inView = visibleItem != null &&
+                        visibleItem.offset >= info.viewportStartOffset &&
+                        visibleItem.offset + visibleItem.size <= info.viewportEndOffset
+                    if (!inView && currentRowIndex in snapshot.rows.indices) {
+                        listState.scrollToItem(currentRowIndex)
+                    }
+                }
+                if (viewportWidth > 0) previousHorizontalViewportWidth = viewportWidth
+            }
     }
 
     val availability = resolveQueueControlAvailability(

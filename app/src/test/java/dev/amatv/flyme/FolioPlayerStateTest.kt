@@ -1025,4 +1025,44 @@ class FolioPlayerStateTest {
         assertEquals("歌词延后 100 毫秒", formatFolioLyricOffsetLabel(-100L, advanceFmt, delayFmt, unadjusted))
         assertEquals("未调整", formatFolioLyricOffsetLabel(0L, advanceFmt, delayFmt, unadjusted))
     }
+
+    @Test
+    fun wideQueueStartPaddingAvoidsExpandedControlsAndRestoresOnCollapse() {
+        // Wide (e) expanded: 4dp card start offset + 464dp card width + 24dp gap = 492dp.
+        assertEquals(
+            492f,
+            computeWideQueueStartPaddingDp(
+                tier = FolioTier.Wide,
+                controlsExpanded = true,
+                controlsCardWidthDp = 464.dp,
+            ).value,
+            0.01f,
+        )
+
+        // Wide (e) collapsed: full width (0dp start padding).
+        assertEquals(
+            0f,
+            computeWideQueueStartPaddingDp(
+                tier = FolioTier.Wide,
+                controlsExpanded = false,
+                controlsCardWidthDp = 464.dp,
+            ).value,
+            0.01f,
+        )
+
+        // Other tiers (including Ultrawide with 3-column layout and Short) keep 0dp.
+        for (tier in FolioTier.entries) {
+            if (tier == FolioTier.Wide) continue
+            assertEquals(
+                "tier=$tier",
+                0f,
+                computeWideQueueStartPaddingDp(
+                    tier = tier,
+                    controlsExpanded = true,
+                    controlsCardWidthDp = 464.dp,
+                ).value,
+                0.01f,
+            )
+        }
+    }
 }

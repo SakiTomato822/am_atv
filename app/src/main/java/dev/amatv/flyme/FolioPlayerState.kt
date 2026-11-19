@@ -422,6 +422,26 @@ fun computeWideCarCollapsedCoverSizeDp(
 /** Compact Wide (`e`) controls card width = collapsed cover width + 64dp (464dp for 400dp cover). */
 fun computeWideCarControlsWidthDp(collapsedCoverWidthDp: Dp): Dp = collapsedCoverWidthDp + 64.dp
 
+const val WIDE_CAR_CONTROLS_START_OFFSET_DP: Float = 4f
+const val WIDE_QUEUE_CONTROLS_GAP_DP: Float = 24f
+
+/**
+ * Start padding inside the Wide (`e`) body for the horizontal Queue panel so it sits clear of the
+ * expanded bottom-left controls card (`controlsRightEdge + 24dp`) and expands to full body width
+ * when the controls collapse.
+ */
+fun computeWideQueueStartPaddingDp(
+    tier: FolioTier,
+    controlsExpanded: Boolean,
+    controlsCardWidthDp: Dp,
+    controlsStartOffsetDp: Dp = WIDE_CAR_CONTROLS_START_OFFSET_DP.dp,
+    gapDp: Dp = WIDE_QUEUE_CONTROLS_GAP_DP.dp,
+): Dp = if (tier == FolioTier.Wide && controlsExpanded) {
+    controlsStartOffsetDp + controlsCardWidthDp + gapDp
+} else {
+    0.dp
+}
+
 /** Target expanded cover size on Wide (`e`) Scrolling Lyrics so cover bottom clears card top by >= 24dp. */
 fun computeWideCarExpandedCoverSizeDp(
     collapsedCoverDp: Dp,
