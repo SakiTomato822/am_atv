@@ -170,18 +170,3 @@ internal fun FlymeAppearanceSettings(settingsStore: SettingsStore) {
         hours(R.string.appearance_light_until, settings.lightUntilMinute) { value -> settingsStore.setLightSchedule(settings.lightFromMinute, value) }
     }
 }
-
-@Composable
-internal fun FlymeTryNewUiSettings(settingsStore: SettingsStore) {
-    val settings by settingsStore.state.collectAsState()
-    val stateLabel = stringResource(if (settings.tryNewUi) R.string.flyme_try_new_ui_on else R.string.flyme_try_new_ui_off)
-    Spacer(Modifier.height(16.dp))
-    Text(stringResource(R.string.flyme_try_new_ui_title), color = FlymeInk, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-    Text(stringResource(R.string.flyme_try_new_ui_summary), color = FlymeInk.copy(alpha = 0.6f), fontSize = 14.sp)
-    Spacer(Modifier.height(6.dp))
-    CacheButton(
-        label = "${stringResource(R.string.flyme_try_new_ui_title)}：$stateLabel",
-        onClick = { settingsStore.setTryNewUi(!settings.tryNewUi) },
-        modifier = Modifier.width(300.dp).automationId("try-new-ui-toggle"),
-    )
-}

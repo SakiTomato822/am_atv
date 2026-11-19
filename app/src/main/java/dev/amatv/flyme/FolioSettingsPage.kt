@@ -140,15 +140,8 @@ internal fun FolioSettingsPage(
                 .fillMaxHeight(),
             contentPadding = PaddingValues(bottom = bottomPadding),
         ) {
-            // 0: Appearance & UI Switch
             item(key = "grp-look") {
                 SettingsGroup(title = stringResource(R.string.appearance_title)) {
-                    SettingsToggleRow(
-                        title = stringResource(R.string.flyme_try_new_ui_title),
-                        subtitle = stringResource(R.string.flyme_try_new_ui_summary),
-                        checked = settings.tryNewUi,
-                        onCheckedChange = settingsStore::setTryNewUi,
-                    )
                     SettingsRow(
                         title = stringResource(R.string.appearance_title),
                     ) {
