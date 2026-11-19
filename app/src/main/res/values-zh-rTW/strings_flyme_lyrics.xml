@@ -3,7 +3,4 @@
     <string name="flyme_lyric_style">預設顯示方式</string>
     <string name="flyme_lyric_flow">滾動歌詞（流光背景）</string>
     <string name="flyme_lyric_soak">海報（封面背景）</string>
-    <string name="flyme_lyric_poster">海報歌詞</string>
-    <string name="flyme_lyric_list">滾動歌詞</string>
-    <string name="flyme_lyric_translate_short">譯</string>
 </resources>

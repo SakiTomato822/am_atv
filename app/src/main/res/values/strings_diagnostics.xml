@@ -1,9 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="diagnostics_title">Playback diagnostics</string>
-    <string name="diagnostics_summary">Recent song changes. If a change is slow, take a screenshot of this list for the developer.</string>
-    <string name="diagnostics_empty">No song changes recorded yet.</string>
-    <string name="diagnostics_clear">Clear</string>
     <string name="diagnostics_gapless">Gapless into “%1$s”: sound after %2$d ms</string>
     <string name="diagnostics_prepare_after_end">Prepared “%1$s” again after the previous song ended: sound after %2$.1f s</string>
     <string name="diagnostics_prepare">Prepared “%1$s” (chosen or skipped to): sound after %2$.1f s</string>
@@ -18,12 +14,10 @@
     <string name="diagnostics_exporting">Exporting…</string>
     <string name="diagnostics_exported">Saved to %1$s. Send this file to the developer.</string>
     <string name="diagnostics_export_failed">Could not export the log: %1$s</string>
-    <string name="diagnostics_widevine">Widevine (system DRM for stations): %1$s</string>
     <string name="widevine_unsupported">not available on this system</string>
     <string name="widevine_ready">ready · %1$s · %2$s %3$s</string>
     <string name="widevine_not_provisioned">present but not provisioned (%1$s); the system could not activate it</string>
     <string name="widevine_error">present but unusable: %1$s</string>
-    <string name="widevine_checking">checking…</string>
     <string name="playback_option_on">on</string>
     <string name="playback_option_off">off</string>
     <string name="playback_fade_title">Fade between songs</string>
@@ -33,8 +27,6 @@
     <string name="playback_fade_playlists">Playlists: %1$s</string>
     <string name="playback_station_mode_title">How stations play</string>
     <string name="playback_station_mode_summary">Many cars and TVs have no Widevine; song by song plays a station on the native player without it. Live radio always needs Widevine.</string>
-    <string name="playback_station_mode_auto">Automatic (web player when Widevine works)</string>
-    <string name="playback_station_mode_songs">Always song by song (no Widevine needed)</string>
     <string name="appearance_title">Appearance</string>
     <string name="appearance_light">Light</string>
     <string name="appearance_dark">Dark</string>
