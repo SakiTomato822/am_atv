@@ -139,7 +139,7 @@ fun FolioListRowCard(
                 text = item.title,
                 color = palette.fg,
                 fontFamily = fontFamily,
-                fontWeight = FontWeight.Light,
+                fontWeight = FontWeight.Medium,
                 fontSize = tierSpec.lif,
                 lineHeight = tierSpec.lif * 1.15f,
                 maxLines = 1,
