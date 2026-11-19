@@ -91,7 +91,7 @@ android {
                 }
             }
             applicationIdSuffix = ".flyme"
-            versionNameSuffix = "-flyme.15.0-alpha4"
+            versionNameSuffix = "-flyme.15.0-alpha5"
             manifestPlaceholders["flymeApplicationLabel"] = "@string/flyme_app_name"
             manifestPlaceholders["flymeRadioProbeEnabled"] = "false"
             matchingFallbacks += "release"
@@ -164,7 +164,7 @@ val musicKitFrameRepairClasses = providers.provider {
 androidComponents {
     onVariants(selector().all()) { variant ->
         if (variant.name == "flymeGecko") {
-            variant.outputs.forEach { it.versionCode.set(41) }
+            variant.outputs.forEach { it.versionCode.set(42) }
             // Direct APK distribution benefits from compressed browser binaries.
             // Android extracts the selected architecture once during installation.
             variant.packaging.jniLibs.useLegacyPackaging.set(true)
