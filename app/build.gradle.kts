@@ -88,7 +88,7 @@ android {
                 }
             }
             applicationIdSuffix = ".flyme"
-            versionNameSuffix = "-flyme.15.0-alpha5"
+            versionNameSuffix = "-flyme.15.0-alpha6"
             manifestPlaceholders["flymeApplicationLabel"] = "@string/flyme_app_name"
             manifestPlaceholders["flymeRadioProbeEnabled"] = "false"
             matchingFallbacks += "release"
@@ -163,7 +163,7 @@ androidComponents {
         variant.enable = variant.buildType == "flymeGecko"
     }
     onVariants(selector().withBuildType("flymeGecko")) { variant ->
-        variant.outputs.forEach { it.versionCode.set(42) }
+        variant.outputs.forEach { it.versionCode.set(43) }
         // Direct APK distribution benefits from compressed browser binaries.
         // Android extracts the selected architecture once during installation.
         variant.packaging.jniLibs.useLegacyPackaging.set(true)
