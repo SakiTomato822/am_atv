@@ -73,7 +73,7 @@ import dev.amatv.model.CatalogOpenAction
 import dev.amatv.model.Destination
 import dev.amatv.model.Track
 import dev.amatv.model.openAction
-import dev.amatv.ui.ArtworkImages
+import dev.amatv.artwork.ArtworkImages
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch

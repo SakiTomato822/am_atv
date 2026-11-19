@@ -1,4 +1,4 @@
-package dev.amatv.ui
+package dev.amatv.artwork
 
 import kotlin.math.abs
 import kotlin.math.max

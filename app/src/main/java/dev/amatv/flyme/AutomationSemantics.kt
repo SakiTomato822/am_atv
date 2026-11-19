@@ -1,4 +1,4 @@
-package dev.amatv.ui
+package dev.amatv.flyme
 
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag

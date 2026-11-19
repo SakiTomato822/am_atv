@@ -35,7 +35,7 @@ import dev.amatv.integration.MusicServices
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.Track
-import dev.amatv.ui.rememberArtworkPalette
+import dev.amatv.artwork.rememberArtworkPalette
 
 /** The pager remains composed beneath the detail layer, retaining its page and scroll position. */
 @Composable

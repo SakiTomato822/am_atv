@@ -20,9 +20,6 @@ import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.unit.dp
 import dev.amatv.core.LyricBackgroundStyle
 import dev.amatv.model.Track
-import dev.amatv.ui.CarLyricFlow
-import dev.amatv.ui.MotionArtwork
-import dev.amatv.ui.SoakGlow
 
 @Composable
 internal fun FolioPlayerBackdrop(

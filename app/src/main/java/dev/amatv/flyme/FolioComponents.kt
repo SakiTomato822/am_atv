@@ -62,7 +62,6 @@ import androidx.compose.ui.unit.sp
 import dev.amatv.R
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
-import dev.amatv.ui.MotionArtwork
 
 @Composable
 internal fun FolioArtwork(

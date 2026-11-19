@@ -24,7 +24,6 @@ import dev.amatv.model.renderLyricWords
 import dev.amatv.playback.AutoplayStatus
 import dev.amatv.playback.QueueEntry
 import dev.amatv.playback.QueueState
-import dev.amatv.ui.posterFontSize
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min

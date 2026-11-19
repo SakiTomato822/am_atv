@@ -1,4 +1,4 @@
-package dev.amatv.ui
+package dev.amatv.flyme
 
 /** Clamped transition coordinates of the existing four-stop lyric mask. */
 internal data class KaraokeMaskRamp(val start: Float, val end: Float) {

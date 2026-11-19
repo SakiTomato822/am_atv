@@ -1,4 +1,4 @@
-package dev.amatv.ui.rendering
+package dev.amatv.flyme.rendering
 
 import android.graphics.Bitmap
 import android.graphics.BitmapShader

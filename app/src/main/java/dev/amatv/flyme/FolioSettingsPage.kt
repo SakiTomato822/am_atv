@@ -47,7 +47,7 @@ import dev.amatv.core.SettingsStore
 import dev.amatv.integration.ContentCacheStorage
 import dev.amatv.integration.LogRecorder
 import dev.amatv.integration.MusicServices
-import dev.amatv.ui.ArtworkImages
+import dev.amatv.artwork.ArtworkImages
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
