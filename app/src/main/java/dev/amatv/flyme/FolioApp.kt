@@ -282,9 +282,6 @@ fun FolioApp(
     LaunchedEffect(activeDestination) {
         if (activeDestination != null) {
             playbackStore.setNavigation(activeDestination, activeDestination)
-            if (activeDestination == Destination.Search) {
-                contentStore.ensureDefaultSearch()
-            }
         }
     }
 
@@ -477,6 +474,7 @@ fun FolioApp(
                             )
                             FolioRootPage.Library -> FolioLibraryPage(
                                 contentState = contentState,
+                                active = activeDestination == Destination.Library,
                                 connectionState = accountState.connectionState,
                                 currentTrack = playbackState.track,
                                 isPlaying = playbackState.playWhenReady,
@@ -488,11 +486,10 @@ fun FolioApp(
                                 onOpenItem = ::openItem,
                             )
                             FolioRootPage.Search -> FolioSearchPage(
-                                contentState = contentState,
                                 currentTrack = playbackState.track,
                                 isPlaying = playbackState.playWhenReady,
                                 bottomPadding = contentBottomPadding,
-                                onSearch = contentStore::search,
+                                search = services::search,
                                 onOpenItem = ::openItem,
                             )
                         }
