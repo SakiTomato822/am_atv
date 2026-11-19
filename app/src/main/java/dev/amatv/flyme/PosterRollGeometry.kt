@@ -1,6 +1,11 @@
 package dev.amatv.flyme
 
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.ui.util.lerp
+
+private val posterRollEasing = CubicBezierEasing(0.12f, 0.85f, 0.12f, 1f)
+
+internal fun posterRollMovement(time: Float): Float = posterRollEasing.transform(time)
 
 internal data class PosterRollBounds(val top: Float, val bottom: Float) {
     val height: Float get() = bottom - top
@@ -53,14 +58,41 @@ internal data class PosterInkPose(val top: Float, val scale: Float, val opacity:
         val fit = minOf(away.height / home.height, panelWidth / (width * scale))
         return PosterInkPose(away.top + (top - home.top) * fit, scale * fit, 0f)
     }
+}
 
-    fun interpolate(end: PosterInkPose, time: Float, movement: Float): PosterInkPose {
+internal enum class PosterInkFade {
+    RoleChange,
+    IncomingFocus,
+    OutgoingFocus,
+    ReplacedPreview,
+}
+
+internal data class PosterInkTrack(
+    val start: PosterInkPose,
+    val end: PosterInkPose,
+    val fadeStyle: PosterInkFade = PosterInkFade.RoleChange,
+) {
+    fun poseAt(time: Float, movement: Float): PosterInkPose {
+        fun window(from: Float, to: Float): Float = ((time - from) / (to - from)).coerceIn(0f, 1f)
         val fade = when {
-            end.opacity == 0f -> (time / 0.45f).coerceIn(0f, 1f)
-            opacity == 0f -> ((time - 0.25f) / 0.75f).coerceIn(0f, 1f)
+            fadeStyle == PosterInkFade.IncomingFocus -> {
+                val remaining = 1f - window(0f, 0.20f)
+                1f - remaining * remaining
+            }
+            fadeStyle == PosterInkFade.OutgoingFocus -> {
+                val elapsed = window(0.11f, 0.50f)
+                elapsed * elapsed
+            }
+            fadeStyle == PosterInkFade.ReplacedPreview -> window(0f, 0.15f)
+            end.opacity == 0f -> window(0f, 0.45f)
+            start.opacity == 0f -> window(0.25f, 1f)
             else -> time
         }
-        return PosterInkPose(lerp(top, end.top, movement), lerp(scale, end.scale, movement), lerp(opacity, end.opacity, fade))
+        return PosterInkPose(
+            lerp(start.top, end.top, movement),
+            lerp(start.scale, end.scale, movement),
+            lerp(start.opacity, end.opacity, fade),
+        )
     }
 }
 

@@ -79,6 +79,12 @@ private sealed interface PosterDrawing {
     val width: Float
     val height: Float
 
+    fun isFocusLayout(order: Int): Boolean = when (this) {
+        is Lead -> focus
+        is Local -> order >= 0
+        is Gap -> true
+    }
+
     data class Lead(
         val index: Int,
         val layout: TextLayoutResult,
@@ -130,6 +136,7 @@ private fun posterRollRow(
 private class PosterRoll(
     start: Map<Int, PosterRollRow>,
     end: Map<Int, PosterRollRow>,
+    focusOrder: Int?,
     panelWidth: Float,
     panelHeight: Float,
     gap: Float,
@@ -151,16 +158,22 @@ private class PosterRoll(
             val endSlot = endBounds.getValue(order)
             val first = from[drawing] ?: to.getValue(drawing).hiddenIn(endSlot, startSlot, drawing.width, panelWidth)
             val last = b ?: first.hiddenIn(startSlot, endSlot, drawing.width, panelWidth)
-            first to last
+            val fade = when {
+                drawing.isFocusLayout(order) && b == null -> PosterInkFade.OutgoingFocus
+                drawing.isFocusLayout(order) && order == focusOrder -> PosterInkFade.IncomingFocus
+                order == focusOrder && b == null -> PosterInkFade.ReplacedPreview
+                else -> PosterInkFade.RoleChange
+            }
+            PosterInkTrack(first, last, fade)
         }
     }
 
     fun sample(): Map<Int, PosterRollRow> {
         val time = progress.value
-        val movement = FolioPlayerMotionTokens.EnterEasing.transform(time)
+        val movement = posterRollMovement(time)
         return buildMap {
             for ((order, tracks) in drawings) {
-                val poses = tracks.mapValues { (_, track) -> track.first.interpolate(track.second, time, movement) }
+                val poses = tracks.mapValues { (_, track) -> track.poseAt(time, movement) }
                     .filterValues { it.opacity > 0f && it.scale > 0f }
                 if (poses.isNotEmpty()) {
                     val bounds = startBounds.getValue(order).interpolate(endBounds.getValue(order), movement)
@@ -351,7 +364,7 @@ internal fun FolioPosterLyricsPanel(
                         val from = running?.sample() ?: settled.second
                         val target = latestStage
                         if (from != target) {
-                            val next = PosterRoll(from, target, panelWidth, panelHeight, upcomingGap)
+                            val next = PosterRoll(from, target, roles.focus?.order, panelWidth, panelHeight, upcomingGap)
                             running = next
                             next.progress.animateTo(1f, tween(POSTER_ROLL_DURATION_MS, easing = LinearEasing))
                         }
@@ -368,7 +381,7 @@ internal fun FolioPosterLyricsPanel(
                 }
                 val staticStage = if (animate && settled.first != roles) settled.second else stage
                 val tracks = roll?.drawings ?: staticStage.mapValues { (_, row) ->
-                    row.drawings.mapValues { (_, pose) -> pose to pose }
+                    row.drawings.mapValues { (_, pose) -> PosterInkTrack(pose, pose) }
                 }
                 for ((order, drawings) in tracks) key(order) {
                     val lead = drawings.keys.filterIsInstance<PosterDrawing.Lead>().firstOrNull()
@@ -387,9 +400,9 @@ internal fun FolioPosterLyricsPanel(
                     } else null
                     for ((drawing, poses) in drawings) key(drawing) {
                         val layer = Modifier.graphicsLayer {
-                            val pose = if (roll == null) poses.first else {
+                            val pose = if (roll == null) poses.start else {
                                 val time = roll.progress.value
-                                poses.first.interpolate(poses.second, time, FolioPlayerMotionTokens.EnterEasing.transform(time))
+                                poses.poseAt(time, posterRollMovement(time))
                             }
                             scaleX = pose.scale
                             scaleY = pose.scale
@@ -415,14 +428,14 @@ internal fun FolioPosterLyricsPanel(
                                     linePresence = linePresence.takeIf { drawing.focus || previousSweepEnd != null },
                                     awaitingStart = isCurrent && !hasStarted,
                                     ink = ink,
-                                    modifier = layer.posterTextSemantics(drawing.layout, poses.second.opacity > 0f),
+                                    modifier = layer.posterTextSemantics(drawing.layout, poses.end.opacity > 0f),
                                     previousAlpha = if (drawing.previous) fg2.alpha else 1f,
                                     previousSweepEnd = previousSweepEnd,
                                 )
                             }
                             is PosterDrawing.Local -> PosterMeasuredText(
                                 drawing.layout, drawing.ink,
-                                layer.posterTextSemantics(drawing.layout, poses.second.opacity > 0f),
+                                layer.posterTextSemantics(drawing.layout, poses.end.opacity > 0f),
                             )
                         }
                     }
