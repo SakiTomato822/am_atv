@@ -1,4 +1,4 @@
-package dev.amatv.ui
+package dev.amatv.flyme
 
 import android.content.res.Resources
 import android.graphics.Typeface

@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import dev.amatv.R
+import dev.amatv.flyme.CarFonts
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -69,7 +70,7 @@ class GeckoMusicKitAuthActivity : Activity() {
         }
         val outer = FrameLayout(this)
         status = TextView(this).apply {
-            if (dev.amatv.BuildConfig.FLYME_AUTO) typeface = dev.amatv.ui.CarFonts.typeface(resources)
+            if (dev.amatv.BuildConfig.FLYME_AUTO) typeface = CarFonts.typeface(resources)
             setTextColor(Color.WHITE)
             setBackgroundColor(Color.rgb(20, 20, 24))
             textSize = 16f
