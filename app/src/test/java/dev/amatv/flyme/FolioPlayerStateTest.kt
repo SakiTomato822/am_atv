@@ -1,6 +1,9 @@
 package dev.amatv.flyme
 
+import androidx.compose.ui.graphics.Color
 import dev.amatv.core.LyricBackgroundStyle
+import dev.amatv.core.LyricsLoadPhase
+import dev.amatv.core.LyricsState
 import dev.amatv.core.PlaybackState
 import dev.amatv.integration.PlaybackRepeatMode
 import dev.amatv.model.CatalogKind
@@ -14,6 +17,7 @@ import dev.amatv.playback.QueueState
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -115,13 +119,13 @@ class FolioPlayerStateTest {
 
     @Test
     fun alwaysOpenControlsFollowsFlowAndNoLyricsRules() {
-        assertTrue(alwaysOpenControls(FolioTier.Wide, LyricBackgroundStyle.Flow, hasLyrics = true, FolioPlayerDisplayState.Lyrics))
-        assertTrue(alwaysOpenControls(FolioTier.Medium, LyricBackgroundStyle.Flow, hasLyrics = true, FolioPlayerDisplayState.Lyrics))
-        assertTrue(alwaysOpenControls(FolioTier.Ultrawide, LyricBackgroundStyle.Flow, hasLyrics = true, FolioPlayerDisplayState.Lyrics))
-        assertFalse(alwaysOpenControls(FolioTier.Short, LyricBackgroundStyle.Flow, hasLyrics = true, FolioPlayerDisplayState.Lyrics))
-        assertFalse(alwaysOpenControls(FolioTier.Wide, LyricBackgroundStyle.Soak, hasLyrics = true, FolioPlayerDisplayState.Lyrics))
-        assertTrue(alwaysOpenControls(FolioTier.Narrow, LyricBackgroundStyle.Soak, hasLyrics = false, FolioPlayerDisplayState.None))
-        assertFalse(alwaysOpenControls(FolioTier.Narrow, LyricBackgroundStyle.Soak, hasLyrics = false, FolioPlayerDisplayState.Queue))
+        assertTrue(alwaysOpenControls(FolioTier.Wide, LyricBackgroundStyle.Flow, hasLyricsOrPending = true, FolioPlayerDisplayState.Lyrics))
+        assertTrue(alwaysOpenControls(FolioTier.Medium, LyricBackgroundStyle.Flow, hasLyricsOrPending = true, FolioPlayerDisplayState.Lyrics))
+        assertTrue(alwaysOpenControls(FolioTier.Ultrawide, LyricBackgroundStyle.Flow, hasLyricsOrPending = true, FolioPlayerDisplayState.Lyrics))
+        assertFalse(alwaysOpenControls(FolioTier.Short, LyricBackgroundStyle.Flow, hasLyricsOrPending = true, FolioPlayerDisplayState.Lyrics))
+        assertFalse(alwaysOpenControls(FolioTier.Wide, LyricBackgroundStyle.Soak, hasLyricsOrPending = true, FolioPlayerDisplayState.Lyrics))
+        assertTrue(alwaysOpenControls(FolioTier.Narrow, LyricBackgroundStyle.Soak, hasLyricsOrPending = false, FolioPlayerDisplayState.None))
+        assertFalse(alwaysOpenControls(FolioTier.Narrow, LyricBackgroundStyle.Soak, hasLyricsOrPending = false, FolioPlayerDisplayState.Queue))
     }
 
     @Test
@@ -313,5 +317,224 @@ class FolioPlayerStateTest {
         assertEquals(0, earlyProj.focusLeadIndex)
         assertEquals("", earlyProj.activeBackingText)
         assertEquals(listOf("让风从窗缝里进来", "到家之前都算在路上"), earlyProj.upcomingLeadTexts)
+    }
+
+    @Test
+    fun duetPosterColorsBySingerHandlesChorusAsPrimaryAndMovesLaterOverlapToSmallLines() {
+        val jay = LyricLine(
+            words = listOf(LyricWord("假装我们还在一块", 1_000L, 4_000L)),
+            agentId = "v1",
+            isOppositeAgent = false,
+            isMultiAgentSong = true,
+        )
+        val amei = LyricLine(
+            words = listOf(LyricWord("我真的演不出来", 4_000L, 8_000L)),
+            agentId = "v2",
+            isOppositeAgent = true,
+            isMultiAgentSong = true,
+        )
+        // Simultaneous overlap: jay2 starts first at 9_000ms, amei2 overlaps starting at 10_000ms.
+        val jayOverlap = LyricLine(
+            words = listOf(LyricWord("还是没能走到未来", 9_000L, 14_000L)),
+            agentId = "v1",
+            isOppositeAgent = false,
+            isMultiAgentSong = true,
+        )
+        val ameiOverlap = LyricLine(
+            words = listOf(LyricWord("难道非要这样分开", 10_000L, 15_000L)),
+            agentId = "v2",
+            isOppositeAgent = true,
+            isMultiAgentSong = true,
+        )
+        val chorus = LyricLine(
+            words = listOf(LyricWord("不该就这样离开", 16_000L, 20_000L)),
+            agentId = "v1000",
+            isOppositeAgent = true,
+            isMultiAgentSong = true,
+        )
+        val unattributed = LyricLine(
+            words = listOf(LyricWord("最后一句", 20_000L, 24_000L)),
+            agentId = null,
+            isOppositeAgent = false,
+            isMultiAgentSong = true,
+        )
+
+        assertFalse(isOppositeSingerLine(jay))
+        assertTrue(isOppositeSingerLine(amei))
+        assertFalse(isOppositeSingerLine(chorus))
+        assertFalse(isOppositeSingerLine(unattributed))
+
+        val lines = listOf(jay, amei, jayOverlap, ameiOverlap, chorus, unattributed)
+
+        // When amei is singing solo (5_000ms), focus is opposite singer, previous is primary, previews reflect agent.
+        val ameiSolo = projectPosterLyrics(lines, positionMs = 5_000L, activeLineIndices = setOf(1))
+        assertEquals(1, ameiSolo.focusLeadIndex)
+        assertTrue(ameiSolo.isFocusOppositeSinger)
+        assertFalse(ameiSolo.previousLine!!.isOppositeSinger)
+        assertFalse(ameiSolo.upcomingLines[0].isOppositeSinger) // jayOverlap
+
+        // When jayOverlap (9_000) & ameiOverlap (10_000) both sing at 11_000ms:
+        // earlier line (jayOverlap) stays big, ameiOverlap joins smallLines colored as opposite singer,
+        // and preview skips ameiOverlap to chorus (which is treated as primary singer).
+        val overlap = projectPosterLyrics(lines, positionMs = 11_000L, activeLineIndices = setOf(2, 3))
+        assertEquals(2, overlap.focusLeadIndex)
+        assertFalse(overlap.isFocusOppositeSinger)
+        assertEquals(1, overlap.smallLines.size)
+        assertEquals("难道非要这样分开", overlap.smallLines[0].text)
+        assertTrue(overlap.smallLines[0].isOppositeSinger)
+        assertEquals(listOf("不该就这样离开", "最后一句"), overlap.upcomingLines.map { it.text })
+        assertFalse(overlap.upcomingLines[0].isOppositeSinger) // chorus -> primary
+
+        // Duet accent colors remain distinct from primary ink & high-contrast on both themes.
+        val warmPalette = listOf(Color(0xFF1A2238), Color(0xFFE07A5F), Color(0xFF3D5A80))
+        val darkDuet = selectDuetAccentColor(warmPalette, folioPlayerBaseColor(warmPalette, isLight = false), isLight = false)
+        val lightDuet = selectDuetAccentColor(warmPalette, folioPlayerBaseColor(warmPalette, isLight = true), isLight = true)
+        assertNotEquals(Color.White, darkDuet)
+        assertNotEquals(Color(0xFF16141B), lightDuet)
+        assertTrue(contrastRatio(darkDuet, folioPlayerBaseColor(warmPalette, isLight = false)) >= 4.8f)
+        assertTrue(contrastRatio(lightDuet, folioPlayerBaseColor(warmPalette, isLight = true)) >= 4.8f)
+
+        // Monochrome artwork still selects a readable distinguishing duet tint.
+        val bwPalette = listOf(Color(0xFFEEEEEE), Color(0xFF888888), Color(0xFF222222))
+        val darkBwDuet = selectDuetAccentColor(bwPalette, folioPlayerBaseColor(bwPalette, isLight = false), isLight = false)
+        val lightBwDuet = selectDuetAccentColor(bwPalette, folioPlayerBaseColor(bwPalette, isLight = true), isLight = true)
+        assertTrue(contrastRatio(darkBwDuet, folioPlayerBaseColor(bwPalette, isLight = false)) >= 4.8f)
+        assertTrue(contrastRatio(lightBwDuet, folioPlayerBaseColor(bwPalette, isLight = true)) >= 4.8f)
+    }
+
+    @Test
+    fun shortTierUsesH5ControlWidthAndLyricsStart() {
+        val shortSpec = playerSpecForTier(FolioTier.Short)
+        assertEquals(336f, shortSpec.controlCardWidth.value, 0.01f)
+        assertEquals(24f, shortSpec.fs.value, 0.01f)
+        assertEquals(34f, shortSpec.pfs.value, 0.01f)
+        assertEquals(384f, shortTierLyricsStartDp(914f).value, 0.01f)
+    }
+
+    @Test
+    fun lyricsAvailabilityCoversPendingUnavailableFailedAndReadyWithoutFlashingNone() {
+        val pendingMismatched = resolveLyricsAvailability(
+            hasCurrentTrack = true,
+            trackCatalogId = "new-song",
+            trackCatalogKind = CatalogKind.Song,
+            isSignedIn = true,
+            displayedLineCount = 0,
+            lyricsState = LyricsState(trackIdentity = "old-song", phase = LyricsLoadPhase.Ready),
+            currentIdentity = "new-song",
+        )
+        assertEquals(FolioLyricsAvailability.Pending, pendingMismatched)
+        assertEquals(
+            FolioPlayerDisplayState.Poster,
+            resolvePlayerDisplayState(FolioTier.Narrow, queueOpen = false, posterPreferred = true, lyricsAvailability = pendingMismatched, hasTimedLyrics = false),
+        )
+        assertEquals(
+            FolioPlayerDisplayState.Lyrics,
+            resolvePlayerDisplayState(FolioTier.Narrow, queueOpen = false, posterPreferred = false, lyricsAvailability = pendingMismatched, hasTimedLyrics = false),
+        )
+
+        val pendingLoading = resolveLyricsAvailability(
+            hasCurrentTrack = true,
+            trackCatalogId = "new-song",
+            trackCatalogKind = CatalogKind.Song,
+            isSignedIn = true,
+            displayedLineCount = 0,
+            lyricsState = LyricsState(trackIdentity = "new-song", phase = LyricsLoadPhase.Loading),
+            currentIdentity = "new-song",
+        )
+        assertEquals(FolioLyricsAvailability.Pending, pendingLoading)
+
+        val unavailable = resolveLyricsAvailability(
+            hasCurrentTrack = true,
+            trackCatalogId = "new-song",
+            trackCatalogKind = CatalogKind.Song,
+            isSignedIn = true,
+            displayedLineCount = 0,
+            lyricsState = LyricsState(trackIdentity = "new-song", phase = LyricsLoadPhase.Unavailable),
+            currentIdentity = "new-song",
+        )
+        assertEquals(FolioLyricsAvailability.Unavailable, unavailable)
+        assertEquals(
+            FolioPlayerDisplayState.None,
+            resolvePlayerDisplayState(FolioTier.Narrow, queueOpen = false, posterPreferred = true, lyricsAvailability = unavailable, hasTimedLyrics = false),
+        )
+
+        val failed = resolveLyricsAvailability(
+            hasCurrentTrack = true,
+            trackCatalogId = "new-song",
+            trackCatalogKind = CatalogKind.Song,
+            isSignedIn = true,
+            displayedLineCount = 0,
+            lyricsState = LyricsState(trackIdentity = "new-song", phase = LyricsLoadPhase.Failed),
+            currentIdentity = "new-song",
+        )
+        assertEquals(FolioLyricsAvailability.Unavailable, failed)
+
+        val ready = resolveLyricsAvailability(
+            hasCurrentTrack = true,
+            trackCatalogId = "new-song",
+            trackCatalogKind = CatalogKind.Song,
+            isSignedIn = true,
+            displayedLineCount = 12,
+            lyricsState = LyricsState(trackIdentity = "new-song", phase = LyricsLoadPhase.Ready),
+            currentIdentity = "new-song",
+        )
+        assertEquals(FolioLyricsAvailability.Ready, ready)
+        assertEquals(
+            FolioPlayerDisplayState.Poster,
+            resolvePlayerDisplayState(FolioTier.Narrow, queueOpen = false, posterPreferred = true, lyricsAvailability = ready, hasTimedLyrics = true),
+        )
+    }
+
+    @Test
+    fun headerAdaptiveColorDetectsTopStripLuminanceAndUnifiesAllButtons() {
+        // White top quarter over dark lower body -> top strip must still evaluate as bright (> 0.50).
+        val white = 0xFFFFFFFF.toInt()
+        val black = 0xFF000000.toInt()
+        val splitBitmap = IntArray(40) { idx -> if (idx < 10) white else black }
+        val splitTopLuma = computeTopStripLuminance(splitBitmap, width = 4, height = 10, topFraction = 0.22f)
+        assertTrue(isTopBackdropLight(splitTopLuma))
+
+        // Dark top strip over bright bottom -> top strip evaluates as dark (< 0.50).
+        val inverseBitmap = IntArray(40) { idx -> if (idx < 10) black else white }
+        val inverseTopLuma = computeTopStripLuminance(inverseBitmap, width = 4, height = 10, topFraction = 0.22f)
+        assertFalse(isTopBackdropLight(inverseTopLuma))
+
+        // Narrow Soak over bright photo uses dark `#16141B` header ink regardless of dark app theme.
+        assertTrue(resolveHeaderUseDarkInk(FolioTier.Narrow, LyricBackgroundStyle.Soak, FolioPlayerDisplayState.Lyrics, themeIsLight = false, topStripLuminance = 0.85f))
+        assertFalse(resolveHeaderUseDarkInk(FolioTier.Narrow, LyricBackgroundStyle.Soak, FolioPlayerDisplayState.Lyrics, themeIsLight = true, topStripLuminance = 0.12f))
+        // Wide car / Flow follow theme surface.
+        assertFalse(resolveHeaderUseDarkInk(FolioTier.Wide, LyricBackgroundStyle.Soak, FolioPlayerDisplayState.Lyrics, themeIsLight = false, topStripLuminance = 0.90f))
+
+        val darkInkScheme = resolveHeaderColorScheme(useDarkInk = true)
+        assertEquals(Color(0xFF16141B), darkInkScheme.fg)
+        assertTrue(darkInkScheme.posterActiveBg.alpha in 0.08f..0.20f)
+        assertTrue(darkInkScheme.glassBg.alpha in 0.08f..0.20f)
+
+        val lightInkScheme = resolveHeaderColorScheme(useDarkInk = false)
+        assertEquals(Color.White, lightInkScheme.fg)
+        assertTrue(lightInkScheme.posterActiveBg.alpha in 0.10f..0.24f)
+    }
+
+    @Test
+    fun motionTokensAndPosterCharacterLightingFollowH5TimingAndReducedMotion() {
+        assertEquals(280, FolioPlayerMotionTokens.CTL_OPACITY_MS)
+        assertEquals(350, FolioPlayerMotionTokens.CTL_TRANSLATE_MS)
+        assertEquals(14f, FolioPlayerMotionTokens.CTL_OFFSET_DP, 0.01f)
+        assertEquals(800, FolioPlayerMotionTokens.POSTER_LIQ_IN_MAIN_MS)
+        assertEquals(700, FolioPlayerMotionTokens.POSTER_LIQ_IN_SUB_MS)
+        assertEquals(600, FolioPlayerMotionTokens.POSTER_LIQ_OUT_MS)
+
+        assertTrue(isReducedMotionEnabled(0f, animatorsEnabled = true))
+        assertTrue(isReducedMotionEnabled(1f, animatorsEnabled = false))
+        assertFalse(isReducedMotionEnabled(1f, animatorsEnabled = true))
+
+        // Character starts illuminating right at its timestamp (no delay) and reaches 1f after 200ms.
+        assertEquals(0.40f, posterCharAlpha(999L, charStartMs = 1000L), 0.01f)
+        assertEquals(0.40f, posterCharAlpha(1000L, charStartMs = 1000L), 0.01f)
+        assertEquals(0.70f, posterCharAlpha(1100L, charStartMs = 1000L), 0.01f)
+        assertEquals(1.00f, posterCharAlpha(1200L, charStartMs = 1000L), 0.01f)
+
+        // Reduced motion lights immediately at timestamp.
+        assertEquals(1.00f, posterCharAlpha(1000L, charStartMs = 1000L, reducedMotion = true), 0.01f)
     }
 }
