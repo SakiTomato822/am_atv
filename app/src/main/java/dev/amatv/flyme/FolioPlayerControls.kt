@@ -1,6 +1,5 @@
 package dev.amatv.flyme
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -79,25 +78,6 @@ import dev.amatv.LocalHostWindow
 import dev.amatv.R
 import dev.amatv.model.Track
 import kotlin.math.roundToLong
-
-internal fun Modifier.folioPlayerGlass(
-    isLight: Boolean,
-    shape: Shape,
-): Modifier {
-    val fill = if (isLight) {
-        Color.White.copy(alpha = 0.86f)
-    } else {
-        Color(0xE0211D26)
-    }
-    val stroke = if (isLight) {
-        Color(0xFF17151C).copy(alpha = 0.12f)
-    } else {
-        Color.White.copy(alpha = 0.22f)
-    }
-    return clip(shape)
-        .background(fill)
-        .border(1.dp, stroke, shape)
-}
 
 @Composable
 internal fun FolioPlayerHeader(
@@ -298,19 +278,19 @@ internal fun FolioPlayerHeader(
                 onClick = onToggleFavorite,
             )
 
-            val modeBg by animateColorAsState(
-                targetValue = if (isPosterMode) headerColors.posterActiveBg else Color.Transparent,
-                animationSpec = tween(FolioMotion.FAST_MS),
-                label = "player-mode-bg",
-            )
+            val headerGlassLight = headerColors.fg != Color.White
             val modeCd = stringResource(
                 if (isPosterMode) R.string.folio_player_toggle_lyrics else R.string.folio_player_toggle_poster,
             )
             Box(
                 modifier = Modifier
                     .size(tierSpec.pib)
+                    .folioPlayerGlass(
+                        isLight = headerGlassLight,
+                        shape = CircleShape,
+                        enabled = isPosterMode,
+                    )
                     .clip(CircleShape)
-                    .background(modeBg)
                     .clickable(enabled = hasTimedLyrics, role = Role.Button, onClick = onTogglePosterMode)
                     .semantics { contentDescription = modeCd },
                 contentAlignment = Alignment.Center,
@@ -334,6 +314,8 @@ internal fun FolioPlayerHeader(
                     iconTint = headerColors.fg,
                     bg = headerColors.glassBg,
                     border = headerColors.glassBorder,
+                    useGlass = true,
+                    glassIsLight = headerGlassLight,
                     onClick = { pipWindow.switchTo(!pipWindow.mini) },
                 )
             }
@@ -1348,14 +1330,24 @@ private fun PlayerIconPillButton(
     onClick: () -> Unit,
     enabled: Boolean = true,
     dimDisabled: Boolean = true,
+    useGlass: Boolean = false,
+    glassIsLight: Boolean = false,
 ) {
     val alpha = if (enabled || !dimDisabled) 1f else 0.36f
     Box(
         modifier = Modifier
             .size(size)
+            .then(
+                if (useGlass) {
+                    Modifier.folioPlayerGlass(isLight = glassIsLight, shape = CircleShape)
+                } else {
+                    Modifier
+                        .clip(CircleShape)
+                        .background(bg)
+                        .then(if (border != Color.Transparent) Modifier.border(1.dp, border, CircleShape) else Modifier)
+                },
+            )
             .clip(CircleShape)
-            .background(bg)
-            .then(if (border != Color.Transparent) Modifier.border(1.dp, border, CircleShape) else Modifier)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {

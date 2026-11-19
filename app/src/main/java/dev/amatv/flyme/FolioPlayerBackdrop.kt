@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.unit.dp
 import dev.amatv.core.LyricBackgroundStyle
 import dev.amatv.model.Track
@@ -46,6 +47,7 @@ internal fun FolioPlayerBackdrop(
     ) {
         val containerWidth = maxWidth
         val containerHeight = maxHeight
+        val coordHolder = LocalFolioGlassEnv.current.coordHolder
         Crossfade(
             targetState = style,
             animationSpec = tween(if (reducedMotion) 0 else BACKDROP_STYLE_CROSSFADE_MS),
@@ -67,6 +69,7 @@ internal fun FolioPlayerBackdrop(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(bleedHeight)
+                                    .then(if (coordHolder != null) Modifier.onPlaced { coordHolder.bleedCoords = it } else Modifier)
                                     .then(pullHandle),
                             ) {
                                 MotionArtwork(
@@ -95,6 +98,7 @@ internal fun FolioPlayerBackdrop(
                                 modifier = Modifier
                                     .width(bleedWidth)
                                     .fillMaxHeight()
+                                    .then(if (coordHolder != null) Modifier.onPlaced { coordHolder.bleedCoords = it } else Modifier)
                                     .then(pullHandle),
                             ) {
                                 MotionArtwork(

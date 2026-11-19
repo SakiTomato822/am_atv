@@ -864,79 +864,86 @@ internal fun FolioQueuePanel(
     }
 
     if (tierSpec.isHorizontalQueue) {
-        LazyRow(
-            state = listState,
-            modifier = modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .folioPlayerGlass(isLight = isLight, shape = RoundedCornerShape(22.dp))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
         ) {
-            items(snapshot.rows, key = { it.key }) { row ->
-                val clickable = !row.isCurrent && (row.timelineIndex != null || snapshot.isStation)
-                val shape = RoundedCornerShape(14.dp)
-                Column(
-                    modifier = Modifier
-                        .width(138.dp)
-                        .clip(shape)
-                        .then(
+            LazyRow(
+                state = listState,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                items(snapshot.rows, key = { it.key }) { row ->
+                    val clickable = !row.isCurrent && (row.timelineIndex != null || snapshot.isStation)
+                    val shape = RoundedCornerShape(14.dp)
+                    Column(
+                        modifier = Modifier
+                            .width(138.dp)
+                            .clip(shape)
+                            .then(
+                                if (row.isCurrent) {
+                                    Modifier
+                                        .background(rowBg)
+                                        .border(1.dp, rowBorder, shape)
+                                } else {
+                                    Modifier.background(Color.Transparent)
+                                },
+                            )
+                            .clickable(enabled = clickable) {
+                                val idx = row.timelineIndex
+                                if (idx != null) {
+                                    onSelectTimelineTrack(idx)
+                                } else if (snapshot.isStation) {
+                                    onPlayStationTrack(row.track)
+                                }
+                            }
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            FolioArtwork(
+                                track = row.track,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.size(tierSpec.qc),
+                            )
                             if (row.isCurrent) {
-                                Modifier
-                                    .background(rowBg)
-                                    .border(1.dp, rowBorder, shape)
-                            } else {
-                                Modifier.background(Color.Transparent)
-                            },
-                        )
-                        .clickable(enabled = clickable) {
-                            val idx = row.timelineIndex
-                            if (idx != null) {
-                                onSelectTimelineTrack(idx)
-                            } else if (snapshot.isStation) {
-                                onPlayStationTrack(row.track)
+                                PlayerQueueEqualizer(color = accent, animate = isPlaying)
                             }
                         }
-                        .padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        FolioArtwork(
-                            track = row.track,
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.size(tierSpec.qc),
-                        )
-                        if (row.isCurrent) {
-                            PlayerQueueEqualizer(color = accent, animate = isPlaying)
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = sectionTagLabel(row.section),
+                                color = if (row.isCurrent) accent else fg2,
+                                fontFamily = fontFamily,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                            )
+                            Text(
+                                text = row.track.title,
+                                color = fg,
+                                fontFamily = fontFamily,
+                                fontWeight = if (row.isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                                fontSize = tierSpec.qt,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = row.track.artist,
+                                color = fg2,
+                                fontFamily = fontFamily,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
-                    }
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = sectionTagLabel(row.section),
-                            color = if (row.isCurrent) accent else fg2,
-                            fontFamily = fontFamily,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                        )
-                        Text(
-                            text = row.track.title,
-                            color = fg,
-                            fontFamily = fontFamily,
-                            fontWeight = if (row.isCurrent) FontWeight.SemiBold else FontWeight.Normal,
-                            fontSize = tierSpec.qt,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = row.track.artist,
-                            color = fg2,
-                            fontFamily = fontFamily,
-                            fontSize = 13.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
                     }
                 }
             }
@@ -955,12 +962,18 @@ internal fun FolioQueuePanel(
         }
     }
 
-    LazyColumn(
-        state = listState,
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 6.dp, bottom = 140.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .folioPlayerGlass(isLight = isLight, shape = RoundedCornerShape(22.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 6.dp, bottom = 140.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
         groupedSections.forEach { (kind, rows) ->
             item(key = "header-${kind.name}") {
                 val label = sectionHeaderLabel(kind, snapshot)
@@ -1048,6 +1061,7 @@ internal fun FolioQueuePanel(
                 }
             }
         }
+    }
     }
 }
 
