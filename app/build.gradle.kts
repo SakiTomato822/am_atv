@@ -33,7 +33,7 @@ plugins {
 android {
     namespace = "dev.amatv"
     compileSdk = 36
-    testBuildType = localSetting("amatv.testBuildType", "debug")
+    testBuildType = "flymeGecko"
 
     defaultConfig {
         applicationId = "dev.amatv"
@@ -68,16 +68,13 @@ android {
     }
 
     buildTypes {
-        release {
+        create("flymeGecko") {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-        }
-        create("flymeGecko") {
-            initWith(getByName("release"))
             signingConfig = signingConfigs.getByName("debug")
             val fixedKeystorePath = localSetting("FLYME_SIGNING_KEYSTORE_FILE")
             if (fixedKeystorePath.isNotBlank()) {
@@ -162,13 +159,14 @@ val musicKitFrameRepairClasses = providers.provider {
 }
 
 androidComponents {
-    onVariants(selector().all()) { variant ->
-        if (variant.name == "flymeGecko") {
-            variant.outputs.forEach { it.versionCode.set(42) }
-            // Direct APK distribution benefits from compressed browser binaries.
-            // Android extracts the selected architecture once during installation.
-            variant.packaging.jniLibs.useLegacyPackaging.set(true)
-        }
+    beforeVariants(selector().all()) { variant ->
+        variant.enable = variant.buildType == "flymeGecko"
+    }
+    onVariants(selector().withBuildType("flymeGecko")) { variant ->
+        variant.outputs.forEach { it.versionCode.set(42) }
+        // Direct APK distribution benefits from compressed browser binaries.
+        // Android extracts the selected architecture once during installation.
+        variant.packaging.jniLibs.useLegacyPackaging.set(true)
         variant.instrumentation.transformClassesWith(
             MusicKitSongIdVisitorFactory::class.java,
             InstrumentationScope.ALL,
@@ -212,7 +210,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.tv:tv-material:1.1.0")
     implementation("androidx.media3:media3-exoplayer:1.11.0")
     implementation("androidx.media3:media3-exoplayer-hls:1.11.0")
     implementation("androidx.media3:media3-ui:1.11.0")
@@ -220,7 +217,6 @@ dependencies {
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.3.0")
     implementation("io.github.kyant0:backdrop:1.0.6")
 
-    debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")

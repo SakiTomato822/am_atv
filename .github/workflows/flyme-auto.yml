@@ -99,7 +99,7 @@ jobs:
           PREVIEW_FLAGS: ${{ inputs.preview && '-Pflyme.uiVerification=true -Pflyme.previewRelease=true -Pflyme.previewAbi=arm64-v8a' || '' }}
         run: |
           chmod +x gradlew
-          ./gradlew '-PAM_DEVELOPER_TOKEN_FILE=../work/ci/developer-token.jwt' '-PFLYME_SIGNING_KEYSTORE_FILE=work/ci/flyme-signing.keystore' '-Pamatv.testBuildType=flymeGecko' $PREVIEW_FLAGS :app:assembleFlymeGecko :app:testFlymeGeckoUnitTest --console=plain --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8'
+          ./gradlew '-PAM_DEVELOPER_TOKEN_FILE=../work/ci/developer-token.jwt' '-PFLYME_SIGNING_KEYSTORE_FILE=work/ci/flyme-signing.keystore' $PREVIEW_FLAGS :app:assembleFlymeGecko :app:testFlymeGeckoUnitTest --console=plain --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8'
 
       # Same fixed signing key as releases, so it installs over a local preview and keeps its sign-in.
       - name: Verify and upload preview APK
