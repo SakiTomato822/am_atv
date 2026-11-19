@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
@@ -21,7 +23,9 @@ import androidx.compose.ui.unit.dp
 import dev.amatv.R
 import dev.amatv.core.PlaybackState
 import dev.amatv.integration.CatalogArtistPage
+import dev.amatv.integration.LibraryCollection
 import dev.amatv.integration.MusicServices
+import dev.amatv.integration.mergeLibraryPage
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.Track
 import kotlinx.coroutines.CancellationException
@@ -34,6 +38,40 @@ internal fun rememberFolioArtistData(artist: Track, services: MusicServices) =
         saved = { services.savedArtistPage(artist) },
         complete = CatalogArtistPage::complete,
     ) { services.catalogArtistPage(artist) }
+
+private data class FolioArtistAlbums(val items: List<Track>, val nextPage: String? = null)
+
+@Composable
+private fun rememberFolioArtistAlbums(
+    artist: Track,
+    services: MusicServices,
+): Pair<FolioDetailData<FolioArtistAlbums>, () -> Unit> {
+    var albums by remember {
+        val cached = services.cachedArtistAlbums(artist)?.let { FolioArtistAlbums(it.items, it.nextPage) }
+        mutableStateOf(FolioDetailData(cached))
+    }
+    var requestedPage by remember { mutableStateOf<String?>(null) }
+    var attempt by remember { mutableIntStateOf(0) }
+    LaunchedEffect(attempt) {
+        val next = requestedPage
+        val previous = albums.value
+        loadFolioDetail(
+            cached = previous,
+            saved = { services.savedArtistAlbums(artist)?.let { FolioArtistAlbums(it) } },
+            fetch = {
+                val page = services.libraryArtistAlbumsPage(artist, next)
+                val items = if (next == null) page.items else mergeLibraryPage(checkNotNull(previous).items, page.items)
+                FolioArtistAlbums(items, page.nextPage)
+            },
+            complete = { true },
+            publish = { albums = it },
+        )
+    }
+    return albums to {
+        if (!albums.failed) requestedPage = albums.value?.nextPage
+        attempt++
+    }
+}
 
 @Composable
 internal fun FolioArtistDetail(
@@ -50,6 +88,10 @@ internal fun FolioArtistDetail(
     val page = data.value
     val songs = page?.topSongs.orEmpty()
     val shelves = page?.shelves.orEmpty()
+    val library = if (artist.resourceType == LibraryCollection.Artists.resourceType) {
+        rememberFolioArtistAlbums(artist, services)
+    } else null
+    val hasCatalog = page?.artist != null || songs.isNotEmpty() || shelves.isNotEmpty()
     val albumCount = shelves.firstOrNull { it.id.endsWith("-full-albums") }?.items?.size ?: 0
     val more = remember { mutableStateMapOf<String, FolioDetailData<List<Track>>>() }
     var showAllSongs by remember { mutableStateOf(false) }
@@ -64,7 +106,7 @@ internal fun FolioArtistDetail(
         val columns = adaptiveColumnCount(maxWidth, spec.liw, spec.lstGap)
         LazyColumn(contentPadding = PaddingValues(bottom = bottomPadding)) {
             item(key = "header") {
-                val meta = if (page != null) {
+                val meta = if (page != null && (library == null || hasCatalog)) {
                     val songLabel = pluralStringResource(R.plurals.folio_detail_artist_songs, songs.size, songs.size)
                     val albumLabel = pluralStringResource(R.plurals.folio_detail_albums, albumCount, albumCount)
                     "$songLabel · $albumLabel"
@@ -80,7 +122,28 @@ internal fun FolioArtistDetail(
                     },
                 )
             }
-            if (data.failed || (songs.isEmpty() && shelves.isEmpty())) {
+            if (library != null) {
+                val (albums, loadMoreOrRetry) = library
+                val items = albums.value?.items.orEmpty()
+                val next = albums.value?.nextPage
+                item(key = "library-albums") {
+                    FolioSectionTitle(stringResource(R.string.folio_detail_library_albums))
+                }
+                folioDetailCards(items, columns, spec.lstGap, false, onOpenItem)
+                if (albums.failed || albums.loading || next != null || items.isEmpty()) {
+                    item(key = "library-albums-status") {
+                        when {
+                            albums.failed -> FolioDetailStatus(
+                                stringResource(R.string.browse_load_more_error), loadMoreOrRetry,
+                            )
+                            albums.loading -> FolioDetailStatus(stringResource(R.string.browse_loading))
+                            next != null -> FolioChip(stringResource(R.string.folio_detail_view_more), false, loadMoreOrRetry)
+                            else -> FolioDetailStatus(stringResource(R.string.library_empty))
+                        }
+                    }
+                }
+            }
+            if ((library == null || hasCatalog) && (data.failed || (songs.isEmpty() && shelves.isEmpty()))) {
                 item(key = "status") {
                     when {
                         data.failed -> FolioDetailStatus(

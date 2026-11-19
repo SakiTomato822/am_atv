@@ -90,6 +90,7 @@
     <string name="album_show_complete">Show Complete Album</string>
     <string name="album_show_library">Show Only Songs in Library</string>
     <string name="artist_in_library">In My Library</string>
+    <string name="folio_detail_library_albums">Albums in Library</string>
     <string name="artist_top_songs">Top Songs</string>
     <string name="artist_albums">Albums</string>
     <string name="artist_singles">Singles &amp; EPs</string>

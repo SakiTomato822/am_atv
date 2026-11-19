@@ -89,6 +89,7 @@
     <string name="album_show_complete">顯示完整專輯</string>
     <string name="album_show_library">只顯示資料庫中的歌曲</string>
     <string name="artist_in_library">資料庫中</string>
+    <string name="folio_detail_library_albums">資料庫中的專輯</string>
     <string name="artist_top_songs">熱門歌曲</string>
     <string name="artist_albums">專輯</string>
     <string name="artist_singles">單曲與 EP</string>
