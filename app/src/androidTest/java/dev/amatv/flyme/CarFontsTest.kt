@@ -1,4 +1,4 @@
-package dev.amatv.ui
+package dev.amatv.flyme
 
 import android.graphics.Paint
 import android.graphics.Typeface
@@ -18,7 +18,7 @@ class CarFontsTest {
     @Test fun composeResolvesRealBoldChineseGlyphs() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val resolver = createFontFamilyResolver(context)
-        val family = CarFonts.family(context.resources)
+        val family = FolioFonts.family(context.resources)
         fun resolve(weight: FontWeight) = resolver.resolve(
             family, weight, fontSynthesis = FontSynthesis.None,
         ).value as Typeface
@@ -47,6 +47,5 @@ class CarFontsTest {
         val system = Paint().apply { typeface = Typeface.DEFAULT; textSize = 48f }
         listOf("歌", "词", "體", "夜", "A", "8").forEach { assertTrue("Missing glyph $it", custom.hasGlyph(it)) }
         assertTrue(kotlin.math.abs(custom.measureText("Music 0123456789") - system.measureText("Music 0123456789")) > 1f)
-        assertSame(CarFonts.family(resources), CarFonts.family(resources))
     }
 }

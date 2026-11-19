@@ -7,8 +7,8 @@ import dev.amatv.model.CatalogKind
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.Destination
 import dev.amatv.model.Track
-import dev.amatv.ui.LibrarySort
-import dev.amatv.ui.sortLibrary
+import dev.amatv.flyme.LibrarySort
+import dev.amatv.flyme.sortLibrary
 import java.text.Collator
 import java.util.Locale
 import kotlinx.coroutines.CompletableDeferred

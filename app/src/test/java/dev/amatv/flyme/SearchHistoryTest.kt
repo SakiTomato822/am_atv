@@ -1,4 +1,4 @@
-package dev.amatv.ui
+package dev.amatv.flyme
 
 import org.junit.Assert.assertEquals
 import org.junit.Test

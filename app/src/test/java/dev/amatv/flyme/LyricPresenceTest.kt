@@ -1,4 +1,4 @@
-package dev.amatv.ui
+package dev.amatv.flyme
 
 import dev.amatv.model.LyricLine
 import dev.amatv.model.LyricTimeline
