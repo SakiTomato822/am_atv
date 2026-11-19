@@ -63,8 +63,11 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.Dp
@@ -725,12 +728,35 @@ internal fun FolioExpandedSubtitle(
     val cleanAlbum = album.trim()
     if (cleanArtist.isEmpty() && cleanAlbum.isEmpty()) return
 
-    val annotated = remember(cleanArtist, cleanAlbum, onOpenArtist, onOpenAlbum) {
+    val baseSpan = remember(color) {
+        SpanStyle(
+            color = color,
+            fontWeight = FontWeight.Normal,
+            textDecoration = TextDecoration.None,
+        )
+    }
+    val pressedSpan = remember(color) {
+        SpanStyle(
+            color = color.copy(alpha = (color.alpha * 0.45f).coerceIn(0.15f, 1f)),
+            fontWeight = FontWeight.Normal,
+            textDecoration = TextDecoration.None,
+        )
+    }
+    val linkStyles = remember(baseSpan, pressedSpan) {
+        TextLinkStyles(
+            style = baseSpan,
+            focusedStyle = baseSpan,
+            hoveredStyle = baseSpan,
+            pressedStyle = pressedSpan,
+        )
+    }
+    val annotated = remember(cleanArtist, cleanAlbum, linkStyles, onOpenArtist, onOpenAlbum) {
         buildAnnotatedString {
             if (cleanArtist.isNotEmpty()) {
                 withLink(
                     LinkAnnotation.Clickable(
                         tag = "artist",
+                        styles = linkStyles,
                         linkInteractionListener = { onOpenArtist() },
                     ),
                 ) {
@@ -744,6 +770,7 @@ internal fun FolioExpandedSubtitle(
                 withLink(
                     LinkAnnotation.Clickable(
                         tag = "album",
+                        styles = linkStyles,
                         linkInteractionListener = { onOpenAlbum() },
                     ),
                 ) {
@@ -756,6 +783,7 @@ internal fun FolioExpandedSubtitle(
         text = annotated,
         color = color,
         fontFamily = fontFamily,
+        fontWeight = FontWeight.Normal,
         fontSize = fontSize,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,

@@ -7,6 +7,7 @@ import dev.amatv.core.LyricsState
 import dev.amatv.core.PlaybackState
 import dev.amatv.integration.PlaybackRepeatMode
 import dev.amatv.model.CatalogKind
+import dev.amatv.model.LyricAgentType
 import dev.amatv.model.LyricLine
 import dev.amatv.model.LyricWord
 import dev.amatv.model.Track
@@ -351,17 +352,43 @@ class FolioPlayerStateTest {
             agentId = "v1000",
             isOppositeAgent = true,
             isMultiAgentSong = true,
+            agentType = LyricAgentType.Group,
+        )
+        val namedGroupIdButPerson = LyricLine(
+            words = listOf(LyricWord("副歌独唱", 18_000L, 19_000L)),
+            agentId = "group_lead",
+            isOppositeAgent = true,
+            isMultiAgentSong = true,
+            agentType = LyricAgentType.Person,
+        )
+        val v1000Character = LyricLine(
+            words = listOf(LyricWord("角色声线", 19_000L, 19_500L)),
+            agentId = "v1000",
+            isOppositeAgent = true,
+            isMultiAgentSong = true,
+            agentType = LyricAgentType.Character,
+        )
+        val anyIdGroup = LyricLine(
+            words = listOf(LyricWord("大合唱", 19_500L, 20_000L)),
+            agentId = "v3",
+            isOppositeAgent = true,
+            isMultiAgentSong = true,
+            agentType = LyricAgentType.Group,
         )
         val unattributed = LyricLine(
             words = listOf(LyricWord("最后一句", 20_000L, 24_000L)),
             agentId = null,
-            isOppositeAgent = false,
+            isOppositeAgent = true,
             isMultiAgentSong = true,
+            agentType = LyricAgentType.Person,
         )
 
         assertFalse(isOppositeSingerLine(jay))
         assertTrue(isOppositeSingerLine(amei))
         assertFalse(isOppositeSingerLine(chorus))
+        assertTrue(isOppositeSingerLine(namedGroupIdButPerson))
+        assertTrue(isOppositeSingerLine(v1000Character))
+        assertFalse(isOppositeSingerLine(anyIdGroup))
         assertFalse(isOppositeSingerLine(unattributed))
 
         val lines = listOf(jay, amei, jayOverlap, ameiOverlap, chorus, unattributed)
