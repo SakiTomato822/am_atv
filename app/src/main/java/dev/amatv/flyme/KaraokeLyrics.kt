@@ -27,7 +27,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
@@ -51,7 +50,6 @@ import dev.amatv.model.LyricLine
 import dev.amatv.model.LyricTimeline
 import dev.amatv.model.LyricTiming
 import dev.amatv.model.LyricWord
-import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.collectLatest
 
@@ -230,19 +228,18 @@ internal fun KaraokeLyricLine(
         label = "lyric-line-scale",
     )
 
-    val timedPresence = animateVocalPresence(isMainActive, isLineSyncMode, "lyric-line-presence")
+    val activePresence = rememberVocalPresence(isMainActive, isLineSyncMode, "lyric-line-presence")
     val timedBackgroundPresence = animateVocalPresence(
         isBackgroundActive, isLineSyncMode, "lyric-background-presence",
     )
     // Keep frame-varying alpha in draw/layer scopes. Passing a Float here would
     // recompose and remeasure the entire word flexbox on every fade frame.
-    val activePresence = rememberContinuousVocalPresence(timedPresence)
     val backgroundPresence = rememberContinuousVocalPresence(timedBackgroundPresence)
 
     val unlitAlpha = flymeLyricAlpha(MotionTokens.KaraokeSecondaryAlpha)
     val fullLineStartPadding = if (alignEnd) 0.dp else 6.dp
     val fullLineEndPadding = if (alignEnd) 6.dp else 0.dp
-    val mainFontSize = if (compactMainLocalization) 31.sp else 34.sp
+    val mainFontSize = if (compactMainLocalization) 31.sp else MotionTokens.KaraokeMainFontSizeSp.sp
     val mainLineHeight = if (compactMainLocalization) 37.sp else 41.sp
     val mainPronunciationFontSize = if (compactMainLocalization) 15.sp else 17.sp
     val mainPronunciationLineHeight = if (compactMainLocalization) 19.sp else 22.sp
@@ -453,6 +450,14 @@ private fun rememberContinuousVocalPresence(target: State<Float>): State<Float> 
 }
 
 @Composable
+internal fun rememberLineSyncedVocalPresence(isActive: Boolean, label: String): State<Float> =
+    rememberVocalPresence(isActive, isLineSyncMode = true, label)
+
+@Composable
+private fun rememberVocalPresence(isActive: Boolean, isLineSyncMode: Boolean, label: String): State<Float> =
+    rememberContinuousVocalPresence(animateVocalPresence(isActive, isLineSyncMode, label))
+
+@Composable
 private fun animateVocalPresence(isActive: Boolean, isLineSyncMode: Boolean, label: String): State<Float> =
     animateFloatAsState(
         targetValue = if (isActive) 1f else 0f,
@@ -502,7 +507,7 @@ private fun LineSyncedContent(
         alpha = unlitAlpha + (MotionTokens.KaraokeBgVocalLitAlpha - unlitAlpha) * backgroundPresence.value
     }
     val textAlign = if (alignEnd) TextAlign.End else TextAlign.Start
-    val mainFontSize = if (compactMainLocalization) 31.sp else 34.sp
+    val mainFontSize = if (compactMainLocalization) 31.sp else MotionTokens.KaraokeMainFontSizeSp.sp
     val mainLineHeight = if (compactMainLocalization) 37.sp else 41.sp
     val pronunciationFontSize = if (compactMainLocalization) 15.sp else 17.sp
     val pronunciationLineHeight = if (compactMainLocalization) 19.sp else 22.sp
@@ -589,13 +594,12 @@ private fun LineSyncedContent(
 }
 
 private class MaskRowData(
-    val indices: IntArray,
+    val sweep: KaraokeRowSweep,
     val top: Float,
     val bottom: Float,
 )
 
-private class MaskRowCache(wordCount: Int) {
-    val wordBounds: Array<Rect?> = arrayOfNulls(wordCount)
+private class MaskRowCache {
     var rows: List<MaskRowData> = emptyList()
     val alphaMask = TextureAlphaMask()
 }
@@ -666,7 +670,7 @@ internal fun lyricFlexRows(
  * lit alpha `0.94f`) or background vocals (`24sp` Bold, lit alpha `0.35f`).
  * - Groups non-breaking sub-word syllables (`emphasisGroupId != null`) into atomic clusters
  *   (`lyrics_karaoke_non_breaking_span.xml`) so line wrapping never splits a word across rows.
- * - Computes local word `Rect` bounds and flex rows directly during `Layout` measure without
+ * - Computes local word bounds and flex rows directly during `Layout` measure without
  *   `onGloballyPositioned` or `positionInRoot()`.
  * - Allocates `CompositingStrategy.Offscreen` and reads `positionState.value` ONLY when the line
  *   is actively highlighted (`isActive || activePresence > 0.001f`). Inactive lines render with a
@@ -699,7 +703,7 @@ private fun KaraokeVocalFlexbox(
     val isRtl = remember(words) {
         LyricTimeline.isRightToLeft(words.joinToString("") { it.text })
     }
-    val rowCache = remember(words) { MaskRowCache(words.size) }
+    val rowCache = remember(words) { MaskRowCache() }
     val density = LocalDensity.current
     val rowSpacingPx = with(density) { 4.dp.roundToPx() }
 
@@ -712,7 +716,6 @@ private fun KaraokeVocalFlexbox(
             .drawWithContent {
                 drawContent()
                 drawKaraokeFlexboxMask(
-                    words = words,
                     isRtl = isRtl,
                     positionMs = positionState.value,
                     activePresence = activePresence.value,
@@ -795,23 +798,21 @@ private fun KaraokeVocalFlexbox(
             val topF = rowTop.toFloat()
             val bottomF = (rowTop + rowHeight).toFloat()
 
-            for (indexInRow in rowIndices.indices) {
-                val wordIndex = rowIndices[indexInRow]
+            val sweepWords = rowIndices.mapIndexed { indexInRow, wordIndex ->
                 val placeable = placeables[wordIndex]
                 val y = rowTop + rowBaseline - baselines[indexInRow]
                 wordX[wordIndex] = x
                 wordY[wordIndex] = y
-                rowCache.wordBounds[wordIndex] = Rect(
-                    left = x.toFloat(),
-                    top = topF,
-                    right = (x + placeable.width).toFloat(),
-                    bottom = bottomF,
-                )
+                val left = x.toFloat()
                 x += placeable.width
+                KaraokeSweepWord(words[wordIndex], left, x.toFloat())
             }
             builtRows.add(
                 MaskRowData(
-                    indices = rowIndices,
+                    sweep = KaraokeRowSweep(
+                        sweepWords, constraints.maxWidth.toFloat(),
+                        MotionTokens.KaraokeGradientFeatherDp.dp.toPx(), isRtl,
+                    ),
                     top = topF,
                     bottom = bottomF,
                 ),
@@ -1089,7 +1090,6 @@ private fun KaraokeWordItem(
  *   and the `500ms` tail sweep (`KARAOKE_SPLIT_ON_CHARS_LANGUAGES_RUSH_GRADIENT_TAG`).
  */
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawKaraokeFlexboxMask(
-    words: List<LyricWord>,
     isRtl: Boolean,
     positionMs: Long,
     activePresence: Float,
@@ -1098,7 +1098,6 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawKaraokeFlexboxM
     rowCache: MaskRowCache,
 ) {
     if (size.width <= 0f || size.height <= 0f) return
-    val wordBounds = rowCache.wordBounds
 
     val effectiveLitAlpha = unlitAlpha + (litAlpha - unlitAlpha) * activePresence
     val litColor = Color.White.copy(alpha = effectiveLitAlpha)
@@ -1114,18 +1113,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawKaraokeFlexboxM
         return
     }
 
-    val featherPx = MotionTokens.KaraokeGradientFeatherDp.dp.toPx()
-    val featherFraction = (featherPx / size.width).coerceIn(0.001f, 1f)
-    val effectivePosMs = positionMs - LyricTimeline.KARAOKE_WORD_OFFSET_MS
-
     rowCache.rows.forEachIndexed { rowIndex, row ->
-        val first = row.indices.first()
-        val last = row.indices.last()
-        val firstWord = words[first]
-        val lastWord = words[last]
-        val isLastWordCjk = LyricTimeline.containsSplitOnCharsScript(lastWord.text)
-        val tailRushMs = if (isLastWordCjk) 0L else MotionTokens.KaraokeRushGradientMillis.toLong()
-
         val rowTop = if (rowIndex == 0) 0f else {
             (rowCache.rows[rowIndex - 1].bottom + row.top) / 2f
         }
@@ -1133,78 +1121,8 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawKaraokeFlexboxM
             (row.bottom + rowCache.rows[rowIndex + 1].top) / 2f
         }
 
-        val firstBounds = wordBounds[first]
-        val lastBounds = wordBounds[last]
-        val rowTextWidth = if (firstBounds != null && lastBounds != null) {
-            abs(maxOf(firstBounds.right, lastBounds.right) - minOf(firstBounds.left, lastBounds.left))
-                .coerceAtLeast(1f)
-        } else {
-            size.width
-        }
-
-        // Compute monotonic cumulative progress across words on this flex row (`aVar.f35409i` in A.i0)
-        var rowProgress = if (isRtl) 1f else 0f
-        for (localIdx in row.indices.indices) {
-            val wordIdx = row.indices[localIdx]
-            val word = words[wordIdx]
-            val bounds = wordBounds[wordIdx] ?: continue
-            val isLastOnRow = wordIdx == last
-            val isCjk = LyricTimeline.containsSplitOnCharsScript(word.text)
-
-            // Exact h0(...) feather adjustment from A.java lines 1126-1171
-            val h0Bonus = when {
-                isLastOnRow -> featherFraction * 1.0f
-                isCjk -> 0f
-                else -> {
-                    val ratio = bounds.width / rowTextWidth
-                    when {
-                        ratio <= 0.2f -> featherFraction * 0.5f
-                        ratio <= 0.4f -> featherFraction * 0.25f
-                        else -> featherFraction * 0.12f
-                    }
-                }
-            }
-
-            val wordStartFraction = ((if (isRtl) bounds.right else bounds.left) / size.width)
-                .coerceIn(0f, 1f)
-            val wordSpanFraction = (bounds.width / size.width).coerceAtLeast(0f)
-            val startAnchor = if (!isRtl) {
-                maxOf(rowProgress, wordStartFraction)
-            } else {
-                minOf(rowProgress, wordStartFraction)
-            }
-            val adjustedSpan = (wordSpanFraction - if (!isRtl) {
-                startAnchor - wordStartFraction
-            } else {
-                wordStartFraction - startAnchor
-            } + h0Bonus).coerceAtLeast(0f)
-
-            if (effectivePosMs < word.startMs) {
-                break
-            }
-            val wordFrac = ((effectivePosMs - word.startMs).toFloat() /
-                word.durationMs.coerceAtLeast(1L)).coerceIn(0f, 1f)
-            rowProgress = if (!isRtl) {
-                startAnchor + adjustedSpan * wordFrac
-            } else {
-                startAnchor - adjustedSpan * wordFrac
-            }
-
-            if (isLastOnRow && effectivePosMs > word.endMs && tailRushMs > 0L) {
-                val rushFrac = ((effectivePosMs - word.endMs).toFloat() / tailRushMs).coerceIn(0f, 1f)
-                val rushTarget = if (!isRtl) 1f + featherFraction else -featherFraction
-                rowProgress += (rushTarget - rowProgress) * rushFrac
-            }
-            if (effectivePosMs <= word.endMs) {
-                break
-            }
-        }
-
-        val isFullyUnlit = effectivePosMs < firstWord.startMs
-        val isFullyLit = effectivePosMs >= lastWord.endMs + tailRushMs
-
-        when {
-            isFullyUnlit -> {
+        when (val highlight = row.sweep.highlightAt(positionMs)) {
+            KaraokeRowHighlight.Unlit -> {
                 drawRect(
                     color = unlitColor,
                     topLeft = Offset(0f, rowTop),
@@ -1212,7 +1130,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawKaraokeFlexboxM
                     blendMode = BlendMode.DstIn,
                 )
             }
-            isFullyLit -> {
+            KaraokeRowHighlight.Lit -> {
                 drawRect(
                     color = litColor,
                     topLeft = Offset(0f, rowTop),
@@ -1220,12 +1138,11 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawKaraokeFlexboxM
                     blendMode = BlendMode.DstIn,
                 )
             }
-            else -> {
-                val ramp = karaokeMaskRamp(rowProgress, featherFraction, isRtl)
+            is KaraokeRowHighlight.Partial -> {
                 rowCache.alphaMask.draw(
                     canvas = drawContext.canvas.nativeCanvas,
                     left = 0f, top = rowTop, right = size.width, bottom = rowBottom,
-                    start = ramp.start * size.width, end = ramp.end * size.width,
+                    start = highlight.ramp.start, end = highlight.ramp.end,
                     startAlpha = if (isRtl) unlitAlpha else effectiveLitAlpha,
                     endAlpha = if (isRtl) effectiveLitAlpha else unlitAlpha,
                 )

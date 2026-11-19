@@ -33,6 +33,7 @@ internal object MotionTokens {
     const val KaraokeDuetLineWidthPercent = 0.85f // lyrics_karaoke_duet_line_width_percent
     const val KaraokeWordLiftDp = -2f // lyrics_karaoke_syllable_lift
     const val KaraokeGradientFeatherDp = 30f // lyrics_karaoke_gradient_feather_width
+    const val KaraokeMainFontSizeSp = 34f
     const val KaraokeEmphasisShadowDp = 5f // lyrics_karaoke_emphasis_shadow_radius
     const val KaraokeEmphasisShadowAlpha = 0.5f // round(127.5f * fraction) / 255f
     const val KaraokeSpringDampingRatio = 0.93f
