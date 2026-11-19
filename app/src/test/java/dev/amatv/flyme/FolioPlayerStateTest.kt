@@ -285,70 +285,7 @@ class FolioPlayerStateTest {
     }
 
     @Test
-    fun backingOnlyLinesNeverBecomePosterLeadOrUpcomingPreview() {
-        val lead1 = LyricLine(words = listOf(LyricWord("慢一点 再慢一点", 5_000L, 10_000L)))
-        val backingOnly = LyricLine(
-            words = emptyList(),
-            backgroundWords = listOf(LyricWord("慢一点", 7_000L, 12_000L)),
-        )
-        val lead2 = LyricLine(words = listOf(LyricWord("让风从窗缝里进来", 12_000L, 17_000L)))
-        val lead3 = LyricLine(words = listOf(LyricWord("到家之前都算在路上", 17_000L, 22_000L)))
-        val lines = listOf(lead1, backingOnly, lead2, lead3)
-
-        assertTrue(isPosterBackingOnlyLine(backingOnly))
-        assertFalse(isPosterBackingOnlyLine(lead1))
-
-        // During the backing-only timestamp (10_500ms, after lead1 ended, backingOnly singing),
-        // Poster keeps lead1 as focusLeadIndex, illuminates "(慢一点)" in activeBackingText,
-        // and previews only lead2 & lead3 (skipping backingOnly).
-        val proj = projectPosterLyrics(
-            lines = lines,
-            positionMs = 10_500L,
-            activeLineIndices = setOf(1),
-        )
-        assertEquals(0, proj.focusLeadIndex)
-        assertTrue(proj.hasStartedLead)
-        assertEquals("(慢一点)", proj.activeBackingText)
-        assertEquals(listOf("让风从窗缝里进来", "到家之前都算在路上"), proj.upcomingLeadTexts)
-
-        // Before backingOnly starts (5_500ms), activeBackingText is empty and preview omits backingOnly.
-        val earlyProj = projectPosterLyrics(
-            lines = lines,
-            positionMs = 5_500L,
-            activeLineIndices = setOf(0),
-        )
-        assertEquals(0, earlyProj.focusLeadIndex)
-        assertEquals("", earlyProj.activeBackingText)
-        assertEquals(listOf("让风从窗缝里进来", "到家之前都算在路上"), earlyProj.upcomingLeadTexts)
-    }
-
-    @Test
-    fun duetPosterColorsBySingerHandlesChorusAsPrimaryAndMovesLaterOverlapToSmallLines() {
-        val jay = LyricLine(
-            words = listOf(LyricWord("假装我们还在一块", 1_000L, 4_000L)),
-            agentId = "v1",
-            isOppositeAgent = false,
-            isMultiAgentSong = true,
-        )
-        val amei = LyricLine(
-            words = listOf(LyricWord("我真的演不出来", 4_000L, 8_000L)),
-            agentId = "v2",
-            isOppositeAgent = true,
-            isMultiAgentSong = true,
-        )
-        // Simultaneous overlap: jay2 starts first at 9_000ms, amei2 overlaps starting at 10_000ms.
-        val jayOverlap = LyricLine(
-            words = listOf(LyricWord("还是没能走到未来", 9_000L, 14_000L)),
-            agentId = "v1",
-            isOppositeAgent = false,
-            isMultiAgentSong = true,
-        )
-        val ameiOverlap = LyricLine(
-            words = listOf(LyricWord("难道非要这样分开", 10_000L, 15_000L)),
-            agentId = "v2",
-            isOppositeAgent = true,
-            isMultiAgentSong = true,
-        )
+    fun duetPosterColorsBySingerAndKeepsGroupInkPrimary() {
         val chorus = LyricLine(
             words = listOf(LyricWord("不该就这样离开", 16_000L, 20_000L)),
             agentId = "v1000",
@@ -385,34 +322,11 @@ class FolioPlayerStateTest {
             agentType = LyricAgentType.Person,
         )
 
-        assertFalse(isOppositeSingerLine(jay))
-        assertTrue(isOppositeSingerLine(amei))
         assertFalse(isOppositeSingerLine(chorus))
         assertTrue(isOppositeSingerLine(namedGroupIdButPerson))
         assertTrue(isOppositeSingerLine(v1000Character))
         assertFalse(isOppositeSingerLine(anyIdGroup))
         assertFalse(isOppositeSingerLine(unattributed))
-
-        val lines = listOf(jay, amei, jayOverlap, ameiOverlap, chorus, unattributed)
-
-        // When amei is singing solo (5_000ms), focus is opposite singer, previous is primary, previews reflect agent.
-        val ameiSolo = projectPosterLyrics(lines, positionMs = 5_000L, activeLineIndices = setOf(1))
-        assertEquals(1, ameiSolo.focusLeadIndex)
-        assertTrue(ameiSolo.isFocusOppositeSinger)
-        assertFalse(ameiSolo.previousLine!!.isOppositeSinger)
-        assertFalse(ameiSolo.upcomingLines[0].isOppositeSinger) // jayOverlap
-
-        // When jayOverlap (9_000) & ameiOverlap (10_000) both sing at 11_000ms:
-        // earlier line (jayOverlap) stays big, ameiOverlap joins smallLines colored as opposite singer,
-        // and preview skips ameiOverlap to chorus (which is treated as primary singer).
-        val overlap = projectPosterLyrics(lines, positionMs = 11_000L, activeLineIndices = setOf(2, 3))
-        assertEquals(2, overlap.focusLeadIndex)
-        assertFalse(overlap.isFocusOppositeSinger)
-        assertEquals(1, overlap.smallLines.size)
-        assertEquals("难道非要这样分开", overlap.smallLines[0].text)
-        assertTrue(overlap.smallLines[0].isOppositeSinger)
-        assertEquals(listOf("不该就这样离开", "最后一句"), overlap.upcomingLines.map { it.text })
-        assertFalse(overlap.upcomingLines[0].isOppositeSinger) // chorus -> primary
 
         // Duet accent colors remain distinct from primary ink & high-contrast on both themes.
         val warmPalette = listOf(Color(0xFF1A2238), Color(0xFFE07A5F), Color(0xFF3D5A80))
@@ -545,7 +459,7 @@ class FolioPlayerStateTest {
     }
 
     @Test
-    fun motionTokensAndPosterCharacterLightingFollowH5TimingAndReducedMotion() {
+    fun motionTokensFollowH5TimingAndReducedMotion() {
         assertEquals(280, FolioPlayerMotionTokens.CTL_OPACITY_MS)
         assertEquals(350, FolioPlayerMotionTokens.CTL_TRANSLATE_MS)
         assertEquals(14f, FolioPlayerMotionTokens.CTL_OFFSET_DP, 0.01f)
@@ -557,14 +471,6 @@ class FolioPlayerStateTest {
         assertTrue(isReducedMotionEnabled(1f, animatorsEnabled = false))
         assertFalse(isReducedMotionEnabled(1f, animatorsEnabled = true))
 
-        // Character starts illuminating right at its timestamp (no delay) and reaches 1f after 200ms.
-        assertEquals(0.40f, posterCharAlpha(999L, charStartMs = 1000L), 0.01f)
-        assertEquals(0.40f, posterCharAlpha(1000L, charStartMs = 1000L), 0.01f)
-        assertEquals(0.70f, posterCharAlpha(1100L, charStartMs = 1000L), 0.01f)
-        assertEquals(1.00f, posterCharAlpha(1200L, charStartMs = 1000L), 0.01f)
-
-        // Reduced motion lights immediately at timestamp.
-        assertEquals(1.00f, posterCharAlpha(1000L, charStartMs = 1000L, reducedMotion = true), 0.01f)
     }
 
     @Test
@@ -840,7 +746,7 @@ class FolioPlayerStateTest {
     }
 
     @Test
-    fun posterRoleLayoutWidthAndTransitionWrapAvoidPrematureBreaks() {
+    fun posterRoleLayoutWidthFitsEachRoleAtItsTargetScale() {
         val typo = posterTypographyFor(
             lines = listOf(LyricLine(words = listOf(LyricWord("这是一句中等长度的主唱歌词", 0L, 1000L)))),
             availableWidthDp = 500f,
@@ -855,20 +761,6 @@ class FolioPlayerStateTest {
         assertTrue("prevWidth=$prevWidth should exceed panelWidth=$panelWidthPx", prevWidth > panelWidthPx)
         assertTrue("nextWidth=$nextWidth should exceed panelWidth=$panelWidthPx", nextWidth > panelWidthPx)
         assertEquals(panelWidthPx.toFloat(), nextWidth * posterRoleScale(PosterLyricRole.Upcoming0, typo), 2f)
-
-        // While transitioning Upcoming -> Focus (or Focus -> Previous), hold the narrower Focus width until settled.
-        assertEquals(
-            focusWidth,
-            resolvePosterTransitionLayoutWidthPx(currentWidthPx = nextWidth, targetWidthPx = focusWidth, isTransitioning = true),
-        )
-        assertEquals(
-            focusWidth,
-            resolvePosterTransitionLayoutWidthPx(currentWidthPx = focusWidth, targetWidthPx = prevWidth, isTransitioning = true),
-        )
-        assertEquals(
-            prevWidth,
-            resolvePosterTransitionLayoutWidthPx(currentWidthPx = focusWidth, targetWidthPx = prevWidth, isTransitioning = false),
-        )
     }
 
     @Test

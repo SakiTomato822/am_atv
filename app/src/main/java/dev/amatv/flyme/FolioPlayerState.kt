@@ -742,7 +742,7 @@ fun buildFolioQueueSnapshot(
 }
 
 fun posterLeadText(line: LyricLine): String =
-    renderLyricWords(line.words, line.joinWithSpaces).trim()
+    renderLyricWords(line.words.filterNot { it.isBackgroundVocal }, line.joinWithSpaces).trim()
 
 fun posterPronunciationText(line: LyricLine): String {
     val linePron = line.pronunciationText?.trim().orEmpty()
@@ -750,17 +750,6 @@ fun posterPronunciationText(line: LyricLine): String {
     return line.words.mapNotNull { it.pronunciationText?.trim()?.takeIf(String::isNotEmpty) }
         .joinToString(" ")
 }
-
-fun posterBackingText(line: LyricLine): String {
-    val raw = renderLyricWords(line.backgroundWords, line.joinWithSpaces).trim()
-    if (raw.isEmpty()) return ""
-    return if (raw.startsWith("(") || raw.startsWith("（")) raw else "($raw)"
-}
-
-/** True when a line carries only backing vocals (`backgroundWords`) with no lead vocal text. */
-fun isPosterBackingOnlyLine(line: LyricLine): Boolean =
-    posterLeadText(line).isEmpty() &&
-        renderLyricWords(line.backgroundWords, line.joinWithSpaces).isNotBlank()
 
 /**
  * Identifies whether a lyric line belongs to an opposite duet vocalist.
@@ -773,139 +762,6 @@ fun isOppositeSingerLine(line: LyricLine): Boolean {
     return line.isOppositeAgent
 }
 
-@Immutable
-data class PosterTextLine(
-    val text: String,
-    val isOppositeSinger: Boolean,
-)
-
-@Immutable
-data class PosterLyricsProjection(
-    val focusLeadIndex: Int,
-    val isFocusOppositeSinger: Boolean,
-    val hasStartedLead: Boolean,
-    val previousLine: PosterTextLine?,
-    val smallLines: List<PosterTextLine>,
-    val upcomingLines: List<PosterTextLine>,
-) {
-    val previousLeadText: String get() = previousLine?.text.orEmpty()
-    val activeBackingText: String get() = smallLines.firstOrNull()?.text.orEmpty()
-    val upcomingLeadTexts: List<String> get() = upcomingLines.map { it.text }
-}
-
-/**
- * Projects lyrics for Poster mode following H5 + duet rules:
- * - Only non-backing lead vocal lines appear as `.pn` large lines, `.pv` previous line, and `.px` preview.
- * - Backing-only lines never become `.pn` or `.px`; when active they sit beneath `.pn` in [smallLines].
- * - When two lead lines overlap in [activeLineIndices] (duet simultaneous singing), the earlier-starting
- *   line holds `.pn` while the later-starting overlapping line joins [smallLines] and is skipped from `.px`.
- */
-fun projectPosterLyrics(
-    lines: List<LyricLine>,
-    positionMs: Long,
-    activeLineIndices: Collection<Int>,
-    isInstrumentalGap: Boolean = false,
-    instrumentalBeforeLineIndex: Int = 0,
-): PosterLyricsProjection {
-    if (lines.isEmpty()) {
-        return PosterLyricsProjection(
-            focusLeadIndex = 0,
-            isFocusOppositeSinger = false,
-            hasStartedLead = false,
-            previousLine = null,
-            smallLines = emptyList(),
-            upcomingLines = emptyList(),
-        )
-    }
-
-    val leadIndices = lines.indices.filter { idx ->
-        !isPosterBackingOnlyLine(lines[idx]) && posterLeadText(lines[idx]).isNotEmpty()
-    }
-    if (leadIndices.isEmpty()) {
-        return PosterLyricsProjection(
-            focusLeadIndex = 0,
-            isFocusOppositeSinger = false,
-            hasStartedLead = false,
-            previousLine = null,
-            smallLines = emptyList(),
-            upcomingLines = emptyList(),
-        )
-    }
-
-    val activeLeads = leadIndices
-        .filter { it in activeLineIndices }
-        .sortedWith(compareBy<Int>({ lines[it].startMs }, { it }))
-    val lastStartedLead = leadIndices.lastOrNull { lines[it].startMs <= positionMs }
-    val focusLeadIndex = activeLeads.firstOrNull() ?: lastStartedLead ?: leadIndices.first()
-    val hasStartedLead = activeLeads.isNotEmpty() || lastStartedLead != null
-    val focusLeadPos = leadIndices.indexOf(focusLeadIndex)
-
-    val previousLine = if (!isInstrumentalGap && hasStartedLead && focusLeadPos > 0) {
-        val prevIdx = leadIndices[focusLeadPos - 1]
-        PosterTextLine(posterLeadText(lines[prevIdx]), isOppositeSingerLine(lines[prevIdx]))
-    } else {
-        null
-    }
-
-    val smallLines = buildList {
-        if (!isInstrumentalGap) {
-            if (activeLeads.size > 1) {
-                for (overlapIdx in activeLeads.drop(1)) {
-                    add(
-                        PosterTextLine(
-                            text = posterLeadText(lines[overlapIdx]),
-                            isOppositeSinger = isOppositeSingerLine(lines[overlapIdx]),
-                        ),
-                    )
-                }
-            }
-            val activeBackingIndices = activeLineIndices
-                .filter { idx -> idx in lines.indices && isPosterBackingOnlyLine(lines[idx]) }
-                .sorted()
-            if (activeBackingIndices.isNotEmpty()) {
-                for (bgIdx in activeBackingIndices) {
-                    add(
-                        PosterTextLine(
-                            text = posterBackingText(lines[bgIdx]),
-                            isOppositeSinger = isOppositeSingerLine(lines[bgIdx]),
-                        ),
-                    )
-                }
-            } else if (hasStartedLead) {
-                val lead = lines[focusLeadIndex]
-                if (lead.backgroundWords.isNotEmpty()) {
-                    val bgStart = lead.backgroundWords.minOf { it.startMs }
-                    val bgEnd = lead.backgroundWords.maxOf { it.endMs }
-                    if (positionMs in bgStart until bgEnd) {
-                        add(PosterTextLine(posterBackingText(lead), isOppositeSingerLine(lead)))
-                    }
-                }
-            }
-        }
-    }
-
-    val maxConsumedActiveLead = activeLeads.maxOrNull()
-    val upcomingIndices = when {
-        isInstrumentalGap -> leadIndices.filter { it >= instrumentalBeforeLineIndex }.take(3)
-        maxConsumedActiveLead != null && activeLeads.size > 1 ->
-            leadIndices.filter { it > maxConsumedActiveLead }.take(3)
-        hasStartedLead && focusLeadPos >= 0 -> leadIndices.drop(focusLeadPos + 1).take(3)
-        else -> leadIndices.drop(1).take(3)
-    }
-    val upcomingLines = upcomingIndices.map { idx ->
-        PosterTextLine(posterLeadText(lines[idx]), isOppositeSingerLine(lines[idx]))
-    }
-
-    return PosterLyricsProjection(
-        focusLeadIndex = focusLeadIndex,
-        isFocusOppositeSinger = isOppositeSingerLine(lines[focusLeadIndex]),
-        hasStartedLead = hasStartedLead,
-        previousLine = previousLine,
-        smallLines = smallLines,
-        upcomingLines = upcomingLines,
-    )
-}
-
 /** H5 + C1 player motion constants matching CSS durations and cubic-bezier curves. */
 object FolioPlayerMotionTokens {
     const val CTL_OPACITY_MS: Int = 280
@@ -916,31 +772,12 @@ object FolioPlayerMotionTokens {
     const val POSTER_LIQ_IN_MAIN_MS: Int = 800
     const val POSTER_LIQ_IN_SUB_MS: Int = 700
     const val POSTER_LIQ_OUT_MS: Int = 600
-    const val POSTER_CHAR_LIGHT_MS: Long = 200L
     val EnterEasing = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)
     val ExitEasing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
 }
 
 fun isReducedMotionEnabled(animatorDurationScale: Float, animatorsEnabled: Boolean): Boolean =
     animatorDurationScale <= 0f || !animatorsEnabled
-
-/**
- * Computes per-character/word opacity for Poster sweep (`.pn .c { opacity: .4; transition: opacity .2s }`),
- * starting illumination at [charStartMs] so timing never lags behind audio.
- */
-fun posterCharAlpha(
-    posMs: Long,
-    charStartMs: Long,
-    litAlpha: Float = 1f,
-    unlitAlpha: Float = 0.40f,
-    reducedMotion: Boolean = false,
-): Float {
-    if (posMs < charStartMs) return unlitAlpha
-    if (reducedMotion) return litAlpha
-    val progress = ((posMs - charStartMs).toFloat() / FolioPlayerMotionTokens.POSTER_CHAR_LIGHT_MS.toFloat())
-        .coerceIn(0f, 1f)
-    return unlitAlpha + (litAlpha - unlitAlpha) * progress
-}
 
 private fun srgbChannelToLinear(c: Float): Double {
     val d = c.toDouble().coerceIn(0.0, 1.0)
@@ -1146,16 +983,6 @@ fun computePosterRoleLayoutWidthPx(
     return (safePanelWidth / safeScale).roundToInt().coerceAtLeast(1)
 }
 
-/**
- * Keeps the narrower width between source and target roles during a roll transition so the line
- * neither overflows horizontally while zooming nor reflows mid-flight, re-wrapping only once settled.
- */
-fun resolvePosterTransitionLayoutWidthPx(
-    currentWidthPx: Int,
-    targetWidthPx: Int,
-    isTransitioning: Boolean,
-): Int = if (isTransitioning) minOf(currentWidthPx, targetWidthPx) else targetWidthPx
-
 fun posterRoleAlpha(
     role: PosterLyricRole,
     previousAlpha: Float,
@@ -1215,7 +1042,7 @@ fun computeSongPosterFontSize(
     var smallest = baseSp * 1.3f
     var measuredAny = false
     for (line in lines) {
-        if (isPosterBackingOnlyLine(line)) continue
+        if (line.agentType == LyricAgentType.Group) continue
         val text = posterLeadText(line)
         if (text.isEmpty()) continue
         measuredAny = true
