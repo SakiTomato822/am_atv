@@ -67,7 +67,10 @@ internal object WindowHosts {
 
     /** The UI preview build always offers it, so the hand-over can be checked on an emulator (it opens full screen there). */
     fun canOpenMini(context: Context): Boolean =
-        hasFlymeWindowMode() || hasFreeform(context) || BuildConfig.FLYME_UI_PREVIEW
+        dev.amatv.flyme.canSupportMiniWindow(
+            hasFlymeWindowMode = hasFlymeWindowMode(),
+            isUiPreview = BuildConfig.FLYME_UI_PREVIEW,
+        )
 
     /** Flyme's window-mode options class ships in its framework; its presence means the small window exists. */
     fun hasFlymeWindowMode(): Boolean = flymeWindowMode

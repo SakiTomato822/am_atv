@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -118,7 +119,7 @@ internal fun FolioScrollingLyricsPanel(
                 ripple = !lowPerformance,
                 controlsVisible = controlsVisible,
                 canSeek = canSeek,
-                fontScale = (fontSizeSp / 34f).coerceIn(0.62f, 1.35f),
+                fontScale = (fontSizeSp / 34f).coerceIn(0.62f, 1.80f),
                 anchorFraction = anchorFraction,
                 onReveal = onReveal,
                 onLineSeek = onLineSeek,
@@ -189,6 +190,11 @@ private data class PosterRollStage(
     override fun hashCode(): Int = key.hashCode()
 }
 
+private data class PosterLeadHeightCacheKey(
+    val lineIndex: Int,
+    val maxWidthPx: Int,
+)
+
 private data class CharTimingEntry(
     val char: Char,
     val startMs: Long,
@@ -200,6 +206,7 @@ internal fun FolioPosterLyricsPanel(
     positionState: State<Long>,
     offsetMs: Long,
     translationEnabled: Boolean,
+    pronunciationEnabled: Boolean,
     baseSp: Float,
     isLight: Boolean,
     fg: Color,
@@ -293,11 +300,12 @@ internal fun FolioPosterLyricsPanel(
                     lineHeight = typo.backingLineHeightSp.sp,
                 )
             }
-            val leadHeightCache = remember(lines, widthPx, leadTextStyle) { HashMap<Int, Float>() }
+            val leadHeightCache = remember(lines, leadTextStyle) { HashMap<PosterLeadHeightCacheKey, Float>() }
+            val pronHeightCache = remember(lines, widthPx, transTextStyle) { HashMap<Int, Float>() }
             val transHeightCache = remember(lines, widthPx, transTextStyle) { HashMap<Int, Float>() }
             val gapHeightPx = with(density) { 56.dp.toPx() }
             val transGapPx = with(density) { 4.dp.toPx() }
-            val smallLineGapPx = with(density) { 6.dp.toPx() }
+            val smallLineGapPx = with(density) { 4.dp.toPx() }
             val prevGapPx = with(density) { 20.dp.toPx() }
             val nextBlockGapPx = with(density) { 28.dp.toPx() }
             val upcomingGapPx = with(density) { 14.dp.toPx() }
@@ -306,30 +314,48 @@ internal fun FolioPosterLyricsPanel(
             val focusTopY = heightPx * 0.40f
             val prevScale = posterRoleScale(PosterLyricRole.Previous, typo)
             val nextScale = posterRoleScale(PosterLyricRole.Upcoming0, typo)
+            val focusWidthPx = computePosterRoleLayoutWidthPx(widthPx, 1f)
+            val prevWidthPx = computePosterRoleLayoutWidthPx(widthPx, prevScale)
+            val nextWidthPx = computePosterRoleLayoutWidthPx(widthPx, nextScale)
 
-            fun measureLeadHeightPx(lineIndex: Int): Float = leadHeightCache.getOrPut(lineIndex) {
-                textMeasurer.measure(
-                    text = posterLeadText(lines[lineIndex]),
-                    style = leadTextStyle,
-                    constraints = Constraints(maxWidth = widthPx),
-                ).size.height.toFloat()
-            }
+            fun measureLeadHeightPx(lineIndex: Int, layoutWidthPx: Int): Float =
+                leadHeightCache.getOrPut(PosterLeadHeightCacheKey(lineIndex, layoutWidthPx)) {
+                    textMeasurer.measure(
+                        text = posterLeadText(lines[lineIndex]),
+                        style = leadTextStyle,
+                        constraints = Constraints(maxWidth = layoutWidthPx),
+                    ).size.height.toFloat()
+                }
 
-            fun measureItemHeightPx(itemKey: PosterRollKey): Float = when (itemKey) {
+            fun measureItemHeightPx(itemKey: PosterRollKey, layoutWidthPx: Int): Float = when (itemKey) {
                 is PosterRollKey.Gap -> gapHeightPx
-                is PosterRollKey.Lead -> measureLeadHeightPx(itemKey.lineIndex)
+                is PosterRollKey.Lead -> measureLeadHeightPx(itemKey.lineIndex, layoutWidthPx)
             }
 
-            fun measureFocusTransHeightPx(itemKey: PosterRollKey): Float {
-                if (!translationEnabled || itemKey !is PosterRollKey.Lead) return 0f
-                val trans = lines[itemKey.lineIndex].translation?.trim().orEmpty()
-                if (trans.isEmpty()) return 0f
-                return transHeightCache.getOrPut(itemKey.lineIndex) {
-                    transGapPx + textMeasurer.measure(
+            fun measureFocusExtrasHeightPx(itemKey: PosterRollKey): Float {
+                if (itemKey !is PosterRollKey.Lead) return 0f
+                val line = lines[itemKey.lineIndex]
+                val pron = if (pronunciationEnabled) posterPronunciationText(line) else ""
+                val trans = if (translationEnabled) line.translation?.trim().orEmpty() else ""
+                val pronH = if (pron.isEmpty()) 0f else pronHeightCache.getOrPut(itemKey.lineIndex) {
+                    textMeasurer.measure(
+                        text = pron,
+                        style = transTextStyle,
+                        constraints = Constraints(maxWidth = widthPx),
+                    ).size.height.toFloat()
+                }
+                val transH = if (trans.isEmpty()) 0f else transHeightCache.getOrPut(itemKey.lineIndex) {
+                    textMeasurer.measure(
                         text = trans,
                         style = transTextStyle,
                         constraints = Constraints(maxWidth = widthPx),
                     ).size.height.toFloat()
+                }
+                return when {
+                    pronH > 0f && transH > 0f -> transGapPx + pronH + transGapPx + transH
+                    pronH > 0f -> transGapPx + pronH
+                    transH > 0f -> transGapPx + transH
+                    else -> 0f
                 }
             }
 
@@ -369,17 +395,17 @@ internal fun FolioPosterLyricsPanel(
                 )
             }
 
-            val currentStage = remember(stageKey, widthPx, heightPx, typo, translationEnabled) {
-                val focusMainH = measureItemHeightPx(stageKey.focusKey)
-                val focusTransH = measureFocusTransHeightPx(stageKey.focusKey)
-                val prevH = stageKey.prevKey?.let { measureItemHeightPx(it) * prevScale } ?: 0f
+            val currentStage = remember(stageKey, widthPx, heightPx, typo, translationEnabled, pronunciationEnabled) {
+                val focusMainH = measureItemHeightPx(stageKey.focusKey, focusWidthPx)
+                val focusExtrasH = measureFocusExtrasHeightPx(stageKey.focusKey)
+                val prevH = stageKey.prevKey?.let { measureItemHeightPx(it, prevWidthPx) * prevScale } ?: 0f
                 val prevY = focusTopY - prevGapPx - prevH
                 val exitAboveY = (if (stageKey.prevKey != null) prevY else focusTopY - prevGapPx) - exitSlidePx
-                val upcoming0Y = focusTopY + focusMainH + focusTransH + nextBlockGapPx
+                val upcoming0Y = focusTopY + focusMainH + focusExtrasH + nextBlockGapPx
                 var cursorY = upcoming0Y
                 val upcomingYs = stageKey.upcomingKeys.map { uKey ->
                     val y = cursorY
-                    cursorY += measureItemHeightPx(uKey) * nextScale + upcomingGapPx
+                    cursorY += measureItemHeightPx(uKey, nextWidthPx) * nextScale + upcomingGapPx
                     y
                 }
                 val enterBelowY = (cursorY - upcomingGapPx).coerceAtLeast(upcoming0Y) + enterSlidePx
@@ -529,41 +555,71 @@ internal fun FolioPosterLyricsPanel(
 
                                     is PosterRollKey.Lead -> {
                                         val line = lines[itemKey.lineIndex]
+                                        val currentRole = transition.currentState.key.roleFor(itemKey)
+                                        val isTransitioning = transition.currentState != transition.targetState
+                                        val currentWrapWidthPx = computePosterRoleLayoutWidthPx(
+                                            panelWidthPx = widthPx,
+                                            scale = posterRoleScale(currentRole, typo),
+                                        )
+                                        val targetWrapWidthPx = computePosterRoleLayoutWidthPx(
+                                            panelWidthPx = widthPx,
+                                            scale = posterRoleScale(targetRole, typo),
+                                        )
+                                        val activeWrapWidthPx = resolvePosterTransitionLayoutWidthPx(
+                                            currentWidthPx = currentWrapWidthPx,
+                                            targetWidthPx = targetWrapWidthPx,
+                                            isTransitioning = isTransitioning,
+                                        )
                                         val mainColor = if (isOpposite) duetAccentColor else fg
-                                        val mainScaledH = measureLeadHeightPx(itemKey.lineIndex) * animatedScale
+                                        val mainScaledH = measureLeadHeightPx(itemKey.lineIndex, activeWrapWidthPx) * animatedScale
+                                        val pronText = posterPronunciationText(line)
                                         val transText = line.translation?.trim().orEmpty()
+                                        val showPron = pronunciationEnabled && pronText.isNotEmpty() && focusWeight > 0.01f
                                         val showTrans = translationEnabled && transText.isNotEmpty() && focusWeight > 0.01f
                                         val showSmallLines = targetRole == PosterLyricRole.Focus &&
                                             projection.smallLines.isNotEmpty() &&
                                             focusWeight > 0.01f
 
                                         Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .graphicsLayer {
-                                                    alpha = animatedAlpha
-                                                    scaleX = animatedScale
-                                                    scaleY = animatedScale
-                                                    transformOrigin = TransformOrigin(0f, 0f)
+                                            modifier = Modifier.layout { measurable, itemConstraints ->
+                                                val roleConstraints = itemConstraints.copy(
+                                                    minWidth = 0,
+                                                    maxWidth = activeWrapWidthPx,
+                                                )
+                                                val placeable = measurable.measure(roleConstraints)
+                                                layout(itemConstraints.maxWidth, placeable.height) {
+                                                    placeable.place(0, 0)
                                                 }
-                                                .then(blurMod),
+                                            },
                                         ) {
-                                            PosterLeadLineText(
-                                                line = line,
-                                                positionState = lyricPosition,
-                                                hasStartedLead = if (itemKey == stageKey.focusKey) {
-                                                    projection.hasStartedLead
-                                                } else {
-                                                    true
-                                                },
-                                                focusWeight = focusWeight,
-                                                textStyle = leadTextStyle,
-                                                baseColor = mainColor,
-                                                reducedMotion = reducedMotion,
-                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .graphicsLayer {
+                                                        alpha = animatedAlpha
+                                                        scaleX = animatedScale
+                                                        scaleY = animatedScale
+                                                        transformOrigin = TransformOrigin(0f, 0f)
+                                                    }
+                                                    .then(blurMod),
+                                            ) {
+                                                PosterLeadLineText(
+                                                    line = line,
+                                                    positionState = lyricPosition,
+                                                    hasStartedLead = if (itemKey == stageKey.focusKey) {
+                                                        projection.hasStartedLead
+                                                    } else {
+                                                        true
+                                                    },
+                                                    focusWeight = focusWeight,
+                                                    textStyle = leadTextStyle,
+                                                    baseColor = mainColor,
+                                                    reducedMotion = reducedMotion,
+                                                )
+                                            }
                                         }
 
-                                        if (showTrans || showSmallLines) {
+                                        if (showPron || showTrans || showSmallLines) {
                                             Column(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
@@ -571,8 +627,19 @@ internal fun FolioPosterLyricsPanel(
                                                         translationY = mainScaledH + transGapPx
                                                         alpha = focusWeight
                                                     },
-                                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                                verticalArrangement = Arrangement.spacedBy(4.dp),
                                             ) {
+                                                if (showPron) {
+                                                    Text(
+                                                        text = pronText,
+                                                        color = if (isOpposite) {
+                                                            duetAccentColor.copy(alpha = 0.60f)
+                                                        } else {
+                                                            fg2
+                                                        },
+                                                        style = transTextStyle,
+                                                    )
+                                                }
                                                 if (showTrans) {
                                                     Text(
                                                         text = transText,

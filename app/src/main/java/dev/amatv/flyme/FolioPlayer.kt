@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -71,10 +72,13 @@ import coil3.request.ImageRequest
 import coil3.request.allowHardware
 import coil3.toBitmap
 import dev.amatv.AmAtvApplication
+import dev.amatv.BuildConfig
 import dev.amatv.R
 import dev.amatv.core.LibraryNotice
 import dev.amatv.core.LyricBackgroundStyle
 import dev.amatv.core.PlaybackState
+import dev.amatv.integration.LyricTextSize
+import dev.amatv.integration.LyricsLocalizationRequest
 import dev.amatv.integration.MusicConnectionState
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
@@ -153,6 +157,10 @@ internal fun BoxScope.FolioPlayerLayer(
         val scope = rememberCoroutineScope()
 
         var queueOpen by FolioPlayerSession.queueOpenState
+        var lyricsSettingsOpen by remember { mutableStateOf(false) }
+        LaunchedEffect(open) {
+            if (!open) lyricsSettingsOpen = false
+        }
         val posterOverride by FolioPlayerSession.posterOverrideState
         val posterPreferred = resolveEffectivePosterPreferred(
             settingsStyle = settings.lyricStyle,
@@ -162,24 +170,63 @@ internal fun BoxScope.FolioPlayerLayer(
         var revealPulse by remember { mutableLongStateOf(0L) }
         var navigationMessage by remember { mutableStateOf<String?>(null) }
 
+        val appLanguageTag = LocalConfiguration.current.locales[0].toLanguageTag()
+        val effectiveLyricsLanguageTag = settings.lyricTranslationLanguageTag.ifBlank { appLanguageTag }
+        val lyricsLocalization = remember(
+            effectiveLyricsLanguageTag,
+            settings.lyricPronunciationLanguageTag,
+            settings.lyricTranslationEnabled,
+            settings.lyricPronunciationEnabled,
+        ) {
+            LyricsLocalizationRequest(
+                languageTag = effectiveLyricsLanguageTag,
+                pronunciationLanguageTag = settings.lyricPronunciationLanguageTag,
+                includeTranslations = settings.lyricTranslationEnabled,
+                includePronunciations = settings.lyricPronunciationEnabled,
+            )
+        }
+        val expectedLyricsVariant = remember(lyricsLocalization) {
+            "${lyricsLocalization.languageTag}|trans=${lyricsLocalization.includeTranslations}" +
+                "|pron=${lyricsLocalization.includePronunciations}" +
+                "|pronLang=${lyricsLocalization.pronunciationLanguageTag}"
+        }
         val rawLines = remember(lyricsState, currentIdentity, track.lyrics) {
             when {
                 lyricsState.trackIdentity == currentIdentity && lyricsState.lines.isNotEmpty() -> lyricsState.lines
                 else -> track.lyrics
             }
         }
+        val enhancementsReady = !lyricsLocalization.enabled || (
+            lyricsState.trackIdentity == currentIdentity &&
+                lyricsState.resolvedVariant == expectedLyricsVariant &&
+                lyricsState.isReady
+            )
+        val enhancementsFailed = lyricsLocalization.enabled &&
+            lyricsState.trackIdentity == currentIdentity &&
+            lyricsState.isTransientFailure &&
+            rawLines.isNotEmpty()
         val displayedLines = remember(
             rawLines,
             settings.lyricTranslationEnabled,
             settings.lyricPronunciationEnabled,
+            enhancementsReady,
         ) {
             rawLines.map { line ->
                 line.forDisplay(
-                    showTranslation = settings.lyricTranslationEnabled,
-                    showPronunciation = settings.lyricPronunciationEnabled,
+                    showTranslation = settings.lyricTranslationEnabled && enhancementsReady,
+                    showPronunciation = settings.lyricPronunciationEnabled && enhancementsReady,
                 )
             }
         }
+        val lyricsDisplayActive = isLyricDisplayActive(
+            translationEnabled = settings.lyricTranslationEnabled,
+            pronunciationEnabled = settings.lyricPronunciationEnabled,
+        )
+        val defaultTextSize = if (BuildConfig.FLYME_AUTO) LyricTextSize.Large else LyricTextSize.Standard
+        val textScaleMultiplier = folioLyricsTextScaleMultiplier(
+            selected = settings.lyricTextSize,
+            defaultSize = defaultTextSize,
+        )
         val lyricsAvailability = resolveLyricsAvailability(
             hasCurrentTrack = playbackState.hasCurrentTrack,
             trackCatalogId = track.catalogId,
@@ -228,8 +275,9 @@ internal fun BoxScope.FolioPlayerLayer(
             playbackState.playWhenReady,
             revealPulse,
             queueOpen,
+            lyricsSettingsOpen,
         ) {
-            if (open && controlsExpanded && !alwaysOpen && playbackState.playWhenReady && !queueOpen) {
+            if (open && controlsExpanded && !alwaysOpen && playbackState.playWhenReady && !queueOpen && !lyricsSettingsOpen) {
                 delay(5_000L)
                 controlsManualOpen = false
             }
@@ -409,6 +457,9 @@ internal fun BoxScope.FolioPlayerLayer(
                     offsetMs = settings.lyricOffsetMs,
                     lowPerformance = settings.lowPerformanceMode,
                     translationEnabled = settings.lyricTranslationEnabled,
+                    pronunciationEnabled = settings.lyricPronunciationEnabled,
+                    lyricsDisplayActive = lyricsDisplayActive,
+                    textScaleMultiplier = textScaleMultiplier,
                     controlsExpanded = controlsExpanded,
                     reducedMotion = reducedMotion,
                     queueOpen = queueOpen,
@@ -451,9 +502,9 @@ internal fun BoxScope.FolioPlayerLayer(
                     onReveal = revealControls,
                     onLineSeek = seekToMs,
                     onSeekTo = seekToMs,
-                    onToggleTranslation = {
+                    onOpenLyricsSettings = {
                         revealControls()
-                        settingsStore.setLyricTranslationEnabled(!settings.lyricTranslationEnabled)
+                        lyricsSettingsOpen = true
                     },
                     onPrevious = {
                         revealControls()
@@ -566,18 +617,31 @@ internal fun BoxScope.FolioPlayerLayer(
                             canSeek = canSeek,
                             isLiveStream = isLiveStream,
                             playWhenReady = playbackState.playWhenReady,
-                            translationEnabled = settings.lyricTranslationEnabled,
+                            lyricsDisplayActive = lyricsDisplayActive,
                             queueOpen = queueOpen,
                             canSkipPrevious = canSkipPrevious,
                             canSkipNext = canSkipNext,
+                            isFavorite = libraryState.current.isFavorite == true,
+                            isInLibrary = libraryState.current.isInLibrary == true,
+                            favoriteInProgress = libraryState.current.isFavoriteInProgress,
+                            libraryInProgress = libraryState.current.isLibraryInProgress,
                             isLight = palette.isLight,
                             fg = fg,
                             fg2 = fg2,
+                            favoriteAccent = accent,
                             onExpandCapsule = revealControls,
                             onSeekTo = seekToMs,
-                            onToggleTranslation = {
+                            onOpenLyricsSettings = {
                                 revealControls()
-                                settingsStore.setLyricTranslationEnabled(!settings.lyricTranslationEnabled)
+                                lyricsSettingsOpen = true
+                            },
+                            onToggleLibrary = {
+                                revealControls()
+                                libraryActions.addToLibrary()
+                            },
+                            onToggleFavorite = {
+                                revealControls()
+                                libraryActions.toggleFavorite()
                             },
                             onPrevious = {
                                 revealControls()
@@ -632,6 +696,9 @@ internal fun BoxScope.FolioPlayerLayer(
                                     offsetMs = settings.lyricOffsetMs,
                                     lowPerformance = settings.lowPerformanceMode,
                                     translationEnabled = settings.lyricTranslationEnabled,
+                                    pronunciationEnabled = settings.lyricPronunciationEnabled,
+                                    lyricsDisplayActive = lyricsDisplayActive,
+                                    textScaleMultiplier = textScaleMultiplier,
                                     controlsExpanded = controlsExpanded,
                                     reducedMotion = reducedMotion,
                                     queueOpen = queueOpen,
@@ -639,6 +706,10 @@ internal fun BoxScope.FolioPlayerLayer(
                                     isPlaying = playbackState.isPlaying,
                                     canSkipPrevious = canSkipPrevious,
                                     canSkipNext = canSkipNext,
+                                    isFavorite = libraryState.current.isFavorite == true,
+                                    isInLibrary = libraryState.current.isInLibrary == true,
+                                    favoriteInProgress = libraryState.current.isFavoriteInProgress,
+                                    libraryInProgress = libraryState.current.isLibraryInProgress,
                                     isLight = palette.isLight,
                                     fg = fg,
                                     fg2 = fg2,
@@ -648,9 +719,17 @@ internal fun BoxScope.FolioPlayerLayer(
                                     onReveal = revealControls,
                                     onLineSeek = seekToMs,
                                     onSeekTo = seekToMs,
-                                    onToggleTranslation = {
+                                    onOpenLyricsSettings = {
                                         revealControls()
-                                        settingsStore.setLyricTranslationEnabled(!settings.lyricTranslationEnabled)
+                                        lyricsSettingsOpen = true
+                                    },
+                                    onToggleLibrary = {
+                                        revealControls()
+                                        libraryActions.addToLibrary()
+                                    },
+                                    onToggleFavorite = {
+                                        revealControls()
+                                        libraryActions.toggleFavorite()
                                     },
                                     onPrevious = { playbackStore.skip(-1) },
                                     onPlayPause = playbackStore::togglePlayback,
@@ -678,6 +757,8 @@ internal fun BoxScope.FolioPlayerLayer(
                                     offsetMs = settings.lyricOffsetMs,
                                     lowPerformance = settings.lowPerformanceMode,
                                     translationEnabled = settings.lyricTranslationEnabled,
+                                    pronunciationEnabled = settings.lyricPronunciationEnabled,
+                                    textScaleMultiplier = textScaleMultiplier,
                                     controlsExpanded = controlsExpanded,
                                     reducedMotion = reducedMotion,
                                     canSeek = canSeek,
@@ -713,6 +794,8 @@ internal fun BoxScope.FolioPlayerLayer(
                                     offsetMs = settings.lyricOffsetMs,
                                     lowPerformance = settings.lowPerformanceMode,
                                     translationEnabled = settings.lyricTranslationEnabled,
+                                    pronunciationEnabled = settings.lyricPronunciationEnabled,
+                                    textScaleMultiplier = textScaleMultiplier,
                                     controlsExpanded = controlsExpanded,
                                     alwaysOpen = alwaysOpen,
                                     playWhenReady = playbackState.playWhenReady,
@@ -755,6 +838,34 @@ internal fun BoxScope.FolioPlayerLayer(
                     }
                 }
             }
+
+            if (lyricsSettingsOpen) {
+                BackHandler(enabled = open) { lyricsSettingsOpen = false }
+                FolioLyricsDisplaySettingsOverlay(
+                    tier = tierSpec.tier,
+                    isLight = palette.isLight,
+                    fg = fg,
+                    fg2 = fg2,
+                    statusTop = statusTop,
+                    navBottom = navBottom,
+                    translationEnabled = settings.lyricTranslationEnabled,
+                    pronunciationEnabled = settings.lyricPronunciationEnabled,
+                    translationAvailable = lyricTranslationAvailable(rawLines, enhancementsReady),
+                    pronunciationAvailable = lyricPronunciationAvailable(rawLines, enhancementsReady),
+                    translationLanguageTag = settings.lyricTranslationLanguageTag,
+                    pronunciationLanguageTag = settings.lyricPronunciationLanguageTag,
+                    appLanguageTag = appLanguageTag,
+                    enhancementsReady = enhancementsReady,
+                    enhancementsFailed = enhancementsFailed,
+                    lyricTextSize = settings.lyricTextSize,
+                    onTranslationChange = settingsStore::setLyricTranslationEnabled,
+                    onPronunciationChange = settingsStore::setLyricPronunciationEnabled,
+                    onTranslationLanguageChange = settingsStore::setLyricTranslationLanguageTag,
+                    onPronunciationLanguageChange = settingsStore::setLyricPronunciationLanguageTag,
+                    onLyricTextSizeChange = settingsStore::setLyricTextSize,
+                    onDismiss = { lyricsSettingsOpen = false },
+                )
+            }
         }
         }
     }
@@ -775,6 +886,9 @@ private fun UltrawidePlayerBody(
     offsetMs: Long,
     lowPerformance: Boolean,
     translationEnabled: Boolean,
+    pronunciationEnabled: Boolean,
+    lyricsDisplayActive: Boolean,
+    textScaleMultiplier: Float,
     controlsExpanded: Boolean,
     reducedMotion: Boolean,
     queueOpen: Boolean,
@@ -782,6 +896,10 @@ private fun UltrawidePlayerBody(
     isPlaying: Boolean,
     canSkipPrevious: Boolean,
     canSkipNext: Boolean,
+    isFavorite: Boolean,
+    isInLibrary: Boolean,
+    favoriteInProgress: Boolean,
+    libraryInProgress: Boolean,
     isLight: Boolean,
     fg: Color,
     fg2: Color,
@@ -791,7 +909,9 @@ private fun UltrawidePlayerBody(
     onReveal: () -> Unit,
     onLineSeek: (Long) -> Unit,
     onSeekTo: (Long) -> Unit,
-    onToggleTranslation: () -> Unit,
+    onOpenLyricsSettings: () -> Unit,
+    onToggleLibrary: () -> Unit,
+    onToggleFavorite: () -> Unit,
     onPrevious: () -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
@@ -864,16 +984,23 @@ private fun UltrawidePlayerBody(
                 canSeek = canSeek,
                 isLiveStream = isLiveStream,
                 playWhenReady = playWhenReady,
-                translationEnabled = translationEnabled,
+                lyricsDisplayActive = lyricsDisplayActive,
                 queueOpen = queueOpen,
                 canSkipPrevious = canSkipPrevious,
                 canSkipNext = canSkipNext,
+                isFavorite = isFavorite,
+                isInLibrary = isInLibrary,
+                favoriteInProgress = favoriteInProgress,
+                libraryInProgress = libraryInProgress,
                 isLight = isLight,
                 fg = fg,
                 fg2 = fg2,
+                favoriteAccent = accent,
                 onExpandCapsule = onReveal,
                 onSeekTo = onSeekTo,
-                onToggleTranslation = onToggleTranslation,
+                onOpenLyricsSettings = onOpenLyricsSettings,
+                onToggleLibrary = onToggleLibrary,
+                onToggleFavorite = onToggleFavorite,
                 onPrevious = onPrevious,
                 onPlayPause = onPlayPause,
                 onCollapsedPlayPause = onPlayPause,
@@ -895,7 +1022,7 @@ private fun UltrawidePlayerBody(
                     lowPerformance = lowPerformance,
                     controlsVisible = controlsExpanded,
                     canSeek = canSeek,
-                    fontSizeSp = tierSpec.fs.value,
+                    fontSizeSp = tierSpec.fs.value * textScaleMultiplier,
                     anchorFraction = tierSpec.anchorFraction,
                     isLight = isLight,
                     onReveal = onReveal,
@@ -907,7 +1034,8 @@ private fun UltrawidePlayerBody(
                     positionState = positionState,
                     offsetMs = offsetMs,
                     translationEnabled = translationEnabled,
-                    baseSp = tierSpec.pfs.value,
+                    pronunciationEnabled = pronunciationEnabled,
+                    baseSp = tierSpec.pfs.value * textScaleMultiplier,
                     isLight = isLight,
                     fg = fg,
                     fg2 = fg2,
@@ -962,6 +1090,8 @@ private fun VerticalPlayerBody(
     offsetMs: Long,
     lowPerformance: Boolean,
     translationEnabled: Boolean,
+    pronunciationEnabled: Boolean,
+    textScaleMultiplier: Float,
     controlsExpanded: Boolean,
     reducedMotion: Boolean,
     canSeek: Boolean,
@@ -1064,7 +1194,7 @@ private fun VerticalPlayerBody(
                         lowPerformance = lowPerformance,
                         controlsVisible = controlsExpanded,
                         canSeek = canSeek,
-                        fontSizeSp = tierSpec.fs.value,
+                        fontSizeSp = tierSpec.fs.value * textScaleMultiplier,
                         anchorFraction = tierSpec.anchorFraction,
                         isLight = isLight,
                         onReveal = onReveal,
@@ -1076,7 +1206,8 @@ private fun VerticalPlayerBody(
                         positionState = positionState,
                         offsetMs = offsetMs,
                         translationEnabled = translationEnabled,
-                        baseSp = tierSpec.pfs.value,
+                        pronunciationEnabled = pronunciationEnabled,
+                        baseSp = tierSpec.pfs.value * textScaleMultiplier,
                         isLight = isLight,
                         fg = fg,
                         fg2 = fg2,
@@ -1126,6 +1257,9 @@ private fun ShortPlayerLayout(
     offsetMs: Long,
     lowPerformance: Boolean,
     translationEnabled: Boolean,
+    pronunciationEnabled: Boolean,
+    lyricsDisplayActive: Boolean,
+    textScaleMultiplier: Float,
     controlsExpanded: Boolean,
     reducedMotion: Boolean,
     queueOpen: Boolean,
@@ -1155,7 +1289,7 @@ private fun ShortPlayerLayout(
     onReveal: () -> Unit,
     onLineSeek: (Long) -> Unit,
     onSeekTo: (Long) -> Unit,
-    onToggleTranslation: () -> Unit,
+    onOpenLyricsSettings: () -> Unit,
     onPrevious: () -> Unit,
     onPlayPause: () -> Unit,
     onCollapsedPlayPause: () -> Unit,
@@ -1231,7 +1365,8 @@ private fun ShortPlayerLayout(
                     positionState = positionState,
                     offsetMs = offsetMs,
                     translationEnabled = translationEnabled,
-                    baseSp = tierSpec.pfs.value,
+                    pronunciationEnabled = pronunciationEnabled,
+                    baseSp = tierSpec.pfs.value * textScaleMultiplier,
                     isLight = isLight,
                     fg = fg,
                     fg2 = fg2,
@@ -1246,7 +1381,7 @@ private fun ShortPlayerLayout(
                     lowPerformance = lowPerformance,
                     controlsVisible = controlsExpanded,
                     canSeek = canSeek,
-                    fontSizeSp = tierSpec.fs.value,
+                    fontSizeSp = tierSpec.fs.value * textScaleMultiplier,
                     anchorFraction = tierSpec.anchorFraction,
                     isLight = isLight,
                     onReveal = onReveal,
@@ -1282,16 +1417,23 @@ private fun ShortPlayerLayout(
             canSeek = canSeek,
             isLiveStream = isLiveStream,
             playWhenReady = playWhenReady,
-            translationEnabled = translationEnabled,
+            lyricsDisplayActive = lyricsDisplayActive,
             queueOpen = queueOpen,
             canSkipPrevious = canSkipPrevious,
             canSkipNext = canSkipNext,
+            isFavorite = isFavorite,
+            isInLibrary = isInLibrary,
+            favoriteInProgress = favoriteInProgress,
+            libraryInProgress = libraryInProgress,
             isLight = isLight,
             fg = fg,
             fg2 = fg2,
+            favoriteAccent = accent,
             onExpandCapsule = onReveal,
             onSeekTo = onSeekTo,
-            onToggleTranslation = onToggleTranslation,
+            onOpenLyricsSettings = onOpenLyricsSettings,
+            onToggleLibrary = onToggleLibrary,
+            onToggleFavorite = onToggleFavorite,
             onPrevious = onPrevious,
             onPlayPause = onPlayPause,
             onCollapsedPlayPause = onCollapsedPlayPause,
@@ -1369,6 +1511,8 @@ private fun TwoColumnPlayerBody(
     offsetMs: Long,
     lowPerformance: Boolean,
     translationEnabled: Boolean,
+    pronunciationEnabled: Boolean,
+    textScaleMultiplier: Float,
     controlsExpanded: Boolean,
     alwaysOpen: Boolean,
     playWhenReady: Boolean,
@@ -1596,7 +1740,8 @@ private fun TwoColumnPlayerBody(
                         positionState = positionState,
                         offsetMs = offsetMs,
                         translationEnabled = translationEnabled,
-                        baseSp = tierSpec.pfs.value,
+                        pronunciationEnabled = pronunciationEnabled,
+                        baseSp = tierSpec.pfs.value * textScaleMultiplier,
                         isLight = isLight,
                         fg = fg,
                         fg2 = fg2,
@@ -1611,7 +1756,7 @@ private fun TwoColumnPlayerBody(
                         lowPerformance = lowPerformance,
                         controlsVisible = controlsExpanded,
                         canSeek = canSeek,
-                        fontSizeSp = tierSpec.fs.value,
+                        fontSizeSp = tierSpec.fs.value * textScaleMultiplier,
                         anchorFraction = tierSpec.anchorFraction,
                         isLight = isLight,
                         onReveal = onReveal,

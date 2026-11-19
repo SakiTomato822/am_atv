@@ -801,4 +801,132 @@ class FolioPlayerStateTest {
         assertEquals(typo.prevSp / typo.mainSp, posterRoleScale(PosterLyricRole.Previous, typo), 0.001f)
         assertEquals(typo.nextSp / typo.mainSp, posterRoleScale(PosterLyricRole.Upcoming0, typo), 0.001f)
     }
+
+    @Test
+    fun miniWindowSupportAndButtonVisibilityOnlyOnCarFullScreen() {
+        assertFalse(canSupportMiniWindow(hasFlymeWindowMode = false, isUiPreview = false))
+        assertTrue(canSupportMiniWindow(hasFlymeWindowMode = true, isUiPreview = false))
+        assertTrue(canSupportMiniWindow(hasFlymeWindowMode = false, isUiPreview = true))
+
+        for (tier in FolioTier.entries) {
+            assertFalse(shouldShowMiniWindowButton(canOpenMini = false, isMiniWindow = false, tier = tier))
+            // Inside the mini-window itself, the mini/full-screen button never appears.
+            assertFalse(shouldShowMiniWindowButton(canOpenMini = true, isMiniWindow = true, tier = tier))
+        }
+
+        val fullScreenTiersWithButton = setOf(FolioTier.Wide, FolioTier.Ultrawide, FolioTier.Short)
+        for (tier in FolioTier.entries) {
+            assertEquals(
+                "tier=$tier",
+                tier in fullScreenTiersWithButton,
+                shouldShowMiniWindowButton(canOpenMini = true, isMiniWindow = false, tier = tier),
+            )
+        }
+    }
+
+    @Test
+    fun narrowTierMovesAddAndFavoriteToControlsCardWhileOthersKeepInHeader() {
+        for (tier in FolioTier.entries) {
+            val expected = if (tier == FolioTier.Narrow) {
+                FolioTrackActionLocation.ControlsCard
+            } else {
+                FolioTrackActionLocation.Header
+            }
+            assertEquals("tier=$tier", expected, trackActionLocationForTier(tier))
+        }
+        // Narrow still keeps the song title in the top header when controls are expanded.
+        assertTrue(showHeaderTitle(FolioTier.Narrow, controlsExpanded = true, displayState = FolioPlayerDisplayState.Poster))
+        assertFalse(showHeaderTitle(FolioTier.Narrow, controlsExpanded = false, displayState = FolioPlayerDisplayState.Poster))
+    }
+
+    @Test
+    fun posterRoleLayoutWidthAndTransitionWrapAvoidPrematureBreaks() {
+        val typo = posterTypographyFor(
+            lines = listOf(LyricLine(words = listOf(LyricWord("这是一句中等长度的主唱歌词", 0L, 1000L)))),
+            availableWidthDp = 500f,
+            baseSp = 40f,
+        )
+        val panelWidthPx = 640
+        val focusWidth = computePosterRoleLayoutWidthPx(panelWidthPx, posterRoleScale(PosterLyricRole.Focus, typo))
+        val prevWidth = computePosterRoleLayoutWidthPx(panelWidthPx, posterRoleScale(PosterLyricRole.Previous, typo))
+        val nextWidth = computePosterRoleLayoutWidthPx(panelWidthPx, posterRoleScale(PosterLyricRole.Upcoming0, typo))
+
+        assertEquals(panelWidthPx, focusWidth)
+        assertTrue("prevWidth=$prevWidth should exceed panelWidth=$panelWidthPx", prevWidth > panelWidthPx)
+        assertTrue("nextWidth=$nextWidth should exceed panelWidth=$panelWidthPx", nextWidth > panelWidthPx)
+        assertEquals(panelWidthPx.toFloat(), nextWidth * posterRoleScale(PosterLyricRole.Upcoming0, typo), 2f)
+
+        // While transitioning Upcoming -> Focus (or Focus -> Previous), hold the narrower Focus width until settled.
+        assertEquals(
+            focusWidth,
+            resolvePosterTransitionLayoutWidthPx(currentWidthPx = nextWidth, targetWidthPx = focusWidth, isTransitioning = true),
+        )
+        assertEquals(
+            focusWidth,
+            resolvePosterTransitionLayoutWidthPx(currentWidthPx = focusWidth, targetWidthPx = prevWidth, isTransitioning = true),
+        )
+        assertEquals(
+            prevWidth,
+            resolvePosterTransitionLayoutWidthPx(currentWidthPx = focusWidth, targetWidthPx = prevWidth, isTransitioning = false),
+        )
+    }
+
+    @Test
+    fun lyricsDisplayAvailabilityActiveStateAndPlacement() {
+        assertFalse(isLyricDisplayActive(translationEnabled = false, pronunciationEnabled = false))
+        assertTrue(isLyricDisplayActive(translationEnabled = true, pronunciationEnabled = false))
+        assertTrue(isLyricDisplayActive(translationEnabled = false, pronunciationEnabled = true))
+        assertTrue(isLyricDisplayActive(translationEnabled = true, pronunciationEnabled = true))
+
+        val linePronLine = LyricLine(
+            words = listOf(LyricWord("君の名は", 0L, 1000L)),
+            translation = "你的名字",
+            pronunciationText = "kimi no na wa",
+        )
+        val wordPronLine = LyricLine(
+            words = listOf(
+                LyricWord("桜", 0L, 500L, pronunciationText = "sakura"),
+                LyricWord("舞う", 500L, 1000L, pronunciationText = "mau"),
+            ),
+        )
+        val plainLine = LyricLine(words = listOf(LyricWord("Plain", 0L, 1000L)))
+
+        assertEquals("kimi no na wa", posterPronunciationText(linePronLine))
+        assertEquals("sakura mau", posterPronunciationText(wordPronLine))
+
+        assertFalse(lyricTranslationAvailable(listOf(linePronLine), enhancementsReady = false))
+        assertTrue(lyricTranslationAvailable(listOf(linePronLine), enhancementsReady = true))
+        assertFalse(lyricTranslationAvailable(listOf(plainLine), enhancementsReady = true))
+
+        assertFalse(lyricPronunciationAvailable(listOf(wordPronLine), enhancementsReady = false))
+        assertTrue(lyricPronunciationAvailable(listOf(wordPronLine), enhancementsReady = true))
+        assertFalse(lyricPronunciationAvailable(listOf(plainLine), enhancementsReady = true))
+
+        assertEquals(
+            FolioLyricsOptionStatus.Hint,
+            resolveLyricsOptionStatus(optionEnabled = false, optionAvailable = false, enhancementsReady = true, enhancementsFailed = false),
+        )
+        assertEquals(
+            FolioLyricsOptionStatus.LoadFailed,
+            resolveLyricsOptionStatus(optionEnabled = true, optionAvailable = false, enhancementsReady = false, enhancementsFailed = true),
+        )
+        assertEquals(
+            FolioLyricsOptionStatus.Loading,
+            resolveLyricsOptionStatus(optionEnabled = true, optionAvailable = false, enhancementsReady = false, enhancementsFailed = false),
+        )
+        assertEquals(
+            FolioLyricsOptionStatus.Unavailable,
+            resolveLyricsOptionStatus(optionEnabled = true, optionAvailable = false, enhancementsReady = true, enhancementsFailed = false),
+        )
+        assertEquals(
+            FolioLyricsOptionStatus.Hint,
+            resolveLyricsOptionStatus(optionEnabled = true, optionAvailable = true, enhancementsReady = true, enhancementsFailed = false),
+        )
+
+        assertEquals(FolioLyricsSettingsPlacement.AnchoredPopover, lyricsSettingsPlacementForTier(FolioTier.Wide))
+        assertEquals(FolioLyricsSettingsPlacement.AnchoredPopover, lyricsSettingsPlacementForTier(FolioTier.Ultrawide))
+        assertEquals(FolioLyricsSettingsPlacement.BottomSheet, lyricsSettingsPlacementForTier(FolioTier.Narrow))
+        assertEquals(FolioLyricsSettingsPlacement.BottomSheet, lyricsSettingsPlacementForTier(FolioTier.Short))
+        assertEquals(FolioLyricsSettingsPlacement.BottomSheet, lyricsSettingsPlacementForTier(FolioTier.Medium))
+    }
 }
