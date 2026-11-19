@@ -21,6 +21,7 @@ internal fun InstrumentalInterludeRow(
     gap: LyricTimeline.InstrumentalGap,
     positionState: State<Long>,
     isUserScrolling: Boolean,
+    exitStartMs: Long = InterludeMotion.exitStart(gap),
 ) {
     val unlitAlpha = flymeLyricAlpha(if (isUserScrolling) {
         MotionTokens.KaraokeSecondaryAlpha
@@ -40,10 +41,10 @@ internal fun InstrumentalInterludeRow(
                 .height(20.dp)
                 .graphicsLayer {
                     val pos = positionState.value
-                    val pulseScale = InterludeMotion.scale(gap, pos)
+                    val pulseScale = InterludeMotion.scale(gap, pos, exitStartMs)
                     scaleX = pulseScale
                     scaleY = pulseScale
-                    alpha = InterludeMotion.alpha(gap, pos)
+                    alpha = InterludeMotion.alpha(gap, pos, exitStartMs)
                     transformOrigin = TransformOrigin(0.5f, 0.5f)
                 },
         ) {
@@ -61,7 +62,7 @@ internal fun InstrumentalInterludeRow(
                     .coerceIn(0f, 1f)
                 val enterAlpha = enterFraction * enterFraction
 
-                val tintFraction = InterludeMotion.dotFraction(gap, pos, dotIndex)
+                val tintFraction = InterludeMotion.dotFraction(gap, pos, dotIndex, exitStartMs)
                 val tintProgress = MotionTokens.InstrumentalDotTintEasing.transform(tintFraction)
                 val dotTintAlpha = unlitAlpha + (MotionTokens.KaraokePrimaryAlpha - unlitAlpha) * tintProgress
 

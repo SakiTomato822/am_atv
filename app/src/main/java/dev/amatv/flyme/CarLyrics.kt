@@ -125,18 +125,17 @@ internal fun CarLyricRows(
         return
     }
     val schedule = remember(lines) { LyricTimeline.Schedule(lines) }
-    val snapshot by remember(schedule, offsetMs, position) {
-        derivedStateOf { schedule.snapshotAt(position.value + offsetMs) }
+    val focus by remember(lines, schedule, offsetMs, position) {
+        derivedStateOf { scrollingLyricFocusAt(lines, schedule, position.value + offsetMs) }
     }
     // Before the first line and in breaks of 7 s or more the list opens a slot for the waiting dots: the
     // next line and those below it move down, and the slot takes the anchor until that line starts.
-    val waiting = snapshot.instrumentalScrollAnchor
+    val waiting = focus.waiting
     val shownGap = remember(lines) { mutableStateOf<LyricTimeline.InstrumentalGap?>(null) }
     LaunchedEffect(waiting) { if (waiting != null) shownGap.value = waiting }
     val open by animateFloatAsState(if (waiting != null) 1f else 0f, tween(600, easing = RippleEasing),
         label = "interlude-open")
-    val active = waiting?.beforeLineIndex ?: snapshot.focusLineIndex.coerceAtLeast(0)
-    val singing = snapshot.activeLineIndices
+    val anchorIndex = focus.anchorIndex
     val lyricPosition = remember(position, offsetMs) {
         derivedStateOf { (position.value + offsetMs).coerceAtLeast(0L) }
     }
@@ -168,18 +167,22 @@ internal fun CarLyricRows(
         val topOf = { index: Int -> var top = 0f; for (i in 0 until index) top += heights[i] + gap; top }
         // Only the first placement waits for measurement. Some lines (background vocals alone) are 0 tall
         // until they are sung and collapse again after, so waiting on every line froze the list mid-song.
-        val measured by remember(heights, active) { derivedStateOf { heights.getOrElse(active) { 0 } > 0 } }
-        // Every line moves by the same amount, placing the active line's centre (or the dots') on the anchor.
-        val target by remember(heights, active, anchor, gap, waiting) {
-            derivedStateOf { anchor - (topOf(active) + (if (waiting != null) dotsHeight else heights[active]) / 2f) }
+        val measured by remember(heights, anchorIndex, waiting) {
+            derivedStateOf { if (waiting != null) dotsHeight > 0 else heights[anchorIndex] > 0 }
+        }
+        // Every line moves by the same amount, centring the anchor row or the dots.
+        val target by remember(heights, anchorIndex, anchor, gap, waiting) {
+            derivedStateOf {
+                anchor - (topOf(anchorIndex) + (if (waiting != null) dotsHeight else heights[anchorIndex]) / 2f)
+            }
         }
         Column(Modifier.fillMaxWidth().wrapContentHeight(Alignment.Top, unbounded = true),
             verticalArrangement = Arrangement.spacedBy(LyricGap)) {
             lines.forEachIndexed { index, line ->
-                // Every line being sung is lit, not only the one the list is centred on.
-                val distance = if (index in singing) 0 else abs(active - index).coerceAtMost(4)
-                // Lines below the active one follow one after another, so the list ripples instead of sliding as a block.
-                val stagger = if (ripple) (index - active + 1).coerceIn(0, 8) * 45 else 0
+                val isCurrent = focus.isCurrent(index)
+                val distance = focus.styleDistance(index)
+                // Lines below the anchor follow one after another, so the list ripples instead of sliding as a block.
+                val stagger = if (ripple) (index - anchorIndex + 1).coerceIn(0, 8) * 45 else 0
                 val shift = shifts[index]
                 var placed by remember { mutableStateOf(false) }
                 LaunchedEffect(target, measured) {
@@ -197,7 +200,7 @@ internal fun CarLyricRows(
                     animationSpec = tween(360, delayMillis = stagger), label = "lyric-opacity",
                 )
                 // Lines more than a screen away are not visible; skip their blur layers.
-                val blur = if (soften && abs(active - index) <= 6) LineBlur[distance].dp else 0.dp
+                val blur = if (soften && abs(anchorIndex - index) <= 6) LineBlur[distance].dp else 0.dp
                 Box(Modifier.fillMaxWidth().onSizeChanged { heights[index] = it.height }
                     .graphicsLayer {
                         val opened = shownGap.value?.takeIf { index >= it.beforeLineIndex }?.let { slot * open } ?: 0f
@@ -210,7 +213,7 @@ internal fun CarLyricRows(
                         if (controlsVisible && canSeek && !line.isStatic) onLineSeek(line.startMs) else onReveal()
                     }
                     .blur(blur)) {
-                    FlymeKaraokeLine(line, distance == 0, lyricPosition, fontScale, static = false)
+                    FlymeKaraokeLine(line, isCurrent, lyricPosition, fontScale, static = false)
                 }
             }
         }
@@ -221,10 +224,45 @@ internal fun CarLyricRows(
                 translationY = topOf(next) + shifts[next].value + browse.value + slot * open - slot
                 alpha = open
             }) {
-                InstrumentalInterludeRow(interlude, lyricPosition, isUserScrolling = false)
+                InstrumentalInterludeRow(
+                    interlude, lyricPosition, isUserScrolling = false,
+                    exitStartMs = InterludeMotion.exitStartForLineHandoff(interlude),
+                )
             }
         }
     }
+}
+
+internal data class ScrollingLyricFocus(
+    val anchorIndex: Int,
+    val waiting: LyricTimeline.InstrumentalGap?,
+    private val singing: List<Int>,
+) {
+    fun isCurrent(index: Int): Boolean = index in singing
+
+    fun styleDistance(index: Int): Int {
+        if (isCurrent(index)) return 0
+        val distance = if (waiting != null && index >= anchorIndex) index - anchorIndex + 1
+            else abs(index - anchorIndex)
+        return distance.coerceIn(1, 4)
+    }
+}
+
+internal fun scrollingLyricFocusAt(
+    lines: List<LyricLine>,
+    schedule: LyricTimeline.Schedule,
+    positionMs: Long,
+): ScrollingLyricFocus {
+    val snapshot = schedule.snapshotAt(positionMs)
+    val waiting = schedule.instrumentalGaps.firstOrNull {
+        positionMs.coerceAtLeast(0L) >= it.startMs && positionMs < it.endMs
+    }
+    return ScrollingLyricFocus(
+        anchorIndex = waiting?.beforeLineIndex ?: snapshot.focusLineIndex.coerceAtLeast(0),
+        waiting = waiting,
+        // The timeline's lookahead can position a row before its start. Only actual vocals can light it.
+        singing = snapshot.activeLineIndices.filter { positionMs >= lines[it].startMs },
+    )
 }
 
 private val LyricGap = 30.dp

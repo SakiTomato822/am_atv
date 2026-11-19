@@ -1,0 +1,72 @@
+package dev.amatv.flyme
+
+import dev.amatv.model.LyricLine
+import dev.amatv.model.LyricTimeline
+import dev.amatv.model.LyricWord
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ScrollingLyricFocusTest {
+    @Test
+    fun introKeepsFirstLineUnlitUntilItsStart() {
+        val lines = listOf(line("first", 9_000, 10_000), line("second", 10_000, 11_000))
+        val schedule = LyricTimeline.Schedule(lines)
+
+        assertEquals(listOf(0), schedule.snapshotAt(8_500).activeLineIndices)
+        for (positionMs in 0L until 9_000L) {
+            val focus = scrollingLyricFocusAt(lines, schedule, positionMs)
+            assertEquals(0, focus.waiting?.beforeLineIndex)
+            assertEquals(0, focus.anchorIndex)
+            assertFalse(focus.isCurrent(0))
+            assertEquals(1, focus.styleDistance(0))
+        }
+        val first = scrollingLyricFocusAt(lines, schedule, 9_000)
+        assertNull(first.waiting)
+        assertEquals(0, first.anchorIndex)
+        assertTrue(first.isCurrent(0))
+        assertEquals(0, first.styleDistance(0))
+    }
+
+    @Test
+    fun sevenSecondInterludeKeepsNextLineUnlitUntilItsStart() {
+        val lines = listOf(line("previous", 1_000, 2_000), line("next", 9_000, 10_000))
+        val schedule = LyricTimeline.Schedule(lines)
+
+        assertTrue(scrollingLyricFocusAt(lines, schedule, 1_999).isCurrent(0))
+        assertEquals(listOf(1), schedule.snapshotAt(8_500).activeLineIndices)
+        for (positionMs in 2_000L until 9_000L) {
+            val focus = scrollingLyricFocusAt(lines, schedule, positionMs)
+            assertEquals(1, focus.waiting?.beforeLineIndex)
+            assertEquals(1, focus.anchorIndex)
+            assertFalse(focus.isCurrent(0))
+            assertFalse(focus.isCurrent(1))
+            assertEquals(1, focus.styleDistance(1))
+        }
+        val next = scrollingLyricFocusAt(lines, schedule, 9_000)
+        assertNull(next.waiting)
+        assertEquals(1, next.anchorIndex)
+        assertTrue(next.isCurrent(1))
+        assertEquals(0, next.styleDistance(1))
+        assertFalse(scrollingLyricFocusAt(lines, schedule, 8_999).isCurrent(1))
+    }
+
+    @Test
+    fun shortIntroCanPositionFirstLineWithoutLightingIt() {
+        val lines = listOf(line("first", 1_000, 2_000))
+        val schedule = LyricTimeline.Schedule(lines)
+
+        for (positionMs in 0L until 1_000L) {
+            val focus = scrollingLyricFocusAt(lines, schedule, positionMs)
+            assertNull(focus.waiting)
+            assertEquals(0, focus.anchorIndex)
+            assertFalse(focus.isCurrent(0))
+        }
+        assertTrue(scrollingLyricFocusAt(lines, schedule, 1_000).isCurrent(0))
+    }
+
+    private fun line(text: String, startMs: Long, endMs: Long) =
+        LyricLine(listOf(LyricWord(text, startMs, endMs)))
+}

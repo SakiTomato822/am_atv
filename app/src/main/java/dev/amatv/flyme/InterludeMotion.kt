@@ -8,8 +8,13 @@ import kotlin.math.sin
 internal object InterludeMotion {
     fun exitStart(gap: LyricTimeline.InstrumentalGap) = gap.endMs + LyricTimeline.INSTRUMENTAL_LINE_OFFSET_MS
 
-    fun dotFraction(gap: LyricTimeline.InstrumentalGap, positionMs: Long, index: Int): Float {
-        val segment = ((exitStart(gap) - gap.startMs).coerceAtLeast(3L) / 3.0)
+    fun exitStartForLineHandoff(gap: LyricTimeline.InstrumentalGap): Long =
+        gap.endMs - MotionTokens.InstrumentalExitExpandMillis - MotionTokens.InstrumentalExitShrinkMillis
+
+    fun dotFraction(
+        gap: LyricTimeline.InstrumentalGap, positionMs: Long, index: Int, exitStartMs: Long = exitStart(gap),
+    ): Float {
+        val segment = ((exitStartMs - gap.startMs).coerceAtLeast(3L) / 3.0)
         return ((positionMs - gap.startMs - index.coerceIn(0, 2) * segment) / segment).toFloat().coerceIn(0f, 1f)
     }
 
@@ -19,12 +24,11 @@ internal object InterludeMotion {
         return 1f + (MotionTokens.InstrumentalPulseMaxScale - 1f) * sin(PI * phase).toFloat()
     }
 
-    fun scale(gap: LyricTimeline.InstrumentalGap, positionMs: Long): Float {
-        val start = exitStart(gap)
-        val elapsed = positionMs - start
+    fun scale(gap: LyricTimeline.InstrumentalGap, positionMs: Long, exitStartMs: Long = exitStart(gap)): Float {
+        val elapsed = positionMs - exitStartMs
         if (elapsed < 0L) return pulse(positionMs - gap.startMs)
         if (elapsed < MotionTokens.InstrumentalExitExpandMillis) {
-            val entryScale = pulse(start - gap.startMs)
+            val entryScale = pulse(exitStartMs - gap.startMs)
             val f = MotionTokens.InstrumentalExitExpandEasing.transform(elapsed.toFloat() / MotionTokens.InstrumentalExitExpandMillis)
             return entryScale + (MotionTokens.InstrumentalPulseMaxScale - entryScale) * f
         }
@@ -33,8 +37,8 @@ internal object InterludeMotion {
             (MotionTokens.InstrumentalExitMinScale - MotionTokens.InstrumentalPulseMaxScale) * MotionTokens.InstrumentalExitShrinkEasing.transform(f)
     }
 
-    fun alpha(gap: LyricTimeline.InstrumentalGap, positionMs: Long): Float {
-        val f = ((positionMs - exitStart(gap) - MotionTokens.InstrumentalExitExpandMillis).toFloat() /
+    fun alpha(gap: LyricTimeline.InstrumentalGap, positionMs: Long, exitStartMs: Long = exitStart(gap)): Float {
+        val f = ((positionMs - exitStartMs - MotionTokens.InstrumentalExitExpandMillis).toFloat() /
             MotionTokens.InstrumentalExitShrinkMillis).coerceIn(0f, 1f)
         return 1f - MotionTokens.InstrumentalExitShrinkEasing.transform(f)
     }

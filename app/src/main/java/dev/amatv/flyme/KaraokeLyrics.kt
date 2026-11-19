@@ -228,13 +228,22 @@ internal fun KaraokeLyricLine(
         label = "lyric-line-scale",
     )
 
-    val activePresence = rememberVocalPresence(isMainActive, isLineSyncMode, "lyric-line-presence")
+    val beforeStart = remember(line, positionState) {
+        derivedStateOf { positionState.value < line.startMs }
+    }
+    val timedMainPresence = rememberVocalPresence(isMainActive, isLineSyncMode, "lyric-line-presence")
+    val activePresence = remember(beforeStart, timedMainPresence) {
+        derivedStateOf { if (beforeStart.value) 0f else timedMainPresence.value }
+    }
     val timedBackgroundPresence = animateVocalPresence(
         isBackgroundActive, isLineSyncMode, "lyric-background-presence",
     )
     // Keep frame-varying alpha in draw/layer scopes. Passing a Float here would
     // recompose and remeasure the entire word flexbox on every fade frame.
-    val backgroundPresence = rememberContinuousVocalPresence(timedBackgroundPresence)
+    val continuousBackgroundPresence = rememberContinuousVocalPresence(timedBackgroundPresence)
+    val backgroundPresence = remember(beforeStart, continuousBackgroundPresence) {
+        derivedStateOf { if (beforeStart.value) 0f else continuousBackgroundPresence.value }
+    }
 
     val unlitAlpha = flymeLyricAlpha(MotionTokens.KaraokeSecondaryAlpha)
     val fullLineStartPadding = if (alignEnd) 0.dp else 6.dp
@@ -270,8 +279,9 @@ internal fun KaraokeLyricLine(
             modifier = Modifier
                 .fillMaxWidth(maxWidthFraction)
                 .graphicsLayer {
-                    scaleX = activeScale.value
-                    scaleY = activeScale.value
+                    val scale = if (beforeStart.value) MotionTokens.KaraokeLineNormalScale else activeScale.value
+                    scaleX = scale
+                    scaleY = scale
                     // Align anchor strictly to top of rendered box: pivotY = 0f ensures top edge never shifts
                     transformOrigin = TransformOrigin(
                         pivotFractionX = if (alignEnd) 1f else 0f,
