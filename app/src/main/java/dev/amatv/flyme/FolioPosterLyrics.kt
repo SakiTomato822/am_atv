@@ -1,32 +1,30 @@
 package dev.amatv.flyme
 
-import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.TransformOrigin
@@ -71,18 +69,99 @@ private data class PosterRoles(
         upcoming.getOrNull(0) -> PosterLyricRole.Upcoming0
         upcoming.getOrNull(1) -> PosterLyricRole.Upcoming1
         upcoming.getOrNull(2) -> PosterLyricRole.Upcoming2
-        else -> if (key.order < (focus?.order ?: 0)) PosterLyricRole.ExitingPrevious else PosterLyricRole.EnteringBelow
+        else -> error("No visible poster role for $key")
     }
 }
 
-private data class PosterRollStage(
-    val roles: PosterRoles,
-    val positions: Map<PosterRollKey, Float>,
-    val exitY: Float,
-    val enterY: Float,
+private sealed interface PosterDrawing {
+    val width: Float
+    val height: Float
+
+    data class Lead(val index: Int, val layout: TextLayoutResult, val focus: Boolean) : PosterDrawing {
+        override val width: Float get() = layout.size.width.toFloat()
+        override val height: Float get() = layout.size.height.toFloat()
+    }
+
+    data class Local(val layout: TextLayoutResult, val ink: Color, val slot: Int) : PosterDrawing {
+        override val width: Float get() = layout.size.width.toFloat()
+        override val height: Float get() = layout.size.height.toFloat()
+    }
+
+    data class Gap(
+        val gap: LyricTimeline.InstrumentalGap,
+        override val width: Float,
+        override val height: Float,
+    ) : PosterDrawing
+}
+
+private data class PosterRollRow(
+    val bounds: PosterRollBounds,
+    val drawings: Map<PosterDrawing, PosterInkPose>,
+)
+
+private fun posterRollRow(
+    top: Float,
+    parts: List<PosterDrawing>,
+    scale: Float,
+    opacity: Float,
+    panelWidth: Float,
+    gap: Float,
+): PosterRollRow {
+    val fit = minOf(scale, panelWidth / parts.maxOf { it.width })
+    var cursor = top
+    val drawings = buildMap {
+        for (part in parts) {
+            if (isNotEmpty()) cursor += gap * fit
+            put(part, PosterInkPose(cursor, fit, opacity))
+            cursor += part.height * fit
+        }
+    }
+    return PosterRollRow(PosterRollBounds(top, cursor), drawings)
+}
+
+/** Both cached versions of a lyric stay within its interpolated row. */
+private class PosterRoll(
+    start: Map<Int, PosterRollRow>,
+    end: Map<Int, PosterRollRow>,
+    panelWidth: Float,
+    panelHeight: Float,
+    gap: Float,
 ) {
-    fun yFor(key: PosterRollKey) = positions[key]
-        ?: if (roles.roleFor(key) == PosterLyricRole.ExitingPrevious) exitY else enterY
+    val progress = Animatable(0f)
+    private val orders = (start.keys + end.keys).sorted()
+    private val startVisible = start.mapValues { it.value.bounds }
+    private val endVisible = end.mapValues { it.value.bounds }
+    private val startBounds = posterRollBounds(orders, startVisible, endVisible, panelHeight, gap)
+    private val endBounds = posterRollBounds(orders, endVisible, startVisible, panelHeight, gap)
+
+    // Common easing keeps every rectangle within its own row and preserves the order of the rows.
+    val drawings = orders.associateWith { order ->
+        val from = start[order]?.drawings.orEmpty()
+        val to = end[order]?.drawings.orEmpty()
+        (from.keys + to.keys).associateWith { drawing ->
+            val b = to[drawing]
+            val startSlot = startBounds.getValue(order)
+            val endSlot = endBounds.getValue(order)
+            val first = from[drawing] ?: to.getValue(drawing).hiddenIn(endSlot, startSlot, drawing.width, panelWidth)
+            val last = b ?: first.hiddenIn(startSlot, endSlot, drawing.width, panelWidth)
+            first to last
+        }
+    }
+
+    fun sample(): Map<Int, PosterRollRow> {
+        val time = progress.value
+        val movement = FolioPlayerMotionTokens.EnterEasing.transform(time)
+        return buildMap {
+            for ((order, tracks) in drawings) {
+                val poses = tracks.mapValues { (_, track) -> track.first.interpolate(track.second, time, movement) }
+                    .filterValues { it.opacity > 0f && it.scale > 0f }
+                if (poses.isNotEmpty()) {
+                    val bounds = startBounds.getValue(order).interpolate(endBounds.getValue(order), movement)
+                    put(order, PosterRollRow(bounds, poses))
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -131,25 +210,13 @@ internal fun FolioPosterLyricsPanel(
     }
 
     val animate = !lowPerformance && !reducedMotion
-    val backdrop = LocalFolioGlassEnv.current.baseColor
-    val edgeFade = if (lowPerformance) Modifier else Modifier.drawWithCache {
-        val shade = Brush.verticalGradient(
-            0f to backdrop,
-            0.08f to backdrop.copy(alpha = 0f),
-            0.90f to backdrop.copy(alpha = 0f),
-            1f to backdrop,
-        )
-        onDrawWithContent {
-            drawContent()
-            drawRect(shade)
-        }
-    }
     CompositionLocalProvider(LocalFlymePalette provides if (isLight) LightFlymePalette else DarkFlymePalette) {
-        BoxWithConstraints(modifier.fillMaxSize().clipToBounds().then(edgeFade)) {
+        BoxWithConstraints(modifier.fillMaxSize().clipToBounds()) {
             val density = LocalDensity.current
             val fontFamily = LocalFolioFontFamily.current
             val width = constraints.maxWidth
             val height = constraints.maxHeight
+            if (width == 0 || height == 0) return@BoxWithConstraints
             val typo = remember(lines, maxWidth, baseSp) { posterTypographyFor(lines, maxWidth.value, baseSp) }
             val measurer = rememberTextMeasurer(cacheSize = 32)
             val leadStyle = TextStyle(
@@ -172,7 +239,7 @@ internal fun FolioPosterLyricsPanel(
             val leadTexts = remember(lines) { lines.map(::posterLeadText) }
             fun measureLead(item: PosterRollKey.Lead, role: PosterLyricRole): TextLayoutResult {
                 val layoutWidth = computePosterRoleLayoutWidthPx(width, posterRoleScale(role, typo))
-                val ellipsize = role == PosterLyricRole.Previous || role == PosterLyricRole.ExitingPrevious
+                val ellipsize = role == PosterLyricRole.Previous
                 return measurer.measure(
                     text = leadTexts[item.index],
                     style = leadStyle,
@@ -199,117 +266,144 @@ internal fun FolioPosterLyricsPanel(
                     measurer.measure(line.text, smallStyle, constraints = Constraints(maxWidth = width)) to line.isOppositeSinger
                 }
             }
+            val panelWidth = width.toFloat()
+            val panelHeight = height.toFloat()
             val localGap = with(density) { 4.dp.toPx() }
             val previousGap = with(density) { 20.dp.toPx() }
             val upcomingGap = with(density) { 14.dp.toPx() }
-            val gapHeight = with(density) { 64.dp.toPx() }
-            fun heightFor(item: PosterRollKey?): Float = when (item) {
-                is PosterRollKey.Lead -> layouts.getValue(item).size.height * posterRoleScale(roles.roleFor(item), typo)
-                is PosterRollKey.Gap -> gapHeight
-                null -> 0f
+            val focusGap = with(density) { 28.dp.toPx() }
+            val smallDrawings = small.mapIndexed { index, (layout, opposite) ->
+                PosterDrawing.Local(layout, if (opposite) duetAccentColor.copy(alpha = 0.78f) else fg2, index + 1)
             }
-            val focusHeight = heightFor(roles.focus)
-            val previousLayoutHeight = roles.previous?.let { layouts.getValue(it).size.height } ?: 0
-            val pronHeight = pronunciation?.let { it.size.height + localGap } ?: 0f
-            val belowHeight = (listOfNotNull(translation) + small.map { it.first }).sumOf {
-                (it.size.height + localGap).toDouble()
-            }.toFloat()
-            val focusY = height * 0.40f - (focusHeight - with(density) { typo.mainLineHeightSp.sp.toPx() }) / 2f
-            val prevY = focusY - pronHeight - previousGap - heightFor(roles.previous)
-            var cursor = focusY + focusHeight + belowHeight + with(density) { 28.dp.toPx() }
-            val positions = buildMap {
-                roles.focus?.let { put(it, focusY) }
-                roles.previous?.let { put(it, prevY) }
-                for (item in roles.upcoming) {
-                    put(item, cursor)
-                    cursor += heightFor(item) + upcomingGap
+            fun row(item: PosterRollKey, top: Float): PosterRollRow {
+                val role = roles.roleFor(item)
+                val scale = posterRoleScale(role, typo)
+                val opacity = posterRoleAlpha(role, fg2.alpha)
+                val parts = when (item) {
+                    is PosterRollKey.Gap -> listOf(with(density) {
+                        val dotWidth = 66.dp.toPx()
+                        val rowHeight = (18.dp.roundToPx() + 20.dp.roundToPx() + 26.dp.roundToPx()).toFloat()
+                        PosterDrawing.Gap(item.gap, dotWidth, rowHeight)
+                    })
+                    is PosterRollKey.Lead -> {
+                        val isFocus = role == PosterLyricRole.Focus
+                        val lead = PosterDrawing.Lead(item.index, layouts.getValue(item), isFocus)
+                        if (isFocus) buildList<PosterDrawing> {
+                            val localInk = if (isOppositeSingerLine(lines[item.index])) {
+                                duetAccentColor.copy(alpha = 0.60f)
+                            } else fg2
+                            pronunciation?.let { add(PosterDrawing.Local(it, localInk, -1)) }
+                            add(lead)
+                            translation?.let { add(PosterDrawing.Local(it, localInk, 0)) }
+                            addAll(smallDrawings)
+                        } else listOf(lead)
+                    }
+                }
+                val zoom = if (item is PosterRollKey.Gap) scale * 1.65f else scale
+                return posterRollRow(top, parts, zoom, opacity, panelWidth, localGap)
+            }
+            val stage = remember(roles, layouts, pronunciation, translation, smallDrawings, density, typo, width, height, lines, fg2, duetAccentColor) {
+                buildMap {
+                    val focus = roles.focus
+                    val anchor = panelHeight * 0.40f + with(density) { typo.mainLineHeightSp.sp.toPx() } / 2f
+                    var nextTop = anchor
+                    if (focus != null) {
+                        val unplaced = row(focus, 0f)
+                        val lead = unplaced.drawings.entries.first { it.key !is PosterDrawing.Local }
+                        val leadTop = anchor - lead.key.height * lead.value.scale / 2f
+                        val focusRow = row(focus, leadTop - lead.value.top)
+                        roles.previous?.let { previous ->
+                            val previousHeight = row(previous, 0f).bounds.height
+                            put(previous.order, row(previous, focusRow.bounds.top - previousGap - previousHeight))
+                        }
+                        put(focus.order, focusRow)
+                        nextTop = focusRow.bounds.bottom + focusGap
+                    } else if (smallDrawings.isNotEmpty()) {
+                        put(-1, posterRollRow(anchor, smallDrawings, 1f, 1f, panelWidth, localGap))
+                    }
+                    for (item in roles.upcoming) {
+                        val upcoming = row(item, nextTop)
+                        put(item.order, upcoming)
+                        nextTop = upcoming.bounds.bottom + upcomingGap
+                    }
                 }
             }
-            val stage = PosterRollStage(roles, positions, prevY - with(density) { 28.dp.toPx() }, cursor)
 
-            key(timeline, clock, seekGeneration) {
-                val transition = if (animate) updateTransition(stage, label = "poster-roll") else null
-                val items = (transition?.currentState?.roles?.visible.orEmpty() + roles.visible).distinct()
-                val rollSpec = tween<Float>(POSTER_ROLL_DURATION_MS, easing = FolioPlayerMotionTokens.EnterEasing)
-                val verticalPositions = items.associateWith { item ->
-                    key(item) { transition?.animateFloat({ rollSpec }, label = "poster-y") { it.yFor(item) } }
-                }
-                val focusPosition = verticalPositions[roles.focus]
-                Box(Modifier.fillMaxSize()) {
-                    for (item in items) key(item) {
-                        val role = roles.roleFor(item)
-                        val targetScale = posterRoleScale(role, typo)
-                        val targetAlpha = posterRoleAlpha(role, fg2.alpha)
-                        val y = verticalPositions[item]
-                        val scale = transition?.animateFloat({ rollSpec }, label = "poster-scale") {
-                            posterRoleScale(it.roles.roleFor(item), typo)
+            key(timeline, clock, seekGeneration, width, height, density, leadStyle, animate) {
+                var settled by remember { mutableStateOf(roles to stage) }
+                var running by remember { mutableStateOf<PosterRoll?>(null) }
+                val roll = running
+                val currentFocus = (roles.focus as? PosterRollKey.Lead)?.index
+                val hasStarted = projection.hasStartedLead
+                if (animate) {
+                    val latestStage by rememberUpdatedState(stage)
+                    LaunchedEffect(roles) {
+                        val from = running?.sample() ?: settled.second
+                        val target = latestStage
+                        if (from != target) {
+                            val next = PosterRoll(from, target, panelWidth, panelHeight, upcomingGap)
+                            running = next
+                            next.progress.animateTo(1f, tween(POSTER_ROLL_DURATION_MS, easing = LinearEasing))
                         }
-                        val opacity = transition?.animateFloat({ rollSpec }, label = "poster-alpha") {
-                            posterRoleAlpha(it.roles.roleFor(item), fg2.alpha)
-                        }
-                        Box(Modifier.fillMaxWidth().graphicsLayer {
-                            val rowY = y?.value ?: stage.yFor(item)
-                            translationY = if (role == PosterLyricRole.Previous) {
-                                val rowHeight = previousLayoutHeight * (scale?.value ?: targetScale)
-                                val focusTop = focusPosition?.value ?: focusY
-                                minOf(rowY, focusTop - pronHeight - previousGap - rowHeight)
-                            } else rowY
-                        }) {
-                            when (item) {
-                                is PosterRollKey.Gap -> Box(Modifier.graphicsLayer {
-                                    val zoom = scale?.value ?: targetScale
-                                    scaleX = 1.65f * zoom
-                                    scaleY = 1.65f * zoom
-                                    alpha = opacity?.value ?: targetAlpha
-                                    translationX = (-28).dp.toPx()
-                                    transformOrigin = TransformOrigin(0f, 0.5f)
-                                    compositingStrategy = CompositingStrategy.ModulateAlpha
-                                }) {
-                                    InstrumentalInterludeRow(item.gap, drawPosition, isUserScrolling = false)
-                                }
-                                is PosterRollKey.Lead -> {
-                                    val line = lines[item.index]
-                                    val layout = layouts[item] ?: remember(lines, item, width, role, typo, leadStyle, measurer) {
-                                        measureLead(item, role)
-                                    }
-                                    val isFocus = role == PosterLyricRole.Focus
-                                    val opposite = isOppositeSingerLine(line)
-                                    val ink = if (opposite) duetAccentColor else fg
-                                    PosterLeadLineText(
-                                        layout, line, drawPosition, isFocus && animate && projection.hasStartedLead,
-                                        if (isFocus && !projection.hasStartedLead) ink.copy(alpha = 0.40f) else ink,
-                                        Modifier.graphicsLayer {
-                                            val zoom = scale?.value ?: targetScale
-                                            scaleX = zoom
-                                            scaleY = zoom
-                                            alpha = opacity?.value ?: targetAlpha
-                                            transformOrigin = TransformOrigin(0f, 0f)
-                                            compositingStrategy = CompositingStrategy.ModulateAlpha
-                                        },
-                                    )
-                                    if (isFocus) {
-                                        val localInk = if (opposite) duetAccentColor.copy(alpha = 0.60f) else fg2
-                                        pronunciation?.let {
-                                            PosterMeasuredText(it, localInk, Modifier.graphicsLayer { translationY = -pronHeight })
-                                        }
-                                        PosterBelowLead(translation, localInk, small, duetAccentColor, fg2, Modifier.graphicsLayer {
-                                            translationY = layout.size.height * (scale?.value ?: targetScale) + localGap
-                                        })
-                                    }
-                                }
-                            }
+                        settled = roles to latestStage
+                        running = null
+                    }
+                    SideEffect {
+                        // Backing-word boundaries can arrive faster than the fade-in window.
+                        // Refresh the packed rows without restarting an active lyric handoff.
+                        if (running == null && settled.first == roles && settled.second != stage) {
+                            settled = roles to stage
                         }
                     }
-                    if (roles.focus == null) {
-                        PosterBelowLead(null, fg2, small, duetAccentColor, fg2, Modifier.graphicsLayer {
-                            translationY = focusY
-                        })
+                }
+                val staticStage = if (animate && settled.first != roles) settled.second else stage
+                val tracks = roll?.drawings ?: staticStage.mapValues { (_, row) ->
+                    row.drawings.mapValues { (_, pose) -> pose to pose }
+                }
+                for ((order, drawings) in tracks) {
+                    for ((drawing, poses) in drawings) key(order, drawing) {
+                        val layer = Modifier.graphicsLayer {
+                            val pose = if (roll == null) poses.first else {
+                                val time = roll.progress.value
+                                poses.first.interpolate(poses.second, time, FolioPlayerMotionTokens.EnterEasing.transform(time))
+                            }
+                            scaleX = pose.scale
+                            scaleY = pose.scale
+                            translationY = pose.top
+                            if (drawing is PosterDrawing.Gap) translationX = -28.dp.toPx() * pose.scale
+                            val center = pose.top + drawing.height * pose.scale / 2f
+                            alpha = pose.opacity * posterEdgeOpacity(center, panelHeight)
+                            transformOrigin = TransformOrigin(0f, 0f)
+                            compositingStrategy = CompositingStrategy.ModulateAlpha
+                        }
+                        when (drawing) {
+                            is PosterDrawing.Gap -> Box(layer) {
+                                InstrumentalInterludeRow(drawing.gap, drawPosition, isUserScrolling = false)
+                            }
+                            is PosterDrawing.Lead -> {
+                                val line = lines[drawing.index]
+                                val isCurrent = drawing.focus && drawing.index == currentFocus
+                                val ink = if (isOppositeSingerLine(line)) duetAccentColor else fg
+                                PosterLeadLineText(
+                                    drawing.layout, line, drawPosition, isCurrent && animate && hasStarted,
+                                    if (isCurrent && !hasStarted) ink.copy(alpha = 0.40f) else ink,
+                                    layer.posterTextSemantics(drawing.layout, poses.second.opacity > 0f),
+                                )
+                            }
+                            is PosterDrawing.Local -> PosterMeasuredText(
+                                drawing.layout, drawing.ink,
+                                layer.posterTextSemantics(drawing.layout, poses.second.opacity > 0f),
+                            )
+                        }
                     }
                 }
             }
         }
     }
 }
+
+private fun Modifier.posterTextSemantics(layout: TextLayoutResult, visibleInTarget: Boolean): Modifier =
+    if (visibleInTarget) semantics { text = layout.layoutInput.text } else this
 
 @Composable
 private fun PosterLeadLineText(
@@ -324,33 +418,15 @@ private fun PosterLeadLineText(
         posterSweepUnits(line).takeIf { it.isNotEmpty() }?.let { PosterLyricSweep(layout, it) }
     } else null
     val height = with(LocalDensity.current) { layout.size.height.toDp() }
-    Canvas(modifier.fillMaxWidth().height(height).semantics { text = layout.layoutInput.text }) {
+    Canvas(modifier.fillMaxWidth().height(height)) {
         if (sweep == null) drawText(layout, color = ink) else sweep.draw(this, position.value, ink)
-    }
-}
-
-@Composable
-private fun PosterBelowLead(
-    translation: TextLayoutResult?,
-    translationInk: Color,
-    small: List<Pair<TextLayoutResult, Boolean>>,
-    duetAccent: Color,
-    ink: Color,
-    modifier: Modifier,
-) {
-    if (translation == null && small.isEmpty()) return
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        translation?.let { PosterMeasuredText(it, translationInk) }
-        for ((layout, opposite) in small) {
-            PosterMeasuredText(layout, if (opposite) duetAccent.copy(alpha = 0.78f) else ink)
-        }
     }
 }
 
 @Composable
 private fun PosterMeasuredText(layout: TextLayoutResult, ink: Color, modifier: Modifier = Modifier) {
     val height = with(LocalDensity.current) { layout.size.height.toDp() }
-    Canvas(modifier.fillMaxWidth().height(height).semantics { text = layout.layoutInput.text }) {
+    Canvas(modifier.fillMaxWidth().height(height)) {
         drawText(layout, color = ink)
     }
 }
