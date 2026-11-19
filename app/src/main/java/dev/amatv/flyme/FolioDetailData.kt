@@ -11,10 +11,10 @@ import dev.amatv.model.Track
 import kotlinx.coroutines.CancellationException
 
 internal object FolioDetailSession {
-    val stack = mutableStateOf(emptyList<Track>())
+    val stack = mutableStateOf(emptyList<FolioDetailEntry>())
 }
 
-internal fun popFolioDetail(stack: List<Track>): List<Track> = stack.dropLast(1)
+internal fun <T> popFolioDetail(stack: List<T>): List<T> = stack.dropLast(1)
 
 internal data class FolioDetailData<T>(
     val value: T? = null,

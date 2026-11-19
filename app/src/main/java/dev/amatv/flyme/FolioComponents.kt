@@ -44,7 +44,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -61,7 +60,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.amatv.R
 import dev.amatv.model.CatalogKind
+import dev.amatv.model.CatalogOpenAction
 import dev.amatv.model.Track
+import dev.amatv.model.openAction
 
 @Composable
 internal fun FolioArtwork(
@@ -111,6 +112,8 @@ fun FolioListRowCard(
     val tierSpec = LocalFolioTierSpec.current
     val fontFamily = LocalFolioFontFamily.current
     val isArtist = item.catalogKind == CatalogKind.Artist
+    val shape = if (isArtist) CircleShape else RoundedCornerShape(FolioRadii.ListCover)
+    val origin = rememberFolioCardOrigin(item, shape)
     val subtitle = when {
         item.artist.isNotBlank() -> item.artist
         !item.pickReason.isNullOrBlank() -> item.pickReason
@@ -120,14 +123,14 @@ fun FolioListRowCard(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(FolioRadii.Row))
-            .clickable(role = Role.Button, onClick = onClick)
+            .folioBrowsePressable(pressedScale = 0.985f) { origin.open(onClick) }
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FolioArtwork(
             track = item,
-            modifier = Modifier.size(tierSpec.lic),
-            shape = if (isArtist) CircleShape else RoundedCornerShape(FolioRadii.ListCover),
+            modifier = Modifier.size(tierSpec.lic).folioArtworkOrigin(origin),
+            shape = shape,
         )
         Spacer(Modifier.width(16.dp))
         Column(
@@ -169,6 +172,8 @@ fun FolioGridCard(
     val palette = LocalFolioPalette.current
     val fontFamily = LocalFolioFontFamily.current
     val isArtist = item.catalogKind == CatalogKind.Artist
+    val shape = if (isArtist) CircleShape else RoundedCornerShape(FolioRadii.Card)
+    val origin = rememberFolioCardOrigin(item, shape)
     val subtitle = when {
         isArtist -> stringResource(R.string.browse_kind_artist)
         item.artist.isNotBlank() -> item.artist
@@ -179,12 +184,12 @@ fun FolioGridCard(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(FolioRadii.Card))
-            .clickable(role = Role.Button, onClick = onClick),
+            .folioBrowsePressable { origin.open(onClick) },
     ) {
         FolioArtwork(
             track = item,
-            modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-            shape = if (isArtist) CircleShape else RoundedCornerShape(FolioRadii.Card),
+            modifier = Modifier.fillMaxWidth().aspectRatio(1f).folioArtworkOrigin(origin),
+            shape = shape,
         )
         Spacer(Modifier.height(6.dp))
         Text(
@@ -211,6 +216,17 @@ fun FolioGridCard(
     }
 }
 
+@Composable
+private fun rememberFolioCardOrigin(item: Track, shape: Shape): FolioArtworkOrigin? =
+    when (item.openAction) {
+        CatalogOpenAction.Collection, CatalogOpenAction.OpenArtist -> rememberFolioArtworkOrigin(shape, item.id)
+        else -> null
+    }
+
+private fun FolioArtworkOrigin?.open(onClick: () -> Unit) {
+    if (this == null) onClick() else click(onClick)
+}
+
 /** Song row matching `.sr` in `flyme15-app.html`. */
 @Composable
 fun FolioSongRow(
@@ -233,7 +249,7 @@ fun FolioSongRow(
             .fillMaxWidth()
             .defaultMinSize(minHeight = tierSpec.rowh)
             .clip(RoundedCornerShape(FolioRadii.Row))
-            .clickable(role = Role.Button, onClick = onClick)
+            .folioBrowsePressable(pressedScale = 0.985f, onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -349,43 +365,30 @@ fun FolioMiniPlayerCapsule(
     val palette = LocalFolioPalette.current
     val fontFamily = LocalFolioFontFamily.current
     val pillShape = RoundedCornerShape(FolioRadii.Capsule)
+    val coverShape = RoundedCornerShape(FolioRadii.CapsuleCover)
+    val origin = rememberFolioArtworkOrigin(coverShape)
 
     Row(
         modifier = modifier
             .widthIn(max = 520.dp)
             .fillMaxWidth()
             .height(64.dp)
-            .shadow(elevation = if (palette.isLight) 10.dp else 18.dp, shape = pillShape, clip = false)
             .clip(pillShape)
-            .background(palette.capsuleBg)
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        Color.White.copy(alpha = if (palette.isLight) 0.16f else 0.06f),
-                        Color.Transparent,
-                    ),
-                ),
-            )
-            .border(
-                width = 1.dp,
-                brush = Brush.verticalGradient(listOf(palette.glassHighlightTop, palette.glassb)),
-                shape = pillShape,
-            )
+            .folioBrowsePressable { origin.open(onOpenPlayer) }
+            .folioMiniPlayerGlass(pillShape)
             .padding(start = 8.dp, end = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         FolioArtwork(
             track = track,
-            modifier = Modifier.size(48.dp),
-            shape = RoundedCornerShape(FolioRadii.CapsuleCover),
+            modifier = Modifier.size(48.dp).folioArtworkOrigin(origin),
+            shape = coverShape,
         )
         Column(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
-                .clip(RoundedCornerShape(16.dp))
-                .clickable(role = Role.Button, onClick = onOpenPlayer)
                 .padding(horizontal = 4.dp),
             verticalArrangement = Arrangement.Center,
         ) {
@@ -414,7 +417,7 @@ fun FolioMiniPlayerCapsule(
             modifier = Modifier
                 .size(48.dp)
                 .clip(CircleShape)
-                .clickable(role = Role.Button, onClick = onTogglePlayback),
+                .folioBrowsePressable(onClick = onTogglePlayback),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -436,21 +439,19 @@ fun FolioMiniPlayerDot(
 ) {
     val palette = LocalFolioPalette.current
     val tierSpec = LocalFolioTierSpec.current
+    val origin = rememberFolioArtworkOrigin(CircleShape)
     Box(
         modifier = modifier
             .size(tierSpec.ib)
             .clip(CircleShape)
-            .background(palette.accent)
-            .padding(2.dp)
-            .clip(CircleShape)
-            .background(palette.bg)
-            .padding(2.dp)
-            .clip(CircleShape)
-            .clickable(role = Role.Button, onClick = onOpenPlayer),
+            .folioBrowsePressable { origin.open(onOpenPlayer) }
+            .folioMiniPlayerGlass(CircleShape)
+            .border(1.dp, palette.accent.copy(alpha = 0.55f), CircleShape)
+            .padding(4.dp),
     ) {
         FolioArtwork(
             track = track,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().folioArtworkOrigin(origin),
             shape = CircleShape,
         )
     }
@@ -472,7 +473,7 @@ fun FolioCircleButton(
             .clip(CircleShape)
             .background(if (outlined) palette.rb else Color.Transparent)
             .then(if (outlined) Modifier.border(1.dp, palette.glassb, CircleShape) else Modifier)
-            .clickable(role = Role.Button, onClick = onClick),
+            .folioBrowsePressable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
@@ -509,7 +510,7 @@ fun FolioChip(
             .clip(shape)
             .background(bg)
             .then(if (!selected) Modifier.border(1.dp, palette.glassb, shape) else Modifier)
-            .clickable(role = Role.Tab, onClick = onClick)
+            .folioBrowsePressable(role = Role.Tab, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 7.dp),
         contentAlignment = Alignment.Center,
     ) {

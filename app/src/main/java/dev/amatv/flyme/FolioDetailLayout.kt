@@ -1,7 +1,7 @@
 package dev.amatv.flyme
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,13 +17,16 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -66,6 +69,7 @@ internal fun FolioDetailHeader(
     layout: FolioDetailLayout,
     meta: String?,
     playable: Boolean,
+    listState: LazyListState,
     onPlay: (Boolean) -> Unit,
     byline: (@Composable () -> Unit)? = null,
 ) {
@@ -73,6 +77,11 @@ internal fun FolioDetailHeader(
     val font = LocalFolioFontFamily.current
     val isArtist = item.catalogKind == CatalogKind.Artist
     val shape = if (isArtist) CircleShape else RoundedCornerShape(12.dp)
+    val cover = LocalFolioDetailCoverTransition.current
+    val spatial = LocalFolioBrowseMotion.current.spatial
+    if (cover != null && spatial) {
+        DisposableEffect(cover) { onDispose { cover.entry.header = null } }
+    }
 
     val description: @Composable () -> Unit = {
         Text(
@@ -97,7 +106,25 @@ internal fun FolioDetailHeader(
             horizontalArrangement = Arrangement.spacedBy(if (layout.buttonsBelowCover) 18.dp else 28.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
-            FolioArtwork(item, Modifier.size(layout.coverSize.dp).shadow(12.dp, shape), shape)
+            val coverSize = Modifier.size(layout.coverSize.dp)
+            val coverModifier = if (cover != null && spatial) {
+                with(cover) {
+                    coverSize
+                        .onGloballyPositioned { entry.header = it }
+                        .sharedCover()
+                        .graphicsLayer {
+                            val progress = if (listState.firstVisibleItemIndex == 0) {
+                                (listState.firstVisibleItemScrollOffset / layout.coverSize.dp.toPx())
+                                    .coerceIn(0f, 1f)
+                            } else 1f
+                            scaleX = 1f - 0.1f * progress
+                            scaleY = scaleX
+                            alpha = 1f - 0.4f * progress
+                            transformOrigin = TransformOrigin(0.5f, 0f)
+                        }
+                }
+            } else coverSize
+            FolioArtwork(item, coverModifier.shadow(12.dp, shape), shape)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 description()
                 if (!layout.buttonsBelowCover) {
@@ -121,7 +148,7 @@ private fun FolioDetailActions(enabled: Boolean, onPlay: (Boolean) -> Unit, modi
                 modifier = Modifier.weight(1f).height(48.dp)
                     .clip(CircleShape)
                     .background(background.copy(alpha = background.alpha * if (enabled) 1f else 0.45f))
-                    .clickable(enabled = enabled, role = Role.Button) { onPlay(shuffle) }
+                    .folioBrowsePressable(enabled = enabled) { onPlay(shuffle) }
                     .padding(horizontal = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,

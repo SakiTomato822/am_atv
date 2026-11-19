@@ -1,11 +1,11 @@
 package dev.amatv.flyme
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -16,7 +16,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -78,10 +77,11 @@ internal fun FolioCollectionDetail(
         ).joinToString(" · ")
     }
 
+    val listState = rememberLazyListState()
     BoxWithConstraints(Modifier.fillMaxSize().padding(start = spec.px, end = spec.pr)) {
         val gap = 14.dp
         val columns = adaptiveColumnCount(maxWidth, spec.gw, gap)
-        LazyColumn(contentPadding = PaddingValues(bottom = bottomPadding)) {
+        LazyColumn(state = listState, contentPadding = PaddingValues(bottom = bottomPadding)) {
             item(key = "header") {
                 val byline = collection.artist.ifBlank { linkedArtist?.title.orEmpty() }
                 FolioDetailHeader(
@@ -89,11 +89,12 @@ internal fun FolioCollectionDetail(
                     layout = layout,
                     meta = meta,
                     playable = songs.isNotEmpty(),
+                    listState = listState,
                     onPlay = { shuffle -> onPlayCollection(playbackCollection, songs, 0, shuffle) },
                     byline = {
                         if (album && byline.isNotBlank()) {
                             val open = if (linkedArtist != null) {
-                                Modifier.clickable(role = Role.Button) {
+                                Modifier.folioBrowsePressable {
                                     onOpenItem(linkedArtist, listOf(linkedArtist))
                                 }
                             } else Modifier

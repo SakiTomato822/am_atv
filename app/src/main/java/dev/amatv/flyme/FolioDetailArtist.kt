@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -102,9 +103,10 @@ internal fun FolioArtistDetail(
         scope.launch { more[shelfId] = loadFolioArtistShelf(services, href) }
     }
 
+    val listState = rememberLazyListState()
     BoxWithConstraints(Modifier.fillMaxSize().padding(start = spec.px, end = spec.pr)) {
         val columns = adaptiveColumnCount(maxWidth, spec.liw, spec.lstGap)
-        LazyColumn(contentPadding = PaddingValues(bottom = bottomPadding)) {
+        LazyColumn(state = listState, contentPadding = PaddingValues(bottom = bottomPadding)) {
             item(key = "header") {
                 val meta = if (page != null && (library == null || hasCatalog)) {
                     val songLabel = pluralStringResource(R.plurals.folio_detail_artist_songs, songs.size, songs.size)
@@ -116,6 +118,7 @@ internal fun FolioArtistDetail(
                     layout = layout,
                     meta = meta,
                     playable = songs.isNotEmpty(),
+                    listState = listState,
                     onPlay = { shuffle ->
                         val queue = if (shuffle) songs.shuffled() else songs
                         onOpenItem(queue.first(), queue)

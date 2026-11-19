@@ -1,6 +1,7 @@
 package dev.amatv.flyme
 
 import android.app.Activity
+import android.os.Build
 import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -11,7 +12,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -48,22 +48,26 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import dev.amatv.AmAtvApplication
 import dev.amatv.BuildConfig
 import dev.amatv.R
 import dev.amatv.core.PlaybackEvent
-import dev.amatv.data.MockCatalog
 import dev.amatv.i18n.AppText
 import dev.amatv.integration.AuthLaunchGate
 import dev.amatv.integration.MusicConnectionState
@@ -136,6 +140,7 @@ fun FolioApp(
     val playbackState by playbackStore.state.collectAsState()
     val queueState by playbackStore.queueController.state.collectAsState()
     val isLight = rememberFolioIsLight(settingsState)
+    val browseMotion = rememberFolioBrowseMotion(settingsState.lowPerformanceMode)
 
     LaunchedEffect(isLight) {
         onLightThemeChanged(isLight)
@@ -160,8 +165,13 @@ fun FolioApp(
     // B1b: the player sheet. B2: the detail stack (albums, playlists, artists). Both are UI state only.
     var playerOpen by remember { FolioPlayerSession.openState }
     var detailStack by FolioDetailSession.stack
-    val openPlayer = { playerOpen = true }
-    val openDetail: (Track) -> Unit = { detailStack = detailStack + it }
+    val browseNavigation = remember { FolioBrowseNavigation() }
+    DisposableEffect(browseNavigation) { onDispose { browseNavigation.root = null } }
+    var playerOrigin by remember { mutableStateOf<FolioArtworkOrigin?>(null) }
+    val openPlayer = {
+        playerOrigin = browseNavigation.clickedArtwork
+        playerOpen = true
+    }
 
     var toastMessage by remember { mutableStateOf<String?>(null) }
     var serviceMessage by remember { mutableStateOf<String?>(null) }
@@ -189,6 +199,40 @@ fun FolioApp(
         initialPage = initialPage,
         pageCount = { FolioRootPage.entries.size },
     )
+    var titleTransition by remember { mutableStateOf<FolioBrowseTabTransition?>(null) }
+    val selectedPage = titleTransition?.to ?: pagerState.currentPage
+
+    fun openDetail(item: Track) {
+        val origin = browseNavigation.clickedArtwork
+        val bounds = if (browseMotion.spatial) origin?.boundsIn(browseNavigation, selectedPage) else null
+        detailStack = detailStack + FolioDetailEntry(item, origin, bounds)
+    }
+
+    fun closeDetail() {
+        val entry = detailStack.last()
+        val header = entry.header
+        entry.returnBounds = if (browseMotion.spatial && header != null && header.isAttached &&
+            !header.boundsInWindow().isEmpty
+        ) {
+            entry.origin?.boundsIn(browseNavigation, selectedPage)
+        } else null
+        detailStack = popFolioDetail(detailStack)
+    }
+
+    fun selectTab(index: Int) {
+        if (titleTransition != null || index == pagerState.currentPage) return
+        if (!browseMotion.animated) {
+            pagerState.requestScrollToPage(index)
+            return
+        }
+        val transition = FolioBrowseTabTransition(pagerState.currentPage, index)
+        titleTransition = transition
+        scope.launch {
+            transition.progress.animateTo(1f, tween(180, easing = FolioMotion.PageEasing))
+            pagerState.scrollToPage(index)
+            titleTransition = null
+        }
+    }
     LaunchedEffect(pagerState.currentPage) {
         FolioUiSession.onPageChanged(pagerState.currentPage)
     }
@@ -211,7 +255,7 @@ fun FolioApp(
                     lyricsStore.onCacheCleared()
                     contentStore.onSignedIn()
                     serviceMessage = null
-                    scope.launch { pagerState.animateScrollToPage(FolioRootPage.Home.index) }
+                    selectTab(FolioRootPage.Home.index)
                 }
                 .onFailure {
                     val err = it.message ?: AppText.text(R.string.app_sign_in_failed)
@@ -274,12 +318,12 @@ fun FolioApp(
                     showToast(it)
                 }
                 PlaybackEvent.SignInRequired -> startSignIn()
-                PlaybackEvent.ShowNowPlaying -> playerOpen = true
+                PlaybackEvent.ShowNowPlaying -> openPlayer()
             }
         }
     }
 
-    val currentRootPage = FolioRootPage.entries[pagerState.currentPage]
+    val currentRootPage = FolioRootPage.entries[selectedPage]
     val activeDestination = currentRootPage.destination
     LaunchedEffect(activeDestination) {
         if (activeDestination != null) {
@@ -330,12 +374,7 @@ fun FolioApp(
         if (showAccount) {
             showAccount = false
         } else {
-            scope.launch {
-                pagerState.animateScrollToPage(
-                    FolioRootPage.Home.index,
-                    animationSpec = tween(FolioMotion.SLOW_MS, easing = FolioMotion.PageEasing),
-                )
-            }
+            selectTab(FolioRootPage.Home.index)
         }
     }
 
@@ -357,10 +396,13 @@ fun FolioApp(
             },
     ) {
         val systemDensity = LocalDensity.current
+        val layoutDirection = LocalLayoutDirection.current
+        val windowWidth = constraints.maxWidth
+        val windowHeight = constraints.maxHeight
         val renderDensity = folioRenderDensity(systemDensity.density)
         val (layoutWidthDp, layoutHeightDp) = folioLayoutDp(
-            windowWidthPx = constraints.maxWidth.toFloat(),
-            windowHeightPx = constraints.maxHeight.toFloat(),
+            windowWidthPx = windowWidth.toFloat(),
+            windowHeightPx = windowHeight.toFloat(),
             systemDensity = systemDensity.density,
         )
         val tier = tierOf(layoutWidthDp, layoutHeightDp)
@@ -368,6 +410,8 @@ fun FolioApp(
 
         CompositionLocalProvider(
             LocalDensity provides Density(renderDensity, systemDensity.fontScale),
+            LocalFolioBrowseMotion provides browseMotion,
+            LocalFolioBrowseNavigation provides browseNavigation,
         ) {
             val statusTop = maxOf(
                 WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
@@ -380,212 +424,221 @@ fun FolioApp(
                 tierSpec = tierSpec,
                 lowPerformanceMode = settingsState.lowPerformanceMode,
             ) {
-            val palette = LocalFolioPalette.current
-            val pageTitles = FolioRootPage.entries.map { stringResource(it.labelRes) }
-            val pageProgress = pagerState.currentPage + pagerState.currentPageOffsetFraction
-            val contentBottomPadding = navBottom + tierSpec.capsp + 28.dp
+                val palette = LocalFolioPalette.current
+                val pageTitles = FolioRootPage.entries.map { stringResource(it.labelRes) }
+                val contentBottomPadding = navBottom + tierSpec.capsp + 28.dp
+                val backdrop = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    !settingsState.lowPerformanceMode && playbackState.hasCurrentTrack
+                ) rememberLayerBackdrop() else null
 
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .folioAmbientBackground(palette),
-            ) {
-                Column(Modifier.fillMaxSize()) {
-                    // Top bar: statusBar + 12dp top, height = tierSpec.ib
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(
-                                start = tierSpec.px,
-                                end = tierSpec.pr,
-                                top = statusTop + 12.dp,
-                            )
-                            .height(tierSpec.ib),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                Box(Modifier.fillMaxSize()) {
+                    FolioDetailLayer(
+                        stack = detailStack,
+                        navigation = browseNavigation,
+                        modifier = Modifier.matchParentSize()
+                            .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)
+                            .folioAmbientBackground(palette),
+                        homeShelves = contentState.shelvesFor(Destination.Home),
+                        statusTop = statusTop,
+                        navBottom = navBottom,
+                        onOpenItem = ::openItem,
+                        onBack = ::closeDetail,
+                        services = services,
+                        playback = playbackState,
+                        onPlayCollection = playbackStore::playCollection,
+                        handleBack = !playerOpen && !showAccount,
                     ) {
-                        FolioCircleButton(
-                            icon = Icons.Rounded.Person,
-                            contentDescription = stringResource(R.string.app_account),
-                            onClick = { showAccount = true },
-                        )
-                        if (!tierSpec.usesBottomCapsule && playbackState.hasCurrentTrack) {
+                        Column(Modifier.fillMaxSize()) {
+                            // Top bar: statusBar + 12dp top, height = tierSpec.ib
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(
+                                        start = tierSpec.px,
+                                        end = tierSpec.pr,
+                                        top = statusTop + 12.dp,
+                                    )
+                                    .height(tierSpec.ib),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                FolioCircleButton(
+                                    icon = Icons.Rounded.Person,
+                                    contentDescription = stringResource(R.string.app_account),
+                                    onClick = { showAccount = true },
+                                )
+                            }
+
+                            Spacer(Modifier.height(10.dp))
+
+                            // Metro Pivot header
+                            FolioPivotBar(
+                                titles = pageTitles,
+                                pageProgress = titleTransition?.let {
+                                    it.from + (it.to - it.from) * it.progress.value
+                                } ?: (pagerState.currentPage + pagerState.currentPageOffsetFraction),
+                                selectedPage = selectedPage,
+                                onSelectPage = ::selectTab,
+                            )
+
+                            // Horizontal Pager for Settings / Home / Browse / Library / Search
+                            HorizontalPager(
+                                state = pagerState,
+                                beyondViewportPageCount = maxOf(1, titleTransition?.distance ?: 0),
+                                userScrollEnabled = titleTransition == null,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .graphicsLayer {
+                                        val frac = abs(pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
+                                        alpha = if (titleTransition == null) 1f - frac * 0.35f else 1f
+                                    },
+                            ) { pageIdx ->
+                                val switch = titleTransition
+                                Box(
+                                    Modifier.fillMaxSize().then(
+                                        switch?.pageModifier(pageIdx, layoutDirection) {
+                                            pagerState.currentPage + pagerState.currentPageOffsetFraction
+                                        } ?: Modifier,
+                                    ).zIndex(if (pageIdx == selectedPage) 1f else 0f),
+                                ) {
+                                    CompositionLocalProvider(LocalFolioBrowseTab provides pageIdx) {
+                                        when (FolioRootPage.entries[pageIdx]) {
+                                            FolioRootPage.Settings -> FolioSettingsPage(
+                                                settingsStore = settingsStore,
+                                                settings = settingsState,
+                                                services = services,
+                                                bottomPadding = contentBottomPadding,
+                                                onNotice = ::showToast,
+                                            )
+                                            FolioRootPage.Home -> FolioHomePage(
+                                                contentState = contentState,
+                                                connectionState = accountState.connectionState,
+                                                statusMessage = serviceMessage ?: services.setupMessage,
+                                                bottomPadding = contentBottomPadding,
+                                                onRetry = ::refreshAll,
+                                                onSignIn = ::startSignIn,
+                                                onOpenItem = ::openItem,
+                                            )
+                                            FolioRootPage.Browse -> FolioBrowsePage(
+                                                contentState = contentState,
+                                                connectionState = accountState.connectionState,
+                                                statusMessage = serviceMessage ?: services.setupMessage,
+                                                bottomPadding = contentBottomPadding,
+                                                onRetry = ::refreshAll,
+                                                onSignIn = ::startSignIn,
+                                                onOpenItem = ::openItem,
+                                            )
+                                            FolioRootPage.Library -> FolioLibraryPage(
+                                                contentState = contentState,
+                                                active = activeDestination == Destination.Library,
+                                                connectionState = accountState.connectionState,
+                                                currentTrack = playbackState.track,
+                                                isPlaying = playbackState.playWhenReady,
+                                                bottomPadding = contentBottomPadding,
+                                                onSignIn = ::startSignIn,
+                                                onLoadMoreShelf = { shelfId ->
+                                                    contentStore.loadMoreLibraryShelf(shelfId, accountState.connectionState)
+                                                },
+                                                onOpenItem = ::openItem,
+                                            )
+                                            FolioRootPage.Search -> FolioSearchPage(
+                                                currentTrack = playbackState.track,
+                                                isPlaying = playbackState.playWhenReady,
+                                                bottomPadding = contentBottomPadding,
+                                                search = services::search,
+                                                onOpenItem = ::openItem,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    CompositionLocalProvider(LocalFolioBrowseBackdrop provides backdrop) {
+                        if (playbackState.hasCurrentTrack && !tierSpec.usesBottomCapsule) {
                             FolioMiniPlayerDot(
                                 track = playbackState.track,
                                 onOpenPlayer = openPlayer,
+                                modifier = Modifier.align(Alignment.TopEnd)
+                                    .padding(top = statusTop + folioDetailTopMargin, end = tierSpec.pr),
                             )
-                        } else {
-                            Spacer(Modifier.height(tierSpec.ib))
+                        } else if (playbackState.hasCurrentTrack) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .fillMaxWidth()
+                                    .padding(
+                                        start = tierSpec.px,
+                                        end = tierSpec.pr,
+                                        bottom = navBottom + 14.dp,
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                FolioMiniPlayerCapsule(
+                                    track = playbackState.track.let {
+                                        if (miniSubtitle != null) it.copy(artist = miniSubtitle) else it
+                                    },
+                                    isPlaying = playbackState.playWhenReady,
+                                    onTogglePlayback = playbackStore::togglePlayback,
+                                    onOpenPlayer = openPlayer,
+                                )
+                            }
                         }
                     }
 
-                    Spacer(Modifier.height(10.dp))
-
-                    // Metro Pivot header
-                    FolioPivotBar(
-                        titles = pageTitles,
-                        pageProgress = pageProgress,
-                        selectedPage = pagerState.currentPage,
-                        onSelectPage = { idx ->
-                            scope.launch {
-                                pagerState.animateScrollToPage(
-                                    idx,
-                                    animationSpec = tween(FolioMotion.SLOW_MS, easing = FolioMotion.PageEasing),
-                                )
-                            }
+                    FolioBrowsePlayerEntrance(
+                        open = playerOpen,
+                        hasCurrentTrack = playbackState.hasCurrentTrack,
+                        origin = playerOrigin?.boundsIn(browseNavigation, selectedPage),
+                        windowWidth = windowWidth,
+                        windowHeight = windowHeight,
+                        statusTop = statusTop,
+                        navBottom = navBottom,
+                        onClose = { playerOpen = false },
+                        onOpenDetail = { item ->
+                            playerOpen = false
+                            openDetail(item)
                         },
                     )
 
-                    // Horizontal Pager for Settings / Home / Browse / Library / Search
-                    HorizontalPager(
-                        state = pagerState,
-                        beyondViewportPageCount = 1,
+                    // Account overlay panel
+                    FolioAccountOverlay(
+                        visible = showAccount,
+                        connectionState = accountState.connectionState,
+                        setupMessage = serviceMessage ?: services.setupMessage,
+                        statusTop = statusTop,
+                        navBottom = navBottom,
+                        onClose = { showAccount = false },
+                        onSignIn = ::startSignIn,
+                        onSignOut = ::signOut,
+                        onRefresh = ::refreshAll,
+                    )
+
+                    // Bottom transient toast matching `.toast` in H5
+                    AnimatedVisibility(
+                        visible = toastMessage != null,
+                        enter = fadeIn(tween(FolioMotion.FAST_MS)),
+                        exit = fadeOut(tween(FolioMotion.FAST_MS)),
                         modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .graphicsLayer {
-                                val frac = abs(pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
-                                alpha = 1f - frac * 0.35f
-                            },
-                    ) { pageIdx ->
-                        when (FolioRootPage.entries[pageIdx]) {
-                            FolioRootPage.Settings -> FolioSettingsPage(
-                                settingsStore = settingsStore,
-                                settings = settingsState,
-                                services = services,
-                                bottomPadding = contentBottomPadding,
-                                onNotice = ::showToast,
-                            )
-                            FolioRootPage.Home -> FolioHomePage(
-                                contentState = contentState,
-                                connectionState = accountState.connectionState,
-                                statusMessage = serviceMessage ?: services.setupMessage,
-                                bottomPadding = contentBottomPadding,
-                                onRetry = ::refreshAll,
-                                onSignIn = ::startSignIn,
-                                onOpenItem = ::openItem,
-                            )
-                            FolioRootPage.Browse -> FolioBrowsePage(
-                                contentState = contentState,
-                                connectionState = accountState.connectionState,
-                                statusMessage = serviceMessage ?: services.setupMessage,
-                                bottomPadding = contentBottomPadding,
-                                onRetry = ::refreshAll,
-                                onSignIn = ::startSignIn,
-                                onOpenItem = ::openItem,
-                            )
-                            FolioRootPage.Library -> FolioLibraryPage(
-                                contentState = contentState,
-                                active = activeDestination == Destination.Library,
-                                connectionState = accountState.connectionState,
-                                currentTrack = playbackState.track,
-                                isPlaying = playbackState.playWhenReady,
-                                bottomPadding = contentBottomPadding,
-                                onSignIn = ::startSignIn,
-                                onLoadMoreShelf = { shelfId ->
-                                    contentStore.loadMoreLibraryShelf(shelfId, accountState.connectionState)
-                                },
-                                onOpenItem = ::openItem,
-                            )
-                            FolioRootPage.Search -> FolioSearchPage(
-                                currentTrack = playbackState.track,
-                                isPlaying = playbackState.playWhenReady,
-                                bottomPadding = contentBottomPadding,
-                                search = services::search,
-                                onOpenItem = ::openItem,
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = navBottom + tierSpec.capsp + 24.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.Black.copy(alpha = 0.80f))
+                                .padding(horizontal = 14.dp, vertical = 9.dp),
+                        ) {
+                            Text(
+                                text = toastMessage.orEmpty(),
+                                color = Color.White,
+                                fontSize = 14.sp,
                             )
                         }
                     }
                 }
-
-                // B2 fills this layer: detail pages stacked over the pager, under the capsule and the player.
-                FolioDetailLayer(
-                    stack = detailStack,
-                    homeShelves = contentState.shelvesFor(Destination.Home),
-                    statusTop = statusTop,
-                    navBottom = navBottom,
-                    onOpenItem = ::openItem,
-                    onBack = { detailStack = popFolioDetail(detailStack) },
-                    services = services,
-                    playback = playbackState,
-                    onPlayCollection = playbackStore::playCollection,
-                    onOpenPlayer = openPlayer,
-                    handleBack = !playerOpen && !showAccount,
-                )
-
-                // Bottom floating glass capsule on Narrow / Short / Medium tiers
-                if (tierSpec.usesBottomCapsule && playbackState.hasCurrentTrack) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .padding(
-                                start = tierSpec.px,
-                                end = tierSpec.pr,
-                                bottom = navBottom + 14.dp,
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        FolioMiniPlayerCapsule(
-                            track = playbackState.track.let {
-                                if (miniSubtitle != null) it.copy(artist = miniSubtitle) else it
-                            },
-                            isPlaying = playbackState.playWhenReady,
-                            onTogglePlayback = playbackStore::togglePlayback,
-                            onOpenPlayer = openPlayer,
-                        )
-                    }
-                }
-
-                // B1b fills this layer: the player, above everything except the account panel and toasts.
-                FolioPlayerLayer(
-                    open = playerOpen,
-                    statusTop = statusTop,
-                    navBottom = navBottom,
-                    onClose = { playerOpen = false },
-                    onOpenDetail = { item ->
-                        playerOpen = false
-                        openDetail(item)
-                    },
-                )
-
-                // Account overlay panel
-                FolioAccountOverlay(
-                    visible = showAccount,
-                    connectionState = accountState.connectionState,
-                    setupMessage = serviceMessage ?: services.setupMessage,
-                    statusTop = statusTop,
-                    navBottom = navBottom,
-                    onClose = { showAccount = false },
-                    onSignIn = ::startSignIn,
-                    onSignOut = ::signOut,
-                    onRefresh = ::refreshAll,
-                )
-
-                // Bottom transient toast matching `.toast` in H5
-                AnimatedVisibility(
-                    visible = toastMessage != null,
-                    enter = fadeIn(tween(FolioMotion.FAST_MS)),
-                    exit = fadeOut(tween(FolioMotion.FAST_MS)),
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = navBottom + tierSpec.capsp + 24.dp),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color.Black.copy(alpha = 0.80f))
-                            .padding(horizontal = 14.dp, vertical = 9.dp),
-                    ) {
-                        Text(
-                            text = toastMessage.orEmpty(),
-                            color = Color.White,
-                            fontSize = 14.sp,
-                        )
-                    }
-                }
             }
-        }
         }
     }
 }
