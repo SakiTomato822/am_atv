@@ -16,5 +16,11 @@
     <string name="folio_player_queue_similar">相似歌曲</string>
     <string name="folio_player_queue_loading">正在为你挑选相似歌曲…</string>
     <string name="folio_player_queue_empty">暂无后续播放曲目</string>
+    <string name="folio_player_queue_clear">清空</string>
+    <string name="folio_player_queue_clear_confirm">确认清空？</string>
+    <string name="folio_player_offset_title">歌词偏移</string>
+    <string name="folio_player_offset_advance">歌词提前 %1$d 毫秒</string>
+    <string name="folio_player_offset_delay">歌词延后 %1$d 毫秒</string>
+    <string name="folio_player_offset_unadjusted">未调整</string>
     <string name="folio_player_controls_expand">展开播放控制</string>
 </resources>

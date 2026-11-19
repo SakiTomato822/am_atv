@@ -1474,11 +1474,13 @@ internal fun FolioLyricsDisplaySettingsOverlay(
     enhancementsReady: Boolean,
     enhancementsFailed: Boolean,
     lyricTextSize: LyricTextSize,
+    lyricOffsetMs: Long,
     onTranslationChange: (Boolean) -> Unit,
     onPronunciationChange: (Boolean) -> Unit,
     onTranslationLanguageChange: (String) -> Unit,
     onPronunciationLanguageChange: (String) -> Unit,
     onLyricTextSizeChange: (LyricTextSize) -> Unit,
+    onLyricOffsetChange: (Long) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var languagePicker by remember { mutableStateOf<FolioLyricsLanguagePicker?>(null) }
@@ -1659,6 +1661,16 @@ internal fun FolioLyricsDisplaySettingsOverlay(
                             bg = rowBg,
                             shape = rowShape,
                             onClick = { onLyricTextSizeChange(lyricTextSize.next()) },
+                        )
+
+                        FolioLyricsOffsetRow(
+                            lyricOffsetMs = lyricOffsetMs,
+                            fg = fg,
+                            fg2 = fg2,
+                            rowBg = rowBg,
+                            chipBg = pillInactiveBg,
+                            rowShape = rowShape,
+                            onLyricOffsetChange = onLyricOffsetChange,
                         )
 
                         Row(
@@ -1918,5 +1930,118 @@ private fun FolioLyricsChoiceRow(
                 modifier = Modifier.size(18.dp),
             )
         }
+    }
+}
+
+@Composable
+private fun FolioLyricsOffsetRow(
+    lyricOffsetMs: Long,
+    fg: Color,
+    fg2: Color,
+    rowBg: Color,
+    chipBg: Color,
+    rowShape: Shape,
+    onLyricOffsetChange: (Long) -> Unit,
+) {
+    val fontFamily = LocalFolioFontFamily.current
+    val statusText = formatFolioLyricOffsetLabel(
+        offsetMs = lyricOffsetMs,
+        advanceFormat = stringResource(R.string.folio_player_offset_advance),
+        delayFormat = stringResource(R.string.folio_player_offset_delay),
+        unadjustedLabel = stringResource(R.string.folio_player_offset_unadjusted),
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(rowShape)
+            .background(rowBg)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.folio_player_offset_title),
+                color = fg,
+                fontFamily = fontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = 15.sp,
+            )
+            Text(
+                text = statusText,
+                color = if (lyricOffsetMs == 0L) fg2 else fg,
+                fontFamily = fontFamily,
+                fontWeight = if (lyricOffsetMs == 0L) FontWeight.Normal else FontWeight.SemiBold,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 12.dp),
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val steps = listOf(-100L to "-100", -50L to "-50", 50L to "+50", 100L to "+100")
+            steps.forEach { (delta, label) ->
+                val enabled = if (delta < 0L) {
+                    lyricOffsetMs > FOLIO_LYRIC_OFFSET_MIN_MS
+                } else {
+                    lyricOffsetMs < FOLIO_LYRIC_OFFSET_MAX_MS
+                }
+                FolioOffsetStepButton(
+                    label = label,
+                    enabled = enabled,
+                    fg = fg,
+                    bg = chipBg,
+                    onClick = { onLyricOffsetChange(adjustFolioLyricOffsetMs(lyricOffsetMs, delta)) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            FolioOffsetStepButton(
+                label = stringResource(R.string.browse_reset),
+                enabled = lyricOffsetMs != 0L,
+                fg = fg,
+                bg = chipBg,
+                onClick = { onLyricOffsetChange(0L) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun FolioOffsetStepButton(
+    label: String,
+    enabled: Boolean,
+    fg: Color,
+    bg: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val fontFamily = LocalFolioFontFamily.current
+    Box(
+        modifier = modifier
+            .height(34.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(bg.copy(alpha = if (enabled) bg.alpha else bg.alpha * 0.45f))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = fg.copy(alpha = if (enabled) 1f else 0.36f),
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
