@@ -175,6 +175,14 @@ internal fun Track.toSessionJson() = JSONObject()
     .put("resourceId", resourceId)
     .put("resourceType", resourceType)
     .put("artworkUrl", artworkUrl)
+    .put("artworkColors", artworkColors?.let { colors ->
+        JSONObject()
+            .put("bgColor", colors.bgColor)
+            .put("textColor1", colors.textColor1)
+            .put("textColor2", colors.textColor2)
+            .put("textColor3", colors.textColor3)
+            .put("textColor4", colors.textColor4)
+    })
     .put("motionArtworkUrl", motionArtworkUrl)
     .put("motionPreviewUrl", motionPreviewUrl)
     .put("explicit", isExplicit)
@@ -196,6 +204,7 @@ internal fun JSONObject.toSessionTrack(): Track {
         resourceId = optString("resourceId").takeIf { it.isNotBlank() && it != "null" },
         resourceType = optString("resourceType").takeIf { it.isNotBlank() && it != "null" },
         artworkUrl = optionalString("artworkUrl"),
+        artworkColors = optJSONObject("artworkColors")?.toAppleArtworkColors(),
         motionArtworkUrl = optionalString("motionArtworkUrl"),
         motionPreviewUrl = optionalString("motionPreviewUrl"),
         // Queue indices belong to one MusicKit process and cannot survive a cold start.

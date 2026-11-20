@@ -980,6 +980,8 @@ class MusicKitBridge(private val context: Context) {
             resourceId = fallback?.resourceId,
             resourceType = fallback?.resourceType,
             artworkUrl = artwork?.takeIf { it.startsWith("https://") } ?: fallback?.artworkUrl,
+            artworkColors = fallback?.takeIf { storeId == null || it.catalogId == storeId }?.artworkColors
+                ?: lookahead?.takeIf { storeId != null && it.catalogId == storeId }?.artworkColors,
             playbackQueueId = queueItem.callOrNull("getPlaybackQueueId") as? Long,
         )
     }

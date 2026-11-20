@@ -50,10 +50,19 @@ data class Track(
     val isExplicit: Boolean = false,
     /** Why a Top Picks card is there ("Made for You", "New Release"...). */
     val pickReason: String? = null,
+    val artworkColors: AppleArtworkColors? = null,
 ) {
     /** Catalog identity survives MusicKit's different browse and now-playing wrapper ids. */
     fun lyricsIdentity(): String = catalogId?.takeIf(String::isNotBlank) ?: id
 }
+
+data class AppleArtworkColors(
+    val bgColor: String? = null,
+    val textColor1: String? = null,
+    val textColor2: String? = null,
+    val textColor3: String? = null,
+    val textColor4: String? = null,
+)
 
 /**
  * Compares two projections of the same live playback-queue entry.

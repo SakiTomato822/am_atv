@@ -1,5 +1,6 @@
 package dev.amatv.integration
 
+import dev.amatv.model.AppleArtworkColors
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.Track
@@ -20,13 +21,15 @@ class DetailSnapshotsTest {
         val directory = temporary.newFolder()
         val store = DetailSnapshots(directory)
         val scope = DetailSnapshots.scope("test-token-first", "tw")
-        val items = listOf(track, track)
+        val colors = AppleArtworkColors(bgColor = "112233", textColor1 = "abcdef")
+        val items = listOf(track.copy(artworkColors = colors), track)
         store.write(store.revision(), scope, "tracks/playlist", encodeDetailTracks(items))
 
         val reopened = DetailSnapshots(directory)
         val restored = reopened.read(scope, "tracks/playlist", ::decodeDetailTracks)
         assertEquals(listOf("i.saved", "i.saved"), restored?.map { it.resourceId })
         assertEquals(listOf("42", "42"), restored?.map { it.catalogId })
+        assertEquals(listOf(colors, null), restored?.map { it.artworkColors })
         assertNull(reopened.read(DetailSnapshots.scope("test-token-second", "tw"), "tracks/playlist", ::decodeDetailTracks))
         assertNull(reopened.read(DetailSnapshots.scope("test-token-first", "us"), "tracks/playlist", ::decodeDetailTracks))
         assertFalse(directory.listFiles()!!.single().readText().contains("test-token-first"))

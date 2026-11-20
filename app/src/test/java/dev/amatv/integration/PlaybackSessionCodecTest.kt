@@ -1,5 +1,6 @@
 package dev.amatv.integration
 
+import dev.amatv.model.AppleArtworkColors
 import dev.amatv.model.Destination
 import dev.amatv.model.Track
 import dev.amatv.model.LyricLine
@@ -79,6 +80,13 @@ class PlaybackSessionCodecTest {
         assertEquals(3, restored.queue.size)
     }
 
+    @Test fun artworkColorsRoundTripWithTheSession() {
+        val colors = AppleArtworkColors("102030", "abcdef", "334455", "eeaa00", "010203")
+        val original = session(1).copy(queue = listOf(track("1").copy(artworkColors = colors)))
+        val restored = PlaybackSessionCodec.decode(PlaybackSessionCodec.encode(original))!!
+        assertEquals(colors, restored.queue.single().artworkColors)
+    }
+
     @Test fun versionOneMigrationPreservesValidQueueAndAssignsAppEntryIds() {
         val old = JSONObject().put("version", 1)
             .put("queue", org.json.JSONArray(listOf(track("1").toSessionJson(), track("1").toSessionJson())))
@@ -88,5 +96,6 @@ class PlaybackSessionCodecTest {
         assertEquals(1, restored.currentIndex)
         assertEquals(45_000L, restored.positionMs)
         assertEquals(setOf(1L), restored.playedEntryIds)
+        assertNull(restored.queue.first().artworkColors)
     }
 }

@@ -1,6 +1,7 @@
 package dev.amatv.integration
 
 import androidx.compose.ui.graphics.Color
+import dev.amatv.model.AppleArtworkColors
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.Track
@@ -15,6 +16,7 @@ class ShelfSnapshotCodecTest {
             durationMs = 1L, palette = listOf(Color(0xFF112233)), lyrics = emptyList(),
             catalogId = "pl.1", catalogKind = CatalogKind.Playlist, artworkUrl = "https://example.com/a.jpg",
             pickReason = "Made for You",
+            artworkColors = AppleArtworkColors(bgColor = "123456", textColor4 = "e2a001"),
         )
         val song = Track(
             id = "1", title = "Song", artist = "Artist", album = "Album", durationMs = 200_000L,

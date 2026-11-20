@@ -1,5 +1,6 @@
 package dev.amatv.integration
 
+import dev.amatv.model.AppleArtworkColors
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
 import kotlinx.coroutines.runBlocking
@@ -17,6 +18,37 @@ class AppleMusicStationTest {
         id = "apple:$id", title = "Song $id", artist = "Artist", album = "Album",
         durationMs = 200_000L, palette = emptyList(), lyrics = emptyList(), catalogId = id,
     )
+
+    @Test fun catalogArtworkParsesSixDigitHexColors() {
+        val root = JSONObject("""
+            {"data":[{"id":"101","type":"songs","attributes":{
+              "name":"Song","artistName":"Artist","albumName":"Album",
+              "artwork":{"bgColor":"102030","textColor1":"aBcDeF","textColor2":"334455",
+                         "textColor3":"eeAA00","textColor4":"010203"}
+            }}]}
+        """.trimIndent())
+        assertEquals(
+            AppleArtworkColors("102030", "aBcDeF", "334455", "eeAA00", "010203"),
+            api.parseStationTracks(root).single().artworkColors,
+        )
+    }
+
+    @Test fun missingAndMalformedArtworkColorsAreAbsent() {
+        val root = JSONObject("""
+            {"data":[
+              {"id":"101","type":"songs","attributes":{"name":"Bare","artistName":"Artist","albumName":"Album"}},
+              {"id":"102","type":"songs","attributes":{"name":"Invalid","artistName":"Artist","albumName":"Album",
+                  "artwork":{"bgColor":"#102030","textColor1":"12345","textColor2":"1234567",
+                             "textColor3":"xyzxyz","textColor4":123456}}},
+              {"id":"103","type":"songs","attributes":{"name":"Partial","artistName":"Artist","albumName":"Album",
+                  "artwork":{"textColor2":"2468ac"}}}
+            ]}
+        """.trimIndent())
+        assertEquals(
+            listOf(null, null, AppleArtworkColors(textColor2 = "2468ac")),
+            api.parseStationTracks(root).map { it.artworkColors },
+        )
+    }
 
     @Test fun stationContainerIsSkippedButItsSongRelationshipIsExpanded() {
         val root = JSONObject("""

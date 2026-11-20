@@ -6,6 +6,7 @@ import dev.amatv.i18n.AppText
 import android.util.Log
 import androidx.compose.ui.graphics.Color
 import dev.amatv.BuildConfig
+import dev.amatv.model.AppleArtworkColors
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.Track
@@ -951,8 +952,9 @@ class AppleMusicApi(
                 }
             }
         }
-        val artwork = (optJSONObject("artwork")?.optString("url")
-            ?: catalogAttrs?.optJSONObject("artwork")?.optString("url"))
+        val localArtwork = optJSONObject("artwork")
+        val catalogArtwork = catalogAttrs?.optJSONObject("artwork")
+        val artwork = (localArtwork?.optString("url") ?: catalogArtwork?.optString("url"))
             ?.asArtworkUrl()
 
         // Skip unplayable unmatched iCloud Music Library local stub containers
@@ -1003,6 +1005,8 @@ class AppleMusicApi(
             catalogId = resolvedCatalogId,
             catalogKind = kind,
             artworkUrl = artwork,
+            artworkColors = localArtwork?.toAppleArtworkColors(catalogArtwork)
+                ?: catalogArtwork?.toAppleArtworkColors(),
             motionArtworkUrl = motion?.videoUrl,
             motionPreviewUrl = motion?.previewUrl,
             resourceId = id,
@@ -1141,6 +1145,24 @@ private val ARTIST_VIEWS = listOf(
     "appears-on-albums" to R.string.artist_appears_on,
     "similar-artists" to R.string.artist_similar,
 )
+
+private val appleArtworkHex = Regex("[0-9a-fA-F]{6}")
+
+internal fun JSONObject.toAppleArtworkColors(fallback: JSONObject? = null): AppleArtworkColors? {
+    fun JSONObject.hex(key: String): String? =
+        (opt(key) as? String)?.takeIf(appleArtworkHex::matches)
+
+    fun color(key: String): String? = hex(key) ?: fallback?.hex(key)
+
+    val colors = AppleArtworkColors(
+        bgColor = color("bgColor"),
+        textColor1 = color("textColor1"),
+        textColor2 = color("textColor2"),
+        textColor3 = color("textColor3"),
+        textColor4 = color("textColor4"),
+    )
+    return colors.takeUnless { it == AppleArtworkColors() }
+}
 
 internal fun parseUserStorefrontId(root: JSONObject): String? = root.optJSONArray("data")
     ?.optJSONObject(0)
