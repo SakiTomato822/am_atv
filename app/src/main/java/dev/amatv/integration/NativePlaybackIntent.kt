@@ -54,6 +54,7 @@ internal class NativePlaybackIntent {
     private var lastPlayingPosition = 0L
     private var lastPlayingDuration = 0L
     private var completionCandidateAt: Long? = null
+    internal val inferredEndAtMs: Long? get() = completionCandidateAt
 
     fun begin(catalogId: String?, positionMs: Long, playWhenReady: Boolean, nowMs: Long) {
         this.catalogId = catalogId

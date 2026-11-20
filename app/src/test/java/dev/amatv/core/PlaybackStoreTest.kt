@@ -190,6 +190,7 @@ class PlaybackStoreTest {
             track: Track,
             positionMs: Long,
             playWhenReady: Boolean,
+            transition: dev.amatv.integration.GaplessTransition?,
         ): Long {
             prepareCalls += Triple(track, positionMs, playWhenReady)
             prepareGate?.await()
@@ -217,12 +218,12 @@ class PlaybackStoreTest {
             skipPreviousCalls++
         }
 
-        override suspend fun playQueuedSong(track: Track): Long? {
+        override suspend fun playQueuedSong(track: Track, transition: dev.amatv.integration.GaplessTransition?): Long? {
             queuedSongCalls += track.catalogId
             return if (track.catalogId in nativeQueueSongs) nextGeneration++ else null
         }
 
-        override fun setLookahead(next: Track?) {
+        override fun setLookahead(next: Track?, transition: dev.amatv.integration.GaplessTransition?) {
             currentLookahead = next
             lookaheadHistory += next
         }

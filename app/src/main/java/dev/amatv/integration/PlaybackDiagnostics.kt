@@ -10,6 +10,8 @@ import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 
 data class PlaybackDiagnosticEntry(val timeMs: Long, val text: String) {
     val clock: String get() = SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(Date(timeMs))
@@ -22,8 +24,25 @@ data class PlaybackDiagnosticEntry(val timeMs: Long, val text: String) {
  */
 class PlaybackDiagnostics private constructor(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences("am_atv_playback_diagnostics", Context.MODE_PRIVATE)
-    private val mutableEntries = MutableStateFlow(load())
+    private val mutableEntries = MutableStateFlow(load(KEY))
     val entries: StateFlow<List<PlaybackDiagnosticEntry>> = mutableEntries.asStateFlow()
+    private val mutableGaplessEntries = MutableStateFlow(load(GAPLESS_KEY))
+    val gaplessEntries: StateFlow<List<PlaybackDiagnosticEntry>> = mutableGaplessEntries.asStateFlow()
+    private val processId = UUID.randomUUID().toString().take(8)
+    private val transitionCounter = AtomicLong()
+    @Volatile internal var lastGaplessEnd: GaplessEnd? = null
+
+    internal fun newTransition(generation: Long, entryId: Long?, nowMs: Long) =
+        GaplessTransition(generation, entryId, "$processId-${transitionCounter.incrementAndGet()}", nowMs)
+
+    @Synchronized
+    internal fun recordGapless(summary: String) {
+        Log.i("AMATV-Gapless", summary)
+        val entry = PlaybackDiagnosticEntry(System.currentTimeMillis(), summary)
+        val next = (listOf(entry) + mutableGaplessEntries.value).take(MAX_ENTRIES)
+        mutableGaplessEntries.value = next
+        preferences.edit().putString(GAPLESS_KEY, encode(next)).apply()
+    }
 
     fun record(text: String, timeMs: Long = System.currentTimeMillis()) {
         synchronized(this) {
@@ -48,8 +67,8 @@ class PlaybackDiagnostics private constructor(context: Context) {
         }
     }
 
-    private fun load(): List<PlaybackDiagnosticEntry> = runCatching {
-        val array = JSONArray(preferences.getString(KEY, null) ?: return emptyList())
+    private fun load(key: String): List<PlaybackDiagnosticEntry> = runCatching {
+        val array = JSONArray(preferences.getString(key, null) ?: return emptyList())
         (0 until array.length()).map { index ->
             val item = array.getJSONObject(index)
             PlaybackDiagnosticEntry(item.getLong("time"), item.getString("text"))
@@ -63,6 +82,7 @@ class PlaybackDiagnostics private constructor(context: Context) {
     companion object {
         private const val TAG = "AMATV-PlaybackDiagnostics"
         private const val KEY = "entries"
+        private const val GAPLESS_KEY = "gapless_entries"
         private const val MAX_ENTRIES = 30
 
         @Volatile private var instance: PlaybackDiagnostics? = null

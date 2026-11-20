@@ -1,5 +1,6 @@
 package dev.amatv.core
 
+import dev.amatv.integration.GaplessTransition
 import dev.amatv.integration.PlaybackMediaSession
 import dev.amatv.integration.PlaybackSession
 import dev.amatv.integration.PlaybackSnapshot
@@ -15,14 +16,15 @@ interface PlayerOperations : RecommendationProvider {
         track: Track,
         positionMs: Long = 0L,
         playWhenReady: Boolean = true,
+        transition: GaplessTransition? = null,
     ): Long
     fun play()
     fun pause()
     fun seekTo(positionMs: Long)
     fun skipToNext()
     fun skipToPrevious()
-    suspend fun playQueuedSong(track: Track): Long?
-    fun setLookahead(next: Track?)
+    suspend fun playQueuedSong(track: Track, transition: GaplessTransition? = null): Long?
+    fun setLookahead(next: Track?, transition: GaplessTransition? = null)
     fun setFadeEnabled(enabled: Boolean)
     suspend fun stationSongs(stationId: String): List<Track>
     suspend fun prefetchLibraryDetails()

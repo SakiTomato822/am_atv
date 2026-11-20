@@ -4,7 +4,12 @@ import dev.amatv.BuildConfig
 import dev.amatv.R
 import dev.amatv.data.MockCatalog
 import dev.amatv.i18n.AppText
+import dev.amatv.integration.GaplessEnd
+import dev.amatv.integration.GaplessPath
+import dev.amatv.integration.GaplessStage
+import dev.amatv.integration.GaplessTransition
 import dev.amatv.integration.MusicConnectionState
+import dev.amatv.integration.PlaybackDiagnostics
 import dev.amatv.integration.PlaybackFailureKind
 import dev.amatv.integration.PlaybackMediaSession
 import dev.amatv.integration.PlaybackRepeatMode
@@ -86,6 +91,7 @@ class PlaybackStore(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val flymeAuto: Boolean = BuildConfig.FLYME_AUTO,
     private val delayFn: suspend (Long) -> Unit = { delay(it) },
+    private val diagnostics: PlaybackDiagnostics? = null,
 ) {
     private val startupCheckpoint: PlaybackSession? =
         sessions.restoreCheckpointSession()?.copy(wasPlaying = false)
@@ -137,12 +143,15 @@ class PlaybackStore(
     private var networkRetryCount = 0
     private var lastPlaybackNotice: String? = null
     private var gaplessLookahead: Pair<Long, Track>? = null
+    private var lookaheadTiming: GaplessTransition? = null
+    private var naturalEndTiming: GaplessEnd? = null
     private var adoptingGaplessEntryId: Long? = null
     private var navigatingQueue = false
     private var advancingEndedTrackId: String? = null
     private var pendingRestore: PlaybackSession? =
         startupCheckpoint?.takeIf { initialTrack.catalogId != null }
     private var playbackRequestJob: Job? = null
+    private var requestTiming: GaplessTransition? = null
     private var selectionGeneration = 0L
     private var pendingRequestedSongCatalogId: String? = null
     private var rawSystemSnapshot: PlaybackSnapshot? = null
@@ -379,15 +388,20 @@ class PlaybackStore(
                             return@collectLatest
                         }
                         // Fresh prepares get time to settle. A natural continuation is already loaded.
+                        val timing = lookaheadTiming?.takeIf {
+                            it.sourceGeneration == expectedPlaybackGeneration && it.entryId == next.first
+                        } ?: diagnostics?.newTransition(expectedPlaybackGeneration, next.first, clock())
+                        lookaheadTiming = timing
                         val continued = _state.value.snapshot?.gaplessAdvanceCatalogId
                         if (continued == null || continued != current.catalogId) delayFn(1_500L)
                         val resolved = cancellableResult { player.resolvePlayableTrack(next.second) }
                             .getOrNull() ?: return@collectLatest
+                        timing?.mark(GaplessStage.Resolved, clock())
                         if (resolved.catalogId != next.second.catalogId) {
                             queueController.updateCatalogIdentity(next.second, resolved)
                         }
                         gaplessLookahead = next.first to resolved
-                        player.setLookahead(resolved)
+                        player.setLookahead(resolved, timing)
                     }
             }
         }
@@ -408,6 +422,7 @@ class PlaybackStore(
             }.distinctUntilChanged().collect { key ->
                 val waitingEntry = key.waitingEntryId ?: return@collect
                 if (key.currentEntryId != waitingEntry) {
+                    naturalEndTiming = null
                     waitingQueueEntryIdFlow.value = null
                     return@collect
                 }
@@ -420,6 +435,7 @@ class PlaybackStore(
                 if (message != null) {
                     // The failed wait is terminal. A later explicit Play may retry the
                     // displayed item, but hydration must never replay it automatically.
+                    naturalEndTiming = null
                     waitingQueueEntryIdFlow.value = null
                     _state.value = _state.value.copy(
                         playWhenReady = false,
@@ -427,6 +443,7 @@ class PlaybackStore(
                         playbackMessage = message,
                     )
                 } else if (!key.awaitingNext && key.autoplayStatus is AutoplayStatus.Idle) {
+                    naturalEndTiming = null
                     waitingQueueEntryIdFlow.value = null
                     _state.value = _state.value.copy(playWhenReady = false)
                 }
@@ -557,7 +574,13 @@ class PlaybackStore(
         else advanced.coerceAtMost(current.track.durationMs.coerceAtLeast(1L))
     }
 
-    private fun launchNativePlayback(nextTrack: Track, resumePositionMs: Long = 0L, reuseQueue: Boolean = false) {
+    private fun launchNativePlayback(
+        nextTrack: Track,
+        resumePositionMs: Long = 0L,
+        reuseQueue: Boolean = false,
+        timing: GaplessTransition? = null,
+    ) {
+        requestTiming = timing
         setHasUserPlaybackRequest(true)
         _state.value = _state.value.copy(
             playbackPrepared = false,
@@ -574,20 +597,23 @@ class PlaybackStore(
         pendingRequestedSongCatalogId = nextTrack.catalogId.takeIf { nextTrack.catalogKind == CatalogKind.Song }
         playbackRequestJob = coroutineScope.launch {
             try {
-                var nativeGeneration = if (reuseQueue) player.playQueuedSong(nextTrack) else null
+                var nativeGeneration = if (reuseQueue) player.playQueuedSong(nextTrack, timing) else null
                 if (nativeGeneration == null) {
                     val resolved = player.resolvePlayableTrack(nextTrack)
                     if (selection != selectionGeneration) return@launch
+                    timing?.mark(GaplessStage.Resolved, clock())
                     val playableTrack = acceptResolvedTrack(nextTrack, resolved)
                     pendingRequestedSongCatalogId = playableTrack.catalogId.takeIf {
                         playableTrack.catalogKind == CatalogKind.Song
                     }
                     if (reuseQueue && playableTrack.catalogId != nextTrack.catalogId) {
-                        nativeGeneration = player.playQueuedSong(playableTrack)
+                        nativeGeneration = player.playQueuedSong(playableTrack, timing)
                     }
                     if (nativeGeneration == null) {
                         if (reuseQueue) player.pause()
-                        nativeGeneration = player.preparePlayback(playableTrack, resumePositionMs, playWhenReady = false)
+                        nativeGeneration = player.preparePlayback(
+                            playableTrack, resumePositionMs, playWhenReady = false, transition = timing,
+                        )
                     }
                 }
                 // Re-read the user intent after playback and authorization work.
@@ -682,6 +708,9 @@ class PlaybackStore(
     }
 
     private fun executeTrackPlayback(nextTrack: Track) {
+        val selectedAt = diagnostics?.let { clock() }
+        val ended = naturalEndTiming
+        naturalEndTiming = null
         waitingQueueEntryIdFlow.value = null
         selectionGeneration++
         playbackRequestJob?.cancel()
@@ -721,7 +750,17 @@ class PlaybackStore(
             // Stop the previous song while authorization/preparation is pending.
             if (!reuseQueue) player.pause()
             if (ready) {
-                launchNativePlayback(initialTrack, reuseQueue = reuseQueue)
+                val timing = if (nextTrack.catalogKind == CatalogKind.Song && diagnostics != null && selectedAt != null) {
+                    val entryId = queueController.state.value.current?.entryId
+                    val preloaded = lookaheadTiming?.takeIf {
+                        ended != null && it.sourceGeneration == ended.generation && it.entryId == entryId
+                    }
+                    (preloaded ?: diagnostics.newTransition(expectedPlaybackGeneration, entryId, selectedAt)).apply {
+                        start(if (ended == null) GaplessPath.Manual else GaplessPath.Fallback, selectedAt, ended)
+                    }
+                } else null
+                lookaheadTiming = null
+                launchNativePlayback(initialTrack, reuseQueue = reuseQueue, timing = timing)
             } else {
                 setExpectedPlaybackGeneration(0L)
                 pendingRequestedSongCatalogId = null
@@ -798,6 +837,7 @@ class PlaybackStore(
             else -> return applyQueueAction(action)
         }
         navigatingQueue = true
+        naturalEndTiming = null
         try {
             return applyQueueAction(action)
         } finally {
@@ -806,6 +846,7 @@ class PlaybackStore(
     }
 
     private fun supersedeStartupQueueWithNewContext() {
+        naturalEndTiming = null
         // A catalog play action deliberately replaces the old rail. Keep pending
         // preference choices, but don't replay old navigation into the new context.
         startupQueueActions.preferencesForNewContext().forEach { applyQueueAction(it) }
@@ -910,6 +951,7 @@ class PlaybackStore(
         if (next == null && live.awaitingNext) {
             waitForNextQueueEntry(live.current?.entryId)
         } else if (next == null) {
+            naturalEndTiming = null
             _state.value = _state.value.copy(
                 isPlaying = false,
                 playWhenReady = false,
@@ -973,6 +1015,7 @@ class PlaybackStore(
             val retrySelection = selection
             val retryTrack = requestedPlaybackTrack()
             val retryPosition = requestedPlaybackPositionMs()
+            val retryTiming = requestTiming?.takeUnless { it.has(GaplessStage.Advanced) }
             networkRetryJob = coroutineScope.launch {
                 for (countdown in 3 downTo 1) {
                     if (retrySelection != selectionGeneration || !_state.value.playWhenReady) return@launch
@@ -984,7 +1027,8 @@ class PlaybackStore(
                 if (retrySelection != selectionGeneration || !_state.value.playWhenReady) return@launch
                 _state.value = _state.value.copy(playbackMessage = null)
                 selectionGeneration++
-                launchNativePlayback(retryTrack, retryPosition)
+                retryTiming?.mark(GaplessStage.Retry, clock())
+                launchNativePlayback(retryTrack, retryPosition, timing = retryTiming)
             }
         } else {
             _state.value = _state.value.copy(
@@ -1041,6 +1085,8 @@ class PlaybackStore(
             queueController.peekAutoNext()?.entryId == queued.first
         ) {
             gaplessLookahead = null
+            lookaheadTiming = null
+            requestTiming = null
             adoptingGaplessEntryId = queued.first
             try {
                 queueController.advanceNext(manual = false)
@@ -1077,6 +1123,9 @@ class PlaybackStore(
                     playbackPrepared = false,
                 )
             } else {
+                naturalEndTiming = diagnostics?.lastGaplessEnd?.takeIf {
+                    it.generation == snapshot.requestGeneration && it.catalogId == snapshot.currentTrack?.catalogId
+                }
                 advanceNextTrack(isAuto = true)
             }
             return

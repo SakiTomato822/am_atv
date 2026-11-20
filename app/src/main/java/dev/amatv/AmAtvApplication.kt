@@ -45,6 +45,7 @@ class AmAtvApplication : Application() {
             libraryActions = libraryActions,
             coroutineScope = applicationScope,
             clock = SystemClock::elapsedRealtime,
+            diagnostics = musicServices.playbackDiagnostics,
         ).also { it.attach() }
     }
 

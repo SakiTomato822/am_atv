@@ -340,6 +340,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
         track: Track,
         positionMs: Long,
         playWhenReady: Boolean,
+        transition: GaplessTransition?,
     ): Long {
         val userToken = checkNotNull(tokenStore.readUserToken()) { AppText.text(R.string.services_sign_in_apple_music) }
         val developerToken = developerTokens.token()
@@ -358,7 +359,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
                 } else {
                     if (stationEngineActive) stationEngine?.stop()
                     stationEngineActive = false
-                    bridge.preparePlayback(track, developerToken, userToken, positionMs, playWhenReady)
+                    bridge.preparePlayback(track, developerToken, userToken, positionMs, playWhenReady, transition)
                 }
             }
         }
@@ -383,12 +384,14 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
     override fun skipToPrevious() { if (!stationEngineActive) bridge.skipToPrevious() }
     fun skipToQueueItem(queueId: Long) = bridge.skipToQueueItem(queueId)
     /** Gapless preloading of the app's next song; stations manage their own queue. */
-    override fun setLookahead(next: Track?) { if (!stationEngineActive) bridge.setLookahead(next) }
+    override fun setLookahead(next: Track?, transition: GaplessTransition?) {
+        if (!stationEngineActive) bridge.setLookahead(next, transition)
+    }
     override fun setFadeEnabled(enabled: Boolean) { bridge.fadeEnabled = enabled }
     /** A station's next songs, to play it on the native player without Widevine. */
     override suspend fun stationSongs(stationId: String): List<Track> = api.stationNextTracks(stationId)
-    override suspend fun playQueuedSong(track: Track): Long? = playbackPreparation.withLock {
-        if (stationEngineActive) null else bridge.playQueuedSong(track)
+    override suspend fun playQueuedSong(track: Track, transition: GaplessTransition?): Long? = playbackPreparation.withLock {
+        if (stationEngineActive) null else bridge.playQueuedSong(track, transition)
     }
     // The app queue owns repeat, shuffle and autoplay. Each native queue contains
     // one selected track, so enabling a second queue engine would race the app.

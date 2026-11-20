@@ -1,5 +1,6 @@
 package dev.amatv.integration
 
+import android.media.audiofx.AudioEffect
 import android.media.audiofx.DynamicsProcessing
 import android.media.audiofx.Visualizer
 import android.util.Log
@@ -14,7 +15,14 @@ import kotlin.math.abs
 internal class GaplessFade {
     private var effect: DynamicsProcessing? = null
     private var sessionId = 0
+    private var attached = false
     private var appliedDb = 0f
+
+    fun attachment(session: Int): String = when {
+        session <= 0 -> "session-unavailable"
+        sessionId == session && attached -> "attached"
+        else -> "not-attached"
+    }
 
     /** [db] is the gain in decibels, 0 or below. A session of 0 (unknown) leaves the sound alone. */
     fun apply(session: Int, db: Float) {
@@ -28,7 +36,9 @@ internal class GaplessFade {
                     DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION, CHANNELS,
                     false, 0, false, 0, false, 0, false,
                 ).build()
-                DynamicsProcessing(0, session, config).apply { enabled = true }
+                DynamicsProcessing(0, session, config).apply {
+                    attached = setEnabled(true) == AudioEffect.SUCCESS
+                }
             }.onFailure { Log.w(TAG, "Fade unavailable on session $session: ${it.javaClass.simpleName}") }
                 .getOrNull() ?: return
             sessionId = session
@@ -47,6 +57,7 @@ internal class GaplessFade {
         runCatching { effect?.release() }
         effect = null
         sessionId = 0
+        attached = false
         appliedDb = 0f
     }
 
