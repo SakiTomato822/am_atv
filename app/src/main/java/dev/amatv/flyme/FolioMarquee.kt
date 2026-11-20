@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.MarqueeAnimationMode
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -25,13 +26,18 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import kotlin.math.ceil
 import kotlinx.coroutines.delay
 
 /** Defaults for player & mini-player horizontal marquee scrolling (U1). */
@@ -41,6 +47,7 @@ object FolioMarqueeDefaults {
     val VELOCITY: Dp = 30.dp
     val EDGE_FADE_WIDTH: Dp = 12.dp
     const val LEFT_FADE_IN_MS: Int = 180
+    val OVERFLOW_TOLERANCE: Dp = 1.dp
 }
 
 /** Pure helper determining when horizontal marquee is permitted (`false` falls back to ellipsis). */
@@ -49,6 +56,13 @@ fun shouldRunFolioMarquee(
     lowPerformance: Boolean,
     text: String,
 ): Boolean = !reducedMotion && !lowPerformance && text.isNotEmpty()
+
+/** Pure helper deciding whether [contentPx] overflows [containerPx] beyond [tolerancePx]. */
+fun marqueeOverflows(
+    contentPx: Int,
+    containerPx: Int,
+    tolerancePx: Int,
+): Boolean = containerPx > 0 && contentPx - containerPx > tolerancePx.coerceAtLeast(0)
 
 /**
  * Single-line text that scrolls horizontally via [basicMarquee] with soft faded edges only when it
@@ -86,10 +100,47 @@ internal fun FolioMarqueeText(
         return
     }
 
+    val textMeasurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+    val baseTextStyle = LocalTextStyle.current
+    val resolvedStyle = remember(
+        baseTextStyle,
+        fontFamily,
+        fontWeight,
+        fontSize,
+        lineHeight,
+        textAlign,
+    ) {
+        baseTextStyle.merge(
+            TextStyle(
+                fontFamily = fontFamily,
+                fontWeight = fontWeight,
+                fontSize = fontSize,
+                lineHeight = lineHeight,
+                textAlign = textAlign ?: TextAlign.Unspecified,
+            ),
+        )
+    }
+    val tolerancePx = remember(density) {
+        with(density) { ceil(FolioMarqueeDefaults.OVERFLOW_TOLERANCE.toPx()).toInt().coerceAtLeast(1) }
+    }
+
     key(resetKey, text) {
         var containerWidthPx by remember { mutableIntStateOf(0) }
-        var contentWidthPx by remember { mutableIntStateOf(0) }
-        val hasOverflow = containerWidthPx > 0 && contentWidthPx > containerWidthPx
+        val contentWidthPx = remember(text, resolvedStyle, density, layoutDirection, textMeasurer) {
+            textMeasurer.measure(
+                text = text,
+                style = resolvedStyle,
+                maxLines = 1,
+                softWrap = false,
+            ).size.width
+        }
+        val hasOverflow = marqueeOverflows(
+            contentPx = contentWidthPx,
+            containerPx = containerWidthPx,
+            tolerancePx = tolerancePx,
+        )
 
         var leftFadeTarget by remember { mutableStateOf(false) }
         LaunchedEffect(hasOverflow) {
@@ -149,6 +200,18 @@ internal fun FolioMarqueeText(
             Alignment.CenterStart
         }
 
+        val marqueeModifier = if (hasOverflow) {
+            Modifier.basicMarquee(
+                iterations = Int.MAX_VALUE,
+                animationMode = MarqueeAnimationMode.Immediately,
+                repeatDelayMillis = FolioMarqueeDefaults.REPEAT_DELAY_MS,
+                initialDelayMillis = FolioMarqueeDefaults.INITIAL_DELAY_MS,
+                velocity = FolioMarqueeDefaults.VELOCITY,
+            )
+        } else {
+            Modifier
+        }
+
         Box(
             modifier = modifier
                 .onSizeChanged { containerWidthPx = it.width }
@@ -165,17 +228,7 @@ internal fun FolioMarqueeText(
                 textAlign = textAlign,
                 maxLines = 1,
                 softWrap = false,
-                onTextLayout = { layoutResult ->
-                    val widthPx = layoutResult.size.width
-                    if (contentWidthPx != widthPx) contentWidthPx = widthPx
-                },
-                modifier = Modifier.basicMarquee(
-                    iterations = Int.MAX_VALUE,
-                    animationMode = MarqueeAnimationMode.Immediately,
-                    repeatDelayMillis = FolioMarqueeDefaults.REPEAT_DELAY_MS,
-                    initialDelayMillis = FolioMarqueeDefaults.INITIAL_DELAY_MS,
-                    velocity = FolioMarqueeDefaults.VELOCITY,
-                ),
+                modifier = marqueeModifier,
             )
         }
     }

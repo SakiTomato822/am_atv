@@ -52,6 +52,7 @@ import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
@@ -99,6 +100,7 @@ import dev.amatv.R
 import dev.amatv.integration.LyricTextSize
 import dev.amatv.model.Track
 import java.util.Locale
+import kotlin.math.ceil
 import kotlin.math.roundToLong
 
 internal class FolioPlayerAnchorCoordsHolder {
@@ -835,6 +837,21 @@ internal fun FolioCarUnderCoverCollapsedBar(
     }
 }
 
+private fun measureSubtitleWidthDp(
+    textMeasurer: androidx.compose.ui.text.TextMeasurer,
+    text: String,
+    style: TextStyle,
+    density: androidx.compose.ui.unit.Density,
+): Dp {
+    val px = textMeasurer.measure(
+        text = text,
+        style = style,
+        maxLines = 1,
+        softWrap = false,
+    ).size.width
+    return ceil(px / density.density).dp
+}
+
 @Composable
 internal fun FolioExpandedSubtitle(
     artist: String,
@@ -853,11 +870,14 @@ internal fun FolioExpandedSubtitle(
     if (cleanArtist.isEmpty() && cleanAlbum.isEmpty()) return
 
     val separator = " — "
-    val textStyle = remember(fontFamily, fontSize) {
-        TextStyle(
-            fontFamily = fontFamily,
-            fontWeight = FontWeight.Normal,
-            fontSize = fontSize,
+    val baseTextStyle = LocalTextStyle.current
+    val textStyle = remember(baseTextStyle, fontFamily, fontSize) {
+        baseTextStyle.merge(
+            TextStyle(
+                fontFamily = fontFamily,
+                fontWeight = FontWeight.Normal,
+                fontSize = fontSize,
+            ),
         )
     }
     val textMeasurer = rememberTextMeasurer()
@@ -866,22 +886,21 @@ internal fun FolioExpandedSubtitle(
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
         val maxWidthDp = maxWidth
         if (cleanArtist.isNotEmpty() && cleanAlbum.isNotEmpty()) {
-            val artistFullDp = remember(cleanArtist, textStyle) {
-                with(density) { textMeasurer.measure(cleanArtist, style = textStyle, maxLines = 1).size.width.toDp() }
+            val artistFullDp = remember(cleanArtist, textStyle, density, textMeasurer) {
+                measureSubtitleWidthDp(textMeasurer, cleanArtist, textStyle, density)
             }
-            val sepFullDp = remember(textStyle) {
-                with(density) { textMeasurer.measure(separator, style = textStyle, maxLines = 1).size.width.toDp() }
+            val sepFullDp = remember(textStyle, density, textMeasurer) {
+                measureSubtitleWidthDp(textMeasurer, separator, textStyle, density)
             }
-            val albumFullDp = remember(cleanAlbum, textStyle) {
-                with(density) { textMeasurer.measure(cleanAlbum, style = textStyle, maxLines = 1).size.width.toDp() }
+            val albumFullDp = remember(cleanAlbum, textStyle, density, textMeasurer) {
+                measureSubtitleWidthDp(textMeasurer, cleanAlbum, textStyle, density)
             }
             val totalDp = artistFullDp + sepFullDp + albumFullDp
             val artistWidthMod = if (totalDp <= maxWidthDp) {
-                Modifier.widthIn(max = artistFullDp)
+                Modifier
             } else {
                 val budgetForArtistAndAlbum = (maxWidthDp - sepFullDp).coerceAtLeast(16.dp)
-                val maxArtistDp = min(artistFullDp, budgetForArtistAndAlbum * 0.45f)
-                Modifier.widthIn(max = maxArtistDp)
+                Modifier.widthIn(max = budgetForArtistAndAlbum * 0.45f)
             }
 
             Row(
@@ -903,6 +922,7 @@ internal fun FolioExpandedSubtitle(
                         text = cleanArtist,
                         color = color,
                         fontFamily = fontFamily,
+                        fontWeight = FontWeight.Normal,
                         fontSize = fontSize,
                         resetKey = resetKey ?: cleanArtist,
                     )
@@ -911,6 +931,7 @@ internal fun FolioExpandedSubtitle(
                     text = separator,
                     color = color,
                     fontFamily = fontFamily,
+                    fontWeight = FontWeight.Normal,
                     fontSize = fontSize,
                     maxLines = 1,
                 )
@@ -930,6 +951,7 @@ internal fun FolioExpandedSubtitle(
                         text = cleanAlbum,
                         color = color,
                         fontFamily = fontFamily,
+                        fontWeight = FontWeight.Normal,
                         fontSize = fontSize,
                         resetKey = resetKey ?: cleanAlbum,
                     )
@@ -951,6 +973,7 @@ internal fun FolioExpandedSubtitle(
                     text = cleanAlbum,
                     color = color,
                     fontFamily = fontFamily,
+                    fontWeight = FontWeight.Normal,
                     fontSize = fontSize,
                     resetKey = resetKey ?: cleanAlbum,
                 )
@@ -971,6 +994,7 @@ internal fun FolioExpandedSubtitle(
                     text = cleanArtist,
                     color = color,
                     fontFamily = fontFamily,
+                    fontWeight = FontWeight.Normal,
                     fontSize = fontSize,
                     resetKey = resetKey ?: cleanArtist,
                 )
