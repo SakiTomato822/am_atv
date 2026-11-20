@@ -76,6 +76,25 @@ class FolioSearchTest {
         assertNull(session.suggestions)
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun editingAfterSubmissionRestartsSuggestionsAndDiscardsPendingSearch() = runTest {
+        val session = FolioSearchSession(this)
+        val pending = CompletableDeferred<List<Track>>()
+        val expected = CatalogSearchSuggestions(listOf(CatalogSearchTerm("Taylor Swift", "taylor swift")), emptyList())
+
+        session.submit("taylor") { withContext(NonCancellable) { pending.await() } }
+        runCurrent()
+        session.edit("taylor s") { expected }
+        assertNull(session.submission)
+
+        pending.complete(listOf(track("old", CatalogKind.Song)))
+        advanceTimeBy(250)
+        runCurrent()
+        assertNull(session.submission)
+        assertEquals(expected, session.suggestions)
+    }
+
     @Test
     fun searchOnlyShowsSubmittedResultsAndClearingCancelsPendingResults() {
         val scope = CoroutineScope(Dispatchers.Unconfined)
