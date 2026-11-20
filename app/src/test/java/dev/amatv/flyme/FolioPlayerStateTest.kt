@@ -139,8 +139,7 @@ class FolioPlayerStateTest {
     }
 
     @Test
-    fun posterAndQueueChoiceStartOffOnColdStart() {
-        assertFalse(FolioPlayerSession.posterPreferredState.value)
+    fun queueChoiceStartsOffOnColdStart() {
         assertFalse(FolioPlayerSession.queueOpenState.value)
     }
 
@@ -646,30 +645,13 @@ class FolioPlayerStateTest {
     }
 
     @Test
-    fun posterPreferredInitializesFromDisplaySettingAndRespectsSessionOverride() {
-        // Without session override: Soak setting -> starts Poster; Flow setting -> starts Scrolling Lyrics.
-        assertTrue(resolveEffectivePosterPreferred(LyricBackgroundStyle.Soak, sessionOverride = null))
-        assertFalse(resolveEffectivePosterPreferred(LyricBackgroundStyle.Flow, sessionOverride = null))
+    fun posterPreferredFollowsPersistedLyricStyleAndTtToggleRoundTrips() {
+        assertTrue(resolveEffectivePosterPreferred(LyricBackgroundStyle.Soak))
+        assertFalse(resolveEffectivePosterPreferred(LyricBackgroundStyle.Flow))
 
-        // Session Tt toggle overrides setting for the rest of the process.
-        val afterToggleFromSoak = FolioPlayerSession.togglePosterPreference(current = true)
-        assertFalse(afterToggleFromSoak)
-        assertFalse(
-            resolveEffectivePosterPreferred(
-                settingsStyle = LyricBackgroundStyle.Soak,
-                sessionOverride = FolioPlayerSession.posterOverrideState.value,
-            ),
-        )
-
-        // Changing default display setting clears session override so next open uses the setting.
-        FolioPlayerSession.syncDefaultDisplayFromSetting(LyricBackgroundStyle.Soak)
-        assertNull(FolioPlayerSession.posterOverrideState.value)
-        assertTrue(
-            resolveEffectivePosterPreferred(
-                settingsStyle = LyricBackgroundStyle.Soak,
-                sessionOverride = FolioPlayerSession.posterOverrideState.value,
-            ),
-        )
+        // Tt persists Soak <-> Flow directly into SettingsStore instead of a volatile process override.
+        assertEquals(LyricBackgroundStyle.Flow, nextLyricStyleForPosterToggle(currentlyPosterPreferred = true))
+        assertEquals(LyricBackgroundStyle.Soak, nextLyricStyleForPosterToggle(currentlyPosterPreferred = false))
     }
 
     @Test

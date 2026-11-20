@@ -8,7 +8,7 @@
     <string name="browse_sign_out_tv">从这台电视退出登录</string>
     <string name="browse_connection_error">无法连接，请重试。</string>
     <string name="browse_reset">重置</string>
-    <string name="browse_performance_mode_hint">停用动态封面视频以提升老旧电视盒硬件的流畅度与稳定性。</string>
+    <string name="browse_performance_mode_hint">减少动画和模糊，让较慢的设备更流畅。自动：根据设备配置和播放页的流畅度自动开启。</string>
     <string name="browse_performance_auto">自动</string>
     <string name="browse_performance_on">开</string>
     <string name="browse_performance_off">关</string>

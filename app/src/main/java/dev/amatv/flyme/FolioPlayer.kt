@@ -171,11 +171,7 @@ internal fun BoxScope.FolioPlayerLayer(
         LaunchedEffect(open) {
             if (!open) lyricsSettingsOpen = false
         }
-        val posterOverride by FolioPlayerSession.posterOverrideState
-        val posterPreferred = resolveEffectivePosterPreferred(
-            settingsStyle = settings.lyricStyle,
-            sessionOverride = posterOverride,
-        )
+        val posterPreferred = resolveEffectivePosterPreferred(settings.lyricStyle)
         var controlsManualOpen by remember { mutableStateOf(true) }
         var revealPulse by remember { mutableLongStateOf(0L) }
         var navigationMessage by remember { mutableStateOf<String?>(null) }
@@ -554,7 +550,7 @@ internal fun BoxScope.FolioPlayerLayer(
                         if (queueOpen) {
                             queueOpen = false
                         } else if (hasTimed) {
-                            FolioPlayerSession.togglePosterPreference(posterPreferred)
+                            settingsStore.setLyricStyle(nextLyricStyleForPosterToggle(posterPreferred))
                         }
                     },
                     onReveal = revealControls,
@@ -632,7 +628,7 @@ internal fun BoxScope.FolioPlayerLayer(
                             if (queueOpen) {
                                 queueOpen = false
                             } else if (hasTimed) {
-                                FolioPlayerSession.togglePosterPreference(posterPreferred)
+                                settingsStore.setLyricStyle(nextLyricStyleForPosterToggle(posterPreferred))
                             }
                         },
                         onOpenAlbum = openAlbumDetail,

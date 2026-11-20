@@ -38,26 +38,10 @@ import kotlin.math.roundToInt
 object FolioPlayerSession {
     val openState: MutableState<Boolean> = mutableStateOf(false)
     val queueOpenState: MutableState<Boolean> = mutableStateOf(false)
-    val posterPreferredState: MutableState<Boolean> = mutableStateOf(false)
-    val posterOverrideState: MutableState<Boolean?> = mutableStateOf(null)
 
     fun reset() {
         openState.value = false
         queueOpenState.value = false
-        posterPreferredState.value = false
-        posterOverrideState.value = null
-    }
-
-    fun syncDefaultDisplayFromSetting(style: LyricBackgroundStyle) {
-        posterOverrideState.value = null
-        posterPreferredState.value = (style == LyricBackgroundStyle.Soak)
-    }
-
-    fun togglePosterPreference(current: Boolean): Boolean {
-        val next = !current
-        posterOverrideState.value = next
-        posterPreferredState.value = next
-        return next
     }
 }
 
@@ -403,13 +387,15 @@ fun resolveEffectiveBackgroundStyle(
 }
 
 /**
- * Resolves whether Poster display is preferred: uses process session override if the user
- * explicitly toggled `Tt`, otherwise initializes from the default display setting (`Soak -> true`).
+ * Resolves whether Poster display is preferred from the persisted [settingsStyle] (`Soak` -> Poster,
+ * `Flow` -> Scrolling Lyrics).
  */
-fun resolveEffectivePosterPreferred(
-    settingsStyle: LyricBackgroundStyle,
-    sessionOverride: Boolean?,
-): Boolean = sessionOverride ?: (settingsStyle == LyricBackgroundStyle.Soak)
+fun resolveEffectivePosterPreferred(settingsStyle: LyricBackgroundStyle): Boolean =
+    settingsStyle == LyricBackgroundStyle.Soak
+
+/** Maps toggling `Tt` in the player header back to the persisted [LyricBackgroundStyle]. */
+fun nextLyricStyleForPosterToggle(currentlyPosterPreferred: Boolean): LyricBackgroundStyle =
+    if (currentlyPosterPreferred) LyricBackgroundStyle.Flow else LyricBackgroundStyle.Soak
 
 /** Collapsed cover size for Wide (`e`) car / tablet landscape (`<= 400.dp`). */
 fun computeWideCarCollapsedCoverSizeDp(
