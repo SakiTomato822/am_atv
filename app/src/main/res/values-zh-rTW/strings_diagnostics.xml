@@ -29,7 +29,7 @@
     <string name="playback_fade_stations">電台</string>
     <string name="playback_fade_playlists">播放列表</string>
     <string name="playback_station_mode_title">電台播放方式</string>
-    <string name="playback_station_mode_summary">很多車機和電視沒有 Widevine；逐首播放會用原生播放器播電台裡的歌，不需要 Widevine。直播電台仍需要 Widevine。</string>
+    <string name="playback_station_mode_summary">部分裝置沒有 Widevine；逐首播放會用原生播放器播電台裡的歌，不需要 Widevine。直播電台仍需要 Widevine。</string>
     <string name="appearance_title">外觀</string>
     <string name="appearance_light">淺色</string>
     <string name="appearance_dark">深色</string>

@@ -4,8 +4,8 @@
     <string name="browse_apple_connected">Apple Music 帳號已連結</string>
     <string name="browse_apple_sign_in">登入 Apple Music</string>
     <string name="browse_refresh_apple">重新整理 Apple Music 內容</string>
-    <string name="browse_sign_in_tv">在這台電視登入</string>
-    <string name="browse_sign_out_tv">從這台電視登出</string>
+    <string name="browse_sign_in_tv">登入 Apple Music</string>
+    <string name="browse_sign_out_tv">登出</string>
     <string name="browse_connection_error">無法連線，請重試。</string>
     <string name="browse_reset">重設</string>
     <string name="browse_performance_mode_hint">減少動畫和模糊，讓較慢的裝置更流暢。自動：根據裝置規格和播放頁面的流暢度自動開啟。</string>

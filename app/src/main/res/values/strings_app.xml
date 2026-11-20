@@ -22,7 +22,7 @@
     <string name="app_apple_music_radio">Apple Music Radio</string>
     <string name="app_library_playlists">Library Playlists</string>
     <string name="app_library_songs">Library Songs</string>
-    <string name="app_apple_signed_out">Signed out of Apple Music on this TV.</string>
+    <string name="app_apple_signed_out">Signed out of Apple Music.</string>
     <string name="app_search_no_results_format">No results found for “%1$s”.</string>
     <string name="app_search_failed">Search failed.</string>
     <string name="app_account">Account</string>

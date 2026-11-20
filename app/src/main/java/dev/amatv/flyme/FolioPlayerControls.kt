@@ -187,6 +187,12 @@ internal fun FolioPlayerHeader(
             tier = tierSpec.tier,
         )
     }
+    val accentColor = LocalFolioControlAccent.current?.value ?: Color.Transparent
+    val headerTint = headerActionTint(
+        isPosterMode = isPosterMode,
+        accentColor = accentColor,
+        defaultFg = headerColors.fg,
+    )
     val collapsedMode = resolveCollapsedHeaderTitleMode(tierSpec.tier, displayState)
     val targetTitleAlpha = if (!controlsExpanded && collapsedMode != FolioCollapsedHeaderTitleMode.None) 1f else 0f
     val collapsedAlpha = if (LocalFolioLowPerformance.current) targetTitleAlpha else animateFloatAsState(
@@ -231,7 +237,7 @@ internal fun FolioPlayerHeader(
                 icon = Icons.Rounded.KeyboardArrowDown,
                 contentDescription = stringResource(R.string.folio_player_close),
                 size = tierSpec.pib,
-                iconTint = headerColors.fg,
+                iconTint = headerTint,
                 bg = Color.Transparent,
                 border = Color.Transparent,
                 onClick = onClose,
@@ -346,16 +352,23 @@ internal fun FolioPlayerHeader(
                     isInLibrary = isInLibrary,
                     inProgress = libraryInProgress,
                     size = tierSpec.pib,
-                    iconTint = headerColors.fg,
+                    iconTint = headerTint,
                     onClick = onToggleLibrary,
                 )
 
+                val resolvedFavoriteTint = resolveHeaderFavoriteTint(
+                    isFavorite = true,
+                    isPosterMode = isPosterMode,
+                    controlAccent = accentColor,
+                    defaultFg = headerColors.fg,
+                    fallbackFavoriteAccent = favoriteAccent,
+                )
                 FavoriteIconButton(
                     isFavorite = isFavorite,
                     inProgress = favoriteInProgress,
                     size = tierSpec.pib,
-                    favoriteAccent = favoriteAccent,
-                    defaultTint = headerColors.fg,
+                    favoriteAccent = resolvedFavoriteTint,
+                    defaultTint = headerTint,
                     onClick = onToggleFavorite,
                 )
             }
@@ -384,7 +397,7 @@ internal fun FolioPlayerHeader(
             ) {
                 Text(
                     text = "Tt",
-                    color = headerColors.fg.copy(alpha = if (hasTimedLyrics) 1f else 0.36f),
+                    color = headerTint.copy(alpha = if (hasTimedLyrics) 1f else 0.36f),
                     fontFamily = fontFamily,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 15.sp,
@@ -396,7 +409,7 @@ internal fun FolioPlayerHeader(
                     icon = Icons.Rounded.PictureInPictureAlt,
                     contentDescription = stringResource(R.string.flyme_open_mini_window),
                     size = tierSpec.pib,
-                    iconTint = headerColors.fg,
+                    iconTint = headerTint,
                     bg = headerColors.glassBg,
                     border = headerColors.glassBorder,
                     useGlass = true,
@@ -1286,6 +1299,12 @@ internal fun FolioPlayerExpandedControls(
         }
 
         if (trackActionLocationForTier(tierSpec.tier) == FolioTrackActionLocation.ControlsCard) {
+            val cardAccentColor = LocalFolioControlAccent.current?.value ?: Color.Transparent
+            val resolvedCardFavAccent = if (cardAccentColor.alpha > 0f) {
+                cardAccentColor.compositeOver(fg)
+            } else {
+                favoriteAccent
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1302,7 +1321,7 @@ internal fun FolioPlayerExpandedControls(
                     isFavorite = isFavorite,
                     inProgress = favoriteInProgress,
                     size = 40.dp,
-                    favoriteAccent = favoriteAccent,
+                    favoriteAccent = resolvedCardFavAccent,
                     defaultTint = fg,
                     onClick = onToggleFavorite,
                 )
@@ -1618,7 +1637,7 @@ private fun PlayerIconPillButton(
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = iconTint.copy(alpha = alpha),
+            tint = iconTint.copy(alpha = iconTint.alpha * alpha),
             modifier = Modifier.size(size * 0.46f),
         )
     }
@@ -1638,8 +1657,8 @@ private fun AddToLibraryIconButton(
             if (isInLibrary) R.string.folio_player_in_library else R.string.folio_player_add_library,
         ),
         size = size,
-        iconTint = iconTint,
-        bg = Color.Transparent,
+        iconTint = if (isInLibrary) iconTint else iconTint.copy(alpha = iconTint.alpha * 0.72f),
+        bg = if (isInLibrary) iconTint.copy(alpha = 0.16f) else Color.Transparent,
         border = Color.Transparent,
         enabled = !inProgress && !isInLibrary,
         dimDisabled = inProgress,
@@ -1662,8 +1681,8 @@ private fun FavoriteIconButton(
             if (isFavorite) R.string.player_favorite_remove else R.string.player_favorite_add,
         ),
         size = size,
-        iconTint = if (isFavorite) favoriteAccent else defaultTint,
-        bg = Color.Transparent,
+        iconTint = if (isFavorite) favoriteAccent else defaultTint.copy(alpha = defaultTint.alpha * 0.72f),
+        bg = if (isFavorite) favoriteAccent.copy(alpha = 0.16f) else Color.Transparent,
         border = Color.Transparent,
         enabled = !inProgress,
         onClick = onClick,

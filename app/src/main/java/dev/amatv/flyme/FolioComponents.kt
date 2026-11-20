@@ -59,6 +59,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.amatv.AmAtvApplication
@@ -342,6 +343,39 @@ fun FolioSongRow(
     }
 }
 
+internal const val TOP_MINI_CAPSULE_MAX_WIDTH_DP: Float = 360f
+internal const val TOP_MINI_CAPSULE_MIN_WIDTH_DP: Float = 220f
+internal const val TOP_MINI_CAPSULE_GAP_FROM_TITLE_DP: Float = 20f
+internal const val TOP_MINI_CAPSULE_HEIGHT_DP: Float = 56f
+
+internal data class FolioTopMiniPlayerLayout(
+    val showCapsule: Boolean,
+    val widthDp: Float,
+)
+
+/**
+ * Computes whether the top-right landscape mini player renders as a compact capsule or falls back
+ * to [FolioMiniPlayerDot], ensuring it never overlaps [pivotRightEdgeDp] inside [windowWidthDp].
+ */
+internal fun computeTopRightMiniPlayerLayout(
+    windowWidthDp: Float,
+    pivotRightEdgeDp: Float,
+    endPaddingDp: Float,
+    gapFromTitleDp: Float = TOP_MINI_CAPSULE_GAP_FROM_TITLE_DP,
+    minCapsuleWidthDp: Float = TOP_MINI_CAPSULE_MIN_WIDTH_DP,
+    maxCapsuleWidthDp: Float = TOP_MINI_CAPSULE_MAX_WIDTH_DP,
+): FolioTopMiniPlayerLayout {
+    val availableDp = windowWidthDp - endPaddingDp - gapFromTitleDp - pivotRightEdgeDp
+    return if (availableDp < minCapsuleWidthDp) {
+        FolioTopMiniPlayerLayout(showCapsule = false, widthDp = 0f)
+    } else {
+        FolioTopMiniPlayerLayout(
+            showCapsule = true,
+            widthDp = availableDp.coerceAtMost(maxCapsuleWidthDp),
+        )
+    }
+}
+
 /** Glass mini-player capsule (Narrow/Short/Medium) or circular artwork dot (Wide/Ultrawide). */
 @Composable
 fun FolioMiniPlayerCapsule(
@@ -351,10 +385,84 @@ fun FolioMiniPlayerCapsule(
     onOpenPlayer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val palette = LocalFolioPalette.current
-    val fontFamily = LocalFolioFontFamily.current
     val pillShape = RoundedCornerShape(FolioRadii.Capsule)
     val coverShape = RoundedCornerShape(FolioRadii.CapsuleCover)
+    FolioMiniPlayerPill(
+        track = track,
+        isPlaying = isPlaying,
+        onTogglePlayback = onTogglePlayback,
+        onOpenPlayer = onOpenPlayer,
+        pillShape = pillShape,
+        coverShape = coverShape,
+        coverSize = 48.dp,
+        titleSize = 16.sp,
+        artistSize = 13.sp,
+        playButtonSize = 48.dp,
+        playIconSize = 22.dp,
+        startPad = 8.dp,
+        endPad = 6.dp,
+        progressVerticalPad = 3.dp,
+        modifier = modifier
+            .widthIn(max = 520.dp)
+            .fillMaxWidth()
+            .height(64.dp),
+    )
+}
+
+/**
+ * Compact top-right mini-player capsule used on landscape tiers (`Wide` / `Ultrawide`) when
+ * enough space clears the rightmost pivot title (`>= 220dp`), capped at `360dp`.
+ */
+@Composable
+fun FolioTopMiniPlayerCapsule(
+    track: Track,
+    isPlaying: Boolean,
+    onTogglePlayback: () -> Unit,
+    onOpenPlayer: () -> Unit,
+    capsuleWidthDp: Dp,
+    modifier: Modifier = Modifier,
+) {
+    FolioMiniPlayerPill(
+        track = track,
+        isPlaying = isPlaying,
+        onTogglePlayback = onTogglePlayback,
+        onOpenPlayer = onOpenPlayer,
+        pillShape = CircleShape,
+        coverShape = CircleShape,
+        coverSize = 40.dp,
+        titleSize = 14.sp,
+        artistSize = 12.sp,
+        playButtonSize = 40.dp,
+        playIconSize = 20.dp,
+        startPad = 8.dp,
+        endPad = 8.dp,
+        progressVerticalPad = 2.5.dp,
+        modifier = modifier
+            .width(capsuleWidthDp)
+            .height(TOP_MINI_CAPSULE_HEIGHT_DP.dp),
+    )
+}
+
+@Composable
+private fun FolioMiniPlayerPill(
+    track: Track,
+    isPlaying: Boolean,
+    onTogglePlayback: () -> Unit,
+    onOpenPlayer: () -> Unit,
+    pillShape: Shape,
+    coverShape: Shape,
+    coverSize: Dp,
+    titleSize: TextUnit,
+    artistSize: TextUnit,
+    playButtonSize: Dp,
+    playIconSize: Dp,
+    startPad: Dp,
+    endPad: Dp,
+    progressVerticalPad: Dp,
+    modifier: Modifier = Modifier,
+) {
+    val palette = LocalFolioPalette.current
+    val fontFamily = LocalFolioFontFamily.current
     val origin = rememberFolioArtworkOrigin(coverShape)
 
     val app = LocalContext.current.applicationContext as AmAtvApplication
@@ -374,21 +482,22 @@ fun FolioMiniPlayerCapsule(
 
     Box(
         modifier = modifier
-            .widthIn(max = 520.dp)
-            .fillMaxWidth()
-            .height(64.dp)
             .clip(pillShape)
             .folioBrowsePressable { origin.open(onOpenPlayer) }
             .folioMiniPlayerGlass(pillShape),
     ) {
         Row(
-            modifier = Modifier.fillMaxSize().padding(start = 8.dp, end = 6.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = startPad, end = endPad),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             FolioArtwork(
                 track = track,
-                modifier = Modifier.size(48.dp).folioArtworkOrigin(origin),
+                modifier = Modifier
+                    .size(coverSize)
+                    .folioArtworkOrigin(origin),
                 shape = coverShape,
             )
             Column(
@@ -403,7 +512,7 @@ fun FolioMiniPlayerCapsule(
                     color = palette.fg,
                     fontFamily = fontFamily,
                     fontWeight = FontWeight.SemiBold,
-                    fontSize = 16.sp,
+                    fontSize = titleSize,
                     resetKey = track.id,
                 )
                 if (track.artist.isNotBlank()) {
@@ -412,14 +521,14 @@ fun FolioMiniPlayerCapsule(
                         color = palette.fg2,
                         fontFamily = fontFamily,
                         fontWeight = FontWeight.Normal,
-                        fontSize = 13.sp,
+                        fontSize = artistSize,
                         resetKey = track.id,
                     )
                 }
             }
             Box(
                 modifier = Modifier
-                    .size(48.dp)
+                    .size(playButtonSize)
                     .clip(CircleShape)
                     .background(accent.value)
                     .folioBrowsePressable(onClick = onTogglePlayback),
@@ -431,7 +540,7 @@ fun FolioMiniPlayerCapsule(
                     tint = if (accent.value.alpha > 0f) {
                         controlAccentForeground(accent.value.compositeOver(surface))
                     } else palette.fg,
-                    modifier = Modifier.size(22.dp),
+                    modifier = Modifier.size(playIconSize),
                 )
             }
         }
@@ -443,7 +552,7 @@ fun FolioMiniPlayerCapsule(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 3.dp),
+                    .padding(horizontal = 20.dp, vertical = progressVerticalPad),
                 accent = accent,
             )
         }

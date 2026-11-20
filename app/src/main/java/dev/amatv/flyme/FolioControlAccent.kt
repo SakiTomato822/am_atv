@@ -73,3 +73,31 @@ internal fun rememberFolioControlAccent(
         rememberUpdatedState(target)
     }
 }
+
+/**
+ * Resolves the tint for player header icons (`⌄`, `+`/`✓`, `☆`/`★`, `Tt`, PiP):
+ * - Poster mode stays luminance-driven ([defaultFg]) so icons remain legible over cover photos.
+ * - Flow mode follows the animated cover [accentColor] when present (`alpha > 0`), blending
+ *   smoothly toward [defaultFg] when monochrome covers return transparent accent.
+ */
+internal fun headerActionTint(
+    isPosterMode: Boolean,
+    accentColor: Color,
+    defaultFg: Color,
+): Color = if (isPosterMode) defaultFg else accentColor.compositeOver(defaultFg)
+
+/**
+ * Unifies [FavoriteIconButton]'s selected tint with [controlAccent] when cover accent is active in
+ * Flow mode, keeping [defaultFg] on monochrome Flow tracks and [fallbackFavoriteAccent] in Poster.
+ */
+internal fun resolveHeaderFavoriteTint(
+    isFavorite: Boolean,
+    isPosterMode: Boolean,
+    controlAccent: Color,
+    defaultFg: Color,
+    fallbackFavoriteAccent: Color,
+): Color {
+    val baseTint = headerActionTint(isPosterMode = isPosterMode, accentColor = controlAccent, defaultFg = defaultFg)
+    if (!isFavorite) return baseTint.copy(alpha = 0.72f)
+    return if (isPosterMode) fallbackFavoriteAccent else baseTint
+}

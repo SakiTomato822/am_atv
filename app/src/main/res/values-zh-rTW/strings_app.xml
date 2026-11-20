@@ -22,7 +22,7 @@
     <string name="app_apple_music_radio">Apple Music 廣播</string>
     <string name="app_library_playlists">媒體庫播放列表</string>
     <string name="app_library_songs">媒體庫歌曲</string>
-    <string name="app_apple_signed_out">已從這台電視登出 Apple Music。</string>
+    <string name="app_apple_signed_out">已登出 Apple Music。</string>
     <string name="app_search_no_results_format">找不到符合「%1$s」的結果。</string>
     <string name="app_search_failed">搜尋失敗。</string>
     <string name="app_account">帳號</string>

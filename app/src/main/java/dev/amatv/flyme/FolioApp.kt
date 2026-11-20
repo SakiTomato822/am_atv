@@ -33,6 +33,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -421,6 +422,8 @@ fun FolioApp(
                     !settingsState.lowPerformance && playbackState.hasCurrentTrack
                 ) rememberLayerBackdrop() else null
 
+                var pivotRightEdgePx by remember { mutableIntStateOf(0) }
+
                 Box(Modifier.fillMaxSize()) {
                     FolioDetailLayer(
                         stack = detailStack,
@@ -439,7 +442,7 @@ fun FolioApp(
                         handleBack = !playerOpen,
                     ) {
                         Column(Modifier.fillMaxSize()) {
-                            // Metro Pivot header anchored directly below status bar (aligns with top-right MiniPlayerDot on Wide/Ultrawide)
+                            // Metro Pivot header anchored directly below status bar (aligns with top-right MiniPlayer on Wide/Ultrawide)
                             FolioPivotBar(
                                 titles = pageTitles,
                                 pageProgress = titleTransition?.let {
@@ -447,14 +450,10 @@ fun FolioApp(
                                 } ?: (pagerState.currentPage + pagerState.currentPageOffsetFraction),
                                 selectedPage = selectedPage,
                                 onSelectPage = ::selectTab,
-                                modifier = Modifier.padding(
-                                    top = statusTop + folioDetailTopMargin,
-                                    end = if (!tierSpec.usesBottomCapsule && playbackState.hasCurrentTrack) {
-                                        tierSpec.pr + tierSpec.ib + 12.dp
-                                    } else {
-                                        0.dp
-                                    },
-                                ),
+                                onRightEdgePxChanged = { rightPx ->
+                                    if (pivotRightEdgePx != rightPx) pivotRightEdgePx = rightPx
+                                },
+                                modifier = Modifier.padding(top = statusTop + folioDetailTopMargin),
                             )
 
                             // Horizontal Pager for Settings / Home / Browse / Library / Search
@@ -539,17 +538,47 @@ fun FolioApp(
                     }
 
                     CompositionLocalProvider(LocalFolioBrowseBackdrop provides backdrop) {
+                        val displayTrack = playbackState.track.let {
+                            if (miniSubtitle != null) it.copy(artist = miniSubtitle) else it
+                        }
                         if (playbackState.hasCurrentTrack && !tierSpec.usesBottomCapsule) {
-                            FolioMiniPlayerDot(
-                                track = playbackState.track,
-                                onOpenPlayer = openPlayer,
-                                modifier = Modifier.align(Alignment.TopEnd)
-                                    .padding(
-                                        top = statusTop + folioDetailTopMargin +
-                                            ((tierSpec.pvh - tierSpec.ib) / 2f).coerceAtLeast(0.dp),
-                                        end = tierSpec.pr,
-                                    ),
+                            val pivotRightEdgeDp = if (pivotRightEdgePx > 0) {
+                                pivotRightEdgePx / renderDensity
+                            } else {
+                                layoutWidthDp
+                            }
+                            val topMiniLayout = computeTopRightMiniPlayerLayout(
+                                windowWidthDp = layoutWidthDp,
+                                pivotRightEdgeDp = pivotRightEdgeDp,
+                                endPaddingDp = tierSpec.pr.value,
                             )
+                            val miniHeightDp = if (topMiniLayout.showCapsule) {
+                                TOP_MINI_CAPSULE_HEIGHT_DP.dp
+                            } else {
+                                tierSpec.ib
+                            }
+                            val topMiniModifier = Modifier.align(Alignment.TopEnd)
+                                .padding(
+                                    top = statusTop + folioDetailTopMargin +
+                                        ((tierSpec.pvh - miniHeightDp) / 2f).coerceAtLeast(0.dp),
+                                    end = tierSpec.pr,
+                                )
+                            if (topMiniLayout.showCapsule) {
+                                FolioTopMiniPlayerCapsule(
+                                    track = displayTrack,
+                                    isPlaying = playbackState.playWhenReady,
+                                    onTogglePlayback = playbackStore::togglePlayback,
+                                    onOpenPlayer = openPlayer,
+                                    capsuleWidthDp = topMiniLayout.widthDp.dp,
+                                    modifier = topMiniModifier,
+                                )
+                            } else {
+                                FolioMiniPlayerDot(
+                                    track = playbackState.track,
+                                    onOpenPlayer = openPlayer,
+                                    modifier = topMiniModifier,
+                                )
+                            }
                         } else if (playbackState.hasCurrentTrack) {
                             Box(
                                 modifier = Modifier
@@ -563,9 +592,7 @@ fun FolioApp(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 FolioMiniPlayerCapsule(
-                                    track = playbackState.track.let {
-                                        if (miniSubtitle != null) it.copy(artist = miniSubtitle) else it
-                                    },
+                                    track = displayTrack,
                                     isPlaying = playbackState.playWhenReady,
                                     onTogglePlayback = playbackStore::togglePlayback,
                                     onOpenPlayer = openPlayer,

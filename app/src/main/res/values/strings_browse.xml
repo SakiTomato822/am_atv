@@ -4,8 +4,8 @@
     <string name="browse_apple_connected">Apple Music account connected</string>
     <string name="browse_apple_sign_in">Sign In to Apple Music</string>
     <string name="browse_refresh_apple">Refresh Apple Music</string>
-    <string name="browse_sign_in_tv">Sign In on This TV</string>
-    <string name="browse_sign_out_tv">Sign Out of This TV</string>
+    <string name="browse_sign_in_tv">Sign In to Apple Music</string>
+    <string name="browse_sign_out_tv">Sign Out</string>
     <string name="browse_connection_error">Unable to connect. Please try again.</string>
     <string name="browse_reset">Reset</string>
     <string name="browse_performance_mode_hint">Reduce animations and blur for smoother performance on slower devices. Auto: enables automatically based on device specs and player smoothness.</string>

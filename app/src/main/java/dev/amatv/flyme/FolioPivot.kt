@@ -78,6 +78,7 @@ internal fun FolioPivotBar(
     selectedPage: Int,
     onSelectPage: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    onRightEdgePxChanged: (Int) -> Unit = {},
 ) {
     val palette = LocalFolioPalette.current
     val tierSpec = LocalFolioTierSpec.current
@@ -163,6 +164,8 @@ internal fun FolioPivotBar(
                 (highPlacement.translationX - lowPlacement.translationX) * fraction
             peekStrength[0] = (if (lowPlacement.isPeekingLeft) 1f - fraction else 0f) +
                 (if (highPlacement.isPeekingLeft) fraction else 0f)
+            val totalSpanPx = if (widths.isEmpty()) 0f else widths.sum() + gapPx * (widths.size - 1)
+            onRightEdgePxChanged((startX + totalSpanPx).roundToInt().coerceAtLeast(0))
 
             layout(constraints.maxWidth, constraints.maxHeight) {
                 var x = startX

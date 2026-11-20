@@ -4,8 +4,8 @@
     <string name="browse_apple_connected">Apple Music 账号已关联</string>
     <string name="browse_apple_sign_in">登录 Apple Music</string>
     <string name="browse_refresh_apple">刷新 Apple Music 内容</string>
-    <string name="browse_sign_in_tv">在这台电视登录</string>
-    <string name="browse_sign_out_tv">从这台电视退出登录</string>
+    <string name="browse_sign_in_tv">登录 Apple Music</string>
+    <string name="browse_sign_out_tv">退出登录</string>
     <string name="browse_connection_error">无法连接，请重试。</string>
     <string name="browse_reset">重置</string>
     <string name="browse_performance_mode_hint">减少动画和模糊，让较慢的设备更流畅。自动：根据设备配置和播放页的流畅度自动开启。</string>
