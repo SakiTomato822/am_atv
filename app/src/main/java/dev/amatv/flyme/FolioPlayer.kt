@@ -662,7 +662,7 @@ internal fun BoxScope.FolioPlayerLayer(
                     val wideExpandedCardDp = with(LocalDensity.current) {
                         if (wideCardHeightPx > 0) wideCardHeightPx.toDp() else 226.dp
                     }
-                    val renderControlsSlot: @Composable (Modifier, Dp) -> Unit = { slotModifier, carWidthDp ->
+                    val renderControlsSlot: @Composable (Modifier, Dp, Dp) -> Unit = { slotModifier, carWidthDp, carCollapsedBarWidthDp ->
                         FolioPlayerAnimatedControlsSlot(
                             controlsExpanded = controlsExpanded,
                             reducedMotion = reducedMotion,
@@ -726,6 +726,7 @@ internal fun BoxScope.FolioPlayerLayer(
                                 Alignment.BottomCenter
                             },
                             carControlsWidthDp = carWidthDp,
+                            collapsedBarWidthDp = carCollapsedBarWidthDp,
                             onCarControlsHeightPxChanged = { wideCardHeightPx = it },
                         )
                     }
@@ -736,16 +737,21 @@ internal fun BoxScope.FolioPlayerLayer(
                             leftColumnWidthDp = wideLeftColumnWidth,
                             bodyHeightDp = maxHeight,
                         )
+                        val flowWideCollapsedCoverDp = computeFlowLandscapeCoverLayout(
+                            leftColumnWidthDp = (wideLeftColumnWidth - WIDE_CAR_COLLAPSED_BAR_START_DP.dp).coerceAtLeast(160.dp),
+                            leftColumnHeightDp = maxHeight,
+                            availableHeightAboveControlsDp = (maxHeight - 134.dp).coerceAtLeast(160.dp),
+                            minBaselineCoverDp = legacyWideCollapsedCover,
+                        ).coverSizeDp
                         val wideCollapsedCoverDp = if (effectiveStyle == LyricBackgroundStyle.Flow) {
-                            computeFlowLandscapeCoverLayout(
-                                leftColumnWidthDp = (wideLeftColumnWidth - 36.dp).coerceAtLeast(160.dp),
-                                leftColumnHeightDp = maxHeight,
-                                availableHeightAboveControlsDp = (maxHeight - 134.dp).coerceAtLeast(160.dp),
-                                minBaselineCoverDp = legacyWideCollapsedCover,
-                            ).coverSizeDp
+                            flowWideCollapsedCoverDp
                         } else {
                             legacyWideCollapsedCover
                         }
+                        val wideCollapsedBarWidthDp = computeWideCollapsedHairlineBarWidthDp(
+                            leftColumnWidthDp = wideLeftColumnWidth,
+                            coverWidthDp = flowWideCollapsedCoverDp,
+                        )
                         val wideControlsWidthDp = computeWideCarControlsWidthDp(wideCollapsedCoverDp)
 
                         when (tierSpec.tier) {
@@ -905,6 +911,7 @@ internal fun BoxScope.FolioPlayerLayer(
                                     .align(Alignment.BottomStart)
                                     .fillMaxWidth(),
                                 wideControlsWidthDp,
+                                wideCollapsedBarWidthDp,
                             )
                         }
                     }
@@ -912,7 +919,7 @@ internal fun BoxScope.FolioPlayerLayer(
                     // Bottom controls slot for Narrow / Medium / non-overlay Wide
                     if (tierSpec.tier != FolioTier.Ultrawide && !overlayControlsInBody) {
                         Spacer(Modifier.height(10.dp))
-                        renderControlsSlot(Modifier.fillMaxWidth(), 464.dp)
+                        renderControlsSlot(Modifier.fillMaxWidth(), 464.dp, Dp.Unspecified)
                     }
                 }
             }

@@ -514,6 +514,7 @@ private fun FolioMiniPlayerPill(
                     fontWeight = FontWeight.SemiBold,
                     fontSize = titleSize,
                     resetKey = track.id,
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 if (track.artist.isNotBlank()) {
                     FolioMarqueeText(
@@ -523,6 +524,7 @@ private fun FolioMiniPlayerPill(
                         fontWeight = FontWeight.Normal,
                         fontSize = artistSize,
                         resetKey = track.id,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
             }

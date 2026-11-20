@@ -1141,6 +1141,32 @@ class FolioPlayerStateTest {
     }
 
     @Test
+    fun wideCollapsedHairlineBarMatchesFlowCoverAndStaysInLeftColumn() {
+        // Car 1920x1080 -> 1280x720 dp: body left column 604dp, cover 400dp -> bar ends at 36 + 400 = 436dp
+        val carBarWidth = computeWideCollapsedHairlineBarWidthDp(
+            leftColumnWidthDp = 604.dp,
+            coverWidthDp = 400.dp,
+        )
+        assertEquals(436f, carBarWidth.value, 0.01f)
+        assertTrue(carBarWidth.value <= 604f)
+
+        // Tablet landscape 1280x800 dp: body left column 604dp, Flow cover 415.2dp -> bar ends at 451.2dp
+        val tabletBarWidth = computeWideCollapsedHairlineBarWidthDp(
+            leftColumnWidthDp = 604.dp,
+            coverWidthDp = 415.2.dp,
+        )
+        assertEquals(451.2f, tabletBarWidth.value, 0.01f)
+        assertTrue(tabletBarWidth.value <= 604f)
+
+        // Clamp guard when cover + start offset would otherwise exceed leftColumnWidthDp
+        val clampedBarWidth = computeWideCollapsedHairlineBarWidthDp(
+            leftColumnWidthDp = 384.dp,
+            coverWidthDp = 370.dp,
+        )
+        assertEquals(384f, clampedBarWidth.value, 0.01f)
+    }
+
+    @Test
     fun marqueeDefaultsAndConditionsRespectReducedMotionAndLowPerformance() {
         assertEquals(1_500, FolioMarqueeDefaults.INITIAL_DELAY_MS)
         assertEquals(1_500, FolioMarqueeDefaults.REPEAT_DELAY_MS)
