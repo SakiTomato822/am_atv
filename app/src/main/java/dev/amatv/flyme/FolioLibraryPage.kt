@@ -121,6 +121,9 @@ internal fun FolioLibraryPage(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val innerWidth = (maxWidth - tierSpec.px - tierSpec.pr).coerceAtLeast(1.dp)
         val cols = adaptiveColumnCount(innerWidth, tierSpec.gw, 14.dp)
+        val rows = if (selectedTab == FolioLibraryTab.Songs) emptyList() else remember(tracks, cols) {
+            tracks.chunked(cols)
+        }
 
         LazyColumn(
             state = listState,
@@ -132,7 +135,7 @@ internal fun FolioLibraryPage(
                 bottom = bottomPadding,
             ),
         ) {
-            item(key = "lib-chips") {
+            item(key = "lib-chips", contentType = "category-chips") {
                 FlowRow(
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -177,7 +180,7 @@ internal fun FolioLibraryPage(
 
             when {
                 tracks.isEmpty() && loading -> {
-                    item(key = "lib-loading") {
+                    item(key = "lib-loading", contentType = "loading") {
                         Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(24.dp),
@@ -188,7 +191,7 @@ internal fun FolioLibraryPage(
                     }
                 }
                 tracks.isEmpty() -> {
-                    item(key = "lib-empty") {
+                    item(key = "lib-empty", contentType = "empty") {
                         Column(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 36.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
@@ -215,7 +218,11 @@ internal fun FolioLibraryPage(
                     }
                 }
                 selectedTab == FolioLibraryTab.Songs -> {
-                    itemsIndexed(tracks, key = { index, item -> "lib-song-${item.id}#$index" }) { index, track ->
+                    itemsIndexed(
+                        tracks,
+                        key = { index, item -> "lib-song-${item.id}#$index" },
+                        contentType = { _, _ -> "song-row" },
+                    ) { index, track ->
                         FolioSongRow(
                             track = track,
                             index = index,
@@ -228,8 +235,11 @@ internal fun FolioLibraryPage(
                     }
                 }
                 else -> {
-                    val rows = tracks.chunked(cols)
-                    itemsIndexed(rows, key = { rowIdx, _ -> "lib-grid-${shelfId}-$rowIdx" }) { rowIdx, rowItems ->
+                    itemsIndexed(
+                        rows,
+                        key = { rowIdx, _ -> "lib-grid-${shelfId}-$rowIdx" },
+                        contentType = { _, _ -> "grid-card-row" },
+                    ) { rowIdx, rowItems ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -254,7 +264,7 @@ internal fun FolioLibraryPage(
             }
 
             if (pagination != null && (pagination.loading || pagination.failed) && tracks.isNotEmpty()) {
-                item(key = "lib-more") {
+                item(key = "lib-more", contentType = "pagination") {
                     Box(Modifier.fillMaxWidth().padding(vertical = 18.dp), contentAlignment = Alignment.Center) {
                         if (pagination.loading) {
                             CircularProgressIndicator(

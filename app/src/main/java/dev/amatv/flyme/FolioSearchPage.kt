@@ -90,6 +90,18 @@ internal fun FolioSearchPage(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val innerWidth = (maxWidth - tierSpec.px - tierSpec.pr).coerceAtLeast(1.dp)
         val listCols = adaptiveColumnCount(innerWidth, tierSpec.liw, tierSpec.lstGap)
+        val results = submission?.results
+        val sections = remember(results) { results?.takeIf { it.isNotEmpty() }?.let(::folioSearchSections) }
+        val cardRows = remember(sections, listCols) {
+            sections?.let {
+                mapOf(
+                    R.string.browse_search_top to it.best.chunked(listCols),
+                    R.string.browse_search_albums to it.albums.chunked(listCols),
+                    R.string.browse_search_artists to it.artists.chunked(listCols),
+                    R.string.browse_search_playlists to it.playlists.chunked(listCols),
+                )
+            }.orEmpty()
+        }
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -100,7 +112,7 @@ internal fun FolioSearchPage(
                 bottom = bottomPadding,
             ),
         ) {
-            item(key = "search-bar") {
+            item(key = "search-bar", contentType = "search-bar") {
                 val shape = RoundedCornerShape(24.dp)
                 Row(
                     modifier = Modifier
@@ -166,7 +178,7 @@ internal fun FolioSearchPage(
             when {
                 submission == null -> {
                     if (history.isNotEmpty()) {
-                        item(key = "search-history") {
+                        item(key = "search-history", contentType = "search-history") {
                             FolioSectionTitle(stringResource(R.string.browse_search_history))
                             FlowRow(
                                 modifier = Modifier.padding(bottom = 14.dp),
@@ -181,7 +193,7 @@ internal fun FolioSearchPage(
                     }
                 }
                 submission.results == null -> {
-                    item(key = "search-loading") {
+                    item(key = "search-loading", contentType = "loading") {
                         Box(Modifier.fillMaxWidth().padding(vertical = 36.dp), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(24.dp),
@@ -191,8 +203,8 @@ internal fun FolioSearchPage(
                         }
                     }
                 }
-                submission.results.isEmpty() -> {
-                    item(key = "search-empty") {
+                sections == null -> {
+                    item(key = "search-empty", contentType = "empty") {
                         Text(
                             text = if (submission.failed) stringResource(R.string.browse_search_error)
                             else stringResource(R.string.app_search_no_results_format, submission.term),
@@ -204,13 +216,19 @@ internal fun FolioSearchPage(
                     }
                 }
                 else -> {
-                    val sections = folioSearchSections(submission.results)
-                    searchCards(R.string.browse_search_top, sections.best, listCols, tierSpec.lstGap, onOpenItem)
+                    searchCards(
+                        R.string.browse_search_top, sections.best, cardRows.getValue(R.string.browse_search_top),
+                        listCols, tierSpec.lstGap, onOpenItem,
+                    )
                     if (sections.songs.isNotEmpty()) {
-                        item(key = "search-songs-title") {
+                        item(key = "search-songs-title", contentType = "section-title") {
                             FolioSectionTitle(stringResource(R.string.browse_search_songs))
                         }
-                        itemsIndexed(sections.songs, key = { index, item -> "search-song-${item.id}#$index" }) { index, track ->
+                        itemsIndexed(
+                            sections.songs,
+                            key = { index, item -> "search-song-${item.id}#$index" },
+                            contentType = { _, _ -> "song-row" },
+                        ) { index, track ->
                             FolioSongRow(
                                 track = track,
                                 index = index,
@@ -222,9 +240,18 @@ internal fun FolioSearchPage(
                             )
                         }
                     }
-                    searchCards(R.string.browse_search_albums, sections.albums, listCols, tierSpec.lstGap, onOpenItem)
-                    searchCards(R.string.browse_search_artists, sections.artists, listCols, tierSpec.lstGap, onOpenItem)
-                    searchCards(R.string.browse_search_playlists, sections.playlists, listCols, tierSpec.lstGap, onOpenItem)
+                    searchCards(
+                        R.string.browse_search_albums, sections.albums, cardRows.getValue(R.string.browse_search_albums),
+                        listCols, tierSpec.lstGap, onOpenItem,
+                    )
+                    searchCards(
+                        R.string.browse_search_artists, sections.artists, cardRows.getValue(R.string.browse_search_artists),
+                        listCols, tierSpec.lstGap, onOpenItem,
+                    )
+                    searchCards(
+                        R.string.browse_search_playlists, sections.playlists, cardRows.getValue(R.string.browse_search_playlists),
+                        listCols, tierSpec.lstGap, onOpenItem,
+                    )
                 }
             }
         }
@@ -234,15 +261,20 @@ internal fun FolioSearchPage(
 private fun LazyListScope.searchCards(
     title: Int,
     cards: List<Track>,
+    rows: List<List<Track>>,
     columns: Int,
     gap: Dp,
     onOpenItem: (Track, List<Track>) -> Unit,
 ) {
-    if (cards.isEmpty()) return
-    item(key = "search-title-$title") {
+    if (rows.isEmpty()) return
+    item(key = "search-title-$title", contentType = "section-title") {
         FolioSectionTitle(stringResource(title))
     }
-    itemsIndexed(cards.chunked(columns), key = { index, _ -> "search-cards-$title-$index" }) { _, row ->
+    itemsIndexed(
+        rows,
+        key = { index, _ -> "search-cards-$title-$index" },
+        contentType = { _, _ -> "list-card-row" },
+    ) { _, row ->
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
             row.forEach { card ->
                 FolioListRowCard(card, onClick = { onOpenItem(card, cards) }, modifier = Modifier.weight(1f))

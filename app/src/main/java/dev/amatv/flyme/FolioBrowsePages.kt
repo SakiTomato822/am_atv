@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -41,7 +42,8 @@ internal fun FolioHomePage(
     onOpenItem: (Track, List<Track>) -> Unit,
 ) {
     val tierSpec = LocalFolioTierSpec.current
-    val shelves = homeShelfOrder(contentState.shelvesFor(Destination.Home))
+    val homeShelves = contentState.shelvesFor(Destination.Home)
+    val shelves = remember(homeShelves) { homeShelfOrder(homeShelves) }
     val loading = contentState.isLoading(Destination.Home)
 
     if (shelves.isEmpty()) {
@@ -59,6 +61,12 @@ internal fun FolioHomePage(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val innerWidth = (maxWidth - tierSpec.px - tierSpec.pr).coerceAtLeast(1.dp)
         val cols = adaptiveColumnCount(innerWidth, tierSpec.liw, tierSpec.lstGap)
+        val shelfRows = remember(shelves, cols) {
+            shelves.map { shelf ->
+                val items = if (shelf.id == "recent-tracks") recentTrackPreview(shelf.items, cols) else shelf.items
+                items.chunked(cols)
+            }
+        }
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
@@ -69,12 +77,15 @@ internal fun FolioHomePage(
             ),
         ) {
             shelves.forEachIndexed { shelfIdx, shelf ->
-                item(key = "home-sec-${shelf.id}") {
+                item(key = "home-sec-${shelf.id}", contentType = "section-title") {
                     FolioSectionTitle(shelf.title)
                 }
-                val displayedItems = if (shelf.id == "recent-tracks") recentTrackPreview(shelf.items, cols) else shelf.items
-                val rows = displayedItems.chunked(cols)
-                itemsIndexed(rows, key = { rowIdx, _ -> "home-row-${shelf.id}-$rowIdx" }) { _, rowItems ->
+                val rows = shelfRows[shelfIdx]
+                itemsIndexed(
+                    rows,
+                    key = { rowIdx, _ -> "home-row-${shelf.id}-$rowIdx" },
+                    contentType = { _, _ -> "list-card-row" },
+                ) { _, rowItems ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(tierSpec.lstGap),
@@ -94,7 +105,7 @@ internal fun FolioHomePage(
                     }
                 }
                 if (shelfIdx < shelves.lastIndex) {
-                    item(key = "home-sp-${shelf.id}") { Spacer(Modifier.height(14.dp)) }
+                    item(key = "home-sp-${shelf.id}", contentType = "shelf-gap") { Spacer(Modifier.height(14.dp)) }
                 }
             }
         }
@@ -130,6 +141,7 @@ internal fun FolioBrowsePage(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val innerWidth = (maxWidth - tierSpec.px - tierSpec.pr).coerceAtLeast(1.dp)
         val cols = adaptiveColumnCount(innerWidth, tierSpec.gw, 14.dp)
+        val shelfRows = remember(shelves, cols) { shelves.map { it.items.chunked(cols) } }
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
@@ -140,11 +152,15 @@ internal fun FolioBrowsePage(
             ),
         ) {
             shelves.forEachIndexed { shelfIdx, shelf ->
-                item(key = "browse-sec-${shelf.id}") {
+                item(key = "browse-sec-${shelf.id}", contentType = "section-title") {
                     FolioSectionTitle(shelf.title)
                 }
-                val rows = shelf.items.chunked(cols)
-                itemsIndexed(rows, key = { rowIdx, _ -> "browse-row-${shelf.id}-$rowIdx" }) { rowIdx, rowItems ->
+                val rows = shelfRows[shelfIdx]
+                itemsIndexed(
+                    rows,
+                    key = { rowIdx, _ -> "browse-row-${shelf.id}-$rowIdx" },
+                    contentType = { _, _ -> "grid-card-row" },
+                ) { rowIdx, rowItems ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -166,7 +182,7 @@ internal fun FolioBrowsePage(
                     }
                 }
                 if (shelfIdx < shelves.lastIndex) {
-                    item(key = "browse-sp-${shelf.id}") { Spacer(Modifier.height(14.dp)) }
+                    item(key = "browse-sp-${shelf.id}", contentType = "shelf-gap") { Spacer(Modifier.height(14.dp)) }
                 }
             }
         }
