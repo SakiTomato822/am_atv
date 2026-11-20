@@ -82,14 +82,11 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.LinkAnnotation
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextLinkStyles
-import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withLink
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
@@ -243,19 +240,16 @@ internal fun FolioPlayerHeader(
                 showHeaderTitle -> {
                     Column(
                         modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalArrangement = Arrangement.spacedBy((-6).dp),
                     ) {
-                        Text(
+                        FolioMarqueeText(
                             text = track.title,
                             color = headerColors.fg,
                             fontFamily = fontFamily,
                             fontWeight = FontWeight.Medium,
                             fontSize = 16.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .folioPressable(isLight = headerGlassLight, onClick = onOpenAlbum),
+                            resetKey = track.id,
+                            modifier = Modifier.fillMaxWidth(),
                         )
                         FolioExpandedSubtitle(
                             artist = track.artist,
@@ -264,6 +258,8 @@ internal fun FolioPlayerHeader(
                             fontSize = 13.sp,
                             onOpenArtist = onOpenArtist,
                             onOpenAlbum = onOpenAlbum,
+                            isLight = headerGlassLight,
+                            resetKey = track.id,
                         )
                     }
                 }
@@ -302,24 +298,37 @@ internal fun FolioPlayerHeader(
                             ),
                         ) {
                             val isLarge = collapsedMode == FolioCollapsedHeaderTitleMode.LargeWithCover
-                            Text(
-                                text = track.title,
-                                color = headerColors.fg,
-                                fontFamily = fontFamily,
-                                fontWeight = if (isLarge) FontWeight.SemiBold else FontWeight.Medium,
-                                fontSize = if (isLarge) 24.sp else 17.sp,
-                                lineHeight = if (isLarge) 28.sp else 20.sp,
-                                maxLines = if (isLarge) 2 else 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            if (subtitle.isNotEmpty()) {
+                            if (isLarge) {
                                 Text(
+                                    text = track.title,
+                                    color = headerColors.fg,
+                                    fontFamily = fontFamily,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 24.sp,
+                                    lineHeight = 28.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            } else {
+                                FolioMarqueeText(
+                                    text = track.title,
+                                    color = headerColors.fg,
+                                    fontFamily = fontFamily,
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 17.sp,
+                                    lineHeight = 20.sp,
+                                    resetKey = track.id,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                            if (subtitle.isNotEmpty()) {
+                                FolioMarqueeText(
                                     text = subtitle,
                                     color = headerColors.fg2,
                                     fontFamily = fontFamily,
                                     fontSize = if (isLarge) 15.sp else 13.5.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
+                                    resetKey = track.id,
+                                    modifier = Modifier.fillMaxWidth(),
                                 )
                             }
                         }
@@ -780,13 +789,13 @@ internal fun FolioCarUnderCoverCollapsedBar(
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (subtitle.isNotEmpty()) {
-                    Text(
+                    FolioMarqueeText(
                         text = subtitle,
                         color = fg2,
                         fontFamily = fontFamily,
                         fontSize = 17.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                        resetKey = track.id,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
             }
@@ -817,73 +826,139 @@ internal fun FolioExpandedSubtitle(
     onOpenArtist: () -> Unit,
     onOpenAlbum: () -> Unit,
     modifier: Modifier = Modifier,
+    isLight: Boolean = LocalFolioPalette.current.isLight,
+    resetKey: Any? = null,
 ) {
     val fontFamily = LocalFolioFontFamily.current
     val cleanArtist = artist.trim()
     val cleanAlbum = album.trim()
     if (cleanArtist.isEmpty() && cleanAlbum.isEmpty()) return
 
-    val baseSpan = remember(color) {
-        SpanStyle(
-            color = color,
+    val separator = " — "
+    val textStyle = remember(fontFamily, fontSize) {
+        TextStyle(
+            fontFamily = fontFamily,
             fontWeight = FontWeight.Normal,
-            textDecoration = TextDecoration.None,
+            fontSize = fontSize,
         )
     }
-    val pressedSpan = remember(color) {
-        SpanStyle(
-            color = color.copy(alpha = (color.alpha * 0.45f).coerceIn(0.15f, 1f)),
-            fontWeight = FontWeight.Normal,
-            textDecoration = TextDecoration.None,
-        )
-    }
-    val linkStyles = remember(baseSpan, pressedSpan) {
-        TextLinkStyles(
-            style = baseSpan,
-            focusedStyle = baseSpan,
-            hoveredStyle = baseSpan,
-            pressedStyle = pressedSpan,
-        )
-    }
-    val annotated = remember(cleanArtist, cleanAlbum, linkStyles, onOpenArtist, onOpenAlbum) {
-        buildAnnotatedString {
-            if (cleanArtist.isNotEmpty()) {
-                withLink(
-                    LinkAnnotation.Clickable(
-                        tag = "artist",
-                        styles = linkStyles,
-                        linkInteractionListener = { onOpenArtist() },
-                    ),
+    val textMeasurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        val maxWidthDp = maxWidth
+        if (cleanArtist.isNotEmpty() && cleanAlbum.isNotEmpty()) {
+            val artistFullDp = remember(cleanArtist, textStyle) {
+                with(density) { textMeasurer.measure(cleanArtist, style = textStyle, maxLines = 1).size.width.toDp() }
+            }
+            val sepFullDp = remember(textStyle) {
+                with(density) { textMeasurer.measure(separator, style = textStyle, maxLines = 1).size.width.toDp() }
+            }
+            val albumFullDp = remember(cleanAlbum, textStyle) {
+                with(density) { textMeasurer.measure(cleanAlbum, style = textStyle, maxLines = 1).size.width.toDp() }
+            }
+            val totalDp = artistFullDp + sepFullDp + albumFullDp
+            val artistWidthMod = if (totalDp <= maxWidthDp) {
+                Modifier.widthIn(max = artistFullDp)
+            } else {
+                val budgetForArtistAndAlbum = (maxWidthDp - sepFullDp).coerceAtLeast(16.dp)
+                val maxArtistDp = min(artistFullDp, budgetForArtistAndAlbum * 0.45f)
+                Modifier.widthIn(max = maxArtistDp)
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = artistWidthMod
+                        .heightIn(min = 40.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .folioPressable(
+                            isLight = isLight,
+                            role = Role.Button,
+                            onClick = onOpenArtist,
+                        ),
+                    contentAlignment = Alignment.CenterStart,
                 ) {
-                    append(cleanArtist)
+                    FolioMarqueeText(
+                        text = cleanArtist,
+                        color = color,
+                        fontFamily = fontFamily,
+                        fontSize = fontSize,
+                        resetKey = resetKey ?: cleanArtist,
+                    )
+                }
+                Text(
+                    text = separator,
+                    color = color,
+                    fontFamily = fontFamily,
+                    fontSize = fontSize,
+                    maxLines = 1,
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .heightIn(min = 40.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .folioPressable(
+                            isLight = isLight,
+                            role = Role.Button,
+                            onClick = onOpenAlbum,
+                        ),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    FolioMarqueeText(
+                        text = cleanAlbum,
+                        color = color,
+                        fontFamily = fontFamily,
+                        fontSize = fontSize,
+                        resetKey = resetKey ?: cleanAlbum,
+                    )
                 }
             }
-            if (cleanArtist.isNotEmpty() && cleanAlbum.isNotEmpty()) {
-                append(" — ")
-            }
-            if (cleanAlbum.isNotEmpty()) {
-                withLink(
-                    LinkAnnotation.Clickable(
-                        tag = "album",
-                        styles = linkStyles,
-                        linkInteractionListener = { onOpenAlbum() },
+        } else if (cleanAlbum.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .heightIn(min = 40.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .folioPressable(
+                        isLight = isLight,
+                        role = Role.Button,
+                        onClick = onOpenAlbum,
                     ),
-                ) {
-                    append(cleanAlbum)
-                }
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                FolioMarqueeText(
+                    text = cleanAlbum,
+                    color = color,
+                    fontFamily = fontFamily,
+                    fontSize = fontSize,
+                    resetKey = resetKey ?: cleanAlbum,
+                )
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .heightIn(min = 40.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .folioPressable(
+                        isLight = isLight,
+                        role = Role.Button,
+                        onClick = onOpenArtist,
+                    ),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                FolioMarqueeText(
+                    text = cleanArtist,
+                    color = color,
+                    fontFamily = fontFamily,
+                    fontSize = fontSize,
+                    resetKey = resetKey ?: cleanArtist,
+                )
             }
         }
     }
-    Text(
-        text = annotated,
-        color = color,
-        fontFamily = fontFamily,
-        fontWeight = FontWeight.Normal,
-        fontSize = fontSize,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = modifier,
-    )
 }
 
 @Composable
@@ -967,23 +1042,23 @@ internal fun FolioPlayerCollapsedCapsule(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    Text(
+                    FolioMarqueeText(
                         text = track.title,
                         color = fg,
                         fontFamily = fontFamily,
                         fontWeight = FontWeight.Medium,
                         fontSize = 15.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                        resetKey = track.id,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                     if (subtitle.isNotEmpty()) {
-                        Text(
+                        FolioMarqueeText(
                             text = subtitle,
                             color = fg2,
                             fontFamily = fontFamily,
                             fontSize = 12.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                            resetKey = track.id,
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                 }
@@ -1091,19 +1166,16 @@ internal fun FolioPlayerExpandedControls(
         ) {
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                verticalArrangement = Arrangement.spacedBy((-6).dp),
             ) {
-                Text(
+                FolioMarqueeText(
                     text = track.title,
                     color = fg,
                     fontFamily = fontFamily,
                     fontWeight = FontWeight.Medium,
                     fontSize = 20.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .folioPressable(enabled = playEnabled, isLight = isLight, onClick = onOpenAlbum),
+                    resetKey = track.id,
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 FolioExpandedSubtitle(
                     artist = track.artist,
@@ -1112,6 +1184,8 @@ internal fun FolioPlayerExpandedControls(
                     fontSize = 14.sp,
                     onOpenArtist = onOpenArtist,
                     onOpenAlbum = onOpenAlbum,
+                    isLight = isLight,
+                    resetKey = track.id,
                 )
             }
 
@@ -1170,26 +1244,20 @@ internal fun FolioPlayerExpandedControls(
                 FolioArtwork(
                     track = track,
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .folioPressable(isLight = isLight, onClick = onOpenAlbum),
+                    modifier = Modifier.size(48.dp),
                 )
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalArrangement = Arrangement.spacedBy((-6).dp),
                 ) {
-                    Text(
+                    FolioMarqueeText(
                         text = track.title,
                         color = fg,
                         fontFamily = fontFamily,
                         fontWeight = FontWeight.Medium,
                         fontSize = 16.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .folioPressable(isLight = isLight, onClick = onOpenAlbum),
+                        resetKey = track.id,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                     FolioExpandedSubtitle(
                         artist = track.artist,
@@ -1198,6 +1266,8 @@ internal fun FolioPlayerExpandedControls(
                         fontSize = 13.sp,
                         onOpenArtist = onOpenArtist,
                         onOpenAlbum = onOpenAlbum,
+                        isLight = isLight,
+                        resetKey = track.id,
                     )
                 }
             }

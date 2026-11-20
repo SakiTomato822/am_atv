@@ -376,24 +376,22 @@ fun FolioMiniPlayerCapsule(
                 .padding(horizontal = 4.dp),
             verticalArrangement = Arrangement.Center,
         ) {
-            Text(
+            FolioMarqueeText(
                 text = track.title,
                 color = palette.fg,
                 fontFamily = fontFamily,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 16.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                resetKey = track.id,
             )
             if (track.artist.isNotBlank()) {
-                Text(
+                FolioMarqueeText(
                     text = track.artist,
                     color = palette.fg2,
                     fontFamily = fontFamily,
                     fontWeight = FontWeight.Normal,
                     fontSize = 13.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    resetKey = track.id,
                 )
             }
         }

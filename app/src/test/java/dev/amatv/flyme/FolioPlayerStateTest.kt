@@ -1088,4 +1088,86 @@ class FolioPlayerStateTest {
         assertEquals(0.35f, darkA.fill.alpha, 0.001f)
         assertEquals(0.45f, darkC.fill.alpha, 0.001f)
     }
+
+    @Test
+    fun flowLandscapeCoverLayoutSizesAndCentersAcrossPhoneTabletAndCar() {
+        // 1. Phone landscape (Short tier: 850x393 dp, collapsed capsule 64dp)
+        assertEquals(FolioTier.Short, tierOf(850f, 393f))
+        val phoneCollapsed = computeFlowLandscapeCoverLayout(
+            leftColumnWidthDp = 336.dp,
+            leftColumnHeightDp = 349.dp,
+            availableHeightAboveControlsDp = 237.dp,
+            minBaselineCoverDp = 120.dp,
+            minVisibleCoverDp = 96.dp,
+        )
+        assertTrue(phoneCollapsed.showCover)
+        assertEquals(209.4f, phoneCollapsed.coverSizeDp.value, 0.1f)
+        assertTrue(phoneCollapsed.coverSizeDp.value >= 120f)
+        assertTrue(phoneCollapsed.coverSizeDp.value <= 237f)
+
+        // Expanded card on compact phone landscape leaves <96dp -> hide cover cleanly to prevent overlap
+        val phoneExpanded = computeFlowLandscapeCoverLayout(
+            leftColumnWidthDp = 336.dp,
+            leftColumnHeightDp = 349.dp,
+            availableHeightAboveControlsDp = 75.dp,
+            minBaselineCoverDp = 120.dp,
+            minVisibleCoverDp = 96.dp,
+        )
+        assertFalse(phoneExpanded.showCover)
+        assertEquals(0f, phoneExpanded.coverSizeDp.value, 0.01f)
+
+        // 2. Tablet landscape (Wide tier: 1280x800 dp, bodyHeight ~ 692dp, leftColumn inner ~ 568dp)
+        assertEquals(FolioTier.Wide, tierOf(1280f, 800f))
+        val tabletBaseline = computeWideCarCollapsedCoverSizeDp(leftColumnWidthDp = 604.dp, bodyHeightDp = 692.dp)
+        assertEquals(400f, tabletBaseline.value, 0.01f)
+        val tabletCollapsed = computeFlowLandscapeCoverLayout(
+            leftColumnWidthDp = 568.dp,
+            leftColumnHeightDp = 692.dp,
+            availableHeightAboveControlsDp = 558.dp,
+            minBaselineCoverDp = tabletBaseline,
+        )
+        assertTrue(tabletCollapsed.showCover)
+        assertEquals(415.2f, tabletCollapsed.coverSizeDp.value, 0.1f)
+        assertTrue(tabletCollapsed.coverSizeDp.value >= tabletBaseline.value)
+
+        // 3. Car head unit (1920x1080 @ 160 dpi -> 1280x720 dp rendered at 1.5 density, Wide tier)
+        val (carW, carH) = folioLayoutDp(1920f, 1080f, 1f)
+        assertEquals(1280f, carW, 0.01f)
+        assertEquals(720f, carH, 0.01f)
+        assertEquals(FolioTier.Wide, tierOf(carW, carH))
+        val carBodyHeight = 594.dp
+        val carBaseline = computeWideCarCollapsedCoverSizeDp(leftColumnWidthDp = 604.dp, bodyHeightDp = carBodyHeight)
+        assertEquals(400f, carBaseline.value, 0.01f)
+        val carCollapsed = computeFlowLandscapeCoverLayout(
+            leftColumnWidthDp = 568.dp,
+            leftColumnHeightDp = carBodyHeight,
+            availableHeightAboveControlsDp = 460.dp,
+            minBaselineCoverDp = carBaseline,
+        )
+        assertTrue(carCollapsed.showCover)
+        // Must not shrink below existing 400dp baseline on car even though 594 * 0.6 = 356.4dp
+        assertEquals(400f, carCollapsed.coverSizeDp.value, 0.01f)
+
+        val carExpanded = computeFlowLandscapeCoverLayout(
+            leftColumnWidthDp = 568.dp,
+            leftColumnHeightDp = carBodyHeight,
+            availableHeightAboveControlsDp = 340.dp,
+            minBaselineCoverDp = carBaseline,
+        )
+        assertTrue(carExpanded.showCover)
+        assertEquals(340f, carExpanded.coverSizeDp.value, 0.01f)
+    }
+
+    @Test
+    fun marqueeDefaultsAndConditionsRespectReducedMotionAndLowPerformance() {
+        assertEquals(1_500, FolioMarqueeDefaults.INITIAL_DELAY_MS)
+        assertEquals(1_500, FolioMarqueeDefaults.REPEAT_DELAY_MS)
+        assertEquals(30f, FolioMarqueeDefaults.VELOCITY.value, 0.01f)
+        assertTrue(FolioMarqueeDefaults.EDGE_FADE_WIDTH.value >= 8f)
+
+        assertTrue(shouldRunFolioMarquee(reducedMotion = false, lowPerformance = false, text = "Fortnight"))
+        assertFalse(shouldRunFolioMarquee(reducedMotion = true, lowPerformance = false, text = "Fortnight"))
+        assertFalse(shouldRunFolioMarquee(reducedMotion = false, lowPerformance = true, text = "Fortnight"))
+        assertFalse(shouldRunFolioMarquee(reducedMotion = false, lowPerformance = false, text = ""))
+    }
 }
