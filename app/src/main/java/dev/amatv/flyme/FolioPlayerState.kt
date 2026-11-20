@@ -456,6 +456,38 @@ fun computeWideCarExpandedCoverSizeDp(
     return collapsedCoverDp.coerceAtMost(available)
 }
 
+@Immutable
+data class FolioFlowCoverLayoutSpec(
+    val coverSizeDp: Dp,
+    val showCover: Boolean,
+)
+
+/**
+ * Computes square cover side length in Flow landscape layouts (`Short` phone landscape, `Wide`
+ * tablet landscape, and `Wide` car 1920x1080 -> 1280x720 dp):
+ * - Target side = `max(min(leftColumnWidth * 0.8, leftColumnHeight * 0.6), minBaselineCoverDp)`.
+ * - Clamped to [availableHeightAboveControlsDp] so cover + controls/capsule never overlap.
+ * - Hides the cover when remaining vertical clearance drops below [minVisibleCoverDp].
+ */
+fun computeFlowLandscapeCoverLayout(
+    leftColumnWidthDp: Dp,
+    leftColumnHeightDp: Dp,
+    availableHeightAboveControlsDp: Dp,
+    minBaselineCoverDp: Dp,
+    minVisibleCoverDp: Dp = 72.dp,
+): FolioFlowCoverLayoutSpec {
+    if (leftColumnWidthDp <= 0.dp || leftColumnHeightDp <= 0.dp || availableHeightAboveControlsDp < minVisibleCoverDp) {
+        return FolioFlowCoverLayoutSpec(coverSizeDp = 0.dp, showCover = false)
+    }
+    val preferred = androidx.compose.ui.unit.min(leftColumnWidthDp * 0.8f, leftColumnHeightDp * 0.6f)
+    val atLeastBaseline = androidx.compose.ui.unit.max(preferred, minBaselineCoverDp)
+    val fitted = atLeastBaseline.coerceAtMost(availableHeightAboveControlsDp)
+    return FolioFlowCoverLayoutSpec(
+        coverSizeDp = fitted,
+        showCover = fitted >= minVisibleCoverDp,
+    )
+}
+
 fun areControlsExpanded(
     manualOpen: Boolean,
     alwaysOpen: Boolean,

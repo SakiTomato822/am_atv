@@ -153,41 +153,32 @@ internal fun FolioNoLyricsStateBox(
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .size(coverSide)
-                        .shadow(20.dp, RoundedCornerShape(16.dp))
-                        .clip(RoundedCornerShape(16.dp))
-                        .folioPressable(onClick = onOpenAlbum),
+                        .shadow(20.dp, RoundedCornerShape(16.dp)),
                 )
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy((-4).dp),
                     modifier = Modifier.widthIn(max = coverSide + 32.dp),
                 ) {
-                    Text(
+                    FolioMarqueeText(
                         text = track.title,
                         color = fg,
                         fontFamily = fontFamily,
                         fontWeight = FontWeight.Medium,
                         fontSize = 21.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .folioPressable(onClick = onOpenAlbum),
+                        resetKey = track.id,
+                        modifier = Modifier.fillMaxWidth(),
                     )
-                    if (track.artist.isNotBlank()) {
-                        Text(
-                            text = track.artist,
+                    if (track.artist.isNotBlank() || track.album.isNotBlank()) {
+                        FolioExpandedSubtitle(
+                            artist = track.artist,
+                            album = track.album,
                             color = fg2,
-                            fontFamily = fontFamily,
-                            fontWeight = FontWeight.Normal,
                             fontSize = 15.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .folioPressable(onClick = onOpenArtist),
+                            onOpenArtist = onOpenArtist,
+                            onOpenAlbum = onOpenAlbum,
+                            resetKey = track.id,
                         )
                     }
                 }

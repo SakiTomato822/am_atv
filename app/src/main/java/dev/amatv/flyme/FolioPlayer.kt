@@ -63,6 +63,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -73,6 +74,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.max
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
 import coil3.request.ImageRequest
@@ -722,10 +724,21 @@ internal fun BoxScope.FolioPlayerLayer(
                     }
 
                     BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                        val wideCollapsedCoverDp = computeWideCarCollapsedCoverSizeDp(
-                            leftColumnWidthDp = maxWidth * 0.50f,
+                        val wideLeftColumnWidth = maxWidth * 0.50f
+                        val legacyWideCollapsedCover = computeWideCarCollapsedCoverSizeDp(
+                            leftColumnWidthDp = wideLeftColumnWidth,
                             bodyHeightDp = maxHeight,
                         )
+                        val wideCollapsedCoverDp = if (effectiveStyle == LyricBackgroundStyle.Flow) {
+                            computeFlowLandscapeCoverLayout(
+                                leftColumnWidthDp = (wideLeftColumnWidth - 36.dp).coerceAtLeast(160.dp),
+                                leftColumnHeightDp = maxHeight,
+                                availableHeightAboveControlsDp = (maxHeight - 134.dp).coerceAtLeast(160.dp),
+                                minBaselineCoverDp = legacyWideCollapsedCover,
+                            ).coverSizeDp
+                        } else {
+                            legacyWideCollapsedCover
+                        }
                         val wideControlsWidthDp = computeWideCarControlsWidthDp(wideCollapsedCoverDp)
 
                         when (tierSpec.tier) {
@@ -1011,35 +1024,31 @@ private fun UltrawidePlayerBody(
                         modifier = Modifier
                             .size(artSide)
                             .shadow(22.dp, RoundedCornerShape(16.dp))
-                            .then(pullHandle)
-                            .clip(RoundedCornerShape(16.dp))
-                            .folioPressable(isLight = isLight, onClick = onOpenAlbum),
+                            .then(pullHandle),
                     )
                 }
-                Text(
-                    text = track.title,
-                    color = fg,
-                    fontFamily = fontFamily,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 20.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .folioPressable(isLight = isLight, onClick = onOpenAlbum),
-                )
-                if (track.artist.isNotBlank()) {
-                    Text(
-                        text = track.artist,
-                        color = fg2,
+                Column(verticalArrangement = Arrangement.spacedBy((-4).dp)) {
+                    FolioMarqueeText(
+                        text = track.title,
+                        color = fg,
                         fontFamily = fontFamily,
-                        fontSize = 15.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .folioPressable(isLight = isLight, onClick = onOpenArtist),
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 20.sp,
+                        resetKey = track.id,
+                        modifier = Modifier.fillMaxWidth(),
                     )
+                    if (track.artist.isNotBlank() || track.album.isNotBlank()) {
+                        FolioExpandedSubtitle(
+                            artist = track.artist,
+                            album = track.album,
+                            color = fg2,
+                            fontSize = 15.sp,
+                            onOpenArtist = onOpenArtist,
+                            onOpenAlbum = onOpenAlbum,
+                            isLight = isLight,
+                            resetKey = track.id,
+                        )
+                    }
                 }
             }
 
@@ -1223,25 +1232,20 @@ private fun VerticalPlayerBody(
                         modifier = Modifier
                             .size(116.dp)
                             .shadow(16.dp, RoundedCornerShape(14.dp))
-                            .then(pullHandle)
-                            .clip(RoundedCornerShape(14.dp))
-                            .folioPressable(isLight = isLight, onClick = onOpenAlbum),
+                            .then(pullHandle),
                     )
                     Column(
                         modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy((-4).dp),
                     ) {
-                        Text(
+                        FolioMarqueeText(
                             text = track.title,
                             color = fg,
                             fontFamily = LocalFolioFontFamily.current,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 22.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .folioPressable(isLight = isLight, onClick = onOpenAlbum),
+                            resetKey = track.id,
+                            modifier = Modifier.fillMaxWidth(),
                         )
                         FolioExpandedSubtitle(
                             artist = track.artist,
@@ -1250,6 +1254,8 @@ private fun VerticalPlayerBody(
                             fontSize = 15.sp,
                             onOpenArtist = onOpenArtist,
                             onOpenAlbum = onOpenAlbum,
+                            isLight = isLight,
+                            resetKey = track.id,
                         )
                     }
                 }
@@ -1521,20 +1527,60 @@ private fun ShortPlayerLayout(
             )
         }
 
-        // Left artwork in Flow (mirrors `.t-m .art { left: 32dp; top: sb+36dp; 128dp }`)
-        val headroom = maxHeight - statusTop - navBottom
-        if (style == LyricBackgroundStyle.Flow && displayState != FolioPlayerDisplayState.Queue && headroom >= 300.dp) {
-            FolioArtwork(
-                track = track,
-                shape = RoundedCornerShape(12.dp),
+        // Left artwork in Flow centered cleanly above controls/capsule without colliding when expanded
+        val density = LocalDensity.current
+        var shortControlsHeightPx by remember { mutableIntStateOf(0) }
+        val measuredControlsDp = with(density) { shortControlsHeightPx.toDp() }
+        val activeControlsReservedDp = if (controlsExpanded) {
+            if (measuredControlsDp > 100.dp) measuredControlsDp else 216.dp
+        } else {
+            64.dp
+        }
+        val topReservedDp = statusTop + 28.dp
+        val bottomReservedDp = navBottom + 8.dp + activeControlsReservedDp + 12.dp
+        val coverLayout = computeFlowLandscapeCoverLayout(
+            leftColumnWidthDp = tierSpec.controlCardWidth,
+            leftColumnHeightDp = (maxHeight - statusTop - navBottom).coerceAtLeast(0.dp),
+            availableHeightAboveControlsDp = (maxHeight - topReservedDp - bottomReservedDp).coerceAtLeast(0.dp),
+            minBaselineCoverDp = 120.dp,
+            minVisibleCoverDp = 96.dp,
+        )
+        val targetCoverAlpha = if (style == LyricBackgroundStyle.Flow &&
+            displayState != FolioPlayerDisplayState.Queue &&
+            coverLayout.showCover
+        ) {
+            1f
+        } else {
+            0f
+        }
+        val coverAlpha = if (lowPerformance || reducedMotion) {
+            targetCoverAlpha
+        } else {
+            animateFloatAsState(
+                targetValue = targetCoverAlpha,
+                animationSpec = tween(FolioPlayerMotionTokens.CTL_OPACITY_MS),
+                label = "short-flow-cover-alpha",
+            ).value
+        }
+        if (coverAlpha > 0.01f && coverLayout.coverSizeDp > 0.dp) {
+            Box(
                 modifier = Modifier
-                    .padding(start = 32.dp, top = statusTop + 44.dp)
-                    .size(min(120.dp, (headroom - 196.dp).coerceAtLeast(72.dp)))
-                    .shadow(18.dp, RoundedCornerShape(12.dp))
-                    .then(pullHandle)
-                    .clip(RoundedCornerShape(12.dp))
-                    .folioPressable(isLight = isLight, onClick = onOpenAlbum),
-            )
+                    .align(Alignment.TopStart)
+                    .padding(start = 16.dp, top = topReservedDp, bottom = bottomReservedDp)
+                    .width(tierSpec.controlCardWidth)
+                    .fillMaxHeight()
+                    .graphicsLayer { alpha = coverAlpha },
+                contentAlignment = Alignment.Center,
+            ) {
+                FolioArtwork(
+                    track = track,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .size(coverLayout.coverSizeDp)
+                        .shadow(20.dp, RoundedCornerShape(14.dp))
+                        .then(pullHandle),
+                )
+            }
         }
 
         // Left controls `.ctl` (`left: 16dp, width: 336dp`) / `.pmeta`
@@ -1576,7 +1622,8 @@ private fun ShortPlayerLayout(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(start = 16.dp, bottom = navBottom + 8.dp)
-                .width(tierSpec.controlCardWidth),
+                .width(tierSpec.controlCardWidth)
+                .onSizeChanged { shortControlsHeightPx = it.height },
             contentAlignment = Alignment.BottomStart,
         )
 
@@ -1725,14 +1772,29 @@ private fun TwoColumnPlayerBody(
                         .width(leftColumnWidth)
                         .fillMaxHeight()
                         .then(pullHandle),
-                    contentAlignment = if (showUnderCoverCollapsed) Alignment.TopStart else Alignment.CenterStart,
+                    contentAlignment = if (showUnderCoverCollapsed && style == LyricBackgroundStyle.Flow) {
+                        Alignment.TopStart
+                    } else {
+                        Alignment.CenterStart
+                    },
                 ) {
                     if (isWideCar) {
+                        val innerLeftWidth = (leftColumnWidth - 36.dp).coerceAtLeast(160.dp)
                         if (showUnderCoverCollapsed) {
-                            val collapsedCoverSize = computeWideCarCollapsedCoverSizeDp(
+                            val legacyCollapsedCoverSize = computeWideCarCollapsedCoverSizeDp(
                                 leftColumnWidthDp = leftColumnWidth,
                                 bodyHeightDp = bodyHeight,
                             )
+                            val collapsedCoverSize = if (style == LyricBackgroundStyle.Flow) {
+                                computeFlowLandscapeCoverLayout(
+                                    leftColumnWidthDp = innerLeftWidth,
+                                    leftColumnHeightDp = bodyHeight,
+                                    availableHeightAboveControlsDp = (bodyHeight - 134.dp).coerceAtLeast(160.dp),
+                                    minBaselineCoverDp = legacyCollapsedCoverSize,
+                                ).coverSizeDp
+                            } else {
+                                legacyCollapsedCoverSize
+                            }
                             val expandedCoverSize = computeWideCarExpandedCoverSizeDp(
                                 collapsedCoverDp = collapsedCoverSize,
                                 bodyHeightDp = bodyHeight,
@@ -1750,8 +1812,19 @@ private fun TwoColumnPlayerBody(
                             val targetScale = (expandedCoverSize / collapsedCoverSize).coerceIn(0.35f, 1f)
                             val coverScale = 1f + (targetScale - 1f) * coverShrinkFraction
 
+                            val topOffsetDp = if (style == LyricBackgroundStyle.Flow) {
+                                val collapsedBlockHeight = collapsedCoverSize + 130.dp
+                                val collapsedTop = ((bodyHeight - collapsedBlockHeight) * 0.5f).coerceAtLeast(0.dp)
+                                val expandedAvailable = (bodyHeight - expandedCarControlsHeightDp - 4.dp - 24.dp)
+                                    .coerceAtLeast(expandedCoverSize)
+                                val expandedTop = ((expandedAvailable - expandedCoverSize) * 0.5f).coerceAtLeast(8.dp)
+                                collapsedTop + (expandedTop - collapsedTop) * coverShrinkFraction
+                            } else {
+                                8.dp
+                            }
+
                             Column(
-                                modifier = Modifier.padding(start = 36.dp, top = 8.dp),
+                                modifier = Modifier.padding(start = 36.dp, top = topOffsetDp),
                                 verticalArrangement = Arrangement.spacedBy(18.dp),
                             ) {
                                 FolioArtwork(
@@ -1762,13 +1835,19 @@ private fun TwoColumnPlayerBody(
                                         .graphicsLayer {
                                             scaleX = coverScale
                                             scaleY = coverScale
-                                            transformOrigin = TransformOrigin(0f, 0f)
+                                            transformOrigin = if (style == LyricBackgroundStyle.Flow) {
+                                                TransformOrigin(0.5f, 0f)
+                                            } else {
+                                                TransformOrigin(0f, 0f)
+                                            }
                                         }
                                         .shadow(24.dp, RoundedCornerShape(14.dp))
                                         .clip(RoundedCornerShape(14.dp))
-                                        .folioPressable(isLight = isLight) {
-                                            if (controlsExpanded) onOpenAlbum() else onReveal()
-                                        },
+                                        .folioPressable(
+                                            enabled = !controlsExpanded,
+                                            isLight = isLight,
+                                            onClick = onReveal,
+                                        ),
                                 )
                                 if (!controlsExpanded || pmetaAlpha > 0.01f) {
                                     FolioCarUnderCoverCollapsedBar(
@@ -1791,20 +1870,40 @@ private fun TwoColumnPlayerBody(
                         } else if (displayState == FolioPlayerDisplayState.Lyrics ||
                             (displayState == FolioPlayerDisplayState.None && style == LyricBackgroundStyle.Flow)
                         ) {
-                            val coverSize = min((bodyHeight - 16.dp).coerceAtLeast(120.dp), min(leftColumnWidth * 0.78f, 400.dp))
-                            FolioArtwork(
-                                track = track,
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier
-                                    .padding(start = 36.dp)
-                                    .size(coverSize)
-                                    .shadow(24.dp, RoundedCornerShape(14.dp))
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .folioPressable(isLight = isLight, onClick = onOpenAlbum),
-                            )
+                            val bottomReserved = if (controlsExpanded) expandedCarControlsHeightDp + 28.dp else 76.dp
+                            val availableHeight = (bodyHeight - bottomReserved - 16.dp).coerceAtLeast(120.dp)
+                            val baselineCover = min((bodyHeight - 16.dp).coerceAtLeast(120.dp), min(leftColumnWidth * 0.78f, 400.dp))
+                            val coverSize = if (style == LyricBackgroundStyle.Flow) {
+                                computeFlowLandscapeCoverLayout(
+                                    leftColumnWidthDp = innerLeftWidth,
+                                    leftColumnHeightDp = bodyHeight,
+                                    availableHeightAboveControlsDp = availableHeight,
+                                    minBaselineCoverDp = baselineCover,
+                                ).coverSizeDp
+                            } else {
+                                baselineCover
+                            }
+                            if (coverSize > 0.dp) {
+                                val legacySlotWidth = computeWideCarCollapsedCoverSizeDp(leftColumnWidth, bodyHeight)
+                                val extraCenterStart = ((legacySlotWidth - coverSize) * 0.5f).coerceAtLeast(0.dp)
+                                FolioArtwork(
+                                    track = track,
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .padding(start = 36.dp + extraCenterStart, bottom = bottomReserved)
+                                        .size(coverSize)
+                                        .shadow(24.dp, RoundedCornerShape(14.dp)),
+                                )
+                            }
                         }
                     } else if (style == LyricBackgroundStyle.Flow) {
-                        val coverSize = min(bodyHeight * 0.72f, 200.dp)
+                        val coverLayout = computeFlowLandscapeCoverLayout(
+                            leftColumnWidthDp = leftColumnWidth,
+                            leftColumnHeightDp = bodyHeight,
+                            availableHeightAboveControlsDp = (bodyHeight - 96.dp).coerceAtLeast(120.dp),
+                            minBaselineCoverDp = min(bodyHeight * 0.72f, 200.dp),
+                        )
+                        val coverSize = coverLayout.coverSizeDp
                         Column(
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
@@ -1813,36 +1912,33 @@ private fun TwoColumnPlayerBody(
                                 shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier
                                     .size(coverSize)
-                                    .shadow(24.dp, RoundedCornerShape(16.dp))
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .folioPressable(isLight = isLight, onClick = onOpenAlbum),
+                                    .shadow(24.dp, RoundedCornerShape(16.dp)),
                             )
-                            Text(
-                                text = track.title,
-                                color = fg,
-                                fontFamily = fontFamily,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 18.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier
-                                    .widthIn(max = coverSize)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .folioPressable(isLight = isLight, onClick = onOpenAlbum),
-                            )
-                            if (track.artist.isNotBlank()) {
-                                Text(
-                                    text = track.artist,
-                                    color = fg2,
+                            Column(
+                                modifier = Modifier.widthIn(max = coverSize),
+                                verticalArrangement = Arrangement.spacedBy((-4).dp),
+                            ) {
+                                FolioMarqueeText(
+                                    text = track.title,
+                                    color = fg,
                                     fontFamily = fontFamily,
-                                    fontSize = 14.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier
-                                        .widthIn(max = coverSize)
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .folioPressable(isLight = isLight, onClick = onOpenArtist),
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 18.sp,
+                                    resetKey = track.id,
+                                    modifier = Modifier.fillMaxWidth(),
                                 )
+                                if (track.artist.isNotBlank() || track.album.isNotBlank()) {
+                                    FolioExpandedSubtitle(
+                                        artist = track.artist,
+                                        album = track.album,
+                                        color = fg2,
+                                        fontSize = 14.sp,
+                                        onOpenArtist = onOpenArtist,
+                                        onOpenAlbum = onOpenAlbum,
+                                        isLight = isLight,
+                                        resetKey = track.id,
+                                    )
+                                }
                             }
                         }
                     }
