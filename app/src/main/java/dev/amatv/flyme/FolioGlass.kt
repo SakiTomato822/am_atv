@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.os.Build
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -201,44 +203,49 @@ internal fun ProvideFolioGlassEnvironment(
     effectiveStyle: LyricBackgroundStyle,
     displayState: FolioPlayerDisplayState,
     baseColor: Color,
+    lowPerformance: Boolean,
     content: @Composable (FolioGlassEnvironment) -> Unit,
 ) {
-    val glassTier = rememberFolioGlassTier()
-    val layerBackdrop = if (glassTier != FolioGlassTier.FallbackC) {
-        rememberLayerBackdrop()
+    val env = if (lowPerformance) {
+        remember { FolioGlassEnvironment() }
     } else {
-        null
-    }
-    val needBlurredCover = glassTier == FolioGlassTier.FallbackC && effectiveStyle == LyricBackgroundStyle.Soak
-    val blurredCover = rememberFolioBlurredCoverBitmap(
-        artworkUrl = track.artworkUrl,
-        active = needBlurredCover,
-    )
-    val coordHolder = remember(glassTier) {
-        if (glassTier == FolioGlassTier.FallbackC) FolioGlassCoordHolder() else null
-    }
-    val isVerticalBleed = tierSpec.tier == FolioTier.Narrow || tierSpec.tier == FolioTier.Medium
-    val showSoakBleed = showSoakArtworkStage(tierSpec.tier, effectiveStyle, displayState)
-    val env = remember(
-        glassTier,
-        layerBackdrop,
-        effectiveStyle,
-        baseColor,
-        blurredCover,
-        isVerticalBleed,
-        showSoakBleed,
-        coordHolder,
-    ) {
-        FolioGlassEnvironment(
-            tier = glassTier,
-            layerBackdrop = layerBackdrop,
-            effectiveStyle = effectiveStyle,
-            baseColor = baseColor,
-            blurredCover = blurredCover,
-            isVerticalBleed = isVerticalBleed,
-            showSoakBleed = showSoakBleed,
-            coordHolder = coordHolder,
+        val glassTier = rememberFolioGlassTier()
+        val layerBackdrop = if (glassTier != FolioGlassTier.FallbackC) {
+            rememberLayerBackdrop()
+        } else {
+            null
+        }
+        val needBlurredCover = glassTier == FolioGlassTier.FallbackC && effectiveStyle == LyricBackgroundStyle.Soak
+        val blurredCover = rememberFolioBlurredCoverBitmap(
+            artworkUrl = track.artworkUrl,
+            active = needBlurredCover,
         )
+        val coordHolder = remember(glassTier) {
+            if (glassTier == FolioGlassTier.FallbackC) FolioGlassCoordHolder() else null
+        }
+        val isVerticalBleed = tierSpec.tier == FolioTier.Narrow || tierSpec.tier == FolioTier.Medium
+        val showSoakBleed = showSoakArtworkStage(tierSpec.tier, effectiveStyle, displayState)
+        remember(
+            glassTier,
+            layerBackdrop,
+            effectiveStyle,
+            baseColor,
+            blurredCover,
+            isVerticalBleed,
+            showSoakBleed,
+            coordHolder,
+        ) {
+            FolioGlassEnvironment(
+                tier = glassTier,
+                layerBackdrop = layerBackdrop,
+                effectiveStyle = effectiveStyle,
+                baseColor = baseColor,
+                blurredCover = blurredCover,
+                isVerticalBleed = isVerticalBleed,
+                showSoakBleed = showSoakBleed,
+                coordHolder = coordHolder,
+            )
+        }
     }
     CompositionLocalProvider(LocalFolioGlassEnv provides env) {
         content(env)
@@ -335,6 +342,11 @@ internal fun Modifier.folioPlayerGlass(
 ): Modifier {
     if (!enabled) return this
     return composed {
+        if (LocalFolioLowPerformance.current) {
+            val fill = if (isLight) Color(0xFFF6F4F9) else Color(0xFF1A1621)
+            val border = resolveFolioGlassColors(FolioGlassTier.FallbackC, isLight).border
+            return@composed this.clip(shape).background(fill).border(1.dp, border, shape)
+        }
         val env = LocalFolioGlassEnv.current
         val colors = remember(env.tier, isLight) { resolveFolioGlassColors(env.tier, isLight) }
         val layerBackdrop = env.layerBackdrop

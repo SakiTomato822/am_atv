@@ -5,6 +5,8 @@ import android.os.SystemClock
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
@@ -147,11 +149,11 @@ internal fun BoxScope.FolioPlayerLayer(
     AnimatedVisibility(
         visible = open && playbackState.hasCurrentTrack,
         modifier = Modifier.matchParentSize(),
-        enter = slideInVertically(
+        enter = if (settings.lowPerformance) EnterTransition.None else slideInVertically(
             animationSpec = tween(FolioMotion.SLOW_MS, easing = FolioMotion.PageEasing),
             initialOffsetY = { it },
         ) + fadeIn(tween(FolioMotion.FAST_MS)),
-        exit = slideOutVertically(
+        exit = if (settings.lowPerformance) ExitTransition.None else slideOutVertically(
             animationSpec = tween(FolioMotion.FAST_MS, easing = FolioMotion.PageEasing),
             targetOffsetY = { it },
         ) + fadeOut(tween(FolioMotion.FAST_MS)),
@@ -307,7 +309,11 @@ internal fun BoxScope.FolioPlayerLayer(
             isReducedMotionEnabled(scale, ValueAnimator.areAnimatorsEnabled())
         }
         val artworkPalette = rememberArtworkPalette(track.artworkUrl, track.palette)
-        val topStripLuminance = rememberArtworkTopLuminance(track.artworkUrl, track.palette)
+        val topStripLuminance = if (!settings.lowPerformance ||
+            showSoakArtworkStage(tierSpec.tier, effectiveStyle, displayState)
+        ) {
+            rememberArtworkTopLuminance(track.artworkUrl, track.palette)
+        } else null
         val baseColor = remember(artworkPalette, palette.isLight) {
             folioPlayerBaseColor(artworkPalette, palette.isLight)
         }
@@ -396,6 +402,7 @@ internal fun BoxScope.FolioPlayerLayer(
             effectiveStyle = effectiveStyle,
             displayState = displayState,
             baseColor = baseColor,
+            lowPerformance = settings.lowPerformance,
         ) { glassEnv ->
             val anchorHolder = remember { FolioPlayerAnchorCoordsHolder() }
             CompositionLocalProvider(
@@ -420,7 +427,7 @@ internal fun BoxScope.FolioPlayerLayer(
                     artworkPalette = artworkPalette,
                     style = effectiveStyle,
                     isLight = palette.isLight,
-                    animateFlow = !settings.lowPerformance,
+                    lowPerformance = settings.lowPerformance,
                     reducedMotion = reducedMotion,
                     tierSpec = tierSpec,
                     displayState = displayState,
@@ -446,15 +453,12 @@ internal fun BoxScope.FolioPlayerLayer(
                 lightBaseColor = baseColor,
                 darkBgColor = palette.bg,
             )
-            val posterScrimAlpha by animateFloatAsState(
-                targetValue = if (displayState == FolioPlayerDisplayState.Poster && scrimColor != Color.Transparent) {
-                    1f
-                } else {
-                    0f
-                },
+            val targetScrimAlpha = if (displayState == FolioPlayerDisplayState.Poster && scrimColor != Color.Transparent) 1f else 0f
+            val posterScrimAlpha = if (settings.lowPerformance) targetScrimAlpha else animateFloatAsState(
+                targetValue = targetScrimAlpha,
                 animationSpec = tween(if (reducedMotion) 0 else BACKDROP_STYLE_CROSSFADE_MS),
                 label = "poster-top-scrim-alpha",
-            )
+            ).value
             if (posterScrimAlpha > 0.01f && scrimColor != Color.Transparent) {
                 Box(
                     modifier = Modifier
@@ -1700,11 +1704,12 @@ private fun TwoColumnPlayerBody(
             val showUnderCoverCollapsed = isWideCar &&
                 !alwaysOpen &&
                 resolveCollapsedLayout(tierSpec.tier, displayState) == FolioCollapsedLayout.UnderCoverInfo
-            val pmetaAlpha by animateFloatAsState(
-                targetValue = if (showUnderCoverCollapsed && !controlsExpanded) 1f else 0f,
+            val targetPmetaAlpha = if (showUnderCoverCollapsed && !controlsExpanded) 1f else 0f
+            val pmetaAlpha = if (lowPerformance) targetPmetaAlpha else animateFloatAsState(
+                targetValue = targetPmetaAlpha,
                 animationSpec = tween(if (reducedMotion) 0 else FolioPlayerMotionTokens.PMETA_OPACITY_MS),
                 label = "wide-undercover-alpha",
-            )
+            ).value
 
             Row(
                 modifier = Modifier
@@ -1733,14 +1738,15 @@ private fun TwoColumnPlayerBody(
                                 bodyHeightDp = bodyHeight,
                                 controlsCardHeightDp = expandedCarControlsHeightDp,
                             )
-                            val coverShrinkFraction by animateFloatAsState(
-                                targetValue = if (controlsExpanded) 1f else 0f,
+                            val targetShrink = if (controlsExpanded) 1f else 0f
+                            val coverShrinkFraction = if (lowPerformance) targetShrink else animateFloatAsState(
+                                targetValue = targetShrink,
                                 animationSpec = tween(
                                     durationMillis = if (reducedMotion) 0 else FolioPlayerMotionTokens.CTL_TRANSLATE_MS,
                                     easing = FolioPlayerMotionTokens.EnterEasing,
                                 ),
                                 label = "wide-cover-shrink",
-                            )
+                            ).value
                             val targetScale = (expandedCoverSize / collapsedCoverSize).coerceIn(0.35f, 1f)
                             val coverScale = 1f + (targetScale - 1f) * coverShrinkFraction
 
@@ -1921,18 +1927,18 @@ private fun TwoColumnPlayerBody(
                 controlsExpanded = controlsExpanded,
                 controlsCardWidthDp = carControlsWidthDp,
             )
-            val animatedQueueStartDp by animateDpAsState(
+            val queueStartDp = if (lowPerformance) targetQueueStartDp else animateDpAsState(
                 targetValue = targetQueueStartDp,
                 animationSpec = tween(
                     durationMillis = if (reducedMotion) 0 else FolioPlayerMotionTokens.CTL_TRANSLATE_MS,
                     easing = FolioPlayerMotionTokens.EnterEasing,
                 ),
                 label = "wide-queue-start-pad",
-            )
+            ).value
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(start = animatedQueueStartDp)
+                    .padding(start = queueStartDp)
                     .graphicsLayer {
                         val p = queueProgressState.value
                         alpha = p

@@ -72,10 +72,15 @@ internal data class PosterLyricsProjection(
     val hasStartedLead: Boolean,
     val previousLeadIndex: Int?,
     val previousLeadSweepEndMs: Long?,
+    val previousLeadSinging: Boolean,
     val smallLines: List<PosterTextLine>,
     val upcomingLeadIndices: List<Int>,
     val gap: LyricTimeline.InstrumentalGap?,
-)
+) {
+    fun wholeLeadHighlight(index: Int): KaraokeRowHighlight =
+        wholeLyricHighlight(gap == null && ((focusLeadIndex == index && hasStartedLead) ||
+            (previousLeadIndex == index && previousLeadSinging)))
+}
 
 /** All inputs to a projection are constant between adjacent boundaries. */
 internal class PosterLyricsTimeline(private val lines: List<LyricLine>) {
@@ -159,6 +164,7 @@ internal class PosterLyricsTimeline(private val lines: List<LyricLine>) {
             hasStartedLead = startedLead >= 0,
             previousLeadIndex = previous,
             previousLeadSweepEndMs = previousSweepEnd,
+            previousLeadSinging = previousSweepEnd != null && positionMs < previousSweepEnd,
             smallLines = smallLines,
             upcomingLeadIndices = if (gap == null) {
                 leadIndices.drop(startedLead.coerceAtLeast(0) + 1).take(3)

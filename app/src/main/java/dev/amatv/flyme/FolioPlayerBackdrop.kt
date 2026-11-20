@@ -12,9 +12,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.unit.dp
@@ -27,7 +29,7 @@ internal fun FolioPlayerBackdrop(
     artworkPalette: List<Color>,
     style: LyricBackgroundStyle,
     isLight: Boolean,
-    animateFlow: Boolean,
+    lowPerformance: Boolean,
     reducedMotion: Boolean = false,
     tierSpec: FolioPlayerTierSpec,
     displayState: FolioPlayerDisplayState,
@@ -36,25 +38,30 @@ internal fun FolioPlayerBackdrop(
     modifier: Modifier = Modifier,
 ) {
     val baseColor = folioPlayerBaseColor(artworkPalette, isLight)
+    val staticFlow = lowPerformance && style == LyricBackgroundStyle.Flow
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
-            .background(baseColor)
+            .then(if (staticFlow) Modifier else Modifier.background(baseColor))
             .pointerInput(Unit) { detectTapGestures { onRevealTap() } },
     ) {
         val containerWidth = maxWidth
         val containerHeight = maxHeight
         val coordHolder = LocalFolioGlassEnv.current.coordHolder
-        Crossfade(
-            targetState = style,
-            animationSpec = tween(if (reducedMotion) 0 else BACKDROP_STYLE_CROSSFADE_MS),
-            label = "backdrop-style-crossfade",
-        ) { activeStyle ->
+        val background: @Composable (LyricBackgroundStyle) -> Unit = { activeStyle ->
             Box(Modifier.fillMaxSize()) {
                 if (activeStyle == LyricBackgroundStyle.Flow) {
-                    CarLyricFlow(track = track, palette = artworkPalette, animate = animateFlow)
-                    val veil = if (isLight) Color(0xFFF6F4F9).copy(alpha = 0.72f) else Color.Black.copy(alpha = 0.24f)
-                    Box(Modifier.fillMaxSize().background(veil))
+                    if (lowPerformance) {
+                        val gradient = remember(artworkPalette, baseColor, isLight) {
+                            val tint = lerp(baseColor, artworkPalette.last(), if (isLight) 0.12f else 0.22f)
+                            Brush.verticalGradient(listOf(tint, baseColor))
+                        }
+                        Box(Modifier.fillMaxSize().background(gradient))
+                    } else {
+                        CarLyricFlow(track = track, palette = artworkPalette)
+                        val veil = if (isLight) Color(0xFFF6F4F9).copy(alpha = 0.72f) else Color.Black.copy(alpha = 0.24f)
+                        Box(Modifier.fillMaxSize().background(veil))
+                    }
                 } else {
                     // Soak style ("海报（封面背景）")
                     val showBleedArtwork = showSoakArtworkStage(tierSpec.tier, activeStyle, displayState)
@@ -146,10 +153,20 @@ internal fun FolioPlayerBackdrop(
                                     ),
                                 ),
                         )
-                        SoakGlow(artworkPalette)
+                        if (!lowPerformance) SoakGlow(artworkPalette)
                     }
                 }
             }
+        }
+        if (lowPerformance) {
+            background(style)
+        } else {
+            Crossfade(
+                targetState = style,
+                animationSpec = tween(if (reducedMotion) 0 else BACKDROP_STYLE_CROSSFADE_MS),
+                label = "backdrop-style-crossfade",
+                content = background,
+            )
         }
     }
 }

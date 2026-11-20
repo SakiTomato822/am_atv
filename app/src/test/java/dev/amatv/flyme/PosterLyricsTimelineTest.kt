@@ -12,6 +12,25 @@ import org.junit.Test
 
 class PosterLyricsTimelineTest {
     @Test
+    fun wholeLineInkKeepsTheNormalPosterRolesThroughGapsAndOverlap() {
+        val lines = listOf(line("First", 8_000, 9_300), line("Next", 9_000, 10_000).copy(timing = LyricTiming.Word), line("Final", 18_000, 19_000))
+        val timeline = PosterLyricsTimeline(lines)
+        val lead = timeline.at(9_000)
+        assertEquals(0, lead.previousLeadIndex)
+        assertEquals(1, lead.focusLeadIndex)
+        assertEquals(listOf(2), lead.upcomingLeadIndices)
+        assertEquals(9_300L, lead.previousLeadSweepEndMs)
+        assertEquals(KaraokeRowHighlight.Lit, lead.wholeLeadHighlight(1))
+        assertEquals(KaraokeRowHighlight.Lit, lead.wholeLeadHighlight(0))
+        assertEquals(KaraokeRowHighlight.Unlit, timeline.at(9_300).wholeLeadHighlight(0))
+        assertEquals(KaraokeRowHighlight.Unlit, lead.wholeLeadHighlight(2))
+        assertEquals(KaraokeRowHighlight.Unlit, timeline.at(7_999).wholeLeadHighlight(0))
+        assertEquals(KaraokeRowHighlight.Unlit, timeline.at(17_999).wholeLeadHighlight(2))
+        assertEquals(KaraokeRowHighlight.Lit, timeline.at(18_000).wholeLeadHighlight(2))
+        assertEquals(KaraokeRowHighlight.Lit, timeline.at(20_000).wholeLeadHighlight(2))
+    }
+
+    @Test
     fun overlappingLeadsAdvanceAtStartAndKeepTheSweepOnThePreviousLine() {
         val lines = listOf(
             LyricLine(

@@ -72,6 +72,7 @@ internal fun KaraokeLyricLine(
     isActive: Boolean,
     isStaticMode: Boolean,
     positionState: State<Long>,
+    wholeLineHighlight: KaraokeRowHighlight? = null,
 ) {
     val hasMainPronunciation = !line.pronunciationText.isNullOrBlank() ||
         line.words.any { !it.pronunciationText.isNullOrBlank() }
@@ -173,13 +174,17 @@ internal fun KaraokeLyricLine(
     }
 
     val isLineSyncMode = line.timing == LyricTiming.Line
-    val isMainActive by remember(line, isActive, positionState) {
-        derivedStateOf { isActive && positionState.value < line.mainEndMs }
+    val isMainActive = if (wholeLineHighlight != null) wholeLineHighlight == KaraokeRowHighlight.Lit else {
+        val singing by remember(line, isActive, positionState) {
+            derivedStateOf { isActive && positionState.value < line.mainEndMs }
+        }
+        singing
     }
-    val isBackgroundActive by remember(line, isActive, positionState) {
+    val isBackgroundActive by remember(line, isActive, positionState, wholeLineHighlight != null) {
         derivedStateOf {
             isActive && line.backgroundWords.isNotEmpty() &&
-                positionState.value < line.backgroundWords.maxOf { it.endMs }
+                positionState.value < line.backgroundWords.maxOf { it.endMs } &&
+                (wholeLineHighlight == null || positionState.value >= line.backgroundWords.minOf { it.startMs })
         }
     }
     val isRtl = remember(line.text) { LyricTimeline.isRightToLeft(line.text) }
@@ -191,11 +196,9 @@ internal fun KaraokeLyricLine(
     }
     // Exact scale animation from A.java (0ms/800ms activate, 150ms/800ms deactivate)
     // and U0.java (150ms/500ms activate, 150ms/600ms deactivate) with E.f43134h (LineScaleEasing)
-    val activeScale = animateFloatAsState(
-        targetValue = if (isActive) {
-            MotionTokens.KaraokeLineHighlightScale
-        }
-        else MotionTokens.KaraokeLineNormalScale,
+    val targetScale = if (isActive) MotionTokens.KaraokeLineHighlightScale else MotionTokens.KaraokeLineNormalScale
+    val activeScale = if (wholeLineHighlight != null) null else animateFloatAsState(
+        targetValue = targetScale,
         animationSpec = if (isLineSyncMode) {
             if (isActive) {
                 tween(
@@ -231,18 +234,25 @@ internal fun KaraokeLyricLine(
     val beforeStart = remember(line, positionState) {
         derivedStateOf { positionState.value < line.startMs }
     }
-    val timedMainPresence = rememberVocalPresence(isMainActive, isLineSyncMode, "lyric-line-presence")
-    val activePresence = remember(beforeStart, timedMainPresence) {
-        derivedStateOf { if (beforeStart.value) 0f else timedMainPresence.value }
+    val activePresence = if (wholeLineHighlight != null) {
+        remember(isMainActive) { mutableFloatStateOf(if (isMainActive) 1f else 0f) }
+    } else {
+        val timedMainPresence = rememberVocalPresence(isMainActive, isLineSyncMode, "lyric-line-presence")
+        remember(beforeStart, timedMainPresence) {
+            derivedStateOf { if (beforeStart.value) 0f else timedMainPresence.value }
+        }
     }
-    val timedBackgroundPresence = animateVocalPresence(
-        isBackgroundActive, isLineSyncMode, "lyric-background-presence",
-    )
-    // Keep frame-varying alpha in draw/layer scopes. Passing a Float here would
-    // recompose and remeasure the entire word flexbox on every fade frame.
-    val continuousBackgroundPresence = rememberContinuousVocalPresence(timedBackgroundPresence)
-    val backgroundPresence = remember(beforeStart, continuousBackgroundPresence) {
-        derivedStateOf { if (beforeStart.value) 0f else continuousBackgroundPresence.value }
+    val backgroundPresence = if (wholeLineHighlight != null) {
+        remember(isBackgroundActive) { mutableFloatStateOf(if (isBackgroundActive) 1f else 0f) }
+    } else {
+        val timedBackgroundPresence = animateVocalPresence(
+            isBackgroundActive, isLineSyncMode, "lyric-background-presence",
+        )
+        // Keep frame-varying alpha in draw/layer scopes.
+        val continuousBackgroundPresence = rememberContinuousVocalPresence(timedBackgroundPresence)
+        remember(beforeStart, continuousBackgroundPresence) {
+            derivedStateOf { if (beforeStart.value) 0f else continuousBackgroundPresence.value }
+        }
     }
 
     val unlitAlpha = flymeLyricAlpha(MotionTokens.KaraokeSecondaryAlpha)
@@ -279,7 +289,7 @@ internal fun KaraokeLyricLine(
             modifier = Modifier
                 .fillMaxWidth(maxWidthFraction)
                 .graphicsLayer {
-                    val scale = if (beforeStart.value) MotionTokens.KaraokeLineNormalScale else activeScale.value
+                    val scale = if (beforeStart.value) MotionTokens.KaraokeLineNormalScale else activeScale?.value ?: targetScale
                     scaleX = scale
                     scaleY = scale
                     // Align anchor strictly to top of rendered box: pivotY = 0f ensures top edge never shifts
@@ -340,6 +350,7 @@ internal fun KaraokeLyricLine(
                         pronunciationFontSize = mainPronunciationFontSize,
                         pronunciationLineHeight = mainPronunciationLineHeight,
                         pronunciationGap = mainLocalizationGap,
+                        sweepEnabled = wholeLineHighlight == null,
                     )
                 }
                 if (!line.translation.isNullOrBlank()) {
@@ -404,6 +415,7 @@ internal fun KaraokeLyricLine(
                         pronunciationFontSize = backgroundPronunciationFontSize,
                         pronunciationLineHeight = backgroundPronunciationLineHeight,
                         pronunciationGap = backgroundLocalizationGap,
+                        sweepEnabled = wholeLineHighlight == null,
                     )
                 }
                 if (!line.backgroundTranslation.isNullOrBlank()) {
@@ -701,23 +713,24 @@ private fun KaraokeVocalFlexbox(
     pronunciationFontSize: TextUnit,
     pronunciationLineHeight: TextUnit,
     pronunciationGap: Dp,
+    sweepEnabled: Boolean,
 ) {
     val litAlpha = flymeLyricAlpha(if (isBackgroundVocal) {
         MotionTokens.KaraokeBgVocalLitAlpha
     } else {
         MotionTokens.KaraokePrimaryAlpha
     })
-    val isHighlighting by remember(isActive, activePresence) {
-        derivedStateOf { isActive || activePresence.value > 0.001f }
+    val isHighlighting by remember(isActive, activePresence, sweepEnabled) {
+        derivedStateOf { sweepEnabled && (isActive || activePresence.value > 0.001f) }
     }
-    val isRtl = remember(words) {
+    val isRtl = sweepEnabled && remember(words) {
         LyricTimeline.isRightToLeft(words.joinToString("") { it.text })
     }
-    val rowCache = remember(words) { MaskRowCache() }
+    val rowCache = if (sweepEnabled) remember(words) { MaskRowCache() } else null
     val density = LocalDensity.current
     val rowSpacingPx = with(density) { 4.dp.roundToPx() }
 
-    val containerModifier = if (isHighlighting) {
+    val containerModifier = if (rowCache != null && isHighlighting) {
         Modifier
             .fillMaxWidth()
             .graphicsLayer {
@@ -738,7 +751,8 @@ private fun KaraokeVocalFlexbox(
         Modifier
             .fillMaxWidth()
             .graphicsLayer {
-                alpha = unlitAlpha
+                alpha = if (!sweepEnabled && isActive) litAlpha else unlitAlpha
+                if (!sweepEnabled) compositingStrategy = CompositingStrategy.ModulateAlpha
             }
     }
 
@@ -775,7 +789,7 @@ private fun KaraokeVocalFlexbox(
         val placeables = measurables.map { it.measure(childConstraints) }
         val wordX = IntArray(placeables.size)
         val wordY = IntArray(placeables.size)
-        val builtRows = ArrayList<MaskRowData>(4)
+        val builtRows = rowCache?.let { ArrayList<MaskRowData>(4) }
 
         var rowTop = 0
 
@@ -805,33 +819,32 @@ private fun KaraokeVocalFlexbox(
             } else {
                 startBleedPx.roundToInt()
             }
-            val topF = rowTop.toFloat()
-            val bottomF = (rowTop + rowHeight).toFloat()
-
-            val sweepWords = rowIndices.mapIndexed { indexInRow, wordIndex ->
-                val placeable = placeables[wordIndex]
-                val y = rowTop + rowBaseline - baselines[indexInRow]
+            val sweepWords = builtRows?.let { ArrayList<KaraokeSweepWord>(rowIndices.size) }
+            for (rowIndex in rowIndices.indices) {
+                val wordIndex = rowIndices[rowIndex]
+                val right = x + placeables[wordIndex].width
                 wordX[wordIndex] = x
-                wordY[wordIndex] = y
-                val left = x.toFloat()
-                x += placeable.width
-                KaraokeSweepWord(words[wordIndex], left, x.toFloat())
+                wordY[wordIndex] = rowTop + rowBaseline - baselines[rowIndex]
+                sweepWords?.add(KaraokeSweepWord(words[wordIndex], x.toFloat(), right.toFloat()))
+                x = right
             }
-            builtRows.add(
-                MaskRowData(
-                    sweep = KaraokeRowSweep(
-                        sweepWords, constraints.maxWidth.toFloat(),
-                        MotionTokens.KaraokeGradientFeatherDp.dp.toPx(), isRtl,
+            if (builtRows != null && sweepWords != null) {
+                builtRows.add(
+                    MaskRowData(
+                        sweep = KaraokeRowSweep(
+                            sweepWords, constraints.maxWidth.toFloat(),
+                            MotionTokens.KaraokeGradientFeatherDp.dp.toPx(), isRtl,
+                        ),
+                        top = rowTop.toFloat(),
+                        bottom = (rowTop + rowHeight).toFloat(),
                     ),
-                    top = topF,
-                    bottom = bottomF,
-                ),
-            )
+                )
+            }
             rowTop += rowHeight + rowSpacingPx
         }
 
-        rowCache.rows = builtRows
-        val totalHeight = if (builtRows.isNotEmpty()) {
+        if (rowCache != null && builtRows != null) rowCache.rows = builtRows
+        val totalHeight = if (rows.isNotEmpty()) {
             (rowTop - rowSpacingPx).coerceAtLeast(0)
         } else {
             0

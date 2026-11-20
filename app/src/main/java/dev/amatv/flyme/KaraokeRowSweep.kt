@@ -15,6 +15,9 @@ internal sealed interface KaraokeRowHighlight {
     data class Partial(val ramp: KaraokeMaskRamp) : KaraokeRowHighlight
 }
 
+internal fun wholeLyricHighlight(started: Boolean): KaraokeRowHighlight =
+    if (started) KaraokeRowHighlight.Lit else KaraokeRowHighlight.Unlit
+
 /** Maps a visual row's timed words to the four-stop mask used by scrolling lyrics. */
 internal class KaraokeRowSweep(
     words: List<KaraokeSweepWord>,

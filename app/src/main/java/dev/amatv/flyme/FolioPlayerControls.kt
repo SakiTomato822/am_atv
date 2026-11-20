@@ -190,11 +190,12 @@ internal fun FolioPlayerHeader(
         )
     }
     val collapsedMode = resolveCollapsedHeaderTitleMode(tierSpec.tier, displayState)
-    val collapsedAlpha by animateFloatAsState(
-        targetValue = if (!controlsExpanded && collapsedMode != FolioCollapsedHeaderTitleMode.None) 1f else 0f,
+    val targetTitleAlpha = if (!controlsExpanded && collapsedMode != FolioCollapsedHeaderTitleMode.None) 1f else 0f
+    val collapsedAlpha = if (LocalFolioLowPerformance.current) targetTitleAlpha else animateFloatAsState(
+        targetValue = targetTitleAlpha,
         animationSpec = tween(if (reducedMotion) 0 else FolioPlayerMotionTokens.PMETA_OPACITY_MS),
         label = "hdr-tt-alpha",
-    )
+    ).value
     val showCollapsedTitle = collapsedMode != FolioCollapsedHeaderTitleMode.None &&
         (!controlsExpanded || collapsedAlpha > 0.01f)
     val expandCd = stringResource(R.string.folio_player_controls_expand)
@@ -443,12 +444,14 @@ internal fun FolioPlayerAnimatedControlsSlot(
     onCarControlsHeightPxChanged: (Int) -> Unit = {},
 ) {
     val lowPerformance = LocalFolioLowPerformance.current
-    val ctlAlphaState = animateFloatAsState(
-        targetValue = if (controlsExpanded) 1f else 0f,
+    val expandedAlpha = if (controlsExpanded) 1f else 0f
+    val collapsedAlpha = 1f - expandedAlpha
+    val ctlAlphaState = if (lowPerformance) null else animateFloatAsState(
+        targetValue = expandedAlpha,
         animationSpec = tween(if (reducedMotion) 0 else FolioPlayerMotionTokens.CTL_OPACITY_MS),
         label = "ctl-alpha",
     )
-    val ctlOffsetState = animateFloatAsState(
+    val ctlOffsetState = if (lowPerformance) null else animateFloatAsState(
         targetValue = if (controlsExpanded) 0f else 1f,
         animationSpec = tween(
             durationMillis = if (reducedMotion) 0 else FolioPlayerMotionTokens.CTL_TRANSLATE_MS,
@@ -456,12 +459,12 @@ internal fun FolioPlayerAnimatedControlsSlot(
         ),
         label = "ctl-offset",
     )
-    val pmetaAlphaState = animateFloatAsState(
-        targetValue = if (controlsExpanded) 0f else 1f,
+    val pmetaAlphaState = if (lowPerformance) null else animateFloatAsState(
+        targetValue = collapsedAlpha,
         animationSpec = tween(if (reducedMotion) 0 else FolioPlayerMotionTokens.PMETA_OPACITY_MS),
         label = "pmeta-alpha",
     )
-    val pmetaOffsetState = animateFloatAsState(
+    val pmetaOffsetState = if (lowPerformance) null else animateFloatAsState(
         targetValue = if (controlsExpanded) 1f else 0f,
         animationSpec = tween(
             durationMillis = if (reducedMotion) 0 else FolioPlayerMotionTokens.PMETA_TRANSLATE_MS,
@@ -473,13 +476,13 @@ internal fun FolioPlayerAnimatedControlsSlot(
     val collapsedLayout = resolveCollapsedLayout(tierSpec.tier, displayState)
     Box(modifier = modifier, contentAlignment = contentAlignment) {
         val showPmeta = collapsedLayout != FolioCollapsedLayout.UnderCoverInfo &&
-            (!controlsExpanded || pmetaAlphaState.value > 0.01f)
-        val showCtl = controlsExpanded || ctlAlphaState.value > 0.01f
+            (!controlsExpanded || (pmetaAlphaState?.value ?: collapsedAlpha) > 0.01f)
+        val showCtl = controlsExpanded || (ctlAlphaState?.value ?: expandedAlpha) > 0.01f
 
         val pmetaDeck: @Composable () -> Unit = {
             val animMod = Modifier.graphicsLayer {
-                alpha = pmetaAlphaState.value
-                if (!lowPerformance && !reducedMotion) {
+                alpha = pmetaAlphaState?.value ?: collapsedAlpha
+                if (pmetaOffsetState != null && !reducedMotion) {
                     val f = pmetaOffsetState.value
                     translationY = 8.dp.toPx() * f
                     val sc = 1f - 0.02f * f
@@ -561,8 +564,8 @@ internal fun FolioPlayerAnimatedControlsSlot(
                 onOpenAlbum = onOpenAlbum,
                 onOpenArtist = onOpenArtist,
                 modifier = widePlacement.graphicsLayer {
-                    alpha = ctlAlphaState.value
-                    if (!lowPerformance && !reducedMotion) {
+                    alpha = ctlAlphaState?.value ?: expandedAlpha
+                    if (ctlOffsetState != null && !reducedMotion) {
                         translationY = FolioPlayerMotionTokens.CTL_OFFSET_DP.dp.toPx() * ctlOffsetState.value
                     }
                 },

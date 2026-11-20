@@ -409,27 +409,32 @@ internal fun FolioPosterLyricsPanel(
                             translationY = pose.top
                             if (drawing is PosterDrawing.Gap) translationX = -28.dp.toPx() * pose.scale
                             val center = pose.top + drawing.height * pose.scale / 2f
-                            alpha = pose.opacity * posterEdgeOpacity(center, panelHeight)
+                            alpha = if (lowPerformance) pose.opacity else pose.opacity * posterEdgeOpacity(center, panelHeight)
                             transformOrigin = TransformOrigin(0f, 0f)
                             compositingStrategy = CompositingStrategy.ModulateAlpha
                         }
                         when (drawing) {
                             is PosterDrawing.Gap -> Box(layer) {
-                                InstrumentalInterludeRow(drawing.gap, drawPosition, isUserScrolling = false)
+                                InstrumentalInterludeRow(
+                                    drawing.gap, drawPosition, isUserScrolling = false, animateHandoff = !lowPerformance,
+                                )
                             }
                             is PosterDrawing.Lead -> {
                                 val line = lines[drawing.index]
                                 val isCurrent = drawing.focus && drawing.index == currentFocus
                                 val previousSweepEnd = previousEnd.takeIf { drawing.focus || drawing.previous }
                                 val ink = if (isOppositeSingerLine(line)) duetAccentColor else fg
+                                val wholeHighlight = if (lowPerformance) projection.wholeLeadHighlight(drawing.index) else null
                                 PosterLeadLineText(
                                     drawing.layout, line, drawPosition,
                                     (isCurrent && animate && hasStarted) || previousSweepEnd != null,
                                     linePresence = linePresence.takeIf { drawing.focus || previousSweepEnd != null },
-                                    awaitingStart = isCurrent && !hasStarted,
+                                    awaitingStart = isCurrent && (wholeHighlight == KaraokeRowHighlight.Unlit || !hasStarted),
                                     ink = ink,
                                     modifier = layer.posterTextSemantics(drawing.layout, poses.end.opacity > 0f),
-                                    previousAlpha = if (drawing.previous) fg2.alpha else 1f,
+                                    previousAlpha = if (drawing.previous && wholeHighlight != KaraokeRowHighlight.Lit) {
+                                        fg2.alpha
+                                    } else 1f,
                                     previousSweepEnd = previousSweepEnd,
                                 )
                             }

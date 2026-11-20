@@ -13,6 +13,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -36,6 +38,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
@@ -62,25 +65,24 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun CarLyricFlow(track: Track, palette: List<Color>, animate: Boolean) {
+internal fun CarLyricFlow(track: Track, palette: List<Color>) {
     Box(Modifier.fillMaxSize().clip(RoundedCornerShape(0.dp)).background(palette.first())) {
         if (track.artworkUrl != null) MotionArtwork(track,
             Modifier.fillMaxSize().blur(80.dp, BlurredEdgeTreatment.Unbounded).graphicsLayer { alpha = 0.48f },
             animate = false, cornerRadius = 0.dp)
-        val angles = if (animate) {
-            val transition = rememberInfiniteTransition(label = "car-lyric-flow")
-            listOf(
-                transition.animateFloat(0f, 1f, infiniteRepeatable(tween(34_000, easing = LinearEasing), RepeatMode.Restart)),
-                transition.animateFloat(1f, 0f, infiniteRepeatable(tween(46_000, easing = LinearEasing), RepeatMode.Restart)),
-                transition.animateFloat(0f, 1f, infiniteRepeatable(tween(40_000, easing = LinearEasing), RepeatMode.Restart)),
-            )
-        } else emptyList()
+        val transition = rememberInfiniteTransition(label = "car-lyric-flow")
+        val angles = listOf(
+            transition.animateFloat(0f, 1f, infiniteRepeatable(tween(34_000, easing = LinearEasing), RepeatMode.Restart)),
+            transition.animateFloat(1f, 0f, infiniteRepeatable(tween(46_000, easing = LinearEasing), RepeatMode.Restart)),
+            transition.animateFloat(0f, 1f, infiniteRepeatable(tween(40_000, easing = LinearEasing), RepeatMode.Restart)),
+        )
         Canvas(Modifier.fillMaxSize()) {
             for (index in 0..2) {
-                val theta = ((if (animate) angles[index].value else 0f) + index / 3f) * 2 * PI
+                val theta = (angles[index].value + index / 3f) * 2 * PI
                 val point = Offset(
                     size.width * (0.23f + index * 0.27f + cos(theta).toFloat() * 0.18f),
                     size.height * (0.5f + sin(theta).toFloat() * 0.32f),
@@ -100,8 +102,7 @@ internal fun CarLyricRows(
     lines: List<LyricLine>,
     position: State<Long>,
     offsetMs: Long,
-    soften: Boolean,
-    ripple: Boolean,
+    lowPerformance: Boolean,
     controlsVisible: Boolean,
     canSeek: Boolean,
     fontScale: Float,
@@ -110,7 +111,8 @@ internal fun CarLyricRows(
     onLineSeek: (Long) -> Unit,
 ) {
     val timed = remember(lines) { lines.any { !it.isStatic } }
-    val fade = Modifier.fillMaxSize().clipToBounds()
+    val clipped = Modifier.fillMaxSize().clipToBounds()
+    val panel = if (lowPerformance) clipped else clipped
         .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
         .drawWithContent {
             drawContent()
@@ -118,7 +120,7 @@ internal fun CarLyricRows(
                 0.82f to Color.Black, 1f to Color.Transparent), blendMode = BlendMode.DstIn)
         }
     if (!timed) {
-        LazyColumn(fade, contentPadding = PaddingValues(top = 35.dp, bottom = 48.dp),
+        LazyColumn(panel, contentPadding = PaddingValues(top = 35.dp, bottom = 48.dp),
             verticalArrangement = Arrangement.spacedBy(LyricGap)) {
             itemsIndexed(lines) { _, line -> FlymeKaraokeLine(line, false, position, fontScale, static = true) }
         }
@@ -130,19 +132,27 @@ internal fun CarLyricRows(
     }
     // Before the first line and in breaks of 7 s or more the list opens a slot for the waiting dots: the
     // next line and those below it move down, and the slot takes the anchor until that line starts.
+    val lyricPosition = remember(position, offsetMs) {
+        derivedStateOf { (position.value + offsetMs).coerceAtLeast(0L) }
+    }
+    if (lowPerformance) {
+        InstantScrollingLyrics(
+            lines, focus, lyricPosition, fontScale, anchorFraction,
+            controlsVisible, canSeek, onReveal, onLineSeek, panel,
+        )
+        return
+    }
+
     val waiting = focus.waiting
     val shownGap = remember(lines) { mutableStateOf<LyricTimeline.InstrumentalGap?>(null) }
     LaunchedEffect(waiting) { if (waiting != null) shownGap.value = waiting }
     val open by animateFloatAsState(if (waiting != null) 1f else 0f, tween(600, easing = RippleEasing),
         label = "interlude-open")
     val anchorIndex = focus.anchorIndex
-    val lyricPosition = remember(position, offsetMs) {
-        derivedStateOf { (position.value + offsetMs).coerceAtLeast(0L) }
-    }
     val browse = remember { Animatable(0f) }
     val browseScope = rememberCoroutineScope()
     var settle by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-    BoxWithConstraints(fade.pointerInput(Unit) {
+    BoxWithConstraints(panel.pointerInput(Unit) {
         // A finger drag browses the lyrics; three seconds after letting go they glide back to the current line.
         detectVerticalDragGestures(
             onDragStart = { settle?.cancel() },
@@ -182,7 +192,7 @@ internal fun CarLyricRows(
                 val isCurrent = focus.isCurrent(index)
                 val distance = focus.styleDistance(index)
                 // Lines below the anchor follow one after another, so the list ripples instead of sliding as a block.
-                val stagger = if (ripple) (index - anchorIndex + 1).coerceIn(0, 8) * 45 else 0
+                val stagger = (index - anchorIndex + 1).coerceIn(0, 8) * 45
                 val shift = shifts[index]
                 var placed by remember { mutableStateOf(false) }
                 LaunchedEffect(target, measured) {
@@ -200,7 +210,7 @@ internal fun CarLyricRows(
                     animationSpec = tween(360, delayMillis = stagger), label = "lyric-opacity",
                 )
                 // Lines more than a screen away are not visible; skip their blur layers.
-                val blur = if (soften && abs(anchorIndex - index) <= 6) LineBlur[distance].dp else 0.dp
+                val blur = if (abs(anchorIndex - index) <= 6) LineBlur[distance].dp else 0.dp
                 Box(Modifier.fillMaxWidth().onSizeChanged { heights[index] = it.height }
                     .graphicsLayer {
                         val opened = shownGap.value?.takeIf { index >= it.beforeLineIndex }?.let { slot * open } ?: 0f
@@ -233,12 +243,104 @@ internal fun CarLyricRows(
     }
 }
 
+@Composable
+private fun InstantScrollingLyrics(
+    lines: List<LyricLine>,
+    focus: ScrollingLyricFocus,
+    position: State<Long>,
+    fontScale: Float,
+    anchorFraction: Float,
+    controlsVisible: Boolean,
+    canSeek: Boolean,
+    onReveal: () -> Unit,
+    onLineSeek: (Long) -> Unit,
+    modifier: Modifier,
+) {
+    val finalLeadIndex = remember(lines) { lines.indexOfLast { !it.isStatic && it.words.any { word -> !word.isBackgroundVocal } } }
+    BoxWithConstraints(modifier) {
+        val anchor = maxHeight * anchorFraction
+        val waiting = focus.waiting
+        val anchorKey = if (waiting == null) focus.anchorIndex else InterludeItemKey
+        val state = rememberLazyListState(initialFirstVisibleItemIndex = focus.anchorIndex)
+        val dragged by state.interactionSource.collectIsDraggedAsState()
+        var browsing by remember(lines) { mutableStateOf(false) }
+        LaunchedEffect(lines, dragged) {
+            if (dragged) {
+                browsing = true
+            } else if (browsing) {
+                snapshotFlow { state.isScrollInProgress }.first { !it }
+                delay(3_000)
+                browsing = false
+            }
+        }
+        // Padding puts the target item's top at the anchor. Its own measured height
+        // moves the centre to the same anchor without measuring intervening lyrics.
+        val anchorHeight by remember(state, anchorKey) {
+            derivedStateOf { state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == anchorKey }?.size ?: 0 }
+        }
+        LaunchedEffect(lines, anchorKey, focus.anchorIndex, anchorHeight, browsing, dragged) {
+            if (!browsing && !dragged) state.requestScrollToItem(focus.anchorIndex, anchorHeight / 2)
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            state = state,
+            contentPadding = PaddingValues(top = anchor, bottom = maxHeight - anchor),
+            verticalArrangement = Arrangement.spacedBy(LyricGap),
+        ) {
+            fun lyricItems(start: Int, end: Int) {
+                items(end - start, key = { start + it }, contentType = { "lyric" }) { slot ->
+                    val index = start + slot
+                    val line = lines[index]
+                    val active = focus.isCurrent(index)
+                    val startedFinalLead = if (index == finalLeadIndex) {
+                        val started by remember(line, position) { derivedStateOf { position.value >= line.startMs } }
+                        started
+                    } else false
+                    val highlight = focus.wholeLineHighlight(index, startedFinalLead)
+                    val opacity = LineOpacity[if (highlight == KaraokeRowHighlight.Lit) 0 else focus.styleDistance(index)]
+                    Box(
+                        Modifier.fillMaxWidth()
+                            .graphicsLayer {
+                                alpha = opacity
+                                compositingStrategy = CompositingStrategy.ModulateAlpha
+                            }
+                            .automationId("car-lyric-line-$index")
+                            .clickable(interactionSource = null, indication = null) {
+                                if (controlsVisible && canSeek && !line.isStatic) onLineSeek(line.startMs) else onReveal()
+                            },
+                    ) {
+                        FlymeKaraokeLine(line, active, position, fontScale, static = false, wholeLineHighlight = highlight)
+                    }
+                }
+            }
+            if (waiting == null) {
+                lyricItems(0, lines.size)
+            } else {
+                lyricItems(0, waiting.beforeLineIndex)
+                item(key = InterludeItemKey, contentType = "interlude") {
+                    InstrumentalInterludeRow(
+                        waiting, position, isUserScrolling = false,
+                        exitStartMs = InterludeMotion.exitStartForLineHandoff(waiting),
+                        animateHandoff = false,
+                    )
+                }
+                lyricItems(waiting.beforeLineIndex, lines.size)
+            }
+        }
+    }
+}
+
+private const val InterludeItemKey = -1
+
 internal data class ScrollingLyricFocus(
     val anchorIndex: Int,
     val waiting: LyricTimeline.InstrumentalGap?,
     private val singing: List<Int>,
 ) {
     fun isCurrent(index: Int): Boolean = index in singing
+
+    fun wholeLineHighlight(index: Int, isStartedFinalLead: Boolean): KaraokeRowHighlight =
+        wholeLyricHighlight(isCurrent(index) || isStartedFinalLead)
 
     fun styleDistance(index: Int): Int {
         if (isCurrent(index)) return 0
@@ -276,7 +378,14 @@ private val RippleEasing = CubicBezierEasing(0.22f, 0.9f, 0.3f, 1f)
  * per-character lift and glow. The new layouts only place, fade and blur the lines around it.
  */
 @Composable
-private fun FlymeKaraokeLine(line: LyricLine, active: Boolean, position: State<Long>, textScale: Float, static: Boolean) {
+private fun FlymeKaraokeLine(
+    line: LyricLine,
+    active: Boolean,
+    position: State<Long>,
+    textScale: Float,
+    static: Boolean,
+    wholeLineHighlight: KaraokeRowHighlight? = null,
+) {
     val density = LocalDensity.current
     CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * textScale)) {
         KaraokeLyricLine(
@@ -284,6 +393,7 @@ private fun FlymeKaraokeLine(line: LyricLine, active: Boolean, position: State<L
             isActive = active,
             isStaticMode = static,
             positionState = position,
+            wholeLineHighlight = wholeLineHighlight,
         )
     }
 }

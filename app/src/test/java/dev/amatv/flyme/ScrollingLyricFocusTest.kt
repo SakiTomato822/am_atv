@@ -11,6 +11,36 @@ import org.junit.Test
 
 class ScrollingLyricFocusTest {
     @Test
+    fun wholeLineInkKeepsTheNormalScrollingAnchorAndNeighbours() {
+        val lines = listOf(line("First", 8_000, 9_200), line("Next", 9_000, 10_000), line("Final", 18_000, 19_000))
+        val schedule = LyricTimeline.Schedule(lines)
+        val intro = scrollingLyricFocusAt(lines, schedule, 7_999)
+        assertEquals(0, intro.waiting?.beforeLineIndex)
+        assertEquals(KaraokeRowHighlight.Unlit, intro.wholeLineHighlight(0, isStartedFinalLead = false))
+
+        val overlap = scrollingLyricFocusAt(lines, schedule, 9_050)
+        assertEquals(1, overlap.anchorIndex)
+        assertTrue(overlap.isCurrent(0))
+        assertTrue(overlap.isCurrent(1))
+        assertFalse(overlap.isCurrent(2))
+        assertEquals(KaraokeRowHighlight.Lit, overlap.wholeLineHighlight(0, isStartedFinalLead = false))
+        assertEquals(KaraokeRowHighlight.Lit, overlap.wholeLineHighlight(1, isStartedFinalLead = false))
+        assertEquals(KaraokeRowHighlight.Unlit, overlap.wholeLineHighlight(2, isStartedFinalLead = false))
+
+        val handoff = scrollingLyricFocusAt(lines, schedule, 9_200)
+        assertEquals(1, handoff.anchorIndex)
+        assertEquals(KaraokeRowHighlight.Unlit, handoff.wholeLineHighlight(0, isStartedFinalLead = false))
+        assertEquals(KaraokeRowHighlight.Lit, handoff.wholeLineHighlight(1, isStartedFinalLead = false))
+
+        val gap = scrollingLyricFocusAt(lines, schedule, 17_999)
+        assertEquals(2, gap.waiting?.beforeLineIndex)
+        assertEquals(KaraokeRowHighlight.Unlit, gap.wholeLineHighlight(2, isStartedFinalLead = false))
+        val finished = scrollingLyricFocusAt(lines, schedule, 20_000)
+        assertEquals(2, finished.anchorIndex)
+        assertEquals(KaraokeRowHighlight.Lit, finished.wholeLineHighlight(2, isStartedFinalLead = true))
+    }
+
+    @Test
     fun introKeepsFirstLineUnlitUntilItsStart() {
         val lines = listOf(line("first", 9_000, 10_000), line("second", 10_000, 11_000))
         val schedule = LyricTimeline.Schedule(lines)

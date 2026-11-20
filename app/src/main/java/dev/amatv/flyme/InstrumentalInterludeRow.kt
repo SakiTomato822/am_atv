@@ -22,12 +22,22 @@ internal fun InstrumentalInterludeRow(
     positionState: State<Long>,
     isUserScrolling: Boolean,
     exitStartMs: Long = InterludeMotion.exitStart(gap),
+    animateHandoff: Boolean = true,
 ) {
     val unlitAlpha = flymeLyricAlpha(if (isUserScrolling) {
         MotionTokens.KaraokeSecondaryAlpha
     } else {
         MotionTokens.KaraokeTertiaryAlpha
     })
+
+    val motion = if (animateHandoff) Modifier.graphicsLayer {
+        val pos = positionState.value
+        val pulseScale = InterludeMotion.scale(gap, pos, exitStartMs)
+        scaleX = pulseScale
+        scaleY = pulseScale
+        alpha = InterludeMotion.alpha(gap, pos, exitStartMs)
+        transformOrigin = TransformOrigin(0.5f, 0.5f)
+    } else Modifier
 
     Box(
         modifier = Modifier
@@ -39,14 +49,7 @@ internal fun InstrumentalInterludeRow(
             modifier = Modifier
                 .width(66.dp)
                 .height(20.dp)
-                .graphicsLayer {
-                    val pos = positionState.value
-                    val pulseScale = InterludeMotion.scale(gap, pos, exitStartMs)
-                    scaleX = pulseScale
-                    scaleY = pulseScale
-                    alpha = InterludeMotion.alpha(gap, pos, exitStartMs)
-                    transformOrigin = TransformOrigin(0.5f, 0.5f)
-                },
+                .then(motion),
         ) {
             val pos = positionState.value
             val elapsedInGap = (pos - gap.startMs).coerceAtLeast(0L)
@@ -60,7 +63,7 @@ internal fun InstrumentalInterludeRow(
                     .coerceAtLeast(0L)
                 val enterFraction = (enterElapsed.toFloat() / MotionTokens.InstrumentalEnterMillis)
                     .coerceIn(0f, 1f)
-                val enterAlpha = enterFraction * enterFraction
+                val enterAlpha = if (animateHandoff) enterFraction * enterFraction else 1f
 
                 val tintFraction = InterludeMotion.dotFraction(gap, pos, dotIndex, exitStartMs)
                 val tintProgress = MotionTokens.InstrumentalDotTintEasing.transform(tintFraction)

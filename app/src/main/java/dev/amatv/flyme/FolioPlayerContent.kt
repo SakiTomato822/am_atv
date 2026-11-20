@@ -102,8 +102,7 @@ internal fun FolioScrollingLyricsPanel(
                 lines = lines,
                 position = positionState,
                 offsetMs = offsetMs,
-                soften = !lowPerformance,
-                ripple = !lowPerformance,
+                lowPerformance = lowPerformance,
                 controlsVisible = controlsVisible,
                 canSeek = canSeek,
                 fontScale = (fontSizeSp / 34f).coerceIn(0.62f, 1.80f),
@@ -406,7 +405,7 @@ internal fun FolioQueuePanel(
                                 modifier = Modifier.size(tierSpec.qc),
                             )
                             if (row.isCurrent) {
-                                PlayerQueueEqualizer(color = accent, animate = isPlaying)
+                                PlayerQueueEqualizer(color = accent, animate = isPlaying && !lowPerformance)
                             }
                         }
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -564,7 +563,7 @@ internal fun FolioQueuePanel(
                             }
                         }
                         if (row.isCurrent) {
-                            PlayerQueueEqualizer(color = accent, animate = isPlaying)
+                            PlayerQueueEqualizer(color = accent, animate = isPlaying && !lowPerformance)
                         }
                     }
                 }
