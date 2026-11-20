@@ -91,31 +91,80 @@ class PosterLyricsTimelineTest {
     }
 
     @Test
-    fun groupsAndBackingVocalsStaySmallAndKeepTheSingersInkRule() {
+    fun groupChorusTakesFocusThroughTheBugaiSoloAndChorusHandoffs() {
+        // L9–L15 timings and agents, with synthetic lyric text.
+        val lines = listOf(
+            line("L9", 76_922, 82_422).copy(agentId = "v1", agentType = LyricAgentType.Person),
+            line("L10", 83_358, 88_800).copy(agentId = "v3", agentType = LyricAgentType.Group),
+            line("L11", 88_969, 91_951).copy(agentId = "v3", agentType = LyricAgentType.Group),
+            line("L12", 92_190, 95_589).copy(agentId = "v3", agentType = LyricAgentType.Group),
+            line("L13", 95_998, 101_080).copy(agentId = "v3", agentType = LyricAgentType.Group),
+            line("L14", 101_372, 108_339).copy(agentId = "v2", agentType = LyricAgentType.Person),
+            line("L15", 107_761, 114_096).copy(agentId = "v1", agentType = LyricAgentType.Person),
+        )
+        val timeline = PosterLyricsTimeline(lines)
+        val shortGap = timeline.at(83_357)
+        assertNull(shortGap.gap)
+        assertEquals(0, shortGap.focusLeadIndex)
+        assertEquals(listOf(1, 2, 3), shortGap.upcomingLeadIndices)
+        for (index in 1..5) {
+            val start = lines[index].startMs
+            assertEquals(index - 1, timeline.at(start - 1).focusLeadIndex)
+            for (position in listOf(start, start + 100)) {
+                val projection = timeline.at(position)
+                assertEquals(index, projection.focusLeadIndex)
+                assertEquals(index - 1, projection.previousLeadIndex)
+                assertTrue(projection.smallLines.isEmpty())
+            }
+        }
+        val overlap = timeline.at(107_761)
+        assertEquals(6, overlap.focusLeadIndex)
+        assertEquals(5, overlap.previousLeadIndex)
+        assertEquals(108_339L, overlap.previousLeadSweepEndMs)
+        assertTrue(overlap.smallLines.isEmpty())
+    }
+
+    @Test
+    fun groupUsesForegroundInkAndOnlyMarkedBackingAppearsAsSmallText() {
         val lead = line("Lead", 1_000, 1_700).copy(
             agentId = "second",
             isOppositeAgent = true,
             backgroundWords = listOf(word("echo", 1_200, 1_600)),
         )
-        val group = line("Group", 1_300, 2_300).copy(
+        val group = LyricLine(
+            words = listOf(word("Group", 1_300, 1_650), word("chorus", 1_650, 2_300)),
             agentId = "group",
             agentType = LyricAgentType.Group,
             isOppositeAgent = true,
         )
-        val backing = LyricLine(backgroundWords = listOf(word("harmony", 1_400, 2_200)), words = emptyList())
+        val backing = LyricLine(
+            backgroundWords = listOf(word("harmony", 1_400, 2_200)),
+            words = emptyList(),
+            agentType = LyricAgentType.Group,
+        )
         val markedBacking = LyricLine(words = listOf(word("hum", 1_500, 2_000).copy(isBackgroundVocal = true)))
-        val timeline = PosterLyricsTimeline(listOf(lead, group, backing, markedBacking, line("Next", 2_400, 2_900)))
+        val last = line("Last", 2_100, 2_900).copy(agentId = "solo")
+        val timeline = PosterLyricsTimeline(
+            listOf(lead, group, backing, markedBacking, line("Next", 1_750, 2_100), last),
+        )
         val projection = timeline.at(1_550)
-        assertEquals(0, projection.focusLeadIndex)
+        assertEquals(1, projection.focusLeadIndex)
         assertTrue(isOppositeSingerLine(lead))
+        assertFalse(isOppositeSingerLine(group))
         assertEquals(
-            listOf(PosterTextLine("(echo)", true), PosterTextLine("Group", false),
-                PosterTextLine("(harmony)", false), PosterTextLine("(hum)", false)),
+            listOf(PosterTextLine("(echo)", true), PosterTextLine("(harmony)", false), PosterTextLine("(hum)", false)),
             projection.smallLines,
         )
-        assertEquals(listOf(4), projection.upcomingLeadIndices)
-        assertEquals(0, timeline.at(2_250).focusLeadIndex)
-        assertNull(PosterLyricsTimeline(listOf(group)).at(1_550).focusLeadIndex)
+        assertEquals(listOf(4, 5), projection.upcomingLeadIndices)
+        val handoff = timeline.at(1_750)
+        assertEquals(4, handoff.focusLeadIndex)
+        assertEquals(1, handoff.previousLeadIndex)
+        assertEquals(2_300L, handoff.previousLeadSweepEndMs)
+        val laterOverlap = timeline.at(2_150)
+        assertEquals(5, laterOverlap.focusLeadIndex)
+        assertEquals(4, laterOverlap.previousLeadIndex)
+        assertEquals(listOf(PosterTextLine("(harmony)", false)), laterOverlap.smallLines)
+        assertEquals(0, PosterLyricsTimeline(listOf(group)).at(1_550).focusLeadIndex)
     }
 
     @Test

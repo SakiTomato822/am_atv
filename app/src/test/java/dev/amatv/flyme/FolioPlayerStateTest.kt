@@ -242,8 +242,11 @@ class FolioPlayerStateTest {
         val longLine = LyricLine(words = listOf(LyricWord("这是一句非常非常长的歌词需要适当缩小字号防止过度折行", 0L, 1000L)))
         val shortOnlySize = computeSongPosterFontSize(listOf(shortLine), availableWidthDp = 360f, baseSp = 40f)
         val mixedSongSize = computeSongPosterFontSize(listOf(shortLine, longLine), availableWidthDp = 360f, baseSp = 40f)
+        val group = longLine.copy(agentId = "v3", agentType = LyricAgentType.Group)
+        val chorusSongSize = computeSongPosterFontSize(listOf(shortLine, group), availableWidthDp = 360f, baseSp = 40f)
         assertTrue(mixedSongSize < shortOnlySize)
         assertEquals(40f, mixedSongSize, 0.01f)
+        assertEquals(mixedSongSize, chorusSongSize, 0.01f)
     }
 
     @Test

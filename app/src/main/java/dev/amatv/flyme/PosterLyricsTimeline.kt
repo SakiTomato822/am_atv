@@ -82,7 +82,7 @@ internal class PosterLyricsTimeline(private val lines: List<LyricLine>) {
     private val leadTexts = lines.map(::posterLeadText)
     private val leadEnds = lines.map(::posterLeadEndMs)
     private val leadIndices = lines.indices.filter {
-        leadTexts[it].isNotEmpty() && lines[it].agentType != LyricAgentType.Group && !lines[it].isStatic
+        leadTexts[it].isNotEmpty() && !lines[it].isStatic
     }
     private val gaps = LyricTimeline.Schedule(lines).instrumentalGaps
     private val backing = lines.map { line ->
@@ -141,8 +141,8 @@ internal class PosterLyricsTimeline(private val lines: List<LyricLine>) {
                 for ((index, line) in lines.withIndex()) {
                     if (line.isStatic) continue
                     val opposite = isOppositeSingerLine(line)
-                    if (line.agentType == LyricAgentType.Group ||
-                        (focusLine != null && index != focus && index != previous && isDifferentSinger(line, focusLine))
+                    if (focusLine != null && index != focus && index != previous &&
+                        isDifferentSinger(line, focusLine)
                     ) {
                         val lead = leadTexts[index]
                         if (lead.isNotEmpty() && positionMs in line.startMs until leadEnds[index]) {
@@ -171,6 +171,7 @@ internal class PosterLyricsTimeline(private val lines: List<LyricLine>) {
 }
 
 private fun isDifferentSinger(line: LyricLine, focus: LyricLine): Boolean {
+    if (line.agentType == LyricAgentType.Group) return false
     val agent = line.agentId
     val focusAgent = focus.agentId
     return if (!agent.isNullOrBlank() && !focusAgent.isNullOrBlank()) agent != focusAgent

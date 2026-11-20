@@ -1054,7 +1054,6 @@ fun computeSongPosterFontSize(
     var smallest = baseSp * 1.3f
     var measuredAny = false
     for (line in lines) {
-        if (line.agentType == LyricAgentType.Group) continue
         val text = posterLeadText(line)
         if (text.isEmpty()) continue
         measuredAny = true
