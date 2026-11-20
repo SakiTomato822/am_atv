@@ -19,7 +19,9 @@ data class SettingsState(
     val repeatMode: PlaybackRepeatMode = PlaybackRepeatMode.Off,
     val shuffleEnabled: Boolean = false,
     val autoplayEnabled: Boolean = true,
-    val lowPerformanceMode: Boolean = false,
+    val lowPerformanceMode: LowPerformanceMode = LowPerformanceMode.Auto,
+    internal val lowPerformanceHardware: Boolean = false,
+    internal val playbackJankDetected: Boolean = false,
 
     // 歌词偏好 (am_atv_playback_preferences)
     val lyricsPreferred: Boolean = true,
@@ -44,6 +46,20 @@ data class SettingsState(
     val cacheDiskEnabled: Boolean = true,
     val cachePrefetchNextTwo: Boolean = true,
 ) {
+    val autoLowPerformanceReason: AutoLowPerformanceReason?
+        get() = when {
+            lowPerformanceMode != LowPerformanceMode.Auto -> null
+            lowPerformanceHardware -> AutoLowPerformanceReason.Hardware
+            playbackJankDetected -> AutoLowPerformanceReason.PlaybackJank
+            else -> null
+        }
+
+    val lowPerformance: Boolean
+        get() = lowPerformanceMode == LowPerformanceMode.On || autoLowPerformanceReason != null
+
+    internal val shouldMeasurePlaybackFrames: Boolean
+        get() = lowPerformanceMode == LowPerformanceMode.Auto && !lowPerformance
+
     /** Whether the UI is light now, given the system night mode and the minute of the day. */
     fun isLight(systemDark: Boolean, minuteOfDay: Int): Boolean = when (appearance) {
         AppearanceMode.Light -> true
@@ -63,7 +79,8 @@ interface SettingsStorage {
     fun saveRepeatMode(mode: PlaybackRepeatMode)
     fun saveShuffleEnabled(enabled: Boolean)
     fun saveAutoplayEnabled(enabled: Boolean)
-    fun saveLowPerformanceMode(enabled: Boolean)
+    fun saveLowPerformanceMode(mode: LowPerformanceMode)
+    fun savePlaybackJankDetected()
 
     fun saveLyricsPreferred(preferred: Boolean)
     fun saveLyricOffsetMs(offsetMs: Long)
@@ -101,12 +118,16 @@ class SharedPreferencesSettingsStorage(context: Context) : SettingsStorage {
         val appearanceRaw = flymePrefs.getString(KEY_APPEARANCE, null).orEmpty()
         val appearance = AppearanceMode.entries.firstOrNull { it.name == appearanceRaw } ?: AppearanceMode.System
         val lyricStyle = if (flymePrefs.getBoolean(KEY_LYRIC_SOAK, false)) LyricBackgroundStyle.Soak else LyricBackgroundStyle.Flow
+        val storedPerformanceMode = playbackPrefs.getString(KEY_PERFORMANCE_MODE, null)
+        val performanceMode = LowPerformanceMode.entries.firstOrNull { it.name == storedPerformanceMode }
+            ?: migrateLowPerformanceMode(playbackPrefs.getBoolean(KEY_LEGACY_LOW_PERFORMANCE_MODE, false))
 
         return SettingsState(
             repeatMode = repeat,
             shuffleEnabled = playbackPrefs.getBoolean(KEY_SHUFFLE_ENABLED, false),
             autoplayEnabled = playbackPrefs.getBoolean(KEY_AUTOPLAY_ENABLED, true),
-            lowPerformanceMode = playbackPrefs.getBoolean(KEY_LOW_PERFORMANCE_MODE, false),
+            lowPerformanceMode = performanceMode,
+            playbackJankDetected = playbackPrefs.getBoolean(KEY_PLAYBACK_JANK_DETECTED, false),
             lyricsPreferred = playbackPrefs.getBoolean(KEY_LYRICS_PREFERRED, true),
             lyricOffsetMs = playbackPrefs.getLong(KEY_LYRIC_OFFSET_MS, 0L),
             lyricTextSize = textSize,
@@ -140,8 +161,14 @@ class SharedPreferencesSettingsStorage(context: Context) : SettingsStorage {
         playbackPrefs.edit().putBoolean(KEY_AUTOPLAY_ENABLED, enabled).apply()
     }
 
-    override fun saveLowPerformanceMode(enabled: Boolean) {
-        playbackPrefs.edit().putBoolean(KEY_LOW_PERFORMANCE_MODE, enabled).apply()
+    override fun saveLowPerformanceMode(mode: LowPerformanceMode) {
+        val editor = playbackPrefs.edit().putString(KEY_PERFORMANCE_MODE, mode.name)
+        if (mode == LowPerformanceMode.Auto) editor.remove(KEY_PLAYBACK_JANK_DETECTED)
+        editor.apply()
+    }
+
+    override fun savePlaybackJankDetected() {
+        playbackPrefs.edit().putBoolean(KEY_PLAYBACK_JANK_DETECTED, true).apply()
     }
 
     override fun saveLyricsPreferred(preferred: Boolean) {
@@ -212,7 +239,9 @@ class SharedPreferencesSettingsStorage(context: Context) : SettingsStorage {
         const val KEY_REPEAT_MODE = "pref_playback_repeat_mode"
         const val KEY_SHUFFLE_ENABLED = "pref_playback_shuffle_enabled"
         const val KEY_AUTOPLAY_ENABLED = "pref_playback_autoplay_enabled"
-        const val KEY_LOW_PERFORMANCE_MODE = "pref_playback_low_performance_mode"
+        const val KEY_LEGACY_LOW_PERFORMANCE_MODE = "pref_playback_low_performance_mode"
+        const val KEY_PERFORMANCE_MODE = "pref_playback_performance_mode"
+        const val KEY_PLAYBACK_JANK_DETECTED = "pref_playback_jank_detected"
         const val KEY_LYRICS_PREFERRED = "pref_playback_lyrics_preferred"
         const val KEY_LYRIC_OFFSET_MS = "pref_playback_lyric_offset_ms"
         const val KEY_LYRIC_TEXT_SIZE = "pref_lyric_text_size"
@@ -239,8 +268,9 @@ class SettingsStore(
     private val storage: SettingsStorage,
     private val onCacheDiskChanged: ((Boolean) -> Unit)? = null,
     private val onCachePrefetchChanged: ((Boolean) -> Unit)? = null,
+    lowPerformanceHardware: Boolean = false,
 ) : QueuePreferences {
-    private val mutableState = MutableStateFlow(storage.loadInitialState())
+    private val mutableState = MutableStateFlow(storage.loadInitialState().copy(lowPerformanceHardware = lowPerformanceHardware))
     val state: StateFlow<SettingsState> = mutableState.asStateFlow()
 
     override var repeatMode: PlaybackRepeatMode
@@ -264,12 +294,22 @@ class SettingsStore(
             storage.saveAutoplayEnabled(value)
         }
 
-    override var lowPerformanceMode: Boolean
-        get() = mutableState.value.lowPerformanceMode
-        set(value) {
-            mutableState.value = mutableState.value.copy(lowPerformanceMode = value)
-            storage.saveLowPerformanceMode(value)
-        }
+    fun setLowPerformanceMode(mode: LowPerformanceMode) {
+        val current = mutableState.value
+        storage.saveLowPerformanceMode(mode)
+        mutableState.value = current.copy(
+            lowPerformanceMode = mode,
+            playbackJankDetected = mode != LowPerformanceMode.Auto && current.playbackJankDetected,
+        )
+    }
+
+    internal fun enableLowPerformanceForPlaybackJank(): Boolean {
+        val current = mutableState.value
+        if (!current.shouldMeasurePlaybackFrames) return false
+        storage.savePlaybackJankDetected()
+        mutableState.value = current.copy(playbackJankDetected = true)
+        return true
+    }
 
     fun setLyricsPreferred(preferred: Boolean) {
         mutableState.value = mutableState.value.copy(lyricsPreferred = preferred)

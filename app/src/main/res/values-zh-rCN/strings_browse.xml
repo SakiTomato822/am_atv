@@ -9,6 +9,12 @@
     <string name="browse_connection_error">无法连接，请重试。</string>
     <string name="browse_reset">重置</string>
     <string name="browse_performance_mode_hint">停用动态封面视频以提升老旧电视盒硬件的流畅度与稳定性。</string>
+    <string name="browse_performance_auto">自动</string>
+    <string name="browse_performance_on">开</string>
+    <string name="browse_performance_off">关</string>
+    <string name="browse_performance_auto_enabled">已自动启用（%1$s）</string>
+    <string name="browse_performance_reason_hardware">设备配置较低</string>
+    <string name="browse_performance_reason_jank">检测到播放页掉帧</string>
     <string name="browse_performance_low">低性能模式</string>
     <string name="browse_search_hint">搜索艺人、专辑、歌曲或播放列表</string>
     <string name="browse_search_error">无法搜索，请重试。</string>

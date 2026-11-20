@@ -343,7 +343,8 @@ class PlaybackStoreTest {
         override fun saveRepeatMode(mode: PlaybackRepeatMode) = Unit
         override fun saveShuffleEnabled(enabled: Boolean) = Unit
         override fun saveAutoplayEnabled(enabled: Boolean) = Unit
-        override fun saveLowPerformanceMode(enabled: Boolean) = Unit
+        override fun saveLowPerformanceMode(mode: LowPerformanceMode) = Unit
+        override fun savePlaybackJankDetected() = Unit
         override fun saveLyricsPreferred(preferred: Boolean) = Unit
         override fun saveLyricOffsetMs(offsetMs: Long) = Unit
         override fun saveLyricTextSize(size: dev.amatv.integration.LyricTextSize) = Unit

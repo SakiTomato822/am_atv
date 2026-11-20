@@ -16,7 +16,9 @@ class SettingsStoreTest {
         var savedRepeatMode: PlaybackRepeatMode? = null
         var savedShuffleEnabled: Boolean? = null
         var savedAutoplayEnabled: Boolean? = null
-        var savedLowPerformanceMode: Boolean? = null
+        var savedLowPerformanceMode: LowPerformanceMode? = null
+        var savedPlaybackJankDetected = initial.playbackJankDetected
+            private set
         var savedLyricsPreferred: Boolean? = null
         var savedLyricOffsetMs: Long? = null
         var savedLyricTextSize: LyricTextSize? = null
@@ -35,12 +37,19 @@ class SettingsStoreTest {
         var savedCacheDiskEnabled: Boolean? = null
         var savedCachePrefetchNextTwo: Boolean? = null
 
-        override fun loadInitialState(): SettingsState = initial
+        override fun loadInitialState(): SettingsState = initial.copy(
+            lowPerformanceMode = savedLowPerformanceMode ?: initial.lowPerformanceMode,
+            playbackJankDetected = savedPlaybackJankDetected,
+        )
 
         override fun saveRepeatMode(mode: PlaybackRepeatMode) { savedRepeatMode = mode }
         override fun saveShuffleEnabled(enabled: Boolean) { savedShuffleEnabled = enabled }
         override fun saveAutoplayEnabled(enabled: Boolean) { savedAutoplayEnabled = enabled }
-        override fun saveLowPerformanceMode(enabled: Boolean) { savedLowPerformanceMode = enabled }
+        override fun saveLowPerformanceMode(mode: LowPerformanceMode) {
+            savedLowPerformanceMode = mode
+            if (mode == LowPerformanceMode.Auto) savedPlaybackJankDetected = false
+        }
+        override fun savePlaybackJankDetected() { savedPlaybackJankDetected = true }
         override fun saveLyricsPreferred(preferred: Boolean) { savedLyricsPreferred = preferred }
         override fun saveLyricOffsetMs(offsetMs: Long) { savedLyricOffsetMs = offsetMs }
         override fun saveLyricTextSize(size: LyricTextSize) { savedLyricTextSize = size }
@@ -71,7 +80,8 @@ class SettingsStoreTest {
         assertEquals(PlaybackRepeatMode.Off, state.repeatMode)
         assertFalse(state.shuffleEnabled)
         assertTrue(state.autoplayEnabled)
-        assertFalse(state.lowPerformanceMode)
+        assertEquals(LowPerformanceMode.Auto, state.lowPerformanceMode)
+        assertFalse(state.lowPerformance)
         assertTrue(state.lyricsPreferred)
         assertEquals(0L, state.lyricOffsetMs)
         assertFalse(state.lyricTranslationEnabled)
@@ -87,7 +97,7 @@ class SettingsStoreTest {
         val custom = SettingsState(
             repeatMode = PlaybackRepeatMode.One,
             shuffleEnabled = true,
-            lowPerformanceMode = true,
+            lowPerformanceMode = LowPerformanceMode.On,
             lyricOffsetMs = -250L,
             lyricStyle = LyricBackgroundStyle.Soak,
             appearance = AppearanceMode.Dark,
@@ -98,7 +108,7 @@ class SettingsStoreTest {
         val state = store.state.value
         assertEquals(PlaybackRepeatMode.One, state.repeatMode)
         assertTrue(state.shuffleEnabled)
-        assertTrue(state.lowPerformanceMode)
+        assertTrue(state.lowPerformance)
         assertEquals(-250L, state.lyricOffsetMs)
         assertEquals(LyricBackgroundStyle.Soak, state.lyricStyle)
         assertEquals(AppearanceMode.Dark, state.appearance)
@@ -142,10 +152,69 @@ class SettingsStoreTest {
         assertFalse(store.autoplayEnabled)
         assertTrue(storage.savedAutoplayEnabled == false)
 
-        store.lowPerformanceMode = true
-        assertTrue(store.state.value.lowPerformanceMode)
-        assertTrue(store.lowPerformanceMode)
-        assertTrue(storage.savedLowPerformanceMode == true)
+    }
+
+    @Test
+    fun manualModesOverrideHardwareAndDisableSampling() {
+        val storage = FakeSettingsStorage()
+        val store = SettingsStore(storage, lowPerformanceHardware = true)
+
+        assertTrue(store.state.value.lowPerformance)
+        assertEquals(AutoLowPerformanceReason.Hardware, store.state.value.autoLowPerformanceReason)
+        assertFalse(store.enableLowPerformanceForPlaybackJank())
+
+        store.setLowPerformanceMode(LowPerformanceMode.Off)
+        assertFalse(store.state.value.lowPerformance)
+        assertNull(store.state.value.autoLowPerformanceReason)
+        assertFalse(store.enableLowPerformanceForPlaybackJank())
+        assertEquals(LowPerformanceMode.Off, storage.savedLowPerformanceMode)
+
+        store.setLowPerformanceMode(LowPerformanceMode.On)
+        assertTrue(store.state.value.lowPerformance)
+        assertNull(store.state.value.autoLowPerformanceReason)
+        assertFalse(store.enableLowPerformanceForPlaybackJank())
+        assertEquals(LowPerformanceMode.On, storage.savedLowPerformanceMode)
+    }
+
+    @Test
+    fun playbackJankPersistsAndSelectingAutoAgainClearsIt() {
+        val storage = FakeSettingsStorage()
+        val store = SettingsStore(storage)
+        assertTrue(store.state.value.shouldMeasurePlaybackFrames)
+        assertTrue(store.enableLowPerformanceForPlaybackJank())
+        assertTrue(store.state.value.lowPerformance)
+        assertFalse(store.state.value.shouldMeasurePlaybackFrames)
+        assertFalse(store.enableLowPerformanceForPlaybackJank())
+
+        val restarted = SettingsStore(storage)
+        assertTrue(restarted.state.value.lowPerformance)
+        assertEquals(AutoLowPerformanceReason.PlaybackJank, restarted.state.value.autoLowPerformanceReason)
+        restarted.setLowPerformanceMode(LowPerformanceMode.Auto)
+        assertFalse(restarted.state.value.lowPerformance)
+        assertTrue(restarted.state.value.shouldMeasurePlaybackFrames)
+        assertFalse(storage.savedPlaybackJankDetected)
+    }
+
+    @Test
+    fun manualOffSuppressesPersistedJankAcrossRestarts() {
+        val storage = FakeSettingsStorage(SettingsState(playbackJankDetected = true))
+        SettingsStore(storage).setLowPerformanceMode(LowPerformanceMode.Off)
+
+        val restarted = SettingsStore(storage)
+        assertFalse(restarted.state.value.lowPerformance)
+        assertNull(restarted.state.value.autoLowPerformanceReason)
+        assertFalse(restarted.state.value.shouldMeasurePlaybackFrames)
+    }
+
+    @Test
+    fun returningToAutoStillAppliesTheStartupHardwareDecision() {
+        val store = SettingsStore(FakeSettingsStorage(), lowPerformanceHardware = true)
+        store.setLowPerformanceMode(LowPerformanceMode.Off)
+        store.setLowPerformanceMode(LowPerformanceMode.Auto)
+
+        assertTrue(store.state.value.lowPerformance)
+        assertEquals(AutoLowPerformanceReason.Hardware, store.state.value.autoLowPerformanceReason)
+        assertFalse(store.state.value.shouldMeasurePlaybackFrames)
     }
 
     @Test

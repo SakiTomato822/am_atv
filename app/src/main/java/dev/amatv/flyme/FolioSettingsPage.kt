@@ -41,6 +41,8 @@ import androidx.compose.ui.unit.sp
 import dev.amatv.BuildConfig
 import dev.amatv.R
 import dev.amatv.core.AppearanceMode
+import dev.amatv.core.AutoLowPerformanceReason
+import dev.amatv.core.LowPerformanceMode
 import dev.amatv.core.LyricBackgroundStyle
 import dev.amatv.core.SettingsState
 import dev.amatv.core.SettingsStore
@@ -168,13 +170,30 @@ internal fun FolioSettingsPage(
                             onIncrease = { settingsStore.setLightSchedule(settings.lightFromMinute, stepMinute(settings.lightUntilMinute, 30)) },
                         )
                     }
-                    SettingsToggleRow(
+                    val performanceReason = when (settings.autoLowPerformanceReason) {
+                        AutoLowPerformanceReason.Hardware -> stringResource(R.string.browse_performance_reason_hardware)
+                        AutoLowPerformanceReason.PlaybackJank -> stringResource(R.string.browse_performance_reason_jank)
+                        null -> null
+                    }
+                    val performanceHint = stringResource(R.string.browse_performance_mode_hint)
+                    SettingsRow(
                         title = stringResource(R.string.browse_performance_low),
-                        subtitle = stringResource(R.string.browse_performance_mode_hint),
-                        checked = settings.lowPerformanceMode,
-                        onCheckedChange = { settingsStore.lowPerformanceMode = it },
+                        subtitle = if (performanceReason == null) performanceHint else {
+                            performanceHint + "\n" +
+                                stringResource(R.string.browse_performance_auto_enabled, performanceReason)
+                        },
                         showDivider = false,
-                    )
+                    ) {
+                        FolioSegmentedPills(
+                            options = listOf(
+                                LowPerformanceMode.Auto to stringResource(R.string.browse_performance_auto),
+                                LowPerformanceMode.On to stringResource(R.string.browse_performance_on),
+                                LowPerformanceMode.Off to stringResource(R.string.browse_performance_off),
+                            ),
+                            selected = settings.lowPerformanceMode,
+                            onSelect = settingsStore::setLowPerformanceMode,
+                        )
+                    }
                 }
             }
 

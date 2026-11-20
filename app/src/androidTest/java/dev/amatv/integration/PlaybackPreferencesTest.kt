@@ -1,8 +1,15 @@
 package dev.amatv.integration
 
 import android.content.Context
+import android.content.ContextWrapper
+import android.content.SharedPreferences
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import dev.amatv.core.AutoLowPerformanceReason
+import dev.amatv.core.LowPerformanceMode
+import dev.amatv.core.SettingsStore
+import dev.amatv.core.SharedPreferencesSettingsStorage
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -11,29 +18,40 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class PlaybackPreferencesTest {
     @Test
-    fun lowPerformanceModeDefaultsOffAndKeepsExplicitChoice() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val preferences = context.getSharedPreferences(
-            "am_atv_playback_preferences",
-            Context.MODE_PRIVATE,
-        )
+    fun lowPerformanceModeMigratesAndKeepsExplicitChoice() {
+        val targetContext = InstrumentationRegistry.getInstrumentation().targetContext
+        val context = object : ContextWrapper(targetContext) {
+            override fun getApplicationContext(): Context = this
+            override fun getSharedPreferences(name: String, mode: Int): SharedPreferences =
+                super.getSharedPreferences("performance_test_$name", mode)
+        }
+        val prefsName = "am_atv_playback_preferences"
+        val preferences = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
+        val storage = SharedPreferencesSettingsStorage(context)
         val key = "pref_playback_low_performance_mode"
-        val hadSavedValue = preferences.contains(key)
-        val savedValue = preferences.getBoolean(key, false)
 
         try {
-            preferences.edit().remove(key).commit()
-            assertFalse(PlaybackPreferences(context).lowPerformanceMode)
+            preferences.edit().clear().commit()
+            assertEquals(LowPerformanceMode.Auto, storage.loadInitialState().lowPerformanceMode)
 
-            PlaybackPreferences(context).lowPerformanceMode = true
-            assertTrue(PlaybackPreferences(context).lowPerformanceMode)
+            preferences.edit().putBoolean(key, false).commit()
+            assertEquals(LowPerformanceMode.Auto, storage.loadInitialState().lowPerformanceMode)
 
-            PlaybackPreferences(context).lowPerformanceMode = false
-            assertFalse(PlaybackPreferences(context).lowPerformanceMode)
+            preferences.edit().putBoolean(key, true).commit()
+            assertEquals(LowPerformanceMode.On, storage.loadInitialState().lowPerformanceMode)
+
+            storage.saveLowPerformanceMode(LowPerformanceMode.Off)
+            assertEquals(LowPerformanceMode.Off, storage.loadInitialState().lowPerformanceMode)
+            assertFalse(SettingsStore(storage).state.value.lowPerformance)
+
+            storage.saveLowPerformanceMode(LowPerformanceMode.Auto)
+            storage.savePlaybackJankDetected()
+            assertEquals(AutoLowPerformanceReason.PlaybackJank, storage.loadInitialState().autoLowPerformanceReason)
+            assertTrue(SettingsStore(storage).state.value.lowPerformance)
+            storage.saveLowPerformanceMode(LowPerformanceMode.Auto)
+            assertFalse(SettingsStore(storage).state.value.lowPerformance)
         } finally {
-            val editor = preferences.edit()
-            if (hadSavedValue) editor.putBoolean(key, savedValue) else editor.remove(key)
-            editor.commit()
+            targetContext.deleteSharedPreferences("performance_test_$prefsName")
         }
     }
 }

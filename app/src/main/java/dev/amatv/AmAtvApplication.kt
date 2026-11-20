@@ -12,6 +12,7 @@ import dev.amatv.core.LyricsStore
 import dev.amatv.core.PlaybackStore
 import dev.amatv.core.SettingsStore
 import dev.amatv.core.SharedPreferencesSettingsStorage
+import dev.amatv.core.detectLowPerformanceHardware
 import dev.amatv.i18n.AppText
 import dev.amatv.integration.ContentCache
 import dev.amatv.integration.LogRecorder
@@ -51,10 +52,12 @@ class AmAtvApplication : Application() {
         super.onCreate()
         AppText.initialize(this)
         val contentCache = ContentCache.get(this)
+        val isMainProcess = getProcessName() == packageName
         settingsStore = SettingsStore(
             storage = SharedPreferencesSettingsStorage(this),
             onCacheDiskChanged = { contentCache.setEnabled(it) },
             onCachePrefetchChanged = { contentCache.setPrefetch(it) },
+            lowPerformanceHardware = isMainProcess && detectLowPerformanceHardware(this),
         )
         libraryActions = LibraryActions(
             api = musicServices.api,
@@ -71,7 +74,7 @@ class AmAtvApplication : Application() {
             operations = musicServices,
             coroutineScope = applicationScope,
         )
-        if (getProcessName() == packageName) {
+        if (isMainProcess) {
             if (BuildConfig.FLYME_AUTO) LogRecorder.start(this)
             val account = accountStore.state.value
             if (account.isSignedIn) {

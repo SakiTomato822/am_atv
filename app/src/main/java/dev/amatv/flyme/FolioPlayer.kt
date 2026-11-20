@@ -400,7 +400,7 @@ internal fun BoxScope.FolioPlayerLayer(
             val anchorHolder = remember { FolioPlayerAnchorCoordsHolder() }
             CompositionLocalProvider(
                 LocalFolioReducedMotion provides reducedMotion,
-                LocalFolioLowPerformance provides settings.lowPerformanceMode,
+                LocalFolioLowPerformance provides settings.lowPerformance,
                 LocalFolioPlayerAnchors provides anchorHolder,
             ) {
             Box(
@@ -420,7 +420,7 @@ internal fun BoxScope.FolioPlayerLayer(
                     artworkPalette = artworkPalette,
                     style = effectiveStyle,
                     isLight = palette.isLight,
-                    animateFlow = !settings.lowPerformanceMode,
+                    animateFlow = !settings.lowPerformance,
                     reducedMotion = reducedMotion,
                     tierSpec = tierSpec,
                     displayState = displayState,
@@ -496,7 +496,7 @@ internal fun BoxScope.FolioPlayerLayer(
                     canSeek = canSeek,
                     isLiveStream = isLiveStream,
                     offsetMs = settings.lyricOffsetMs,
-                    lowPerformance = settings.lowPerformanceMode,
+                    lowPerformance = settings.lowPerformance,
                     translationEnabled = settings.lyricTranslationEnabled,
                     pronunciationEnabled = settings.lyricPronunciationEnabled,
                     lyricsDisplayActive = lyricsDisplayActive,
@@ -738,7 +738,7 @@ internal fun BoxScope.FolioPlayerLayer(
                                     canSeek = canSeek,
                                     isLiveStream = isLiveStream,
                                     offsetMs = settings.lyricOffsetMs,
-                                    lowPerformance = settings.lowPerformanceMode,
+                                    lowPerformance = settings.lowPerformance,
                                     translationEnabled = settings.lyricTranslationEnabled,
                                     pronunciationEnabled = settings.lyricPronunciationEnabled,
                                     lyricsDisplayActive = lyricsDisplayActive,
@@ -802,7 +802,7 @@ internal fun BoxScope.FolioPlayerLayer(
                                     queueSnapshot = queueSnapshot,
                                     positionState = positionState,
                                     offsetMs = settings.lyricOffsetMs,
-                                    lowPerformance = settings.lowPerformanceMode,
+                                    lowPerformance = settings.lowPerformance,
                                     translationEnabled = settings.lyricTranslationEnabled,
                                     pronunciationEnabled = settings.lyricPronunciationEnabled,
                                     textScaleMultiplier = textScaleMultiplier,
@@ -842,7 +842,7 @@ internal fun BoxScope.FolioPlayerLayer(
                                     positionState = positionState,
                                     durationMs = durationMs,
                                     offsetMs = settings.lyricOffsetMs,
-                                    lowPerformance = settings.lowPerformanceMode,
+                                    lowPerformance = settings.lowPerformance,
                                     translationEnabled = settings.lyricTranslationEnabled,
                                     pronunciationEnabled = settings.lyricPronunciationEnabled,
                                     textScaleMultiplier = textScaleMultiplier,
@@ -896,7 +896,7 @@ internal fun BoxScope.FolioPlayerLayer(
             BackHandler(enabled = open && lyricsSettingsOpen) { lyricsSettingsOpen = false }
             FolioLyricsDisplaySettingsOverlay(
                 open = lyricsSettingsOpen,
-                lowPerformance = settings.lowPerformanceMode,
+                lowPerformance = settings.lowPerformance,
                 reducedMotion = reducedMotion,
                 tier = tierSpec.tier,
                 isLight = palette.isLight,

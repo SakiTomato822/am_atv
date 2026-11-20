@@ -9,6 +9,12 @@
     <string name="browse_connection_error">Unable to connect. Please try again.</string>
     <string name="browse_reset">Reset</string>
     <string name="browse_performance_mode_hint">Disable animated artwork video to ensure smooth playback on older TV hardware.</string>
+    <string name="browse_performance_auto">Auto</string>
+    <string name="browse_performance_on">On</string>
+    <string name="browse_performance_off">Off</string>
+    <string name="browse_performance_auto_enabled">Automatically enabled (%1$s)</string>
+    <string name="browse_performance_reason_hardware">Lower-spec device</string>
+    <string name="browse_performance_reason_jank">Dropped frames detected on the playback page</string>
     <string name="browse_performance_low">Low Spec Mode</string>
     <string name="browse_search_hint">Search artists, albums, songs, or playlists</string>
     <string name="browse_search_error">Unable to search. Please try again.</string>

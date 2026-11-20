@@ -140,7 +140,7 @@ fun FolioApp(
     val playbackState by playbackStore.state.collectAsState()
     val queueState by playbackStore.queueController.state.collectAsState()
     val isLight = rememberFolioIsLight(settingsState)
-    val browseMotion = rememberFolioBrowseMotion(settingsState.lowPerformanceMode)
+    val browseMotion = rememberFolioBrowseMotion(settingsState.lowPerformance)
 
     LaunchedEffect(isLight) {
         onLightThemeChanged(isLight)
@@ -422,13 +422,13 @@ fun FolioApp(
             FolioTheme(
                 isLight = isLight,
                 tierSpec = tierSpec,
-                lowPerformanceMode = settingsState.lowPerformanceMode,
+                lowPerformanceMode = settingsState.lowPerformance,
             ) {
                 val palette = LocalFolioPalette.current
                 val pageTitles = FolioRootPage.entries.map { stringResource(it.labelRes) }
                 val contentBottomPadding = navBottom + tierSpec.capsp + 28.dp
                 val backdrop = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                    !settingsState.lowPerformanceMode && playbackState.hasCurrentTrack
+                    !settingsState.lowPerformance && playbackState.hasCurrentTrack
                 ) rememberLayerBackdrop() else null
 
                 Box(Modifier.fillMaxSize()) {
@@ -587,6 +587,9 @@ fun FolioApp(
                         }
                     }
 
+                    if (playerOpen && playbackState.hasCurrentTrack && settingsState.shouldMeasurePlaybackFrames) {
+                        FolioPlaybackFrameMonitor(settingsStore)
+                    }
                     FolioBrowsePlayerEntrance(
                         open = playerOpen,
                         hasCurrentTrack = playbackState.hasCurrentTrack,

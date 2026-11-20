@@ -9,6 +9,12 @@
     <string name="browse_connection_error">無法連線，請重試。</string>
     <string name="browse_reset">重設</string>
     <string name="browse_performance_mode_hint">停用動態封面影片以提升老舊電視盒硬體的流暢度與穩定性。</string>
+    <string name="browse_performance_auto">自動</string>
+    <string name="browse_performance_on">開</string>
+    <string name="browse_performance_off">關</string>
+    <string name="browse_performance_auto_enabled">已自動啟用（%1$s）</string>
+    <string name="browse_performance_reason_hardware">裝置規格較低</string>
+    <string name="browse_performance_reason_jank">偵測到播放頁面掉幀</string>
     <string name="browse_performance_low">低效能模式</string>
     <string name="browse_search_hint">搜尋藝人、專輯、歌曲或播放列表</string>
     <string name="browse_search_error">無法搜尋，請重試。</string>

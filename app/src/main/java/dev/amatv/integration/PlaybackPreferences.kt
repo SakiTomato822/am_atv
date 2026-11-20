@@ -56,7 +56,6 @@ interface QueuePreferences {
     var repeatMode: PlaybackRepeatMode
     var shuffleEnabled: Boolean
     var autoplayEnabled: Boolean
-    var lowPerformanceMode: Boolean
 }
 
 /**
@@ -100,12 +99,6 @@ class PlaybackPreferences(context: Context) : QueuePreferences, dev.amatv.core.P
         get() = preferences.getBoolean(KEY_LYRICS_PREFERRED, true)
         set(value) {
             preferences.edit().putBoolean(KEY_LYRICS_PREFERRED, value).apply()
-        }
-
-    override var lowPerformanceMode: Boolean
-        get() = preferences.getBoolean(KEY_LOW_PERFORMANCE_MODE, false)
-        set(value) {
-            preferences.edit().putBoolean(KEY_LOW_PERFORMANCE_MODE, value).apply()
         }
 
     var lyricOffsetMs: Long
@@ -198,7 +191,6 @@ class PlaybackPreferences(context: Context) : QueuePreferences, dev.amatv.core.P
         const val KEY_LYRIC_PRONUNCIATION_ENABLED = "pref_lyric_pronunciation_enabled"
         const val KEY_LYRIC_TRANSLATION_LANGUAGE = "pref_lyric_translation_language"
         const val KEY_LYRIC_PRONUNCIATION_LANGUAGE = "pref_lyric_pronunciation_language"
-        const val KEY_LOW_PERFORMANCE_MODE = "pref_playback_low_performance_mode"
         const val KEY_LYRICS_PREFERRED = "pref_playback_lyrics_preferred"
         const val KEY_LYRIC_TEXT_SIZE = "pref_lyric_text_size"
     }

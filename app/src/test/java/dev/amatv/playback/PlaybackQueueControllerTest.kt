@@ -28,7 +28,6 @@ class PlaybackQueueControllerTest {
         override var repeatMode: PlaybackRepeatMode = PlaybackRepeatMode.Off
         override var shuffleEnabled: Boolean = false
         override var autoplayEnabled: Boolean = false
-        override var lowPerformanceMode: Boolean = false
     }
 
     private class FakeRecommendationProvider : RecommendationProvider {
