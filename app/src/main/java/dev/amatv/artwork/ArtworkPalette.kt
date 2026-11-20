@@ -1,6 +1,7 @@
 package dev.amatv.artwork
 
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -61,6 +62,11 @@ internal object ArtworkPalette {
     }
 
     internal fun distance(first: Int, second: Int): Double = distance(oklab(first), oklab(second))
+
+    internal fun chroma(color: Int): Double {
+        val lab = oklab(color)
+        return hypot(lab[1], lab[2])
+    }
 
     private fun distance(a: DoubleArray, b: DoubleArray): Double = sqrt(
         (a[0] - b[0]).pow(2) + (a[1] - b[1]).pow(2) + (a[2] - b[2]).pow(2),

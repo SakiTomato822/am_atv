@@ -69,6 +69,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -601,11 +602,14 @@ internal fun FolioCircleGlassPlayButton(
     onTogglePlay: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val accent = LocalFolioControlAccent.current?.value ?: Color.Transparent
+    val surface = LocalFolioPalette.current.capsuleBg.copy(alpha = 1f)
     Box(
         modifier = modifier
             .size(size)
             .folioPlayerGlass(isLight = isLight, shape = CircleShape)
             .clip(CircleShape)
+            .background(accent)
             .folioPressable(
                 enabled = enabled,
                 compact = true,
@@ -617,7 +621,7 @@ internal fun FolioCircleGlassPlayButton(
     ) {
         FolioAnimatedPlayPauseIcon(
             playWhenReady = playWhenReady,
-            tint = fg,
+            tint = if (accent.alpha > 0f) controlAccentForeground(accent.compositeOver(surface)) else fg,
             modifier = Modifier.size(size * 0.44f),
         )
     }
@@ -629,6 +633,7 @@ internal fun FolioHairlineProgressBar(
     durationMs: Long,
     fg: Color,
     modifier: Modifier = Modifier,
+    accent: State<Color>? = LocalFolioControlAccent.current,
 ) {
     Canvas(modifier = modifier.height(3.dp)) {
         val progress = if (durationMs > 0L) {
@@ -644,7 +649,7 @@ internal fun FolioHairlineProgressBar(
         )
         if (progress > 0f) {
             drawRoundRect(
-                color = fg.copy(alpha = 0.85f),
+                color = accent?.value?.compositeOver(fg.copy(alpha = 0.85f)) ?: fg.copy(alpha = 0.85f),
                 size = Size(size.width * progress, size.height),
                 cornerRadius = radius,
             )
@@ -979,8 +984,14 @@ internal fun FolioPlayerCollapsedCapsule(
 ) {
     val fontFamily = LocalFolioFontFamily.current
     val shape = RoundedCornerShape(FolioRadii.Capsule)
-    val playIconBg = fg
-    val playIconTint = if (isLight) Color.White else Color(0xFF17151C)
+    val controlAccent = LocalFolioControlAccent.current
+    val accent = controlAccent?.value ?: Color.Transparent
+    val playIconBg = accent.compositeOver(fg)
+    val playIconTint = when {
+        accent.alpha > 0f -> controlAccentForeground(playIconBg)
+        isLight -> Color.White
+        else -> Color(0xFF17151C)
+    }
     val expandCd = stringResource(R.string.folio_player_controls_expand)
     val subtitle = formatFolioPlayerSubtitle(track.artist, track.album)
 
@@ -1105,7 +1116,8 @@ internal fun FolioPlayerCollapsedCapsule(
             )
             if (progress > 0f) {
                 drawRoundRect(
-                    color = fg.copy(alpha = 0.78f),
+                    color = controlAccent?.value?.compositeOver(fg.copy(alpha = 0.78f))
+                        ?: fg.copy(alpha = 0.78f),
                     size = Size(size.width * progress, size.height),
                     cornerRadius = radius,
                 )
@@ -1354,6 +1366,9 @@ private fun TransportRow(
     val fontFamily = LocalFolioFontFamily.current
     val anchors = LocalFolioPlayerAnchors.current
     val isPaletteLight = LocalFolioPalette.current.isLight
+    val accent = LocalFolioControlAccent.current?.value ?: Color.Transparent
+    val playFill = accent.compositeOver(playBg)
+    val playIcon = if (accent.alpha > 0f) controlAccentForeground(playFill) else playFg
     val translateCd = stringResource(R.string.player_lyrics_display_settings)
     Row(
         modifier = modifier,
@@ -1405,7 +1420,7 @@ private fun TransportRow(
             modifier = Modifier
                 .size(tierSpec.pp)
                 .clip(CircleShape)
-                .background(playBg)
+                .background(playFill)
                 .folioPressable(
                     enabled = playEnabled,
                     compact = true,
@@ -1417,7 +1432,7 @@ private fun TransportRow(
         ) {
             FolioAnimatedPlayPauseIcon(
                 playWhenReady = playWhenReady,
-                tint = playFg,
+                tint = playIcon,
                 modifier = Modifier.size(tierSpec.pp * 0.48f),
             )
         }
@@ -1456,6 +1471,7 @@ private fun SeekSection(
     fg2: Color,
     onSeekTo: (Long) -> Unit,
 ) {
+    val controlAccent = LocalFolioControlAccent.current
     val fontFamily = LocalFolioFontFamily.current
     var dragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableFloatStateOf(0f) }
@@ -1522,7 +1538,8 @@ private fun SeekSection(
                 )
                 val fillW = (size.width * shownFraction).coerceAtLeast(0f)
                 drawRoundRect(
-                    color = fg.copy(alpha = 0.88f),
+                    color = controlAccent?.value?.compositeOver(fg.copy(alpha = 0.88f))
+                        ?: fg.copy(alpha = 0.88f),
                     topLeft = Offset(0f, trackY),
                     size = Size(fillW, trackH),
                     cornerRadius = radius,
@@ -1530,7 +1547,7 @@ private fun SeekSection(
                 if (canSeek && durationMs > 0L) {
                     val thumbX = fillW.coerceIn(trackH, (size.width - trackH).coerceAtLeast(trackH))
                     drawCircle(
-                        color = fg,
+                        color = controlAccent?.value?.compositeOver(fg) ?: fg,
                         radius = if (dragging) 7.dp.toPx() else 5.dp.toPx(),
                         center = Offset(thumbX, size.height * 0.5f),
                     )

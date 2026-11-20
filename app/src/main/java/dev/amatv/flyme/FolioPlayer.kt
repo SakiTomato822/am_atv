@@ -94,7 +94,7 @@ import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
 import dev.amatv.model.forDisplay
 import dev.amatv.artwork.ArtworkImages
-import dev.amatv.artwork.rememberArtworkPalette
+import dev.amatv.artwork.rememberArtworkPaletteResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -310,7 +310,8 @@ internal fun BoxScope.FolioPlayerLayer(
             )
             isReducedMotionEnabled(scale, ValueAnimator.areAnimatorsEnabled())
         }
-        val artworkPalette = rememberArtworkPalette(track.artworkUrl, track.palette)
+        val artwork = rememberArtworkPaletteResult(track.artworkUrl, track.palette)
+        val artworkPalette = artwork.colors
         val topStripLuminance = if (!settings.lowPerformance ||
             showSoakArtworkStage(tierSpec.tier, effectiveStyle, displayState)
         ) {
@@ -334,6 +335,15 @@ internal fun BoxScope.FolioPlayerLayer(
         }
         val fg = if (palette.isLight) Color(0xFF16141B) else Color.White
         val fg2 = if (palette.isLight) Color(0xFF16141B).copy(alpha = 0.72f) else Color.White.copy(alpha = 0.68f)
+        val controlAccent = rememberFolioControlAccent(
+            appleColors = track.artworkColors,
+            palette = artwork.extractedColors(track.artworkUrl),
+            background = folioControlBackground(
+                effectiveStyle, artworkPalette, baseColor, palette.isLight, settings.lowPerformance,
+            ),
+            neutral = fg,
+            animate = !settings.lowPerformance && !reducedMotion && LocalFolioBrowseMotion.current.animated,
+        )
         val accent = palette.accent
         val pullDown = rememberFolioPullDownToClose(onClose)
 
@@ -408,6 +418,7 @@ internal fun BoxScope.FolioPlayerLayer(
         ) { glassEnv ->
             val anchorHolder = remember { FolioPlayerAnchorCoordsHolder() }
             CompositionLocalProvider(
+                LocalFolioControlAccent provides controlAccent,
                 LocalFolioReducedMotion provides reducedMotion,
                 LocalFolioLowPerformance provides settings.lowPerformance,
                 LocalFolioPlayerAnchors provides anchorHolder,
@@ -2221,7 +2232,7 @@ private fun rememberArtworkTopLuminance(url: String?, fallback: List<Color>): Fl
 }
 
 @Composable
-private fun rememberFolioPlaybackPositionMs(
+internal fun rememberFolioPlaybackPositionMs(
     playbackState: PlaybackState,
     active: Boolean,
 ): FolioPlaybackPosition {

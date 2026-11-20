@@ -38,6 +38,7 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -46,7 +47,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -58,7 +61,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.amatv.AmAtvApplication
 import dev.amatv.R
+import dev.amatv.artwork.rememberArtworkPaletteResult
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.CatalogOpenAction
 import dev.amatv.model.Track
@@ -352,61 +357,94 @@ fun FolioMiniPlayerCapsule(
     val coverShape = RoundedCornerShape(FolioRadii.CapsuleCover)
     val origin = rememberFolioArtworkOrigin(coverShape)
 
-    Row(
+    val app = LocalContext.current.applicationContext as AmAtvApplication
+    val playbackState by app.playbackStore.state.collectAsState()
+    val position = rememberFolioPlaybackPositionMs(playbackState, active = true)
+    val durationMs = playbackState.snapshot?.durationMs ?: track.durationMs
+    val motion = LocalFolioBrowseMotion.current
+    val surface = palette.capsuleBg.copy(alpha = 1f)
+    val artwork = rememberArtworkPaletteResult(track.artworkUrl, track.palette)
+    val accent = rememberFolioControlAccent(
+        appleColors = track.artworkColors,
+        palette = artwork.extractedColors(track.artworkUrl),
+        background = surface,
+        neutral = palette.fg,
+        animate = motion.spatial,
+    )
+
+    Box(
         modifier = modifier
             .widthIn(max = 520.dp)
             .fillMaxWidth()
             .height(64.dp)
             .clip(pillShape)
             .folioBrowsePressable { origin.open(onOpenPlayer) }
-            .folioMiniPlayerGlass(pillShape)
-            .padding(start = 8.dp, end = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .folioMiniPlayerGlass(pillShape),
     ) {
-        FolioArtwork(
-            track = track,
-            modifier = Modifier.size(48.dp).folioArtworkOrigin(origin),
-            shape = coverShape,
-        )
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .padding(horizontal = 4.dp),
-            verticalArrangement = Arrangement.Center,
+        Row(
+            modifier = Modifier.fillMaxSize().padding(start = 8.dp, end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            FolioMarqueeText(
-                text = track.title,
-                color = palette.fg,
-                fontFamily = fontFamily,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 16.sp,
-                resetKey = track.id,
+            FolioArtwork(
+                track = track,
+                modifier = Modifier.size(48.dp).folioArtworkOrigin(origin),
+                shape = coverShape,
             )
-            if (track.artist.isNotBlank()) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .padding(horizontal = 4.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
                 FolioMarqueeText(
-                    text = track.artist,
-                    color = palette.fg2,
+                    text = track.title,
+                    color = palette.fg,
                     fontFamily = fontFamily,
-                    fontWeight = FontWeight.Normal,
-                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp,
                     resetKey = track.id,
+                )
+                if (track.artist.isNotBlank()) {
+                    FolioMarqueeText(
+                        text = track.artist,
+                        color = palette.fg2,
+                        fontFamily = fontFamily,
+                        fontWeight = FontWeight.Normal,
+                        fontSize = 13.sp,
+                        resetKey = track.id,
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(accent.value)
+                    .folioBrowsePressable(onClick = onTogglePlayback),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    contentDescription = stringResource(if (isPlaying) R.string.player_pause else R.string.player_play),
+                    tint = if (accent.value.alpha > 0f) {
+                        controlAccentForeground(accent.value.compositeOver(surface))
+                    } else palette.fg,
+                    modifier = Modifier.size(22.dp),
                 )
             }
         }
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .folioBrowsePressable(onClick = onTogglePlayback),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                contentDescription = stringResource(if (isPlaying) R.string.player_pause else R.string.player_play),
-                tint = palette.fg,
-                modifier = Modifier.size(22.dp),
+        if (durationMs > 0L && playbackState.snapshot?.isLiveStream != true) {
+            FolioHairlineProgressBar(
+                positionState = position,
+                durationMs = durationMs,
+                fg = palette.fg,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 3.dp),
+                accent = accent,
             )
         }
     }

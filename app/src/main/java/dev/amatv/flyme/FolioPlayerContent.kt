@@ -54,6 +54,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -269,6 +270,7 @@ internal fun FolioQueuePanel(
     reducedMotion: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    val currentMarker = LocalFolioControlAccent.current?.value?.compositeOver(accent) ?: accent
     val fontFamily = LocalFolioFontFamily.current
     val currentRowIndex = remember(snapshot.rows) {
         snapshot.rows.indexOfFirst { it.isCurrent }.coerceAtLeast(0)
@@ -396,13 +398,13 @@ internal fun FolioQueuePanel(
                                 modifier = Modifier.size(tierSpec.qc),
                             )
                             if (row.isCurrent) {
-                                PlayerQueueEqualizer(color = accent, animate = isPlaying && !lowPerformance)
+                                PlayerQueueEqualizer(color = currentMarker, animate = isPlaying && !lowPerformance)
                             }
                         }
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
                                 text = sectionTagLabel(row.section),
-                                color = if (row.isCurrent) accent else fg2,
+                                color = if (row.isCurrent) currentMarker else fg2,
                                 fontFamily = fontFamily,
                                 fontSize = 11.sp,
                                 maxLines = 1,
@@ -554,7 +556,7 @@ internal fun FolioQueuePanel(
                             }
                         }
                         if (row.isCurrent) {
-                            PlayerQueueEqualizer(color = accent, animate = isPlaying && !lowPerformance)
+                            PlayerQueueEqualizer(color = currentMarker, animate = isPlaying && !lowPerformance)
                         }
                     }
                 }
@@ -596,6 +598,9 @@ private fun FolioQueueControlBar(
     val activeBg = fg
     val activeFg = if (isLight) Color.White else Color(0xFF17151C)
     val repeatActive = repeatMode != PlaybackRepeatMode.Off
+    val controlAccent = LocalFolioControlAccent.current?.value ?: Color.Transparent
+    val repeatAccent = if (repeatActive && availability.canSetRepeat) controlAccent else Color.Transparent
+    val shuffleAccent = if (shuffleEnabled && availability.canSetShuffle) controlAccent else Color.Transparent
     val toggleFadeMs = if (reducedMotion) 0 else FolioPlayerMotionTokens.TOGGLE_PILL_MS
     val repeatBg by animateColorAsState(
         targetValue = if (repeatActive && availability.canSetRepeat) activeBg else inactiveBg,
@@ -646,7 +651,7 @@ private fun FolioQueueControlBar(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(CircleShape)
-                    .background(repeatBg)
+                    .background(repeatBg.copy(alpha = repeatBg.alpha * (1f - repeatAccent.alpha)))
                     .folioPressable(
                         enabled = availability.canSetRepeat,
                         compact = true,
@@ -663,7 +668,7 @@ private fun FolioQueueControlBar(
                         Icons.Rounded.Repeat
                     },
                     contentDescription = repeatLabel,
-                    tint = repeatTint,
+                    tint = repeatAccent.compositeOver(repeatTint),
                     modifier = Modifier.size(20.dp),
                 )
             }
@@ -672,7 +677,7 @@ private fun FolioQueueControlBar(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(CircleShape)
-                    .background(shuffleBg)
+                    .background(shuffleBg.copy(alpha = shuffleBg.alpha * (1f - shuffleAccent.alpha)))
                     .folioPressable(
                         enabled = availability.canSetShuffle,
                         compact = true,
@@ -685,7 +690,7 @@ private fun FolioQueueControlBar(
                 Icon(
                     imageVector = Icons.Rounded.Shuffle,
                     contentDescription = stringResource(R.string.player_shuffle),
-                    tint = shuffleTint,
+                    tint = shuffleAccent.compositeOver(shuffleTint),
                     modifier = Modifier.size(20.dp),
                 )
             }

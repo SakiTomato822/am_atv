@@ -84,16 +84,30 @@ private class ArtworkCachePolicy(
 
 private val paletteCache = object : android.util.LruCache<String, List<Color>>(64) {}
 
+internal data class ArtworkPaletteResult(val colors: List<Color>, val extractedFrom: String? = null) {
+    fun extractedColors(url: String?): List<Color> =
+        if (extractedFrom != null && extractedFrom == url) colors else emptyList()
+}
+
 @Composable
-internal fun rememberArtworkPalette(url: String?, fallback: List<Color>): List<Color> {
+internal fun rememberArtworkPalette(url: String?, fallback: List<Color>): List<Color> =
+    rememberArtworkPaletteResult(url, fallback).colors
+
+@Composable
+internal fun rememberArtworkPaletteResult(url: String?, fallback: List<Color>): ArtworkPaletteResult {
     val context = LocalContext.current.applicationContext
     val default = remember(fallback) {
         ArtworkPalette.extract(fallback.map { it.toArgb() }.toIntArray()).map { Color(it) }
             .ifEmpty { List(5) { Color(0xFF233645) } }
     }
-    return produceState(initialValue = url?.let(paletteCache::get) ?: default, url, default) {
+    val cached = url?.let(paletteCache::get)
+    val initial = if (cached == null) ArtworkPaletteResult(default) else ArtworkPaletteResult(cached, url)
+    return produceState(initialValue = initial, url, default) {
         if (url == null || !url.startsWith("https://")) return@produceState
-        paletteCache.get(url)?.let { value = it; return@produceState }
+        paletteCache.get(url)?.let {
+            value = ArtworkPaletteResult(it, url)
+            return@produceState
+        }
         val request = ImageRequest.Builder(context).data(url)
             .size(48).allowHardware(false).memoryCacheKey("palette:$url").build()
         val image = ArtworkImages.loader(context).execute(request).image ?: return@produceState
@@ -103,6 +117,9 @@ internal fun rememberArtworkPalette(url: String?, fallback: List<Color>): List<C
             bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
             ArtworkPalette.extract(pixels).map { Color(it) }
         }
-        if (colors.isNotEmpty()) { paletteCache.put(url, colors); value = colors }
+        if (colors.isNotEmpty()) {
+            paletteCache.put(url, colors)
+            value = ArtworkPaletteResult(colors, url)
+        }
     }.value
 }
