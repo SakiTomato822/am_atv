@@ -409,7 +409,20 @@ fun computeWideCarCollapsedCoverSizeDp(
 fun computeWideCarControlsWidthDp(collapsedCoverWidthDp: Dp): Dp = collapsedCoverWidthDp + 64.dp
 
 const val WIDE_CAR_CONTROLS_START_OFFSET_DP: Float = 4f
+const val WIDE_CAR_COLLAPSED_BAR_START_DP: Float = 36f
 const val WIDE_QUEUE_CONTROLS_GAP_DP: Float = 24f
+
+/**
+ * Computes the outer width (including the 36.dp start offset) for Wide (`e`) collapsed
+ * [FolioCollapsedLayout.CircleButtonAndHairline] controls, aligning its right edge with the
+ * under-cover Flow collapsed bar (`36.dp + coverWidthDp`) while clamping to [leftColumnWidthDp]
+ * so the hairline progress bar never crosses into the right lyrics column.
+ */
+fun computeWideCollapsedHairlineBarWidthDp(
+    leftColumnWidthDp: Dp,
+    coverWidthDp: Dp,
+    startOffsetDp: Dp = WIDE_CAR_COLLAPSED_BAR_START_DP.dp,
+): Dp = (startOffsetDp + coverWidthDp).coerceAtMost(leftColumnWidthDp)
 
 /**
  * Start padding inside the Wide (`e`) body for the horizontal Queue panel so it sits clear of the

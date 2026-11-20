@@ -466,6 +466,7 @@ internal fun FolioPlayerAnimatedControlsSlot(
     modifier: Modifier = Modifier,
     contentAlignment: Alignment = Alignment.BottomStart,
     carControlsWidthDp: Dp = 464.dp,
+    collapsedBarWidthDp: Dp = Dp.Unspecified,
     onCarControlsHeightPxChanged: (Int) -> Unit = {},
 ) {
     val lowPerformance = LocalFolioLowPerformance.current
@@ -542,7 +543,13 @@ internal fun FolioPlayerAnimatedControlsSlot(
                     interactive = !controlsExpanded,
                     onExpand = onExpandCapsule,
                     onTogglePlay = onCollapsedPlayPause,
-                    modifier = animMod.fillMaxWidth(),
+                    modifier = animMod.then(
+                        if (tierSpec.tier == FolioTier.Wide && collapsedBarWidthDp != Dp.Unspecified) {
+                            Modifier.width(collapsedBarWidthDp)
+                        } else {
+                            Modifier.fillMaxWidth()
+                        },
+                    ),
                 )
 
                 FolioCollapsedLayout.UnderCoverInfo -> Unit
@@ -687,10 +694,9 @@ internal fun FolioCirclePlayHairlineBar(
     modifier: Modifier = Modifier,
 ) {
     val expandCd = stringResource(R.string.folio_player_controls_expand)
-    val startPad = if (buttonOnLeft) 36.dp else 20.dp
-    val endPad = if (buttonOnLeft) 28.dp else 0.dp
+    val startPad = if (buttonOnLeft) WIDE_CAR_COLLAPSED_BAR_START_DP.dp else 20.dp
     Row(
-        modifier = modifier.padding(start = startPad, end = endPad),
+        modifier = modifier.padding(start = startPad),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
