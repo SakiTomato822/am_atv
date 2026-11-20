@@ -1,9 +1,11 @@
 package dev.amatv.flyme
 
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.amatv.integration.CatalogSearchSuggestions
+import dev.amatv.integration.SEARCH_LOG_TAG
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
 import kotlinx.coroutines.CancellationException
@@ -37,20 +39,20 @@ internal class FolioSearchSession(private val scope: CoroutineScope) {
     fun edit(text: String, suggest: suspend (String) -> CatalogSearchSuggestions) {
         if (query == text) return
         dismissSuggestions()
+        searchJob?.cancel()
+        submission = null
         query = text
         val term = text.trim()
-        if (term.isEmpty()) {
-            searchJob?.cancel()
-            submission = null
-            return
-        }
+        if (term.isEmpty()) return
         suggestionJob = scope.launch {
             delay(250)
             val completed = try {
                 suggest(term)
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                Log.w(SEARCH_LOG_TAG, "suggestions failed termLength=${term.length} " +
+                    "${error.javaClass.simpleName}: ${error.message}")
                 return@launch
             }
             ensureActive()

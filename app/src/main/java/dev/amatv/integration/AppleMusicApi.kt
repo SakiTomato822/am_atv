@@ -23,6 +23,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -30,6 +31,8 @@ import java.net.URI
 import java.net.URLEncoder
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+
+internal const val SEARCH_LOG_TAG = "AMATV-Search"
 
 internal data class CatalogSearchTerm(val displayTerm: String, val searchTerm: String)
 
@@ -603,19 +606,26 @@ class AppleMusicApi(
     }
 
     internal suspend fun searchSuggestions(term: String): CatalogSearchSuggestions {
+        val termLength = term.length
+        Log.d(SEARCH_LOG_TAG, "suggestions request termLength=$termLength")
         val sf = effectiveStorefront()
         val encoded = URLEncoder.encode(term, Charsets.UTF_8.name())
         val root = requestRoot(
             path = "/v1/catalog/$sf/search/suggestions?term=$encoded" +
                 "&kinds=terms,topResults&types=songs,albums,artists&limit=8",
             needsUserToken = false,
-            cancellableGet = true,
+            suggestionTermLength = termLength,
         )
-        return withContext(parseDispatcher) { parseSearchSuggestions(root) }
+        val suggestions = withContext(parseDispatcher) { parseSearchSuggestions(root) }
+        Log.d(SEARCH_LOG_TAG, "suggestions parsed termLength=$termLength " +
+            "terms=${suggestions.terms.size} topResults=${suggestions.topResults.size}")
+        return suggestions
     }
 
     internal fun parseSearchSuggestions(root: JSONObject): CatalogSearchSuggestions {
-        val suggestions = root.optJSONObject("results")?.optJSONArray("suggestions") ?: JSONArray()
+        val suggestions = checkNotNull(root.optJSONObject("results")?.optJSONArray("suggestions")) {
+            "Apple Music response is missing the results.suggestions array"
+        }
         val terms = mutableListOf<CatalogSearchTerm>()
         val topResults = mutableListOf<Track>()
         for (index in 0 until suggestions.length()) {
@@ -789,7 +799,7 @@ class AppleMusicApi(
         needsUserToken: Boolean,
         method: String = "GET",
         postBody: String? = null,
-        cancellableGet: Boolean = false,
+        suggestionTermLength: Int? = null,
     ): JSONObject = withContext(Dispatchers.IO) {
         val musicUserToken = userToken()
         if (needsUserToken) {
@@ -807,11 +817,11 @@ class AppleMusicApi(
                 put("Accept", "application/json")
                 if (!musicUserToken.isNullOrBlank()) put("Music-User-Token", musicUserToken)
             }
-            if (cancellableGet) {
+            if (suggestionTermLength != null) {
                 val request = Request.Builder().url(url).apply {
                     headers.forEach { (name, value) -> header(name, value) }
                 }.build()
-                return suggestionHttpClient.newCall(request).awaitStatusAndBody()
+                return suggestionHttpClient.newCall(request).awaitStatusAndBody(suggestionTermLength)
             }
             val connection = URI(url).toURL().openConnection() as HttpURLConnection
             return try {
@@ -852,10 +862,16 @@ class AppleMusicApi(
             throw CatalogRequestException(catalogHttpFailure(status), message, status)
         }
         // PUT/DELETE (ratings) answer 204 with no body.
-        if (body.isBlank()) JSONObject() else JSONObject(body)
+        try {
+            if (body.isBlank()) JSONObject() else JSONObject(body)
+        } catch (error: JSONException) {
+            if (suggestionTermLength == null) throw error
+            // Android's JSON exception can include the response body and the search term.
+            throw JSONException("Apple Music suggestions response is not a valid JSON object")
+        }
     }
 
-    private suspend fun Call.awaitStatusAndBody(): Pair<Int, String> =
+    private suspend fun Call.awaitStatusAndBody(termLength: Int): Pair<Int, String> =
         suspendCancellableCoroutine { continuation ->
             continuation.invokeOnCancellation { cancel() }
             enqueue(object : Callback {
@@ -864,6 +880,7 @@ class AppleMusicApi(
                 }
 
                 override fun onResponse(call: Call, response: Response) {
+                    Log.d(SEARCH_LOG_TAG, "suggestions response termLength=$termLength httpStatus=${response.code}")
                     continuation.resumeWith(runCatching {
                         response.use { it.code to it.body?.string().orEmpty() }
                     })

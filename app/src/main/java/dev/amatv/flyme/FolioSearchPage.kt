@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalContext
@@ -77,6 +78,7 @@ internal fun FolioSearchPage(
     val query = session.query
     val submission = session.submission
     val suggestions = session.suggestions
+    var searchFieldFocused by remember { mutableStateOf(false) }
     DisposableEffect(session) {
         onDispose { session.dismissSuggestions() }
     }
@@ -170,14 +172,16 @@ internal fun FolioSearchPage(
                             keyboardActions = KeyboardActions(
                                 onSearch = { submit(query) },
                             ),
-                            modifier = Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
-                                val key = event.nativeKeyEvent
-                                if (key.keyCode != KeyEvent.KEYCODE_ENTER &&
-                                    key.keyCode != KeyEvent.KEYCODE_NUMPAD_ENTER
-                                ) return@onPreviewKeyEvent false
-                                if (key.action == KeyEvent.ACTION_UP) submit(query)
-                                true
-                            },
+                            modifier = Modifier.fillMaxWidth()
+                                .onFocusChanged { searchFieldFocused = it.isFocused }
+                                .onPreviewKeyEvent { event ->
+                                    val key = event.nativeKeyEvent
+                                    if (key.keyCode != KeyEvent.KEYCODE_ENTER &&
+                                        key.keyCode != KeyEvent.KEYCODE_NUMPAD_ENTER
+                                    ) return@onPreviewKeyEvent false
+                                    if (key.action == KeyEvent.ACTION_UP) submit(query)
+                                    true
+                                },
                         )
                     }
                     if (query.isNotEmpty()) {
@@ -193,7 +197,9 @@ internal fun FolioSearchPage(
                 }
             }
 
-            if (suggestions != null && (suggestions.terms.isNotEmpty() || suggestions.topResults.isNotEmpty())) {
+            if (searchFieldFocused && submission == null && suggestions != null &&
+                (suggestions.terms.isNotEmpty() || suggestions.topResults.isNotEmpty())
+            ) {
                 item(key = "search-suggestions", contentType = "search-suggestions") {
                     FolioSearchSuggestionsPanel(
                         suggestions = suggestions,

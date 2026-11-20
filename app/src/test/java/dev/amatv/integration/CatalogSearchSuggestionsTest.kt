@@ -4,9 +4,23 @@ import dev.amatv.model.CatalogOpenAction
 import dev.amatv.model.openAction
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class CatalogSearchSuggestionsTest {
+    @Test
+    fun missingSuggestionsArrayIsAnErrorButAnEmptyArrayIsValid() {
+        val api = AppleMusicApi("tw", DeveloperTokenClient("")) { null }
+
+        assertThrows(IllegalStateException::class.java) {
+            api.parseSearchSuggestions(JSONObject("""{"results":{}}"""))
+        }
+        assertEquals(
+            CatalogSearchSuggestions(emptyList(), emptyList()),
+            api.parseSearchSuggestions(JSONObject("""{"results":{"suggestions":[]}}""")),
+        )
+    }
+
     @Test
     fun parsesDisplayAndSearchTermsAndKeepsThreePlayableOrOpenableResults() {
         val api = AppleMusicApi("tw", DeveloperTokenClient("")) { null }
