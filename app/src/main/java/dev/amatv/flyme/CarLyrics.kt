@@ -112,13 +112,15 @@ internal fun CarLyricRows(
 ) {
     val timed = remember(lines) { lines.any { !it.isStatic } }
     val clipped = Modifier.fillMaxSize().clipToBounds()
-    val panel = if (lowPerformance) clipped else clipped
-        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-        .drawWithContent {
-            drawContent()
-            drawRect(Brush.verticalGradient(0f to Color.Transparent, 0.12f to Color.Black,
-                0.82f to Color.Black, 1f to Color.Transparent), blendMode = BlendMode.DstIn)
-        }
+    val edgeFade = if (lowPerformance) Modifier else {
+        Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                drawRect(Brush.verticalGradient(0f to Color.Transparent, 0.12f to Color.Black,
+                    0.82f to Color.Black, 1f to Color.Transparent), blendMode = BlendMode.DstIn)
+            }
+    }
+    val panel = clipped.then(edgeFade)
     if (!timed) {
         LazyColumn(panel, contentPadding = PaddingValues(top = 35.dp, bottom = 48.dp),
             verticalArrangement = Arrangement.spacedBy(LyricGap)) {
