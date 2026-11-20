@@ -317,6 +317,7 @@ object LyricTimeline {
     const val KARAOKE_WORD_OFFSET_MS = 0L
     /** A completed line may hand off just before the next onset. */
     const val LINE_LOOKAHEAD_MS = 180L
+    private const val INTRO_MIN_GAP_MS = 3_000L
     const val INSTRUMENTAL_MIN_GAP_MS = 7_000L
     const val INSTRUMENTAL_DURATION_TRIM_MS = 800L
     const val INSTRUMENTAL_DOT_FINAL_SEGMENT_MS = 750L
@@ -476,20 +477,21 @@ object LyricTimeline {
         }
 
         val instrumentalGaps: List<InstrumentalGap> = buildList {
-            var previousEndMs = 0L
+            var previousEndMs: Long? = null
             for (index in lines.indices) {
                 if (!timed[index]) continue
-                val rawGap = starts[index] - previousEndMs
-                if (rawGap >= INSTRUMENTAL_MIN_GAP_MS) {
+                val gapStartMs = previousEndMs ?: 0L
+                val rawGap = starts[index] - gapStartMs
+                if (rawGap >= instrumentalMinGapMs(previousEndMs)) {
                     add(InstrumentalGap(
                         beforeLineIndex = index,
-                        startMs = previousEndMs,
+                        startMs = gapStartMs,
                         endMs = starts[index],
                         rawGapDurationMs = rawGap,
                         adjustedDurationMs = (rawGap - INSTRUMENTAL_DURATION_TRIM_MS).coerceAtLeast(1L),
                     ))
                 }
-                previousEndMs = maxOf(previousEndMs, ends[index])
+                previousEndMs = maxOf(gapStartMs, ends[index])
             }
         }
 
@@ -667,33 +669,37 @@ object LyricTimeline {
     }
 
     /**
-     * Detects if an instrumental interlude (`gap >= 7000ms` with no active lines) is
+     * Detects if an instrumental intro or interlude with no active lines is
      * currently active at [positionMs], mirroring `A.l` (`lines 638-900`) and `U0.a`.
      */
     fun activeInstrumentalGapAt(lines: List<LyricLine>, positionMs: Long): InstrumentalGap? {
         if (lines.isEmpty() || lines.all { it.isStatic }) return null
-        var prevEndMs = 0L
+        var prevEndMs: Long? = null
         for (index in lines.indices) {
             val line = lines[index]
             if (line.isStatic) continue
-            val rawGap = line.startMs - prevEndMs
-            if (rawGap >= INSTRUMENTAL_MIN_GAP_MS) {
+            val gapStartMs = prevEndMs ?: 0L
+            val rawGap = line.startMs - gapStartMs
+            if (rawGap >= instrumentalMinGapMs(prevEndMs)) {
                 val leadMs = -INSTRUMENTAL_LINE_OFFSET_MS // 1300ms before next line
                 val gapActiveEnd = line.startMs - leadMs + 1_000L // includes 750ms + 250ms exit
-                if (positionMs in prevEndMs until gapActiveEnd) {
+                if (positionMs in gapStartMs until gapActiveEnd) {
                     return InstrumentalGap(
                         beforeLineIndex = index,
-                        startMs = prevEndMs,
+                        startMs = gapStartMs,
                         endMs = line.startMs,
                         rawGapDurationMs = rawGap,
                         adjustedDurationMs = (rawGap - INSTRUMENTAL_DURATION_TRIM_MS).coerceAtLeast(1L),
                     )
                 }
             }
-            prevEndMs = maxOf(prevEndMs, line.endMs)
+            prevEndMs = maxOf(gapStartMs, line.endMs)
         }
         return null
     }
+
+    private fun instrumentalMinGapMs(previousEndMs: Long?): Long =
+        if (previousEndMs == null) INTRO_MIN_GAP_MS else INSTRUMENTAL_MIN_GAP_MS
 
     fun wordProgress(
         word: LyricWord,

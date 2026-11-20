@@ -2,6 +2,7 @@ package dev.amatv.flyme
 
 import dev.amatv.model.LyricAgentType
 import dev.amatv.model.LyricLine
+import dev.amatv.model.LyricTimeline
 import dev.amatv.model.LyricTiming
 import dev.amatv.model.LyricWord
 import org.junit.Assert.assertEquals
@@ -208,6 +209,35 @@ class PosterLyricsTimelineTest {
         clock.sample(2_600)
         assertEquals(0, timeline.at(clock.sample(500)).focusLeadIndex)
         assertEquals(2L, clock.seekGeneration)
+    }
+
+    @Test
+    fun fiveSecondIntroShowsDotsInBothLyricModes() {
+        assertIntroGap(firstStartMs = 5_000, expectedGapIndex = 0)
+        assertIntroGap(firstStartMs = 3_000, expectedGapIndex = 0)
+    }
+
+    @Test
+    fun twoSecondIntroDoesNotShowDotsInEitherLyricMode() {
+        assertIntroGap(firstStartMs = 2_000, expectedGapIndex = null)
+    }
+
+    @Test
+    fun fiveSecondInterludeDoesNotShowDotsInEitherLyricMode() {
+        val lines = listOf(line("First", 1_000, 2_000), line("Second", 7_000, 8_000))
+        assertNull(PosterLyricsTimeline(lines).at(3_000).gap)
+        assertNull(scrollingLyricFocusAt(lines, LyricTimeline.Schedule(lines), 3_000).waiting)
+        assertNull(LyricTimeline.activeInstrumentalGapAt(lines, 3_000))
+    }
+
+    private fun assertIntroGap(firstStartMs: Long, expectedGapIndex: Int?) {
+        val lines = listOf(line("First", firstStartMs, firstStartMs + 1_000))
+        assertEquals(expectedGapIndex, PosterLyricsTimeline(lines).at(1_000).gap?.beforeLineIndex)
+        assertEquals(
+            expectedGapIndex,
+            scrollingLyricFocusAt(lines, LyricTimeline.Schedule(lines), 1_000).waiting?.beforeLineIndex,
+        )
+        assertEquals(expectedGapIndex, LyricTimeline.activeInstrumentalGapAt(lines, 1_000)?.beforeLineIndex)
     }
 
     @Test
