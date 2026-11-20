@@ -13,24 +13,16 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import okhttp3.Call
-import okhttp3.Callback
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
-import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URLEncoder
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 
 internal const val SEARCH_LOG_TAG = "AMATV-Search"
 
@@ -40,13 +32,6 @@ internal data class CatalogSearchSuggestions(
     val terms: List<CatalogSearchTerm>,
     val topResults: List<Track>,
 )
-
-private val suggestionHttpClient by lazy {
-    OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .build()
-}
 
 class DeveloperTokenClient(
     private val endpoint: String,
@@ -817,12 +802,6 @@ class AppleMusicApi(
                 put("Accept", "application/json")
                 if (!musicUserToken.isNullOrBlank()) put("Music-User-Token", musicUserToken)
             }
-            if (suggestionTermLength != null) {
-                val request = Request.Builder().url(url).apply {
-                    headers.forEach { (name, value) -> header(name, value) }
-                }.build()
-                return suggestionHttpClient.newCall(request).awaitStatusAndBody(suggestionTermLength)
-            }
             val connection = URI(url).toURL().openConnection() as HttpURLConnection
             return try {
                 connection.requestMethod = method
@@ -835,6 +814,9 @@ class AppleMusicApi(
                     connection.outputStream.bufferedWriter(Charsets.UTF_8).use { it.write(postBody) }
                 }
                 val status = connection.responseCode
+                if (suggestionTermLength != null) {
+                    Log.d(SEARCH_LOG_TAG, "suggestions response termLength=$suggestionTermLength httpStatus=$status")
+                }
                 val body = (if (status in 200..299) {
                     connection.inputStream
                 } else {
@@ -848,6 +830,7 @@ class AppleMusicApi(
 
         var (status, body) = execute(forceTokenRefresh = false)
         if (status == HttpURLConnection.HTTP_UNAUTHORIZED) {
+            currentCoroutineContext().ensureActive()
             val retried = execute(forceTokenRefresh = true)
             status = retried.first
             body = retried.second
@@ -870,23 +853,6 @@ class AppleMusicApi(
             throw JSONException("Apple Music suggestions response is not a valid JSON object")
         }
     }
-
-    private suspend fun Call.awaitStatusAndBody(termLength: Int): Pair<Int, String> =
-        suspendCancellableCoroutine { continuation ->
-            continuation.invokeOnCancellation { cancel() }
-            enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    continuation.resumeWith(Result.failure(e))
-                }
-
-                override fun onResponse(call: Call, response: Response) {
-                    Log.d(SEARCH_LOG_TAG, "suggestions response termLength=$termLength httpStatus=${response.code}")
-                    continuation.resumeWith(runCatching {
-                        response.use { it.code to it.body?.string().orEmpty() }
-                    })
-                }
-            })
-        }
 
     private fun parseAllTracks(root: JSONObject, songsOnly: Boolean = false): List<Track> {
         val output = LinkedHashMap<String, Track>()
