@@ -177,7 +177,6 @@ internal fun Track.toSessionJson() = JSONObject()
     .put("artworkUrl", artworkUrl)
     .put("motionArtworkUrl", motionArtworkUrl)
     .put("motionPreviewUrl", motionPreviewUrl)
-    .put("hasLyricsAvailable", hasLyricsAvailable)
     .put("explicit", isExplicit)
 
 internal fun JSONObject.toSessionTrack(): Track {
@@ -199,7 +198,6 @@ internal fun JSONObject.toSessionTrack(): Track {
         artworkUrl = optionalString("artworkUrl"),
         motionArtworkUrl = optionalString("motionArtworkUrl"),
         motionPreviewUrl = optionalString("motionPreviewUrl"),
-        hasLyricsAvailable = optBoolean("hasLyricsAvailable"),
         // Queue indices belong to one MusicKit process and cannot survive a cold start.
         playbackQueueId = null,
         isExplicit = optBoolean("explicit"),

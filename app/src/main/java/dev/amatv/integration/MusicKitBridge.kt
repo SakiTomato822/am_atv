@@ -980,9 +980,6 @@ class MusicKitBridge(private val context: Context) {
             resourceId = fallback?.resourceId,
             resourceType = fallback?.resourceType,
             artworkUrl = artwork?.takeIf { it.startsWith("https://") } ?: fallback?.artworkUrl,
-            hasLyricsAvailable = item.callOrNull("hasLyricsAvailable") as? Boolean
-                ?: fallback?.hasLyricsAvailable
-                ?: false,
             playbackQueueId = queueItem.callOrNull("getPlaybackQueueId") as? Long,
         )
     }
@@ -1009,8 +1006,7 @@ class MusicKitBridge(private val context: Context) {
      * MusicKit's hosted Javadoc documents timed-text selection, but the
      * currently downloadable 1.1.1 playback AAR omits those public methods.
      * The bundled player still keeps a track-info set internally. Reading its
-     * metadata lets us distinguish a real text track from a catalog-only
-     * `hasLyricsAvailable` flag without requesting any private service API.
+     * metadata lets us inspect actual timed-text tracks without requesting any private service API.
      */
     private fun logAvailableTimedTextTracks(currentController: Any) {
         runCatching {

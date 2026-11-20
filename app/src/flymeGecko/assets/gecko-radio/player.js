@@ -104,7 +104,6 @@ function radioItem(item) {
     durationMs: Number(item.playbackDuration || a.durationInMillis || 0) ||
       Math.round((Number(radioMusic.currentPlaybackDuration) || 0) * 1000),
     live: !!(item.isLiveRadioStation || a.isLive),
-    hasLyrics: !!a.hasLyrics,
     artworkUrl,
   };
 }

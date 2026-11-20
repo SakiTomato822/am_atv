@@ -107,6 +107,7 @@ fun FolioListRowCard(
     item: Track,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    titleMaxLines: Int = 1,
 ) {
     val palette = LocalFolioPalette.current
     val tierSpec = LocalFolioTierSpec.current
@@ -144,7 +145,7 @@ fun FolioListRowCard(
                 fontWeight = FontWeight.Medium,
                 fontSize = tierSpec.lif,
                 lineHeight = tierSpec.lif * 1.15f,
-                maxLines = 1,
+                maxLines = titleMaxLines,
                 overflow = TextOverflow.Ellipsis,
             )
             if (subtitle.isNotBlank()) {
@@ -291,23 +292,6 @@ fun FolioSongRow(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
-                if (track.hasLyricsAvailable || track.lyrics.isNotEmpty()) {
-                    Spacer(Modifier.width(6.dp))
-                    Box(
-                        modifier = Modifier
-                            .border(1.dp, palette.fg3, RoundedCornerShape(FolioRadii.Tag))
-                            .padding(horizontal = 5.dp, vertical = 1.dp),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.folio_tag_lyrics),
-                            color = palette.fg2,
-                            fontFamily = fontFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 10.5.sp,
-                            letterSpacing = 0.3.sp,
-                        )
-                    }
-                }
                 if (track.isExplicit) {
                     Spacer(Modifier.width(6.dp))
                     Box(

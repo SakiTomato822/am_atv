@@ -37,13 +37,12 @@ class WebStationSnapshotTest {
     @Test fun songInsidePersonalStationKeepsItsCatalogIdForLyrics() {
         val result = snapshot("""{"state":"playing","playing":true,"positionMs":3000,
             "item":{"type":"song","id":"1440","catalogId":"1440","title":"彝人","artist":"A","album":"B",
-            "durationMs":240000,"hasLyrics":true,"artworkUrl":"https://example.invalid/600x600.jpg"}}""")
+            "durationMs":240000,"artworkUrl":"https://example.invalid/600x600.jpg"}}""")
         val track = checkNotNull(result.currentTrack)
         assertEquals(CatalogKind.Song, track.catalogKind)
         assertEquals("1440", track.catalogId)
         assertEquals("apple:1440", track.id)
         assertEquals(240_000L, track.durationMs)
-        assertTrue(track.hasLyricsAvailable)
         assertEquals(3_000L, result.positionMs)
         assertTrue(result.canSkipNext)
         assertFalse(result.canSkipPrevious)

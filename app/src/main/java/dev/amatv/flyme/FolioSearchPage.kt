@@ -1,11 +1,13 @@
 package dev.amatv.flyme
 
+import android.view.KeyEvent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -30,6 +32,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -45,10 +49,13 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.amatv.R
+import dev.amatv.integration.CatalogSearchSuggestions
+import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
 import dev.amatv.model.matchesPlaybackQueueEntry
 import org.json.JSONArray
@@ -60,6 +67,7 @@ internal fun FolioSearchPage(
     isPlaying: Boolean,
     bottomPadding: Dp,
     search: suspend (String) -> List<Track>,
+    suggest: suspend (String) -> CatalogSearchSuggestions,
     onOpenItem: (Track, List<Track>) -> Unit,
 ) {
     val palette = LocalFolioPalette.current
@@ -68,6 +76,10 @@ internal fun FolioSearchPage(
     val session = folioSearchSession
     val query = session.query
     val submission = session.submission
+    val suggestions = session.suggestions
+    DisposableEffect(session) {
+        onDispose { session.dismissSuggestions() }
+    }
     val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
     val preferences = remember(context) {
@@ -95,7 +107,6 @@ internal fun FolioSearchPage(
         val cardRows = remember(sections, listCols) {
             sections?.let {
                 mapOf(
-                    R.string.browse_search_top to it.best.chunked(listCols),
                     R.string.browse_search_albums to it.albums.chunked(listCols),
                     R.string.browse_search_artists to it.artists.chunked(listCols),
                     R.string.browse_search_playlists to it.playlists.chunked(listCols),
@@ -146,7 +157,7 @@ internal fun FolioSearchPage(
                         }
                         BasicTextField(
                             value = query,
-                            onValueChange = session::edit,
+                            onValueChange = { session.edit(it, suggest) },
                             singleLine = true,
                             textStyle = TextStyle(
                                 color = palette.fg,
@@ -159,7 +170,14 @@ internal fun FolioSearchPage(
                             keyboardActions = KeyboardActions(
                                 onSearch = { submit(query) },
                             ),
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
+                                val key = event.nativeKeyEvent
+                                if (key.keyCode != KeyEvent.KEYCODE_ENTER &&
+                                    key.keyCode != KeyEvent.KEYCODE_NUMPAD_ENTER
+                                ) return@onPreviewKeyEvent false
+                                if (key.action == KeyEvent.ACTION_UP) submit(query)
+                                true
+                            },
                         )
                     }
                     if (query.isNotEmpty()) {
@@ -169,15 +187,31 @@ internal fun FolioSearchPage(
                             tint = palette.fg2,
                             modifier = Modifier
                                 .size(20.dp)
-                                .clickable { session.edit("") },
+                                .clickable { session.edit("", suggest) },
                         )
                     }
                 }
             }
 
+            if (suggestions != null && (suggestions.terms.isNotEmpty() || suggestions.topResults.isNotEmpty())) {
+                item(key = "search-suggestions", contentType = "search-suggestions") {
+                    FolioSearchSuggestionsPanel(
+                        suggestions = suggestions,
+                        currentTrack = currentTrack,
+                        isPlaying = isPlaying,
+                        onSubmit = ::submit,
+                        onOpen = { item ->
+                            session.dismissSuggestions()
+                            keyboard?.hide()
+                            onOpenItem(item, listOf(item))
+                        },
+                    )
+                }
+            }
+
             when {
                 submission == null -> {
-                    if (history.isNotEmpty()) {
+                    if (query.isBlank() && history.isNotEmpty()) {
                         item(key = "search-history", contentType = "search-history") {
                             FolioSectionTitle(stringResource(R.string.browse_search_history))
                             FlowRow(
@@ -216,10 +250,11 @@ internal fun FolioSearchPage(
                     }
                 }
                 else -> {
-                    searchCards(
-                        R.string.browse_search_top, sections.best, cardRows.getValue(R.string.browse_search_top),
-                        listCols, tierSpec.lstGap, onOpenItem,
-                    )
+                    item(key = "search-best", contentType = "search-best") {
+                        FolioSectionTitle(stringResource(R.string.browse_search_top))
+                        val best = sections.best.single()
+                        FolioListRowCard(best, onClick = { onOpenItem(best, sections.best) }, titleMaxLines = 2)
+                    }
                     if (sections.songs.isNotEmpty()) {
                         item(key = "search-songs-title", contentType = "section-title") {
                             FolioSectionTitle(stringResource(R.string.browse_search_songs))
@@ -253,6 +288,60 @@ internal fun FolioSearchPage(
                         listCols, tierSpec.lstGap, onOpenItem,
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FolioSearchSuggestionsPanel(
+    suggestions: CatalogSearchSuggestions,
+    currentTrack: Track,
+    isPlaying: Boolean,
+    onSubmit: (String) -> Unit,
+    onOpen: (Track) -> Unit,
+) {
+    val palette = LocalFolioPalette.current
+    val fontFamily = LocalFolioFontFamily.current
+    Column(
+        Modifier.fillMaxWidth()
+            .padding(bottom = 12.dp)
+            .folioPlayerGlass(isLight = palette.isLight, shape = RoundedCornerShape(20.dp))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    ) {
+        suggestions.terms.forEach { term ->
+            Row(
+                modifier = Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(FolioRadii.Row))
+                    .folioBrowsePressable { onSubmit(term.searchTerm) }
+                    .padding(horizontal = 8.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(Icons.Rounded.Search, contentDescription = null, tint = palette.fg2, modifier = Modifier.size(20.dp))
+                Text(
+                    text = term.displayTerm,
+                    color = palette.fg,
+                    fontFamily = fontFamily,
+                    fontSize = 15.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        suggestions.topResults.forEachIndexed { index, track ->
+            if (track.catalogKind == CatalogKind.Song) {
+                FolioSongRow(
+                    track = track,
+                    index = index,
+                    showCover = true,
+                    showArtist = true,
+                    isCurrent = track.matchesPlaybackQueueEntry(currentTrack),
+                    isPlaying = isPlaying,
+                    onClick = { onOpen(track) },
+                )
+            } else {
+                FolioListRowCard(track, onClick = { onOpen(track) }, modifier = Modifier.padding(horizontal = 8.dp))
             }
         }
     }

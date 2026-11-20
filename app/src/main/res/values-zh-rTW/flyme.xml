@@ -10,7 +10,6 @@
     <string name="flyme_text_large">大</string>
     <string name="flyme_text_extra_large">特大</string>
     <string name="folio_tab_settings">設定</string>
-    <string name="folio_tag_lyrics">歌詞</string>
     <string name="folio_artist_detail_pending">藝人詳情頁將在後續階段提供。</string>
     <string name="folio_collection_empty">沒有可播放的歌曲。</string>
 </resources>

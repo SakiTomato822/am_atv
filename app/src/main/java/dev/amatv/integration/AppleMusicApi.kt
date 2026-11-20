@@ -13,15 +13,37 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URLEncoder
 import java.util.Locale
+import java.util.concurrent.TimeUnit
+
+internal data class CatalogSearchTerm(val displayTerm: String, val searchTerm: String)
+
+internal data class CatalogSearchSuggestions(
+    val terms: List<CatalogSearchTerm>,
+    val topResults: List<Track>,
+)
+
+private val suggestionHttpClient by lazy {
+    OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .build()
+}
 
 class DeveloperTokenClient(
     private val endpoint: String,
@@ -580,6 +602,48 @@ class AppleMusicApi(
         )
     }
 
+    internal suspend fun searchSuggestions(term: String): CatalogSearchSuggestions {
+        val sf = effectiveStorefront()
+        val encoded = URLEncoder.encode(term, Charsets.UTF_8.name())
+        val root = requestRoot(
+            path = "/v1/catalog/$sf/search/suggestions?term=$encoded" +
+                "&kinds=terms,topResults&types=songs,albums,artists&limit=8",
+            needsUserToken = false,
+            cancellableGet = true,
+        )
+        return withContext(parseDispatcher) { parseSearchSuggestions(root) }
+    }
+
+    internal fun parseSearchSuggestions(root: JSONObject): CatalogSearchSuggestions {
+        val suggestions = root.optJSONObject("results")?.optJSONArray("suggestions") ?: JSONArray()
+        val terms = mutableListOf<CatalogSearchTerm>()
+        val topResults = mutableListOf<Track>()
+        for (index in 0 until suggestions.length()) {
+            val suggestion = suggestions.optJSONObject(index) ?: continue
+            when (suggestion.optString("kind")) {
+                "terms" -> if (terms.size < 5) {
+                    val searchTerm = suggestion.optString("searchTerm").takeIf(String::isNotBlank) ?: continue
+                    val displayTerm = suggestion.optString("displayTerm").ifBlank { searchTerm }
+                    terms.add(CatalogSearchTerm(displayTerm, searchTerm))
+                }
+                "topResults" -> if (topResults.size < 3) {
+                    val content = suggestion.optJSONObject("content") ?: continue
+                    val type = content.optString("type")
+                    val kind = when (type) {
+                        "songs" -> CatalogKind.Song
+                        "albums" -> CatalogKind.Album
+                        "artists" -> CatalogKind.Artist
+                        else -> continue
+                    }
+                    val id = content.optString("id").takeIf(String::isNotBlank) ?: continue
+                    val attributes = content.optJSONObject("attributes") ?: continue
+                    attributes.toTrack(id, kind, resourceType = type)?.let(topResults::add)
+                }
+            }
+        }
+        return CatalogSearchSuggestions(terms, topResults)
+    }
+
     /** Top results first, then each type in Apple Music's order; an item appears once. */
     internal fun parseGroupedSearch(root: JSONObject): List<Track> {
         val results = root.optJSONObject("results") ?: return emptyList()
@@ -725,6 +789,7 @@ class AppleMusicApi(
         needsUserToken: Boolean,
         method: String = "GET",
         postBody: String? = null,
+        cancellableGet: Boolean = false,
     ): JSONObject = withContext(Dispatchers.IO) {
         val musicUserToken = userToken()
         if (needsUserToken) {
@@ -736,17 +801,24 @@ class AppleMusicApi(
 
         suspend fun execute(forceTokenRefresh: Boolean): Pair<Int, String> {
             val developerToken = developerTokens.token(forceRefresh = forceTokenRefresh)
-            val connection = URI("https://api.music.apple.com$path").toURL()
-                .openConnection() as HttpURLConnection
+            val url = "https://api.music.apple.com$path"
+            val headers = buildMap {
+                put("Authorization", "Bearer $developerToken")
+                put("Accept", "application/json")
+                if (!musicUserToken.isNullOrBlank()) put("Music-User-Token", musicUserToken)
+            }
+            if (cancellableGet) {
+                val request = Request.Builder().url(url).apply {
+                    headers.forEach { (name, value) -> header(name, value) }
+                }.build()
+                return suggestionHttpClient.newCall(request).awaitStatusAndBody()
+            }
+            val connection = URI(url).toURL().openConnection() as HttpURLConnection
             return try {
                 connection.requestMethod = method
                 connection.connectTimeout = 10_000
                 connection.readTimeout = 15_000
-                connection.setRequestProperty("Authorization", "Bearer $developerToken")
-                connection.setRequestProperty("Accept", "application/json")
-                if (!musicUserToken.isNullOrBlank()) {
-                    connection.setRequestProperty("Music-User-Token", musicUserToken)
-                }
+                headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
                 if (postBody != null) {
                     connection.doOutput = true
                     connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
@@ -782,6 +854,22 @@ class AppleMusicApi(
         // PUT/DELETE (ratings) answer 204 with no body.
         if (body.isBlank()) JSONObject() else JSONObject(body)
     }
+
+    private suspend fun Call.awaitStatusAndBody(): Pair<Int, String> =
+        suspendCancellableCoroutine { continuation ->
+            continuation.invokeOnCancellation { cancel() }
+            enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    continuation.resumeWith(Result.failure(e))
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    continuation.resumeWith(runCatching {
+                        response.use { it.code to it.body?.string().orEmpty() }
+                    })
+                }
+            })
+        }
 
     private fun parseAllTracks(root: JSONObject, songsOnly: Boolean = false): List<Track> {
         val output = LinkedHashMap<String, Track>()
@@ -918,8 +1006,6 @@ class AppleMusicApi(
         val resourceIdentity = "${resourceType.orEmpty()}:$id"
         val stableIdentity = resolvedCatalogId ?: "library:$resourceIdentity"
         val palettes = paletteFor(stableIdentity)
-        val hasLyrics = optBoolean("hasLyrics", false) ||
-            (catalogAttrs?.optBoolean("hasLyrics", false) == true)
         return Track(
             id = "apple:$stableIdentity",
             title = name,
@@ -936,7 +1022,6 @@ class AppleMusicApi(
             artworkUrl = artwork,
             motionArtworkUrl = motion?.videoUrl,
             motionPreviewUrl = motion?.previewUrl,
-            hasLyricsAvailable = hasLyrics,
             resourceId = id,
             resourceType = resourceType,
             dateAddedMs = optString("dateAdded").takeIf { it.isNotBlank() }

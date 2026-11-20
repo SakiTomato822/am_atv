@@ -39,7 +39,6 @@ data class Track(
     val motionArtworkUrl: String? = null,
     val motionPreviewUrl: String? = null,
     /** Apple reports lyrics exist, even when the public Android SDK cannot return their TTML. */
-    val hasLyricsAvailable: Boolean = lyrics.isNotEmpty(),
     /** Stable controller identity used to jump within the existing queue without rebuilding it. */
     val playbackQueueId: Long? = null,
     /** Original API identity; library containers can also have a separate catalog ID. */

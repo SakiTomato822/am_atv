@@ -114,7 +114,6 @@ private fun webStationItemTrack(item: JSONObject, station: Track, live: Boolean)
         catalogId = catalogId,
         catalogKind = if (song) CatalogKind.Song else CatalogKind.Station,
         artworkUrl = artwork ?: station.artworkUrl.takeUnless { song },
-        hasLyricsAvailable = song && item.optBoolean("hasLyrics"),
     )
 }
 

@@ -546,6 +546,7 @@ fun FolioApp(
                                                 isPlaying = playbackState.playWhenReady,
                                                 bottomPadding = contentBottomPadding,
                                                 search = services::search,
+                                                suggest = services::searchSuggestions,
                                                 onOpenItem = ::openItem,
                                             )
                                         }

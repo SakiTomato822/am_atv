@@ -189,6 +189,8 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
         api.charts(types)
     override suspend fun liveRadio(): List<Track> = api.liveRadio()
     override suspend fun search(term: String): List<Track> = api.search(term)
+
+    internal suspend fun searchSuggestions(term: String): CatalogSearchSuggestions = api.searchSuggestions(term)
     override suspend fun createAmStation(songId: String): Pair<String?, List<Track>> =
         api.createContinuousStation(songId)
     override suspend fun amStationNextTracks(stationId: String): List<Track> =

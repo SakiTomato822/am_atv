@@ -3,12 +3,14 @@ package dev.amatv.flyme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import dev.amatv.integration.CatalogSearchSuggestions
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
@@ -25,17 +27,42 @@ internal class FolioSearchSession(private val scope: CoroutineScope) {
         private set
     var submission by mutableStateOf<FolioSearchSubmission?>(null)
         private set
+    var suggestions by mutableStateOf<CatalogSearchSuggestions?>(null)
+        private set
     private var searchJob: Job? = null
+    private var suggestionJob: Job? = null
 
-    fun edit(text: String) {
+    fun edit(text: String, suggest: suspend (String) -> CatalogSearchSuggestions) {
+        if (query == text) return
+        dismissSuggestions()
         query = text
-        if (text.isBlank()) {
+        val term = text.trim()
+        if (term.isEmpty()) {
             searchJob?.cancel()
             submission = null
+            return
+        }
+        suggestionJob = scope.launch {
+            delay(250)
+            val completed = try {
+                suggest(term)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                return@launch
+            }
+            ensureActive()
+            suggestions = completed
         }
     }
 
+    fun dismissSuggestions() {
+        suggestionJob?.cancel()
+        suggestions = null
+    }
+
     fun submit(term: String, search: suspend (String) -> List<Track>) {
+        dismissSuggestions()
         searchJob?.cancel()
         query = term
         submission = FolioSearchSubmission(term)
