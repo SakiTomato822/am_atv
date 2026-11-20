@@ -1,5 +1,6 @@
 package dev.amatv.flyme
 
+import android.os.Build
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
@@ -10,6 +11,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -53,6 +55,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
@@ -71,9 +74,22 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun CarLyricFlow(track: Track, palette: List<Color>) {
     Box(Modifier.fillMaxSize().clip(RoundedCornerShape(0.dp)).background(palette.first())) {
-        if (track.artworkUrl != null) MotionArtwork(track,
-            Modifier.fillMaxSize().blur(80.dp, BlurredEdgeTreatment.Unbounded).graphicsLayer { alpha = 0.48f },
-            animate = false, cornerRadius = 0.dp)
+        if (flowUsesLiveBlur(Build.VERSION.SDK_INT)) {
+            if (track.artworkUrl != null) MotionArtwork(track,
+                Modifier.fillMaxSize().blur(80.dp, BlurredEdgeTreatment.Unbounded).graphicsLayer { alpha = 0.48f },
+                animate = false, cornerRadius = 0.dp)
+        } else {
+            val blurredCover = rememberFolioBlurredCoverBitmap(artworkUrl = track.artworkUrl, active = true)
+            if (blurredCover != null) {
+                Image(
+                    bitmap = blurredCover,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                    alpha = 0.48f,
+                )
+            }
+        }
         val transition = rememberInfiniteTransition(label = "car-lyric-flow")
         val angles = listOf(
             transition.animateFloat(0f, 1f, infiniteRepeatable(tween(34_000, easing = LinearEasing), RepeatMode.Restart)),
@@ -145,6 +161,8 @@ internal fun CarLyricRows(
         return
     }
 
+    val liveBlur = flowUsesLiveBlur(Build.VERSION.SDK_INT)
+    val opacityLadder = lineOpacityLadder(liveBlur)
     val waiting = focus.waiting
     val shownGap = remember(lines) { mutableStateOf<LyricTimeline.InstrumentalGap?>(null) }
     LaunchedEffect(waiting) { if (waiting != null) shownGap.value = waiting }
@@ -208,16 +226,16 @@ internal fun CarLyricRows(
                     shift.animateTo(target, tween(750, easing = RippleEasing))
                 }
                 val opacity by animateFloatAsState(
-                    targetValue = LineOpacity[distance],
+                    targetValue = opacityLadder[distance],
                     animationSpec = tween(360, delayMillis = stagger), label = "lyric-opacity",
                 )
                 // Lines more than a screen away are not visible; skip their blur layers.
-                val blur = if (abs(anchorIndex - index) <= 6) LineBlur[distance].dp else 0.dp
+                val blur = if (liveBlur && abs(anchorIndex - index) <= 6) LineBlur[distance].dp else 0.dp
                 Box(Modifier.fillMaxWidth().onSizeChanged { heights[index] = it.height }
                     .graphicsLayer {
                         val opened = shownGap.value?.takeIf { index >= it.beforeLineIndex }?.let { slot * open } ?: 0f
                         translationY = shift.value + browse.value + opened
-                        alpha = opacity
+                        alpha = if (!liveBlur && isCurrent) opacityLadder[0] else opacity
                     }
                     .automationId("car-lyric-line-$index")
                     .clickable(interactionSource = null, indication = null) {
@@ -259,6 +277,7 @@ private fun InstantScrollingLyrics(
     modifier: Modifier,
 ) {
     val finalLeadIndex = remember(lines) { lines.indexOfLast { !it.isStatic && it.words.any { word -> !word.isBackgroundVocal } } }
+    val opacityLadder = lineOpacityLadder(liveBlur = false)
     BoxWithConstraints(modifier) {
         val anchor = maxHeight * anchorFraction
         val waiting = focus.waiting
@@ -299,7 +318,7 @@ private fun InstantScrollingLyrics(
                         started
                     } else false
                     val highlight = focus.wholeLineHighlight(index, startedFinalLead)
-                    val opacity = LineOpacity[if (highlight == KaraokeRowHighlight.Lit) 0 else focus.styleDistance(index)]
+                    val opacity = opacityLadder[if (highlight == KaraokeRowHighlight.Lit) 0 else focus.styleDistance(index)]
                     Box(
                         Modifier.fillMaxWidth()
                             .graphicsLayer {
@@ -370,10 +389,15 @@ internal fun scrollingLyricFocusAt(
 }
 
 private val LyricGap = 30.dp
-// The Flyme.12 line renderer already dims unsung lines, so distance only fades them a little further.
-private val LineOpacity = listOf(1f, 0.95f, 0.80f, 0.65f, 0.50f)
+private val LineOpacityWithBlur = listOf(1f, 0.95f, 0.80f, 0.65f, 0.50f)
+private val LineOpacityWithoutBlur = listOf(1f, 0.55f, 0.45f, 0.38f, 0.32f)
 private val LineBlur = listOf(0f, 0.4f, 0.8f, 1.2f, 1.6f)
 private val RippleEasing = CubicBezierEasing(0.22f, 0.9f, 0.3f, 1f)
+
+internal fun flowUsesLiveBlur(sdkInt: Int): Boolean = sdkInt >= Build.VERSION_CODES.S
+
+internal fun lineOpacityLadder(liveBlur: Boolean): List<Float> =
+    if (liveBlur) LineOpacityWithBlur else LineOpacityWithoutBlur
 
 internal fun scrollingLyricLocalizationScale(multiplier: Float): Float = 1f + (multiplier - 1f) * 0.5f
 

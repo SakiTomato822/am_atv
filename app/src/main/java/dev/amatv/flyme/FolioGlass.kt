@@ -511,7 +511,7 @@ internal fun Modifier.folioPlayerGlass(
  * Loads artwork once per track and runs a lightweight offscreen blur on a ~64px bitmap on background threads.
  */
 @Composable
-private fun rememberFolioBlurredCoverBitmap(
+internal fun rememberFolioBlurredCoverBitmap(
     artworkUrl: String?,
     active: Boolean,
 ): ImageBitmap? {
