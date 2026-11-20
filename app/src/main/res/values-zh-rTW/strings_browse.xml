@@ -8,7 +8,7 @@
     <string name="browse_sign_out_tv">從這台電視登出</string>
     <string name="browse_connection_error">無法連線，請重試。</string>
     <string name="browse_reset">重設</string>
-    <string name="browse_performance_mode_hint">停用動態封面影片以提升老舊電視盒硬體的流暢度與穩定性。</string>
+    <string name="browse_performance_mode_hint">減少動畫和模糊，讓較慢的裝置更流暢。自動：根據裝置規格和播放頁面的流暢度自動開啟。</string>
     <string name="browse_performance_auto">自動</string>
     <string name="browse_performance_on">開</string>
     <string name="browse_performance_off">關</string>

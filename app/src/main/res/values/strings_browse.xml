@@ -8,7 +8,7 @@
     <string name="browse_sign_out_tv">Sign Out of This TV</string>
     <string name="browse_connection_error">Unable to connect. Please try again.</string>
     <string name="browse_reset">Reset</string>
-    <string name="browse_performance_mode_hint">Disable animated artwork video to ensure smooth playback on older TV hardware.</string>
+    <string name="browse_performance_mode_hint">Reduce animations and blur for smoother performance on slower devices. Auto: enables automatically based on device specs and player smoothness.</string>
     <string name="browse_performance_auto">Auto</string>
     <string name="browse_performance_on">On</string>
     <string name="browse_performance_off">Off</string>

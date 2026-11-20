@@ -21,7 +21,7 @@
     <string name="playback_option_on">on</string>
     <string name="playback_option_off">off</string>
     <string name="playback_fade_title">Fade between songs</string>
-    <string name="playback_fade_summary">At a gapless change, the song fades out over its last 3 seconds and the next fades in over 2. Choose where.</string>
+    <string name="playback_fade_summary">At a gapless change, the song fades out over its last 2 seconds and the next fades in over 0.8 seconds. Choose where.</string>
     <string name="playback_fade_albums">Albums</string>
     <string name="playback_fade_stations">Stations</string>
     <string name="playback_fade_playlists">Playlists</string>

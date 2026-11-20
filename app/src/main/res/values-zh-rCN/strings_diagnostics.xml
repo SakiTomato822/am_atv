@@ -21,7 +21,7 @@
     <string name="playback_option_on">开</string>
     <string name="playback_option_off">关</string>
     <string name="playback_fade_title">歌曲间淡入淡出</string>
-    <string name="playback_fade_summary">无缝切歌时，前一首最后 3 秒淡出、下一首开头 2 秒淡入。选择要在哪里使用。</string>
+    <string name="playback_fade_summary">无缝切歌时，前一首最后 2 秒淡出、下一首开头 0.8 秒淡入。选择要在哪里使用。</string>
     <string name="playback_fade_albums">专辑</string>
     <string name="playback_fade_stations">电台</string>
     <string name="playback_fade_playlists">播放列表</string>

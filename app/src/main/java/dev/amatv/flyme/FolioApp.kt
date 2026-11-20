@@ -15,22 +15,17 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -175,7 +170,6 @@ fun FolioApp(
 
     var toastMessage by remember { mutableStateOf<String?>(null) }
     var serviceMessage by remember { mutableStateOf<String?>(null) }
-    var showAccount by remember { mutableStateOf(false) }
 
     fun showToast(message: String) {
         toastMessage = message
@@ -271,7 +265,7 @@ fun FolioApp(
                 serviceMessage = it
                 showToast(it)
             }
-            showAccount = true
+            selectTab(FolioRootPage.Settings.index)
             return
         }
         if (!authLaunchGate.tryBegin()) return
@@ -370,12 +364,8 @@ fun FolioApp(
         }
     }
 
-    BackHandler(enabled = showAccount || pagerState.currentPage != FolioRootPage.Home.index) {
-        if (showAccount) {
-            showAccount = false
-        } else {
-            selectTab(FolioRootPage.Home.index)
-        }
+    BackHandler(enabled = pagerState.currentPage != FolioRootPage.Home.index) {
+        selectTab(FolioRootPage.Home.index)
     }
 
     BoxWithConstraints(
@@ -446,31 +436,10 @@ fun FolioApp(
                         services = services,
                         playback = playbackState,
                         onPlayCollection = playbackStore::playCollection,
-                        handleBack = !playerOpen && !showAccount,
+                        handleBack = !playerOpen,
                     ) {
                         Column(Modifier.fillMaxSize()) {
-                            // Top bar: statusBar + 12dp top, height = tierSpec.ib
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(
-                                        start = tierSpec.px,
-                                        end = tierSpec.pr,
-                                        top = statusTop + 12.dp,
-                                    )
-                                    .height(tierSpec.ib),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                FolioCircleButton(
-                                    icon = Icons.Rounded.Person,
-                                    contentDescription = stringResource(R.string.app_account),
-                                    onClick = { showAccount = true },
-                                )
-                            }
-
-                            Spacer(Modifier.height(10.dp))
-
-                            // Metro Pivot header
+                            // Metro Pivot header anchored directly below status bar (aligns with top-right MiniPlayerDot on Wide/Ultrawide)
                             FolioPivotBar(
                                 titles = pageTitles,
                                 pageProgress = titleTransition?.let {
@@ -478,6 +447,14 @@ fun FolioApp(
                                 } ?: (pagerState.currentPage + pagerState.currentPageOffsetFraction),
                                 selectedPage = selectedPage,
                                 onSelectPage = ::selectTab,
+                                modifier = Modifier.padding(
+                                    top = statusTop + folioDetailTopMargin,
+                                    end = if (!tierSpec.usesBottomCapsule && playbackState.hasCurrentTrack) {
+                                        tierSpec.pr + tierSpec.ib + 12.dp
+                                    } else {
+                                        0.dp
+                                    },
+                                ),
                             )
 
                             // Horizontal Pager for Settings / Home / Browse / Library / Search
@@ -507,7 +484,12 @@ fun FolioApp(
                                                 settingsStore = settingsStore,
                                                 settings = settingsState,
                                                 services = services,
+                                                connectionState = accountState.connectionState,
+                                                setupMessage = serviceMessage ?: services.setupMessage,
                                                 bottomPadding = contentBottomPadding,
+                                                onSignIn = ::startSignIn,
+                                                onSignOut = ::signOut,
+                                                onRefresh = ::refreshAll,
                                                 onNotice = ::showToast,
                                             )
                                             FolioRootPage.Home -> FolioHomePage(
@@ -562,7 +544,11 @@ fun FolioApp(
                                 track = playbackState.track,
                                 onOpenPlayer = openPlayer,
                                 modifier = Modifier.align(Alignment.TopEnd)
-                                    .padding(top = statusTop + folioDetailTopMargin, end = tierSpec.pr),
+                                    .padding(
+                                        top = statusTop + folioDetailTopMargin +
+                                            ((tierSpec.pvh - tierSpec.ib) / 2f).coerceAtLeast(0.dp),
+                                        end = tierSpec.pr,
+                                    ),
                             )
                         } else if (playbackState.hasCurrentTrack) {
                             Box(
@@ -604,19 +590,6 @@ fun FolioApp(
                             playerOpen = false
                             openDetail(item)
                         },
-                    )
-
-                    // Account overlay panel
-                    FolioAccountOverlay(
-                        visible = showAccount,
-                        connectionState = accountState.connectionState,
-                        setupMessage = serviceMessage ?: services.setupMessage,
-                        statusTop = statusTop,
-                        navBottom = navBottom,
-                        onClose = { showAccount = false },
-                        onSignIn = ::startSignIn,
-                        onSignOut = ::signOut,
-                        onRefresh = ::refreshAll,
                     )
 
                     // Bottom transient toast matching `.toast` in H5

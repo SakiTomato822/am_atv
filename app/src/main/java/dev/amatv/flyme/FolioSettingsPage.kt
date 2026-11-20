@@ -8,16 +8,17 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,6 +33,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -43,11 +46,11 @@ import dev.amatv.R
 import dev.amatv.core.AppearanceMode
 import dev.amatv.core.AutoLowPerformanceReason
 import dev.amatv.core.LowPerformanceMode
-import dev.amatv.core.LyricBackgroundStyle
 import dev.amatv.core.SettingsState
 import dev.amatv.core.SettingsStore
 import dev.amatv.integration.ContentCacheStorage
 import dev.amatv.integration.LogRecorder
+import dev.amatv.integration.MusicConnectionState
 import dev.amatv.integration.MusicServices
 import dev.amatv.artwork.ArtworkImages
 import kotlinx.coroutines.CancellationException
@@ -60,7 +63,12 @@ internal fun FolioSettingsPage(
     settingsStore: SettingsStore,
     settings: SettingsState,
     services: MusicServices,
+    connectionState: MusicConnectionState,
+    setupMessage: String?,
     bottomPadding: Dp,
+    onSignIn: () -> Unit,
+    onSignOut: () -> Unit,
+    onRefresh: () -> Unit,
     onNotice: (String) -> Unit,
 ) {
     val palette = LocalFolioPalette.current
@@ -80,6 +88,7 @@ internal fun FolioSettingsPage(
     var exportingLog by remember { mutableStateOf(false) }
 
     val navLabels = listOf(
+        stringResource(R.string.app_account),
         stringResource(R.string.appearance_title),
         stringResource(R.string.nav_now_playing),
         stringResource(R.string.player_lyrics),
@@ -88,7 +97,7 @@ internal fun FolioSettingsPage(
         stringResource(R.string.flyme_app_name),
     )
     // Exact LazyColumn item indices matching the section headers below.
-    val navIndices = listOf(0, 1, 2, 3, 4, 5)
+    val navIndices = listOf(0, 1, 2, 3, 4, 5, 6)
     var selectedSection by remember { mutableIntStateOf(0) }
 
     Row(
@@ -142,6 +151,99 @@ internal fun FolioSettingsPage(
                 .fillMaxHeight(),
             contentPadding = PaddingValues(bottom = bottomPadding),
         ) {
+            // 0: Account
+            item(key = "grp-account") {
+                SettingsGroup(title = stringResource(R.string.app_account)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(Color(0xFFFF5C72), Color(0xFF7A5CFF)),
+                                    ),
+                                ),
+                        )
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = "Apple Music",
+                                color = palette.fg,
+                                fontFamily = fontFamily,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 18.sp,
+                            )
+                            val statusText = when (connectionState) {
+                                MusicConnectionState.SignedIn -> stringResource(R.string.browse_apple_connected)
+                                MusicConnectionState.ReadyToSignIn -> setupMessage ?: stringResource(R.string.browse_apple_sign_in)
+                                MusicConnectionState.Demo -> setupMessage ?: stringResource(R.string.browse_apple_sign_in)
+                            }
+                            Text(
+                                text = statusText,
+                                color = palette.fg2,
+                                fontFamily = fontFamily,
+                                fontSize = 13.sp,
+                                lineHeight = 18.sp,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                    }
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(palette.rb))
+                    SettingsRow(
+                        title = stringResource(R.string.browse_refresh_apple),
+                    ) {
+                        FolioChip(
+                            label = stringResource(R.string.browse_reload),
+                            selected = false,
+                            onClick = onRefresh,
+                        )
+                    }
+                    SettingsRow(
+                        title = "Storefront",
+                        showDivider = connectionState != MusicConnectionState.Demo,
+                    ) {
+                        Text(
+                            text = BuildConfig.APPLE_MUSIC_STOREFRONT.uppercase(),
+                            color = palette.fg2,
+                            fontFamily = fontFamily,
+                            fontSize = 14.sp,
+                        )
+                    }
+                    when (connectionState) {
+                        MusicConnectionState.SignedIn -> {
+                            Text(
+                                text = stringResource(R.string.browse_sign_out_tv),
+                                color = palette.danger,
+                                fontFamily = fontFamily,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 16.sp,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable(onClick = onSignOut)
+                                    .padding(horizontal = 4.dp, vertical = 14.dp),
+                            )
+                        }
+                        MusicConnectionState.ReadyToSignIn -> {
+                            Box(Modifier.padding(top = 12.dp, start = 4.dp)) {
+                                FolioChip(
+                                    label = stringResource(R.string.browse_sign_in_tv),
+                                    selected = true,
+                                    onClick = onSignIn,
+                                )
+                            }
+                        }
+                        MusicConnectionState.Demo -> Unit
+                    }
+                }
+            }
+
+            // 1: Appearance
             item(key = "grp-look") {
                 SettingsGroup(title = stringResource(R.string.appearance_title)) {
                     SettingsRow(
@@ -235,24 +337,9 @@ internal fun FolioSettingsPage(
                 }
             }
 
-            // 2: Lyrics
+            // 3: Lyrics
             item(key = "grp-lyr") {
                 SettingsGroup(title = stringResource(R.string.player_lyrics)) {
-                    SettingsRow(
-                        title = stringResource(R.string.flyme_lyric_style),
-                    ) {
-                        FolioSegmentedPills(
-                            options = listOf(
-                                LyricBackgroundStyle.Flow to stringResource(R.string.flyme_lyric_flow),
-                                LyricBackgroundStyle.Soak to stringResource(R.string.flyme_lyric_soak),
-                            ),
-                            selected = settings.lyricStyle,
-                            onSelect = { style ->
-                                settingsStore.setLyricStyle(style)
-                                FolioPlayerSession.syncDefaultDisplayFromSetting(style)
-                            },
-                        )
-                    }
                     SettingsToggleRow(
                         title = stringResource(R.string.player_lyrics_translation),
                         subtitle = stringResource(R.string.player_lyrics_translation_hint),
