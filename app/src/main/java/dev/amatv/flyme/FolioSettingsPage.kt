@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -78,6 +79,8 @@ internal fun FolioSettingsPage(
         }
     }
     var exportingLog by remember { mutableStateOf(false) }
+    var showGaplessLog by remember { mutableStateOf(false) }
+    val gaplessEntries by services.playbackDiagnostics.gaplessEntries.collectAsState()
 
     val navLabels = listOf(
         stringResource(R.string.appearance_title),
@@ -86,9 +89,10 @@ internal fun FolioSettingsPage(
         stringResource(R.string.flyme_media_status),
         stringResource(R.string.browse_cache_title),
         stringResource(R.string.flyme_app_name),
+        stringResource(R.string.diagnostics_gapless_history),
     )
     // Exact LazyColumn item indices matching the section headers below.
-    val navIndices = listOf(0, 1, 2, 3, 4, 5)
+    val navIndices = listOf(0, 1, 2, 3, 4, 5, 6)
     var selectedSection by remember { mutableIntStateOf(0) }
 
     Row(
@@ -376,6 +380,33 @@ internal fun FolioSettingsPage(
                             fontSize = 14.sp,
                         )
                     }
+                }
+            }
+
+            item(key = "grp-gapless") {
+                val title = stringResource(R.string.diagnostics_gapless_history)
+                SettingsGroup(title = title) {
+                    SettingsToggleRow(
+                        title = stringResource(R.string.diagnostics_gapless_show),
+                        checked = showGaplessLog,
+                        onCheckedChange = { showGaplessLog = it },
+                    )
+                }
+            }
+            if (showGaplessLog) {
+                if (gaplessEntries.isEmpty()) {
+                    item(key = "gapless-empty") {
+                        Text(stringResource(R.string.diagnostics_gapless_empty), color = palette.fg2, fontFamily = fontFamily)
+                    }
+                }
+                items(gaplessEntries) { entry ->
+                    Text(
+                        text = "${entry.clock}  ${entry.text}",
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        color = palette.fg2,
+                        fontFamily = fontFamily,
+                        fontSize = 13.sp,
+                    )
                 }
             }
         }

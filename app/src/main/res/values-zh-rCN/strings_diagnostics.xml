@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="diagnostics_gapless_history">切歌诊断记录</string>
+    <string name="diagnostics_gapless_show">显示最近的切歌记录</string>
+    <string name="diagnostics_gapless_empty">暂无切歌记录</string>
     <string name="diagnostics_gapless">无缝接上「%1$s」：%2$d 毫秒出声</string>
     <string name="diagnostics_prepare_after_end">上一首播完后重新准备「%1$s」：%2$.1f 秒出声</string>
     <string name="diagnostics_prepare">点歌或手动切到「%1$s」：%2$.1f 秒出声</string>

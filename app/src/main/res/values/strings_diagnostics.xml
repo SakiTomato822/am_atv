@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="diagnostics_gapless_history">Track transition diagnostics</string>
+    <string name="diagnostics_gapless_show">Show recent transitions</string>
+    <string name="diagnostics_gapless_empty">No track transitions recorded yet</string>
     <string name="diagnostics_gapless">Gapless into “%1$s”: sound after %2$d ms</string>
     <string name="diagnostics_prepare_after_end">Prepared “%1$s” again after the previous song ended: sound after %2$.1f s</string>
     <string name="diagnostics_prepare">Prepared “%1$s” (chosen or skipped to): sound after %2$.1f s</string>
