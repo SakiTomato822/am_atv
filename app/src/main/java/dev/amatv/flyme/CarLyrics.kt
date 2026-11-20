@@ -375,6 +375,8 @@ private val LineOpacity = listOf(1f, 0.95f, 0.80f, 0.65f, 0.50f)
 private val LineBlur = listOf(0f, 0.4f, 0.8f, 1.2f, 1.6f)
 private val RippleEasing = CubicBezierEasing(0.22f, 0.9f, 0.3f, 1f)
 
+internal fun scrollingLyricLocalizationScale(multiplier: Float): Float = 1f + (multiplier - 1f) * 0.5f
+
 /**
  * One lyric line drawn by the Flyme.12 karaoke renderer, so word-timed lines get the same smooth sweep,
  * per-character lift and glow. The new layouts only place, fade and blur the lines around it.
@@ -389,13 +391,20 @@ private fun FlymeKaraokeLine(
     wholeLineHighlight: KaraokeRowHighlight? = null,
 ) {
     val density = LocalDensity.current
-    CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * textScale)) {
+    val mainDensity = Density(density.density, density.fontScale * textScale)
+    val localizationScale = scrollingLyricLocalizationScale(textScale)
+    CompositionLocalProvider(LocalDensity provides mainDensity) {
         KaraokeLyricLine(
             line = line,
             isActive = active,
             isStaticMode = static,
             positionState = position,
             wholeLineHighlight = wholeLineHighlight,
+            localizationSize = { size ->
+                // Apply the partial scale with the system font scale, then express it in the row's density.
+                val localizedDp = with(density) { (size * localizationScale).toDp() }
+                with(mainDensity) { localizedDp.toSp() }
+            },
         )
     }
 }

@@ -11,6 +11,13 @@ import org.junit.Test
 
 class ScrollingLyricFocusTest {
     @Test
+    fun localizationFollowsHalfOfTheMainTextScaleChange() {
+        assertEquals(0.875f, scrollingLyricLocalizationScale(0.75f), 0f)
+        assertEquals(1f, scrollingLyricLocalizationScale(1f), 0f)
+        assertEquals(1.25f, scrollingLyricLocalizationScale(1.5f), 0f)
+    }
+
+    @Test
     fun wholeLineInkKeepsTheNormalScrollingAnchorAndNeighbours() {
         val lines = listOf(line("First", 8_000, 9_200), line("Next", 9_000, 10_000), line("Final", 18_000, 19_000))
         val schedule = LyricTimeline.Schedule(lines)

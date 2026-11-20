@@ -73,6 +73,7 @@ internal fun KaraokeLyricLine(
     isStaticMode: Boolean,
     positionState: State<Long>,
     wholeLineHighlight: KaraokeRowHighlight? = null,
+    localizationSize: (TextUnit) -> TextUnit = { it },
 ) {
     val hasMainPronunciation = !line.pronunciationText.isNullOrBlank() ||
         line.words.any { !it.pronunciationText.isNullOrBlank() }
@@ -111,8 +112,8 @@ internal fun KaraokeLyricLine(
                 if (!staticPronunciation.isNullOrBlank()) {
                     Text(
                         text = staticPronunciation,
-                        fontSize = staticPronunciationFontSize,
-                        lineHeight = staticPronunciationLineHeight,
+                        fontSize = localizationSize(staticPronunciationFontSize),
+                        lineHeight = localizationSize(staticPronunciationLineHeight),
                         fontWeight = FontWeight.SemiBold,
                         color = FlymeInk.copy(alpha = 0.58f),
                         modifier = Modifier.padding(bottom = staticLocalizationGap),
@@ -128,8 +129,8 @@ internal fun KaraokeLyricLine(
                 if (!line.translation.isNullOrBlank()) {
                     Text(
                         text = line.translation,
-                        fontSize = staticTranslationFontSize,
-                        lineHeight = staticTranslationLineHeight,
+                        fontSize = localizationSize(staticTranslationFontSize),
+                        lineHeight = localizationSize(staticTranslationLineHeight),
                         fontWeight = FontWeight.Medium,
                         color = FlymeInk.copy(alpha = 0.62f),
                         modifier = Modifier.padding(top = staticLocalizationGap),
@@ -138,8 +139,8 @@ internal fun KaraokeLyricLine(
                 if (!staticBackgroundPronunciation.isNullOrBlank()) {
                     Text(
                         text = staticBackgroundPronunciation,
-                        fontSize = staticBackgroundTypography.pronunciationSizeSp.sp,
-                        lineHeight = staticBackgroundTypography.pronunciationLineHeightSp.sp,
+                        fontSize = localizationSize(staticBackgroundTypography.pronunciationSizeSp.sp),
+                        lineHeight = localizationSize(staticBackgroundTypography.pronunciationLineHeightSp.sp),
                         fontWeight = FontWeight.SemiBold,
                         color = FlymeInk.copy(alpha = 0.48f),
                         modifier = Modifier.padding(
@@ -161,8 +162,8 @@ internal fun KaraokeLyricLine(
                 if (!line.backgroundTranslation.isNullOrBlank()) {
                     Text(
                         text = line.backgroundTranslation,
-                        fontSize = staticBackgroundTypography.translationSizeSp.sp,
-                        lineHeight = staticBackgroundTypography.translationLineHeightSp.sp,
+                        fontSize = localizationSize(staticBackgroundTypography.translationSizeSp.sp),
+                        lineHeight = localizationSize(staticBackgroundTypography.translationLineHeightSp.sp),
                         fontWeight = FontWeight.Medium,
                         color = FlymeInk.copy(alpha = 0.48f),
                         modifier = Modifier.padding(top = 4.dp),
@@ -260,10 +261,10 @@ internal fun KaraokeLyricLine(
     val fullLineEndPadding = if (alignEnd) 6.dp else 0.dp
     val mainFontSize = if (compactMainLocalization) 31.sp else MotionTokens.KaraokeMainFontSizeSp.sp
     val mainLineHeight = if (compactMainLocalization) 37.sp else 41.sp
-    val mainPronunciationFontSize = if (compactMainLocalization) 15.sp else 17.sp
-    val mainPronunciationLineHeight = if (compactMainLocalization) 19.sp else 22.sp
-    val mainTranslationFontSize = if (compactMainLocalization) 21.sp else 24.sp
-    val mainTranslationLineHeight = if (compactMainLocalization) 25.sp else 29.sp
+    val mainPronunciationFontSize = localizationSize(if (compactMainLocalization) 15.sp else 17.sp)
+    val mainPronunciationLineHeight = localizationSize(if (compactMainLocalization) 19.sp else 22.sp)
+    val mainTranslationFontSize = localizationSize(if (compactMainLocalization) 21.sp else 24.sp)
+    val mainTranslationLineHeight = localizationSize(if (compactMainLocalization) 25.sp else 29.sp)
     val mainLocalizationGap = if (compactMainLocalization) 2.dp else 4.dp
     val backgroundTypography = backgroundVocalTypography(
         isStaticMode = false,
@@ -272,10 +273,10 @@ internal fun KaraokeLyricLine(
     )
     val backgroundFontSize = backgroundTypography.fontSizeSp.sp
     val backgroundLineHeight = backgroundTypography.lineHeightSp.sp
-    val backgroundPronunciationFontSize = backgroundTypography.pronunciationSizeSp.sp
-    val backgroundPronunciationLineHeight = backgroundTypography.pronunciationLineHeightSp.sp
-    val backgroundTranslationFontSize = backgroundTypography.translationSizeSp.sp
-    val backgroundTranslationLineHeight = backgroundTypography.translationLineHeightSp.sp
+    val backgroundPronunciationFontSize = localizationSize(backgroundTypography.pronunciationSizeSp.sp)
+    val backgroundPronunciationLineHeight = localizationSize(backgroundTypography.pronunciationLineHeightSp.sp)
+    val backgroundTranslationFontSize = localizationSize(backgroundTypography.translationSizeSp.sp)
+    val backgroundTranslationLineHeight = localizationSize(backgroundTypography.translationLineHeightSp.sp)
     val backgroundLocalizationGap = backgroundTypography.localizationGapDp.dp
 
     Box(
@@ -309,6 +310,7 @@ internal fun KaraokeLyricLine(
                     alignEnd = alignEnd,
                     compactMainLocalization = compactMainLocalization,
                     compactBackgroundLocalization = compactBackgroundLocalization,
+                    localizationSize = localizationSize,
                 )
             } else {
                 // Main vocal FullWidthAlphaGradientFlexboxLayout (karaoke_line_flexbox)
@@ -518,6 +520,7 @@ private fun LineSyncedContent(
     alignEnd: Boolean,
     compactMainLocalization: Boolean,
     compactBackgroundLocalization: Boolean,
+    localizationSize: (TextUnit) -> TextUnit,
 ) {
     val mainAlphaModifier = Modifier.graphicsLayer {
         alpha = unlitAlpha + (MotionTokens.KaraokePrimaryAlpha - unlitAlpha) * activePresence.value
@@ -531,10 +534,10 @@ private fun LineSyncedContent(
     val textAlign = if (alignEnd) TextAlign.End else TextAlign.Start
     val mainFontSize = if (compactMainLocalization) 31.sp else MotionTokens.KaraokeMainFontSizeSp.sp
     val mainLineHeight = if (compactMainLocalization) 37.sp else 41.sp
-    val pronunciationFontSize = if (compactMainLocalization) 15.sp else 17.sp
-    val pronunciationLineHeight = if (compactMainLocalization) 19.sp else 22.sp
-    val translationFontSize = if (compactMainLocalization) 21.sp else 24.sp
-    val translationLineHeight = if (compactMainLocalization) 25.sp else 29.sp
+    val pronunciationFontSize = localizationSize(if (compactMainLocalization) 15.sp else 17.sp)
+    val pronunciationLineHeight = localizationSize(if (compactMainLocalization) 19.sp else 22.sp)
+    val translationFontSize = localizationSize(if (compactMainLocalization) 21.sp else 24.sp)
+    val translationLineHeight = localizationSize(if (compactMainLocalization) 25.sp else 29.sp)
     val mainGap = if (compactMainLocalization) 2.dp else 4.dp
     val backgroundTypography = backgroundVocalTypography(
         isStaticMode = false,
@@ -543,10 +546,10 @@ private fun LineSyncedContent(
     )
     val backgroundFontSize = backgroundTypography.fontSizeSp.sp
     val backgroundLineHeight = backgroundTypography.lineHeightSp.sp
-    val backgroundPronunciationFontSize = backgroundTypography.pronunciationSizeSp.sp
-    val backgroundPronunciationLineHeight = backgroundTypography.pronunciationLineHeightSp.sp
-    val backgroundTranslationFontSize = backgroundTypography.translationSizeSp.sp
-    val backgroundTranslationLineHeight = backgroundTypography.translationLineHeightSp.sp
+    val backgroundPronunciationFontSize = localizationSize(backgroundTypography.pronunciationSizeSp.sp)
+    val backgroundPronunciationLineHeight = localizationSize(backgroundTypography.pronunciationLineHeightSp.sp)
+    val backgroundTranslationFontSize = localizationSize(backgroundTypography.translationSizeSp.sp)
+    val backgroundTranslationLineHeight = localizationSize(backgroundTypography.translationLineHeightSp.sp)
     val backgroundGap = backgroundTypography.localizationGapDp.dp
 
     if (!line.pronunciationText.isNullOrBlank()) {
