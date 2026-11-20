@@ -14,7 +14,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
-internal val folioSearchSession = FolioSearchSession(CoroutineScope(Dispatchers.Main.immediate))
+internal val folioSearchSession by lazy {
+    FolioSearchSession(CoroutineScope(Dispatchers.Main.immediate))
+}
 
 internal data class FolioSearchSubmission(
     val term: String,
