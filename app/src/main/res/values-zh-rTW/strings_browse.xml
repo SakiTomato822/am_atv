@@ -66,6 +66,14 @@
     <string name="browse_search_playlists">播放列表</string>
     <string name="browse_search_clear">清除</string>
     <string name="browse_search_history">最近搜尋</string>
+    <string name="play_history_title">播放記錄</string>
+    <string name="play_history_all">全部</string>
+    <string name="play_history_empty">暫無播放記錄</string>
+    <string name="play_history_cancel">取消</string>
+    <string name="play_history_group_today">今天</string>
+    <string name="play_history_group_yesterday">昨天</string>
+    <string name="play_history_group_this_week">本週</string>
+    <string name="play_history_group_earlier">更早</string>
     <string name="artist_latest_release">最新發行</string>
     <string name="artist_playlists">藝人歌單</string>
     <string name="artist_live_albums">現場專輯</string>

@@ -66,6 +66,14 @@
     <string name="browse_search_playlists">Playlists</string>
     <string name="browse_search_clear">Clear</string>
     <string name="browse_search_history">Recent Searches</string>
+    <string name="play_history_title">Play History</string>
+    <string name="play_history_all">All</string>
+    <string name="play_history_empty">No play history yet.</string>
+    <string name="play_history_cancel">Cancel</string>
+    <string name="play_history_group_today">Today</string>
+    <string name="play_history_group_yesterday">Yesterday</string>
+    <string name="play_history_group_this_week">This Week</string>
+    <string name="play_history_group_earlier">Earlier</string>
     <string name="artist_latest_release">Latest Release</string>
     <string name="artist_playlists">Artist Playlists</string>
     <string name="artist_live_albums">Live Albums</string>

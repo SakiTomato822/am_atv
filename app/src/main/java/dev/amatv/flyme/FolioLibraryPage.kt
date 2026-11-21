@@ -1,5 +1,7 @@
 package dev.amatv.flyme
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -16,7 +18,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -29,10 +35,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -69,6 +78,7 @@ internal fun FolioLibraryPage(
     onSignIn: () -> Unit,
     onLoadMoreShelf: (String) -> Unit,
     onOpenItem: (Track, List<Track>) -> Unit,
+    onOpenHistory: () -> Unit = {},
 ) {
     val palette = LocalFolioPalette.current
     val tierSpec = LocalFolioTierSpec.current
@@ -151,6 +161,32 @@ internal fun FolioLibraryPage(
                                 label = stringResource(tab.labelRes),
                                 selected = tab == selectedTab,
                                 onClick = { FolioLibrarySession.tab = tab },
+                            )
+                        }
+                        val historyShape = RoundedCornerShape(FolioRadii.Chip)
+                        Row(
+                            modifier = Modifier
+                                .clip(historyShape)
+                                .background(palette.rb)
+                                .border(1.dp, palette.glassb, historyShape)
+                                .folioBrowsePressable(role = Role.Button, onClick = onOpenHistory)
+                                .padding(horizontal = 12.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.History,
+                                contentDescription = null,
+                                tint = palette.fg2,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Text(
+                                text = stringResource(R.string.play_history_title),
+                                color = palette.fg,
+                                fontFamily = fontFamily,
+                                fontWeight = FontWeight.Normal,
+                                fontSize = 14.sp,
+                                maxLines = 1,
                             )
                         }
                     }

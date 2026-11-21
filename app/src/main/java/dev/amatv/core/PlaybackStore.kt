@@ -92,6 +92,7 @@ class PlaybackStore(
     private val flymeAuto: Boolean = BuildConfig.FLYME_AUTO,
     private val delayFn: suspend (Long) -> Unit = { delay(it) },
     private val diagnostics: PlaybackDiagnostics? = null,
+    private val playHistoryStore: PlayHistoryStore? = null,
 ) {
     private val startupCheckpoint: PlaybackSession? =
         sessions.restoreCheckpointSession()?.copy(wasPlaying = false)
@@ -209,6 +210,17 @@ class PlaybackStore(
         ?.takeIf { it.catalogKind == CatalogKind.Station }
 
     private fun isStationPlayback(): Boolean = stationQueueTrack() != null
+
+    private fun currentPlayHistorySource(): PlayHistorySource {
+        val queue = queueController.state.value
+        val isStation = isStationPlayback() || queue.stationFeed != null
+        return resolvePlayHistorySource(
+            contextKind = queue.context?.kind,
+            isStation = isStation,
+            currentDestination = currentDestination,
+            previousDestination = previousDestination,
+        )
+    }
 
     private fun requestedPlaybackTrack(): Track = stationQueueTrack() ?: _state.value.track
 
@@ -513,12 +525,46 @@ class PlaybackStore(
                     while (_state.value.isPlaying) {
                         val currentMs = currentPositionMs()
                         if (currentMs >= durationMs - 250L) {
+                            playHistoryStore?.onTrackFinished(_state.value.track, clock(), currentPlayHistorySource())
                             advanceNextTrack(isAuto = true)
                             break
                         }
                         delayFn(250L)
                     }
                 }
+        }
+
+        if (playHistoryStore != null) {
+            coroutineScope.launch {
+                _state.map { Triple(it.track, it.isPlaying, it.hasCurrentTrack) }
+                    .distinctUntilChanged()
+                    .collectLatest { (currentTrack, playing, hasCurrent) ->
+                        if (!hasCurrent) return@collectLatest
+                        playHistoryStore.onPlaybackProgress(
+                            track = currentTrack,
+                            isPlaying = playing,
+                            elapsedRealtimeMs = clock(),
+                            source = currentPlayHistorySource(),
+                        )
+                        if (playing) {
+                            val remainingMs = playHistoryStore.remainingThresholdMs()
+                            if (remainingMs > 0L) {
+                                delayFn(remainingMs)
+                                val live = _state.value
+                                if (live.hasCurrentTrack && live.isPlaying &&
+                                    playHistorySongKey(live.track) == playHistorySongKey(currentTrack)
+                                ) {
+                                    playHistoryStore.onPlaybackProgress(
+                                        track = live.track,
+                                        isPlaying = true,
+                                        elapsedRealtimeMs = clock(),
+                                        source = currentPlayHistorySource(),
+                                    )
+                                }
+                            }
+                        }
+                    }
+            }
         }
 
         // Lyrics arrive independently of MusicKit's playback clock. Publish their
@@ -1087,6 +1133,7 @@ class PlaybackStore(
             gaplessLookahead = null
             lookaheadTiming = null
             requestTiming = null
+            playHistoryStore?.onTrackFinished(_state.value.track, clock(), currentPlayHistorySource())
             adoptingGaplessEntryId = queued.first
             try {
                 queueController.advanceNext(manual = false)
@@ -1115,6 +1162,7 @@ class PlaybackStore(
             advancingEndedTrackId != endedEntryKey
         ) {
             advancingEndedTrackId = endedEntryKey
+            playHistoryStore?.onTrackFinished(currentStateBeforeEnded.track, clock(), currentPlayHistorySource())
             _state.value = _state.value.copy(isPlaying = false)
             if (isStationPlayback()) {
                 setExpectedPlaybackGeneration(0L)
@@ -1230,6 +1278,7 @@ class PlaybackStore(
         playbackRequestJob?.cancel()
         accountStore.signOut()
         queueController.reset()
+        playHistoryStore?.clear()
         waitingQueueEntryIdFlow.value = null
         pendingRestore = null
         setExpectedPlaybackGeneration(0L)

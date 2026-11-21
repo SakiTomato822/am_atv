@@ -26,6 +26,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.CircularProgressIndicator
@@ -55,6 +56,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.amatv.R
+import dev.amatv.core.PlayHistoryEntry
 import dev.amatv.integration.CatalogSearchSuggestions
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
@@ -70,6 +72,8 @@ internal fun FolioSearchPage(
     search: suspend (String) -> List<Track>,
     suggest: suspend (String) -> CatalogSearchSuggestions,
     onOpenItem: (Track, List<Track>) -> Unit,
+    recentPlayEntries: List<PlayHistoryEntry> = emptyList(),
+    onOpenAllHistory: () -> Unit = {},
 ) {
     val palette = LocalFolioPalette.current
     val tierSpec = LocalFolioTierSpec.current
@@ -104,6 +108,13 @@ internal fun FolioSearchPage(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val innerWidth = (maxWidth - tierSpec.px - tierSpec.pr).coerceAtLeast(1.dp)
         val listCols = adaptiveColumnCount(innerWidth, tierSpec.liw, tierSpec.lstGap)
+        val recentCols = adaptiveColumnCount(innerWidth, tierSpec.gw, 14.dp)
+        val recentTracks = remember(recentPlayEntries) {
+            recentPlayEntries.take(8).map { it.toTrack() }
+        }
+        val recentCardRows = remember(recentTracks, recentCols) {
+            recentTracks.chunked(recentCols)
+        }
         val results = submission?.results
         val sections = remember(results) { results?.takeIf { it.isNotEmpty() }?.let(::folioSearchSections) }
         val cardRows = remember(sections, listCols) {
@@ -227,6 +238,84 @@ internal fun FolioSearchPage(
                             ) {
                                 history.forEach { term ->
                                     FolioChip(label = term, selected = false, onClick = { submit(term) })
+                                }
+                            }
+                        }
+                    }
+                    if (query.isBlank() && recentTracks.isNotEmpty()) {
+                        item(key = "search-recent-header", contentType = "section-title") {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                FolioSectionTitle(
+                                    text = stringResource(R.string.app_recently_played),
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(FolioRadii.Chip))
+                                        .folioBrowsePressable(role = Role.Button, onClick = onOpenAllHistory)
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.play_history_all),
+                                        color = palette.accent,
+                                        fontFamily = fontFamily,
+                                        fontWeight = FontWeight.Medium,
+                                        fontSize = 14.sp,
+                                    )
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                                        contentDescription = null,
+                                        tint = palette.accent,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                            }
+                        }
+                        if (tierSpec.tier == FolioTier.Narrow) {
+                            itemsIndexed(
+                                recentTracks,
+                                key = { index, item -> "search-recent-song-${item.id}-$index" },
+                                contentType = { _, _ -> "song-row" },
+                            ) { index, track ->
+                                FolioSongRow(
+                                    track = track,
+                                    index = index,
+                                    showCover = true,
+                                    showArtist = true,
+                                    isCurrent = track.matchesPlaybackQueueEntry(currentTrack),
+                                    isPlaying = isPlaying,
+                                    onClick = { onOpenItem(track, recentTracks) },
+                                )
+                            }
+                        } else {
+                            itemsIndexed(
+                                recentCardRows,
+                                key = { rowIdx, _ -> "search-recent-grid-$rowIdx" },
+                                contentType = { _, _ -> "grid-card-row" },
+                            ) { rowIdx, rowItems ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = if (rowIdx < recentCardRows.lastIndex) 16.dp else 0.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                ) {
+                                    for (c in 0 until recentCols) {
+                                        val item = rowItems.getOrNull(c)
+                                        if (item != null) {
+                                            FolioGridCard(
+                                                item = item,
+                                                onClick = { onOpenItem(item, recentTracks) },
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                        } else {
+                                            Spacer(Modifier.weight(1f))
+                                        }
+                                    }
                                 }
                             }
                         }
