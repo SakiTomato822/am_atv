@@ -51,6 +51,7 @@ data class Track(
     /** Why a Top Picks card is there ("Made for You", "New Release"...). */
     val pickReason: String? = null,
     val artworkColors: AppleArtworkColors? = null,
+    val previewUrl: String? = null,
 ) {
     /** Catalog identity survives MusicKit's different browse and now-playing wrapper ids. */
     fun lyricsIdentity(): String = catalogId?.takeIf(String::isNotBlank) ?: id

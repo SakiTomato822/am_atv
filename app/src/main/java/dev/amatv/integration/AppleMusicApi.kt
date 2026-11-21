@@ -519,6 +519,10 @@ class AppleMusicApi(
 
     suspend fun resolveCatalogSongId(id: String): String = catalogSongResolver.resolve(id)
 
+    internal suspend fun songPreviewUrl(catalogId: String): String? =
+        requestRoot("/v1/catalog/${effectiveStorefront()}/songs/$catalogId", needsUserToken = false)
+            .optJSONArray("data")?.optJSONObject(0)?.optJSONObject("attributes")?.songPreviewUrl()
+
     private suspend fun libraryCatalogSongId(id: String): String {
         val root = requestRoot(
             path = "/v1/me/library/songs/${URLEncoder.encode(id, Charsets.UTF_8.name())}?include=catalog",
@@ -1009,6 +1013,7 @@ class AppleMusicApi(
                 ?: catalogArtwork?.toAppleArtworkColors(),
             motionArtworkUrl = motion?.videoUrl,
             motionPreviewUrl = motion?.previewUrl,
+            previewUrl = if (kind == CatalogKind.Song) catalogAttrs?.songPreviewUrl() ?: songPreviewUrl() else null,
             resourceId = id,
             resourceType = resourceType,
             dateAddedMs = optString("dateAdded").takeIf { it.isNotBlank() }
@@ -1017,6 +1022,9 @@ class AppleMusicApi(
                 catalogAttrs?.optString("contentRating") == "explicit",
         )
     }
+
+    private fun JSONObject.songPreviewUrl(): String? =
+        optJSONArray("previews")?.optJSONObject(0)?.optString("url")?.takeIf { it.startsWith("https://") }
 
     private fun JSONObject.displayText(key: String): String? {
         val value = opt(key)

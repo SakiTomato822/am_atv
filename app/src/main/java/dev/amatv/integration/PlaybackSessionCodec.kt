@@ -185,6 +185,7 @@ internal fun Track.toSessionJson() = JSONObject()
     })
     .put("motionArtworkUrl", motionArtworkUrl)
     .put("motionPreviewUrl", motionPreviewUrl)
+    .put("previewUrl", previewUrl)
     .put("explicit", isExplicit)
 
 internal fun JSONObject.toSessionTrack(): Track {
@@ -207,6 +208,7 @@ internal fun JSONObject.toSessionTrack(): Track {
         artworkColors = optJSONObject("artworkColors")?.toAppleArtworkColors(),
         motionArtworkUrl = optionalString("motionArtworkUrl"),
         motionPreviewUrl = optionalString("motionPreviewUrl"),
+        previewUrl = optionalString("previewUrl"),
         // Queue indices belong to one MusicKit process and cannot survive a cold start.
         playbackQueueId = null,
         isExplicit = optBoolean("explicit"),

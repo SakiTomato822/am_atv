@@ -103,6 +103,7 @@ internal suspend fun resolvePlayableSongTrack(
     return track.copy(
         id = "apple:$resolved",
         catalogId = resolved,
+        previewUrl = null, // The equivalent recording has its own preview.
         resourceId = track.resourceId ?: libraryId ?: original,
         resourceType = track.resourceType ?: if (libraryId != null) "library-songs" else "songs",
     )
