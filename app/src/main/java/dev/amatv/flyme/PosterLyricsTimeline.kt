@@ -8,6 +8,7 @@ import dev.amatv.model.LyricAgentType
 import dev.amatv.model.LyricLine
 import dev.amatv.model.LyricTimeline
 import dev.amatv.model.LyricTiming
+import dev.amatv.model.LyricWord
 import dev.amatv.model.renderLyricWords
 
 /** Shares the displayed playback position and identifies deliberate seeks made in the player. */
@@ -40,7 +41,7 @@ internal class FolioPlaybackPosition(initialPositionMs: Long) : State<Long> {
     }
 }
 
-internal class PosterPlaybackClock(initialPositionMs: Long) {
+internal class LyricPlaybackClock(initialPositionMs: Long) {
     private var lastSampleMs = initialPositionMs
     var positionMs = initialPositionMs
         private set
@@ -61,6 +62,17 @@ internal class PosterPlaybackClock(initialPositionMs: Long) {
 
 internal data class PosterTextLine(val text: String, val isOppositeSinger: Boolean)
 
+internal data class PosterBackingLine(
+    val sourceIndex: Int,
+    val text: String,
+    val words: List<LyricWord>,
+    val textOffset: Int,
+    val joinWithSpaces: Boolean,
+    val isOppositeSinger: Boolean,
+) {
+    val interval = words.backingVocalInterval()
+}
+
 internal const val POSTER_PREVIOUS_FADE_MS = 200L
 
 internal fun posterLeadEndMs(line: LyricLine): Long =
@@ -74,6 +86,7 @@ internal data class PosterLyricsProjection(
     val previousLeadSweepEndMs: Long?,
     val previousLeadSinging: Boolean,
     val smallLines: List<PosterTextLine>,
+    val backingLines: List<PosterBackingLine>,
     val upcomingLeadIndices: List<Int>,
     val gap: LyricTimeline.InstrumentalGap?,
 ) {
@@ -90,28 +103,28 @@ internal class PosterLyricsTimeline(private val lines: List<LyricLine>) {
         leadTexts[it].isNotEmpty() && !lines[it].isStatic
     }
     private val gaps = LyricTimeline.Schedule(lines).instrumentalGaps
-    private val backing = lines.map { line ->
-        val words = line.backgroundWords + line.words.filter { it.isBackgroundVocal }
+    private val backing = lines.mapIndexedNotNull { index, line ->
+        if (line.isStatic) return@mapIndexedNotNull null
+        val words = line.backingVocalWords()
         val text = renderLyricWords(words, line.joinWithSpaces).trim()
-        val display = when {
-            text.isEmpty() || text.startsWith('(') || text.startsWith('（') -> text
-            else -> "($text)"
-        }
-        val interval = if (words.isEmpty()) LongRange.EMPTY else {
-            words.minOf { it.startMs } until words.maxOf { it.endMs }
-        }
-        interval to display
+        if (text.isEmpty()) return@mapIndexedNotNull null
+        val wrap = !text.startsWith('(') && !text.startsWith('（')
+        PosterBackingLine(
+            index, if (wrap) "($text)" else text, words, if (wrap) 1 else 0,
+            line.joinWithSpaces, isOppositeSingerLine(line),
+        )
     }
+    // Reserve each voice throughout the lead's whole focus interval, including its silent frames.
+    private val backingByFocus = leadIndices.mapIndexed { slot, index ->
+        val start = if (slot == 0) 0L else lines[index].startMs
+        val end = leadIndices.getOrNull(slot + 1)?.let { lines[it].startMs } ?: Long.MAX_VALUE
+        index to backing.filter { !it.interval.isEmpty() && it.interval.first < end && it.interval.last >= start }
+    }.toMap()
     private val boundaries = buildSet {
         add(0L)
-        for ((index, line) in lines.withIndex()) {
-            add(line.startMs)
+        for (index in leadIndices) {
+            add(lines[index].startMs)
             add(leadEnds[index])
-            val (interval) = backing[index]
-            if (!interval.isEmpty()) {
-                add(interval.first)
-                add(interval.last + 1)
-            }
         }
         for ((index, next) in leadIndices.zipWithNext()) {
             if (leadEnds[index] > lines[next].startMs) {
@@ -154,8 +167,6 @@ internal class PosterLyricsTimeline(private val lines: List<LyricLine>) {
                             add(PosterTextLine(lead, opposite))
                         }
                     }
-                    val (interval, text) = backing[index]
-                    if (positionMs in interval && text.isNotEmpty()) add(PosterTextLine(text, opposite))
                 }
             }
         }
@@ -166,6 +177,7 @@ internal class PosterLyricsTimeline(private val lines: List<LyricLine>) {
             previousLeadSweepEndMs = previousSweepEnd,
             previousLeadSinging = previousSweepEnd != null && positionMs < previousSweepEnd,
             smallLines = smallLines,
+            backingLines = if (gap != null) emptyList() else if (focus == null) backing else backingByFocus.getValue(focus),
             upcomingLeadIndices = if (gap == null) {
                 leadIndices.drop(startedLead.coerceAtLeast(0) + 1).take(3)
             } else {

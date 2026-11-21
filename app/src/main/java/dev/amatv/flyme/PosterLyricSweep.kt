@@ -17,15 +17,21 @@ import dev.amatv.model.renderLyricWords
 internal data class PosterSweepUnit(val startOffset: Int, val endOffset: Int, val word: LyricWord)
 
 /** Offsets refer to the same trimmed lyric string used to measure the poster. */
-internal fun posterSweepUnits(line: LyricLine): List<PosterSweepUnit> {
-    val words = line.words.filterNot { it.isBackgroundVocal }
-    val trimStart = renderLyricWords(words, line.joinWithSpaces).takeWhile { it.isWhitespace() }.length
-    var offset = -trimStart
+internal fun posterSweepUnits(line: LyricLine): List<PosterSweepUnit> =
+    posterSweepUnits(line.words.filterNot { it.isBackgroundVocal }, line.joinWithSpaces)
+
+private fun posterSweepUnits(
+    words: List<LyricWord>,
+    joinWithSpaces: Boolean,
+    textOffset: Int = 0,
+): List<PosterSweepUnit> {
+    val trimStart = renderLyricWords(words, joinWithSpaces).takeWhile { it.isWhitespace() }.length
+    var offset = textOffset - trimStart
     return words.mapIndexedNotNull { index, word ->
         val display = word.displayText
         val start = offset
         offset += display.length
-        if (display == word.text && line.joinWithSpaces && word.hasTrailingWhitespace &&
+        if (display == word.text && joinWithSpaces && word.hasTrailingWhitespace &&
             index < words.lastIndex
         ) offset++
 
@@ -96,19 +102,24 @@ internal class PosterSweepRow(
     }
 }
 
-internal class PosterLyricSweep(
+internal class PosterLyricSweep private constructor(
     private val layout: TextLayoutResult,
-    line: LyricLine,
+    units: List<PosterSweepUnit>,
+    private val endMs: Long,
 ) {
+    constructor(layout: TextLayoutResult, line: LyricLine) :
+        this(layout, posterSweepUnits(line), posterLeadEndMs(line))
+
+    constructor(layout: TextLayoutResult, line: PosterBackingLine) :
+        this(layout, posterSweepUnits(line.words, line.joinWithSpaces, line.textOffset), line.interval.last + 1)
+
     private data class Row(val top: Float, val bottom: Float, val sweep: PosterSweepRow)
 
-    private val endMs = posterLeadEndMs(line)
     private val featherPx = with(layout.layoutInput.density) {
         MotionTokens.KaraokeGradientFeatherDp.dp.toPx() *
             (layout.layoutInput.style.fontSize.value / MotionTokens.KaraokeMainFontSizeSp)
     }
     private val rows = run {
-        val units = posterSweepUnits(line)
         val wordsByRow = List(layout.lineCount) { index ->
             posterSweepWordsOnRow(
                 units, layout.getLineStart(index), layout.getLineEnd(index, visibleEnd = true),

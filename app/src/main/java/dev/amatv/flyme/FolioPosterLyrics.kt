@@ -82,6 +82,7 @@ private sealed interface PosterDrawing {
     fun isFocusLayout(order: Int): Boolean = when (this) {
         is Lead -> focus
         is Local -> order >= 0
+        is Backing -> true
         is Gap -> true
     }
 
@@ -96,6 +97,11 @@ private sealed interface PosterDrawing {
     }
 
     data class Local(val layout: TextLayoutResult, val ink: Color, val slot: Int) : PosterDrawing {
+        override val width: Float get() = layout.size.width.toFloat()
+        override val height: Float get() = layout.size.height.toFloat()
+    }
+
+    data class Backing(val layout: TextLayoutResult, val ink: Color, val line: PosterBackingLine) : PosterDrawing {
         override val width: Float get() = layout.size.width.toFloat()
         override val height: Float get() = layout.size.height.toFloat()
     }
@@ -121,15 +127,11 @@ private fun posterRollRow(
     gap: Float,
 ): PosterRollRow {
     val fit = minOf(scale, panelWidth / parts.maxOf { it.width })
-    var cursor = top
-    val drawings = buildMap {
-        for (part in parts) {
-            if (isNotEmpty()) cursor += gap * fit
-            put(part, PosterInkPose(cursor, fit, opacity))
-            cursor += part.height * fit
-        }
-    }
-    return PosterRollRow(PosterRollBounds(top, cursor), drawings)
+    val slots = posterPackedPartBounds(top, parts.map { it.height }, fit, gap)
+    val drawings = parts.mapIndexed { index, part ->
+        part to PosterInkPose(slots[index].top, fit, opacity)
+    }.toMap()
+    return PosterRollRow(PosterRollBounds(top, slots.last().bottom), drawings)
 }
 
 /** Both cached versions of a lyric stay within its interpolated row. */
@@ -207,7 +209,7 @@ internal fun FolioPosterLyricsPanel(
 
     val timeline = remember(lines) { PosterLyricsTimeline(lines) }
     val clock = remember(positionState, timeline, offsetMs) {
-        PosterPlaybackClock(Snapshot.withoutReadObservation { (positionState.value + offsetMs).coerceAtLeast(0L) })
+        LyricPlaybackClock(Snapshot.withoutReadObservation { (positionState.value + offsetMs).coerceAtLeast(0L) })
     }
     val initialSeekVersion = remember(clock) { Snapshot.withoutReadObservation { positionState.seekVersion } }
     val drawPosition = remember(clock) { mutableLongStateOf(clock.positionMs) }
@@ -248,7 +250,7 @@ internal fun FolioPosterLyricsPanel(
                 fontSize = typo.translationSp.sp, lineHeight = typo.translationLineHeightSp.sp,
             )
             val smallStyle = TextStyle(
-                fontFamily = fontFamily, fontWeight = FontWeight.SemiBold,
+                fontFamily = fontFamily, fontWeight = LyricBackingWeight,
                 fontSize = typo.backingSp.sp, lineHeight = typo.backingLineHeightSp.sp,
             )
             val roles = PosterRoles(
@@ -295,6 +297,13 @@ internal fun FolioPosterLyricsPanel(
             val smallDrawings = small.mapIndexed { index, (layout, opposite) ->
                 PosterDrawing.Local(layout, if (opposite) duetAccentColor.copy(alpha = 0.78f) else fg2, index + 1)
             }
+            val backingDrawings = remember(projection.backingLines, width, smallStyle, measurer, fg2, duetAccentColor) {
+                projection.backingLines.map { line ->
+                    val layout = measurer.measure(line.text, smallStyle, constraints = Constraints(maxWidth = width))
+                    val ink = if (line.isOppositeSinger) duetAccentColor.copy(alpha = 0.78f) else fg2
+                    PosterDrawing.Backing(layout, ink, line)
+                }
+            }
             fun row(item: PosterRollKey, top: Float): PosterRollRow {
                 val role = roles.roleFor(item)
                 val scale = posterRoleScale(role, typo)
@@ -319,13 +328,14 @@ internal fun FolioPosterLyricsPanel(
                             add(lead)
                             translation?.let { add(PosterDrawing.Local(it, localInk, 0)) }
                             addAll(smallDrawings)
+                            addAll(backingDrawings)
                         } else listOf(lead)
                     }
                 }
                 val zoom = if (item is PosterRollKey.Gap) scale * 1.65f else scale
                 return posterRollRow(top, parts, zoom, opacity, panelWidth, localGap)
             }
-            val stage = remember(roles, layouts, pronunciation, translation, smallDrawings, density, typo, width, height, lines, fg2, duetAccentColor) {
+            val stage = remember(roles, layouts, pronunciation, translation, smallDrawings, backingDrawings, density, typo, width, height, lines, fg2, duetAccentColor) {
                 buildMap {
                     val focus = roles.focus
                     val anchor = panelHeight * 0.40f + with(density) { typo.mainLineHeightSp.sp.toPx() } / 2f
@@ -341,8 +351,8 @@ internal fun FolioPosterLyricsPanel(
                         }
                         put(focus.order, focusRow)
                         nextTop = focusRow.bounds.bottom + focusGap
-                    } else if (smallDrawings.isNotEmpty()) {
-                        put(-1, posterRollRow(anchor, smallDrawings, 1f, 1f, panelWidth, localGap))
+                    } else if (backingDrawings.isNotEmpty()) {
+                        put(-1, posterRollRow(anchor, backingDrawings, 1f, 1f, panelWidth, localGap))
                     }
                     for (item in roles.upcoming) {
                         val upcoming = row(item, nextTop)
@@ -372,8 +382,7 @@ internal fun FolioPosterLyricsPanel(
                         running = null
                     }
                     SideEffect {
-                        // Backing-word boundaries can arrive faster than the fade-in window.
-                        // Refresh the packed rows without restarting an active lyric handoff.
+                        // Refresh a changed stage without restarting an active lyric handoff.
                         if (running == null && settled.first == roles && settled.second != stage) {
                             settled = roles to stage
                         }
@@ -409,7 +418,10 @@ internal fun FolioPosterLyricsPanel(
                             translationY = pose.top
                             if (drawing is PosterDrawing.Gap) translationX = -28.dp.toPx() * pose.scale
                             val center = pose.top + drawing.height * pose.scale / 2f
-                            alpha = if (lowPerformance) pose.opacity else pose.opacity * posterEdgeOpacity(center, panelHeight)
+                            val inkOpacity = if (lowPerformance) pose.opacity else pose.opacity * posterEdgeOpacity(center, panelHeight)
+                            alpha = if (drawing is PosterDrawing.Backing) {
+                                inkOpacity * backingVocalOpacity(drawPosition.longValue, drawing.line.interval, animate)
+                            } else inkOpacity
                             transformOrigin = TransformOrigin(0f, 0f)
                             compositingStrategy = CompositingStrategy.ModulateAlpha
                         }
@@ -442,6 +454,16 @@ internal fun FolioPosterLyricsPanel(
                                 drawing.layout, drawing.ink,
                                 layer.posterTextSemantics(drawing.layout, poses.end.opacity > 0f),
                             )
+                            is PosterDrawing.Backing -> {
+                                val sweep = if (animate) remember(drawing.layout, drawing.line) {
+                                    PosterLyricSweep(drawing.layout, drawing.line)
+                                } else null
+                                val heightDp = with(density) { drawing.layout.size.height.toDp() }
+                                Canvas(layer.fillMaxWidth().height(heightDp)) {
+                                    if (sweep != null) sweep.draw(this, drawPosition.longValue, drawing.ink)
+                                    else drawText(drawing.layout, color = drawing.ink)
+                                }
+                            }
                         }
                     }
                 }

@@ -14,6 +14,20 @@ internal data class PosterRollBounds(val top: Float, val bottom: Float) {
         PosterRollBounds(lerp(top, end.top, progress), lerp(bottom, end.bottom, progress))
 }
 
+internal fun posterPackedPartBounds(
+    top: Float,
+    heights: List<Float>,
+    scale: Float,
+    gap: Float,
+): List<PosterRollBounds> {
+    var cursor = top
+    return heights.map { height ->
+        val part = PosterRollBounds(cursor, cursor + height * scale)
+        cursor = part.bottom + gap * scale
+        part
+    }
+}
+
 /** Completes one end of the roll in lyric order, including the rows that are hidden at this end. */
 internal fun posterRollBounds(
     orders: List<Int>,

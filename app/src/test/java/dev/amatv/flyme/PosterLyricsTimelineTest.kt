@@ -171,10 +171,10 @@ class PosterLyricsTimelineTest {
         assertEquals(1, projection.focusLeadIndex)
         assertTrue(isOppositeSingerLine(lead))
         assertFalse(isOppositeSingerLine(group))
-        assertEquals(
-            listOf(PosterTextLine("(echo)", true), PosterTextLine("(harmony)", false), PosterTextLine("(hum)", false)),
-            projection.smallLines,
-        )
+        fun visibleBacking(at: Long) = timeline.at(at).backingLines
+            .filter { at in it.interval }.map { it.text to it.isOppositeSinger }
+        assertTrue(projection.smallLines.isEmpty())
+        assertEquals(listOf("(echo)" to true, "(harmony)" to false, "(hum)" to false), visibleBacking(1_550))
         assertEquals(listOf(4, 5), projection.upcomingLeadIndices)
         val handoff = timeline.at(1_750)
         assertEquals(4, handoff.focusLeadIndex)
@@ -183,7 +183,8 @@ class PosterLyricsTimelineTest {
         val laterOverlap = timeline.at(2_150)
         assertEquals(5, laterOverlap.focusLeadIndex)
         assertEquals(4, laterOverlap.previousLeadIndex)
-        assertEquals(listOf(PosterTextLine("(harmony)", false)), laterOverlap.smallLines)
+        assertTrue(laterOverlap.smallLines.isEmpty())
+        assertEquals(listOf("(harmony)" to false), visibleBacking(2_150))
         assertEquals(0, PosterLyricsTimeline(listOf(group)).at(1_550).focusLeadIndex)
     }
 
@@ -191,7 +192,7 @@ class PosterLyricsTimelineTest {
     fun clockHoldsFocusAndSweepThroughJitterThenResetsForASeek() {
         val lyric = LyricLine(words = listOf(word("one", 1_500, 1_800), word("two", 1_800, 2_200)))
         val timeline = PosterLyricsTimeline(listOf(line("Before", 200, 1_500), lyric))
-        val clock = PosterPlaybackClock(1_470)
+        val clock = LyricPlaybackClock(1_470)
         val sweep = PosterSweepRow(
             listOf(KaraokeSweepWord(lyric.words[0], 0f, 30f), KaraokeSweepWord(lyric.words[1], 35f, 70f)),
             70f, 30f, isRtl = false, nextRowStartMs = null,
@@ -209,6 +210,30 @@ class PosterLyricsTimelineTest {
         clock.sample(2_600)
         assertEquals(0, timeline.at(clock.sample(500)).focusLeadIndex)
         assertEquals(2L, clock.seekGeneration)
+    }
+
+    @Test
+    fun harmonyStartAndEndChangeOnlyInkWhileThePosterKeepsItsMeasuredSlots() {
+        val lead = line("Focus", 1_000, 3_000).copy(
+            backgroundWords = listOf(word("one", 1_400, 1_600), word("two", 1_600, 1_900)),
+        )
+        val detached = LyricLine(words = listOf(word("echo", 1_400, 1_900).copy(isBackgroundVocal = true)))
+        val timeline = PosterLyricsTimeline(listOf(lead, detached, line("Next", 3_100, 4_000)))
+        val before = timeline.at(1_399)
+        assertEquals(0, before.focusLeadIndex)
+        assertEquals(listOf(2), before.upcomingLeadIndices)
+        assertEquals(listOf("(one two)", "(echo)"), before.backingLines.map { it.text })
+        fun packed(projection: PosterLyricsProjection) = posterPackedPartBounds(
+            top = 100f, heights = listOf(60f, 20f) + projection.backingLines.map { 28f }, scale = 1f, gap = 4f,
+        )
+        val slots = packed(before)
+        assertEquals(PosterRollBounds(100f, 160f), slots.first())
+        assertEquals(248f, slots.last().bottom)
+        for (ms in listOf(1_399L, 1_400L, 1_401L, 1_899L, 1_900L, 1_901L)) {
+            assertEquals(timeline.boundaryAt(1_399), timeline.boundaryAt(ms))
+            assertEquals(before, timeline.at(ms))
+            assertEquals(slots, packed(timeline.at(ms)))
+        }
     }
 
     @Test
