@@ -407,7 +407,7 @@ internal fun Modifier.folioPlayerGlass(
             )
         } else {
             val coordHolder = env.coordHolder
-            var selfCoords: LayoutCoordinates? = remember { null }
+            var selfCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
             val placeModifier = if (coordHolder != null) {
                 Modifier.onPlaced { coords -> selfCoords = coords }
             } else {

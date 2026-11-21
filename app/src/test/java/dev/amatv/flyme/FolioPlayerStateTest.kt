@@ -1178,4 +1178,57 @@ class FolioPlayerStateTest {
         assertFalse(shouldRunFolioMarquee(reducedMotion = false, lowPerformance = true, text = "Fortnight"))
         assertFalse(shouldRunFolioMarquee(reducedMotion = false, lowPerformance = false, text = ""))
     }
+
+    @Test
+    fun queueUnderlayPreservesNonQueueContentStateAndComputesFirstFrameScrollIndex() {
+        assertEquals(
+            FolioPlayerDisplayState.Poster,
+            resolveQueueUnderlayDisplayState(
+                tier = FolioTier.Wide,
+                posterPreferred = true,
+                lyricsAvailability = FolioLyricsAvailability.Ready,
+                hasTimedLyrics = true,
+            ),
+        )
+        assertEquals(
+            FolioPlayerDisplayState.Lyrics,
+            resolveQueueUnderlayDisplayState(
+                tier = FolioTier.Wide,
+                posterPreferred = false,
+                lyricsAvailability = FolioLyricsAvailability.Ready,
+                hasTimedLyrics = true,
+            ),
+        )
+        assertEquals(
+            FolioPlayerDisplayState.None,
+            resolveQueueUnderlayDisplayState(
+                tier = FolioTier.Narrow,
+                posterPreferred = true,
+                lyricsAvailability = FolioLyricsAvailability.Unavailable,
+                hasTimedLyrics = false,
+            ),
+        )
+
+        val t0 = sampleTrack("0", "Played 1")
+        val t1 = sampleTrack("1", "Played 2")
+        val t2 = sampleTrack("2", "Current")
+        val t3 = sampleTrack("3", "Next")
+        val snapshot = FolioQueueSnapshot(
+            rows = listOf(
+                FolioQueueRow("p0", t0, FolioQueueSectionKind.Played, 0, isCurrent = false),
+                FolioQueueRow("p1", t1, FolioQueueSectionKind.Played, 1, isCurrent = false),
+                FolioQueueRow("cur", t2, FolioQueueSectionKind.NowPlaying, 2, isCurrent = true),
+                FolioQueueRow("next", t3, FolioQueueSectionKind.UpNext, 3, isCurrent = false),
+            ),
+            playedCount = 2,
+            upNextCount = 1,
+            autoplayCount = 0,
+            isStation = false,
+            autoplayEnabled = false,
+            autoplayStatus = dev.amatv.playback.AutoplayStatus.Idle,
+        )
+        assertEquals(2, computeQueueInitialScrollIndex(snapshot, isHorizontalQueue = true))
+        // Vertical LazyColumn has [header-Played, p0, p1] = 3 items before header-NowPlaying at index 3.
+        assertEquals(3, computeQueueInitialScrollIndex(snapshot, isHorizontalQueue = false))
+    }
 }

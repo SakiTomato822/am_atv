@@ -271,37 +271,47 @@ internal fun FolioQueuePanel(
 ) {
     val currentMarker = LocalFolioControlAccent.current?.value?.compositeOver(accent) ?: accent
     val fontFamily = LocalFolioFontFamily.current
-    val currentRowIndex = remember(snapshot.rows) {
-        snapshot.rows.indexOfFirst { it.isCurrent }.coerceAtLeast(0)
+    val targetScrollIndex = remember(snapshot, tierSpec.isHorizontalQueue) {
+        computeQueueInitialScrollIndex(
+            snapshot = snapshot,
+            isHorizontalQueue = tierSpec.isHorizontalQueue,
+        )
     }
-    val listState = rememberLazyListState()
-    var hasScrolledOnce by remember { mutableStateOf(false) }
-    LaunchedEffect(currentRowIndex, snapshot.rows.size) {
-        if (snapshot.rows.isNotEmpty() && currentRowIndex in snapshot.rows.indices) {
-            if (!hasScrolledOnce || reducedMotion || lowPerformance) {
-                listState.scrollToItem(currentRowIndex)
-                hasScrolledOnce = true
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = targetScrollIndex)
+    var lastScrolledTarget by remember {
+        mutableStateOf(
+            if (snapshot.rows.isNotEmpty()) targetScrollIndex to snapshot.rows.size else null,
+        )
+    }
+    LaunchedEffect(targetScrollIndex, snapshot.rows.size) {
+        val nextTarget = targetScrollIndex to snapshot.rows.size
+        if (snapshot.rows.isNotEmpty() && lastScrolledTarget != nextTarget) {
+            if (lastScrolledTarget == null || reducedMotion || lowPerformance) {
+                listState.scrollToItem(targetScrollIndex)
             } else {
-                listState.animateScrollToItem(currentRowIndex)
+                listState.animateScrollToItem(targetScrollIndex)
             }
+            lastScrolledTarget = nextTarget
+        } else if (snapshot.rows.isEmpty()) {
+            lastScrolledTarget = null
         }
     }
     var previousHorizontalViewportWidth by remember { mutableIntStateOf(0) }
-    LaunchedEffect(tierSpec.isHorizontalQueue, listState, currentRowIndex, snapshot.rows.size) {
+    LaunchedEffect(tierSpec.isHorizontalQueue, listState, targetScrollIndex, snapshot.rows.size) {
         if (!tierSpec.isHorizontalQueue) return@LaunchedEffect
         snapshotFlow { listState.layoutInfo.viewportSize.width }
             .collect { viewportWidth ->
                 if (viewportWidth > 0 && previousHorizontalViewportWidth > 0 && viewportWidth != previousHorizontalViewportWidth) {
                     val info = listState.layoutInfo
-                    val visibleItem = info.visibleItemsInfo.firstOrNull { it.index == currentRowIndex }
+                    val visibleItem = info.visibleItemsInfo.firstOrNull { it.index == targetScrollIndex }
                     val inView = visibleItem != null &&
                         visibleItem.offset >= info.viewportStartOffset &&
                         visibleItem.offset + visibleItem.size <= info.viewportEndOffset
-                    if (!inView && currentRowIndex in snapshot.rows.indices) {
+                    if (!inView && targetScrollIndex in snapshot.rows.indices) {
                         if (reducedMotion || lowPerformance) {
-                            listState.scrollToItem(currentRowIndex)
+                            listState.scrollToItem(targetScrollIndex)
                         } else {
-                            listState.animateScrollToItem(currentRowIndex)
+                            listState.animateScrollToItem(targetScrollIndex)
                         }
                     }
                 }
