@@ -235,6 +235,23 @@ fun resolvePlayerDisplayState(
     else -> FolioPlayerDisplayState.Lyrics
 }
 
+/**
+ * Resolves the underlying non-queue display state so opening or closing the Queue overlay keeps
+ * the fading underlay (`Lyrics`, `Poster`, or `None`) intact instead of snapping away on frame 1.
+ */
+fun resolveQueueUnderlayDisplayState(
+    tier: FolioTier,
+    posterPreferred: Boolean,
+    lyricsAvailability: FolioLyricsAvailability,
+    hasTimedLyrics: Boolean,
+): FolioPlayerDisplayState = resolvePlayerDisplayState(
+    tier = tier,
+    queueOpen = false,
+    posterPreferred = posterPreferred,
+    lyricsAvailability = lyricsAvailability,
+    hasTimedLyrics = hasTimedLyrics,
+)
+
 fun resolvePlayerDisplayState(
     tier: FolioTier,
     queueOpen: Boolean,
@@ -771,6 +788,31 @@ fun buildFolioQueueSnapshot(
         autoplayEnabled = queueState.infinite,
         autoplayStatus = queueState.autoplayStatus,
     )
+}
+
+/**
+ * Computes the exact first-frame `LazyRow` / `LazyColumn` scroll item index for [snapshot]
+ * so opening the queue renders immediately on the active item without a frame-2 jump.
+ */
+fun computeQueueInitialScrollIndex(
+    snapshot: FolioQueueSnapshot,
+    isHorizontalQueue: Boolean,
+): Int {
+    if (snapshot.rows.isEmpty()) return 0
+    val currentRowIndex = snapshot.rows.indexOfFirst { it.isCurrent }.coerceAtLeast(0)
+    if (isHorizontalQueue) return currentRowIndex
+    var itemIndex = 0
+    for (kind in FolioQueueSectionKind.entries) {
+        val sectionRows = snapshot.rows.filter { it.section == kind }
+        val hasAutoplayLoading = kind == FolioQueueSectionKind.Autoplay &&
+            sectionRows.isEmpty() &&
+            snapshot.autoplayEnabled
+        if (sectionRows.isNotEmpty() || hasAutoplayLoading) {
+            if (sectionRows.any { it.isCurrent }) return itemIndex
+            itemIndex += 1 + if (sectionRows.isEmpty() && snapshot.autoplayStatus == AutoplayStatus.Loading) 1 else sectionRows.size
+        }
+    }
+    return currentRowIndex
 }
 
 fun posterLeadText(line: LyricLine): String =
