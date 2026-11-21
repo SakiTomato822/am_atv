@@ -7,9 +7,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
@@ -60,8 +58,7 @@ private val LyricPrimaryWeight = FontWeight.ExtraBold
  * architecture from `A.java` (Syllable/Karaoke), `U0.java` (Line-synced), and `L.java` (Static):
  * - Single-pass white glyphs masked by per-flex-line `BlendMode.DstIn` 4-stop horizontal gradients
  *   (no duplicate unlit/lit `FlowRow` layers, eliminating emphasis double-vision).
- * - Dedicated `bg_line_flexbox` below `karaoke_line_flexbox` (`marginTop = 4dp`, `24sp` Bold,
- *   lit alpha `0.35f`, unlit alpha `0.18f`) for `ttm:role="x-bg"` background vocals.
+ * - Dedicated `bg_line_flexbox` below `karaoke_line_flexbox` for `ttm:role="x-bg"` background vocals.
  * - Duet alignment (`0.85f` width fraction when `isMultiAgentSong`, right-aligned when `isOppositeAgent`).
  * - Stacked pronunciation above words (`17sp` SemiBold, lit alpha `0.35f`) and translation below
  *   (`24sp` SemiBold for main translation, `19sp` SemiBold for background vocal translation).
@@ -74,6 +71,7 @@ internal fun KaraokeLyricLine(
     positionState: State<Long>,
     wholeLineHighlight: KaraokeRowHighlight? = null,
     localizationSize: (TextUnit) -> TextUnit = { it },
+    attachedBacking: List<LyricLine> = emptyList(),
 ) {
     val hasMainPronunciation = !line.pronunciationText.isNullOrBlank() ||
         line.words.any { !it.pronunciationText.isNullOrBlank() }
@@ -154,7 +152,7 @@ internal fun KaraokeLyricLine(
                         text = "(${line.backgroundText})",
                         fontSize = staticBackgroundTypography.fontSizeSp.sp,
                         lineHeight = staticBackgroundTypography.lineHeightSp.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = LyricBackingWeight,
                         color = FlymeInk.copy(alpha = 0.52f),
                         modifier = Modifier.padding(top = 4.dp),
                     )
@@ -180,13 +178,6 @@ internal fun KaraokeLyricLine(
             derivedStateOf { isActive && positionState.value < line.mainEndMs }
         }
         singing
-    }
-    val isBackgroundActive by remember(line, isActive, positionState, wholeLineHighlight != null) {
-        derivedStateOf {
-            isActive && line.backgroundWords.isNotEmpty() &&
-                positionState.value < line.backgroundWords.maxOf { it.endMs } &&
-                (wholeLineHighlight == null || positionState.value >= line.backgroundWords.minOf { it.startMs })
-        }
     }
     val isRtl = remember(line.text) { LyricTimeline.isRightToLeft(line.text) }
     val alignEnd = line.isOppositeAgent != isRtl
@@ -243,19 +234,6 @@ internal fun KaraokeLyricLine(
             derivedStateOf { if (beforeStart.value) 0f else timedMainPresence.value }
         }
     }
-    val backgroundPresence = if (wholeLineHighlight != null) {
-        remember(isBackgroundActive) { mutableFloatStateOf(if (isBackgroundActive) 1f else 0f) }
-    } else {
-        val timedBackgroundPresence = animateVocalPresence(
-            isBackgroundActive, isLineSyncMode, "lyric-background-presence",
-        )
-        // Keep frame-varying alpha in draw/layer scopes.
-        val continuousBackgroundPresence = rememberContinuousVocalPresence(timedBackgroundPresence)
-        remember(beforeStart, continuousBackgroundPresence) {
-            derivedStateOf { if (beforeStart.value) 0f else continuousBackgroundPresence.value }
-        }
-    }
-
     val unlitAlpha = flymeLyricAlpha(MotionTokens.KaraokeSecondaryAlpha)
     val fullLineStartPadding = if (alignEnd) 0.dp else 6.dp
     val fullLineEndPadding = if (alignEnd) 6.dp else 0.dp
@@ -266,19 +244,6 @@ internal fun KaraokeLyricLine(
     val mainTranslationFontSize = localizationSize(if (compactMainLocalization) 21.sp else 24.sp)
     val mainTranslationLineHeight = localizationSize(if (compactMainLocalization) 25.sp else 29.sp)
     val mainLocalizationGap = if (compactMainLocalization) 2.dp else 4.dp
-    val backgroundTypography = backgroundVocalTypography(
-        isStaticMode = false,
-        compactMainLocalization = compactMainLocalization,
-        compactBackgroundLocalization = compactBackgroundLocalization,
-    )
-    val backgroundFontSize = backgroundTypography.fontSizeSp.sp
-    val backgroundLineHeight = backgroundTypography.lineHeightSp.sp
-    val backgroundPronunciationFontSize = localizationSize(backgroundTypography.pronunciationSizeSp.sp)
-    val backgroundPronunciationLineHeight = localizationSize(backgroundTypography.pronunciationLineHeightSp.sp)
-    val backgroundTranslationFontSize = localizationSize(backgroundTypography.translationSizeSp.sp)
-    val backgroundTranslationLineHeight = localizationSize(backgroundTypography.translationLineHeightSp.sp)
-    val backgroundLocalizationGap = backgroundTypography.localizationGapDp.dp
-
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -305,11 +270,9 @@ internal fun KaraokeLyricLine(
                 LineSyncedContent(
                     line = line,
                     activePresence = activePresence,
-                    backgroundPresence = backgroundPresence,
                     unlitAlpha = unlitAlpha,
                     alignEnd = alignEnd,
                     compactMainLocalization = compactMainLocalization,
-                    compactBackgroundLocalization = compactBackgroundLocalization,
                     localizationSize = localizationSize,
                 )
             } else {
@@ -376,71 +339,18 @@ internal fun KaraokeLyricLine(
                         },
                     )
                 }
-                // Background vocal FullWidthAlphaGradientFlexboxLayout (bg_line_flexbox)
-                if (line.backgroundWords.isNotEmpty()) {
-                    Spacer(Modifier.height(4.dp))
-                    if (!line.backgroundPronunciationText.isNullOrBlank() &&
-                        line.backgroundWords.none { !it.pronunciationText.isNullOrBlank() }
-                    ) {
-                        Text(
-                            text = line.backgroundPronunciationText,
-                            fontSize = backgroundPronunciationFontSize,
-                            lineHeight = backgroundPronunciationLineHeight,
-                            fontWeight = FontWeight.SemiBold,
-                            color = FlymeInk,
-                            textAlign = if (alignEnd) TextAlign.End else TextAlign.Start,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(
-                                    start = fullLineStartPadding,
-                                    end = fullLineEndPadding,
-                                    bottom = backgroundLocalizationGap,
-                                )
-                                .graphicsLayer {
-                                alpha = unlitAlpha +
-                                    (MotionTokens.KaraokeBgVocalLitAlpha - unlitAlpha) *
-                                    backgroundPresence.value
-                            },
-                        )
-                    }
-                    KaraokeVocalFlexbox(
-                        line = line,
-                        words = line.backgroundWords,
-                        isBackgroundVocal = true,
-                        isActive = isBackgroundActive,
-                        activePresence = backgroundPresence,
-                        unlitAlpha = unlitAlpha,
-                        alignEnd = alignEnd,
-                        positionState = positionState,
-                        fontSize = backgroundFontSize,
-                        lineHeight = backgroundLineHeight,
-                        pronunciationFontSize = backgroundPronunciationFontSize,
-                        pronunciationLineHeight = backgroundPronunciationLineHeight,
-                        pronunciationGap = backgroundLocalizationGap,
-                        sweepEnabled = wholeLineHighlight == null,
-                    )
-                }
-                if (!line.backgroundTranslation.isNullOrBlank()) {
-                    Text(
-                        text = line.backgroundTranslation,
-                        fontSize = backgroundTranslationFontSize,
-                        lineHeight = backgroundTranslationLineHeight,
-                        fontWeight = FontWeight.SemiBold,
-                        color = FlymeInk,
-                        textAlign = if (alignEnd) TextAlign.End else TextAlign.Start,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(
-                                start = fullLineStartPadding,
-                                end = fullLineEndPadding,
-                                top = backgroundLocalizationGap,
-                            )
-                            .graphicsLayer {
-                            alpha = unlitAlpha +
-                                (MotionTokens.KaraokeBgVocalLitAlpha - unlitAlpha) * backgroundPresence.value
-                        },
-                    )
-                }
+            }
+            if (line.backgroundWords.isNotEmpty()) {
+                ScrollingBackingVocals(
+                    line, positionState, wholeLineHighlight == null, unlitAlpha, alignEnd,
+                    compactMainLocalization, localizationSize,
+                )
+            }
+            for (backing in attachedBacking) {
+                ScrollingBackingVocals(
+                    backing, positionState, wholeLineHighlight == null, unlitAlpha, alignEnd,
+                    compactMainLocalization, localizationSize,
+                )
             }
         }
     }
@@ -515,11 +425,9 @@ private fun animateVocalPresence(isActive: Boolean, isLineSyncMode: Boolean, lab
 private fun LineSyncedContent(
     line: LyricLine,
     activePresence: State<Float>,
-    backgroundPresence: State<Float>,
     unlitAlpha: Float,
     alignEnd: Boolean,
     compactMainLocalization: Boolean,
-    compactBackgroundLocalization: Boolean,
     localizationSize: (TextUnit) -> TextUnit,
 ) {
     val mainAlphaModifier = Modifier.graphicsLayer {
@@ -527,9 +435,6 @@ private fun LineSyncedContent(
     }
     val subAlphaModifier = Modifier.graphicsLayer {
         alpha = unlitAlpha + (MotionTokens.KaraokeBgVocalLitAlpha - unlitAlpha) * activePresence.value
-    }
-    val backgroundAlphaModifier = Modifier.graphicsLayer {
-        alpha = unlitAlpha + (MotionTokens.KaraokeBgVocalLitAlpha - unlitAlpha) * backgroundPresence.value
     }
     val textAlign = if (alignEnd) TextAlign.End else TextAlign.Start
     val mainFontSize = if (compactMainLocalization) 31.sp else MotionTokens.KaraokeMainFontSizeSp.sp
@@ -539,19 +444,6 @@ private fun LineSyncedContent(
     val translationFontSize = localizationSize(if (compactMainLocalization) 21.sp else 24.sp)
     val translationLineHeight = localizationSize(if (compactMainLocalization) 25.sp else 29.sp)
     val mainGap = if (compactMainLocalization) 2.dp else 4.dp
-    val backgroundTypography = backgroundVocalTypography(
-        isStaticMode = false,
-        compactMainLocalization = compactMainLocalization,
-        compactBackgroundLocalization = compactBackgroundLocalization,
-    )
-    val backgroundFontSize = backgroundTypography.fontSizeSp.sp
-    val backgroundLineHeight = backgroundTypography.lineHeightSp.sp
-    val backgroundPronunciationFontSize = localizationSize(backgroundTypography.pronunciationSizeSp.sp)
-    val backgroundPronunciationLineHeight = localizationSize(backgroundTypography.pronunciationLineHeightSp.sp)
-    val backgroundTranslationFontSize = localizationSize(backgroundTypography.translationSizeSp.sp)
-    val backgroundTranslationLineHeight = localizationSize(backgroundTypography.translationLineHeightSp.sp)
-    val backgroundGap = backgroundTypography.localizationGapDp.dp
-
     if (!line.pronunciationText.isNullOrBlank()) {
         Text(
             text = line.pronunciationText,
@@ -583,38 +475,85 @@ private fun LineSyncedContent(
             modifier = Modifier.fillMaxWidth().then(subAlphaModifier).padding(top = mainGap),
         )
     }
-    if (line.backgroundWords.isNotEmpty()) {
-        if (!line.backgroundPronunciationText.isNullOrBlank()) {
+}
+
+@Composable
+private fun ScrollingBackingVocals(
+    line: LyricLine,
+    position: State<Long>,
+    playSweep: Boolean,
+    unlitAlpha: Float,
+    alignEnd: Boolean,
+    compactMainLocalization: Boolean,
+    localizationSize: (TextUnit) -> TextUnit,
+) {
+    val words = line.backgroundWords
+    val interval = remember(words) { words.backingVocalInterval() }
+    val sweepPosition = remember(interval, position) {
+        derivedStateOf { position.value.let { if (it in interval) it else interval.first } }
+    }
+    val animate = playSweep && !LocalFolioReducedMotion.current
+    val compact = !line.backgroundTranslation.isNullOrBlank() &&
+        (!line.backgroundPronunciationText.isNullOrBlank() || words.any { !it.pronunciationText.isNullOrBlank() })
+    val typography = backgroundVocalTypography(false, compactMainLocalization, compact)
+    val pronunciationSize = localizationSize(typography.pronunciationSizeSp.sp)
+    val pronunciationHeight = localizationSize(typography.pronunciationLineHeightSp.sp)
+    val gap = typography.localizationGapDp.dp
+    val textAlign = if (alignEnd) TextAlign.End else TextAlign.Start
+    val litAlpha = flymeLyricAlpha(MotionTokens.KaraokeBgVocalLitAlpha)
+    val localModifier = Modifier.fillMaxWidth()
+        .padding(start = if (alignEnd) 0.dp else 6.dp, end = if (alignEnd) 6.dp else 0.dp)
+    val wordTimed = line.timing == LyricTiming.Word
+
+    // Keep the measured block and its mask in place while only its layer opacity changes.
+    Column(Modifier.fillMaxWidth().graphicsLayer {
+        alpha = backingVocalOpacity(position.value, interval, animate)
+        compositingStrategy = CompositingStrategy.ModulateAlpha
+    }.padding(top = 4.dp)) {
+        if (!line.backgroundPronunciationText.isNullOrBlank() &&
+            (!wordTimed || words.none { !it.pronunciationText.isNullOrBlank() })
+        ) {
             Text(
                 text = line.backgroundPronunciationText,
-                fontSize = backgroundPronunciationFontSize,
-                lineHeight = backgroundPronunciationLineHeight,
+                fontSize = pronunciationSize,
+                lineHeight = pronunciationHeight,
                 fontWeight = FontWeight.SemiBold,
-                color = FlymeInk,
+                color = FlymeInk.copy(alpha = litAlpha),
                 textAlign = textAlign,
-                modifier = Modifier.fillMaxWidth().then(backgroundAlphaModifier).padding(top = backgroundGap),
+                modifier = localModifier.padding(bottom = gap),
             )
         }
-        Text(
-            text = "(${line.backgroundText})",
-            fontSize = backgroundFontSize,
-            lineHeight = backgroundLineHeight,
-            fontWeight = FontWeight.SemiBold,
-            color = FlymeInk,
-            textAlign = textAlign,
-            modifier = Modifier.fillMaxWidth().then(backgroundAlphaModifier).padding(top = backgroundGap),
-        )
-    }
-    if (!line.backgroundTranslation.isNullOrBlank()) {
-        Text(
-            text = line.backgroundTranslation,
-            fontSize = backgroundTranslationFontSize,
-            lineHeight = backgroundTranslationLineHeight,
-            fontWeight = FontWeight.SemiBold,
-            color = FlymeInk,
-            textAlign = textAlign,
-            modifier = Modifier.fillMaxWidth().then(backgroundAlphaModifier).padding(top = backgroundGap),
-        )
+        if (wordTimed) {
+            val presence = remember { mutableFloatStateOf(1f) }
+            KaraokeVocalFlexbox(
+                line = line, words = words, isBackgroundVocal = true, isActive = true, activePresence = presence,
+                unlitAlpha = unlitAlpha, alignEnd = alignEnd, positionState = sweepPosition,
+                fontSize = typography.fontSizeSp.sp, lineHeight = typography.lineHeightSp.sp,
+                pronunciationFontSize = pronunciationSize, pronunciationLineHeight = pronunciationHeight,
+                pronunciationGap = gap, sweepEnabled = animate,
+            )
+        } else {
+            Text(
+                text = "(${line.backgroundText})",
+                fontSize = typography.fontSizeSp.sp,
+                lineHeight = typography.lineHeightSp.sp,
+                fontWeight = LyricBackingWeight,
+                color = FlymeInk.copy(alpha = litAlpha),
+                textAlign = textAlign,
+                modifier = localModifier,
+            )
+        }
+        if (!line.backgroundTranslation.isNullOrBlank()) {
+            Text(
+                text = line.backgroundTranslation,
+                fontSize = localizationSize(typography.translationSizeSp.sp),
+                lineHeight = localizationSize(typography.translationLineHeightSp.sp),
+                fontWeight = FontWeight.SemiBold,
+                color = FlymeInk.copy(alpha = litAlpha),
+                textAlign = textAlign,
+                modifier = localModifier.padding(top = gap),
+            )
+        }
     }
 }
 
@@ -990,7 +929,7 @@ private fun KaraokeWordItem(
                 fontSize = fontSize,
                 lineHeight = lineHeight,
                 fontWeight = if (isBackgroundVocal) {
-                    FontWeight.SemiBold
+                    LyricBackingWeight
                 } else LyricPrimaryWeight,
                 color = FlymeInk,
             )
@@ -1015,7 +954,7 @@ private fun KaraokeWordItem(
                             fontSize = fontSize,
                             lineHeight = lineHeight,
                             fontWeight = if (isBackgroundVocal) {
-                                FontWeight.SemiBold
+                                LyricBackingWeight
                             } else LyricPrimaryWeight,
                             color = FlymeInk,
                         )
@@ -1064,7 +1003,7 @@ private fun KaraokeWordItem(
                                     fontSize = fontSize,
                                     lineHeight = lineHeight,
                                     fontWeight = if (isBackgroundVocal) {
-                                        FontWeight.SemiBold
+                                        LyricBackingWeight
                                     } else LyricPrimaryWeight,
                                     color = Color.Transparent,
                                     style = shadowStyle,
@@ -1085,7 +1024,7 @@ private fun KaraokeWordItem(
                                 fontSize = fontSize,
                                 lineHeight = lineHeight,
                                 fontWeight = if (isBackgroundVocal) {
-                                    FontWeight.SemiBold
+                                    LyricBackingWeight
                                 } else LyricPrimaryWeight,
                                 color = FlymeInk,
                                 onTextLayout = { result ->

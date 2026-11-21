@@ -41,7 +41,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -79,7 +78,7 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun FolioScrollingLyricsPanel(
     lines: List<LyricLine>,
-    positionState: State<Long>,
+    positionState: FolioPlaybackPosition,
     offsetMs: Long,
     lowPerformance: Boolean,
     controlsVisible: Boolean,
@@ -100,7 +99,7 @@ internal fun FolioScrollingLyricsPanel(
     ) {
         Box(modifier = modifier.fillMaxSize()) {
             CarLyricRows(
-                lines = lines,
+                sourceLines = lines,
                 position = positionState,
                 offsetMs = offsetMs,
                 lowPerformance = lowPerformance,

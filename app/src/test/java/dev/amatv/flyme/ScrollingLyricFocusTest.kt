@@ -11,6 +11,21 @@ import org.junit.Test
 
 class ScrollingLyricFocusTest {
     @Test
+    fun detachedBackingIsReservedBelowTheLeadWithoutChangingFocusAtEitherBoundary() {
+        val lead = LyricLine(listOf(LyricWord("lead", 1_000, 3_000)))
+        val harmony = LyricLine(listOf(LyricWord("harmony", 1_900, 2_400, isBackgroundVocal = true)))
+        val content = scrollingLyricContent(listOf(lead, harmony))
+        assertEquals(listOf(lead), content.leads)
+        val backing = content.attachedBacking.getValue(0).single()
+        assertTrue(backing.words.isEmpty())
+        assertEquals(harmony.words, backing.backgroundWords)
+        val schedule = LyricTimeline.Schedule(content.leads)
+        val before = scrollingLyricFocusAt(content.leads, schedule, 1_899)
+        for (ms in listOf(1_900L, 1_901L, 2_399L, 2_400L, 2_401L)) {
+            assertEquals(before, scrollingLyricFocusAt(content.leads, schedule, ms))
+        }
+    }
+    @Test
     fun localizationFollowsHalfOfTheMainTextScaleChange() {
         assertEquals(0.875f, scrollingLyricLocalizationScale(0.75f), 0f)
         assertEquals(1f, scrollingLyricLocalizationScale(1f), 0f)

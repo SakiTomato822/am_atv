@@ -35,12 +35,14 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
@@ -115,8 +117,8 @@ internal fun CarLyricFlow(track: Track, palette: List<Color>) {
 
 @Composable
 internal fun CarLyricRows(
-    lines: List<LyricLine>,
-    position: State<Long>,
+    sourceLines: List<LyricLine>,
+    position: FolioPlaybackPosition,
     offsetMs: Long,
     lowPerformance: Boolean,
     controlsVisible: Boolean,
@@ -126,7 +128,7 @@ internal fun CarLyricRows(
     onReveal: () -> Unit,
     onLineSeek: (Long) -> Unit,
 ) {
-    val timed = remember(lines) { lines.any { !it.isStatic } }
+    val timed = remember(sourceLines) { sourceLines.any { !it.isStatic } }
     val clipped = Modifier.fillMaxSize().clipToBounds()
     val edgeFade = if (lowPerformance) Modifier else {
         Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
@@ -140,22 +142,33 @@ internal fun CarLyricRows(
     if (!timed) {
         LazyColumn(panel, contentPadding = PaddingValues(top = 35.dp, bottom = 48.dp),
             verticalArrangement = Arrangement.spacedBy(LyricGap)) {
-            itemsIndexed(lines) { _, line -> FlymeKaraokeLine(line, false, position, fontScale, static = true) }
+            itemsIndexed(sourceLines) { _, line -> FlymeKaraokeLine(line, false, position, fontScale, static = true) }
         }
         return
     }
+    val content = remember(sourceLines) { scrollingLyricContent(sourceLines) }
+    val lines = content.leads
     val schedule = remember(lines) { LyricTimeline.Schedule(lines) }
-    val focus by remember(lines, schedule, offsetMs, position) {
-        derivedStateOf { scrollingLyricFocusAt(lines, schedule, position.value + offsetMs) }
+    val clock = remember(content, position, offsetMs) {
+        Snapshot.withoutReadObservation {
+            LyricPlaybackClock((position.value + offsetMs).coerceAtLeast(0L))
+        }
     }
-    // Before the first line and in breaks of 7 s or more the list opens a slot for the waiting dots: the
-    // next line and those below it move down, and the slot takes the anchor until that line starts.
-    val lyricPosition = remember(position, offsetMs) {
-        derivedStateOf { (position.value + offsetMs).coerceAtLeast(0L) }
+    val lyricPosition = remember(clock) { mutableLongStateOf(clock.positionMs) }
+    val initialSeekVersion = remember(clock) { Snapshot.withoutReadObservation { position.seekVersion } }
+    LaunchedEffect(clock) {
+        var seekVersion = initialSeekVersion
+        snapshotFlow { position.value to position.seekVersion }.collect { (sample, version) ->
+            lyricPosition.longValue = clock.sample((sample + offsetMs).coerceAtLeast(0L), seek = version != seekVersion)
+            seekVersion = version
+        }
+    }
+    val focus by remember(lines, schedule, lyricPosition) {
+        derivedStateOf { scrollingLyricFocusAt(lines, schedule, lyricPosition.longValue) }
     }
     if (lowPerformance) {
         InstantScrollingLyrics(
-            lines, focus, lyricPosition, fontScale, anchorFraction,
+            content, focus, lyricPosition, fontScale, anchorFraction,
             controlsVisible, canSeek, onReveal, onLineSeek, panel,
         )
         return
@@ -195,8 +208,7 @@ internal fun CarLyricRows(
         var dotsHeight by remember { mutableIntStateOf(0) }
         val slot = dotsHeight + gap
         val topOf = { index: Int -> var top = 0f; for (i in 0 until index) top += heights[i] + gap; top }
-        // Only the first placement waits for measurement. Some lines (background vocals alone) are 0 tall
-        // until they are sung and collapse again after, so waiting on every line froze the list mid-song.
+        // Only the first placement waits for measurement.
         val measured by remember(heights, anchorIndex, waiting) {
             derivedStateOf { if (waiting != null) dotsHeight > 0 else heights[anchorIndex] > 0 }
         }
@@ -243,7 +255,10 @@ internal fun CarLyricRows(
                         if (controlsVisible && canSeek && !line.isStatic) onLineSeek(line.startMs) else onReveal()
                     }
                     .blur(blur)) {
-                    FlymeKaraokeLine(line, isCurrent, lyricPosition, fontScale, static = false)
+                    FlymeKaraokeLine(
+                        line, isCurrent, lyricPosition, fontScale, static = false,
+                        attachedBacking = content.attachedBacking[index].orEmpty(),
+                    )
                 }
             }
         }
@@ -265,7 +280,7 @@ internal fun CarLyricRows(
 
 @Composable
 private fun InstantScrollingLyrics(
-    lines: List<LyricLine>,
+    content: ScrollingLyricContent,
     focus: ScrollingLyricFocus,
     position: State<Long>,
     fontScale: Float,
@@ -276,6 +291,7 @@ private fun InstantScrollingLyrics(
     onLineSeek: (Long) -> Unit,
     modifier: Modifier,
 ) {
+    val lines = content.leads
     val finalLeadIndex = remember(lines) { lines.indexOfLast { !it.isStatic && it.words.any { word -> !word.isBackgroundVocal } } }
     val opacityLadder = lineOpacityLadder(liveBlur = false)
     BoxWithConstraints(modifier) {
@@ -330,7 +346,10 @@ private fun InstantScrollingLyrics(
                                 if (controlsVisible && canSeek && !line.isStatic) onLineSeek(line.startMs) else onReveal()
                             },
                     ) {
-                        FlymeKaraokeLine(line, active, position, fontScale, static = false, wholeLineHighlight = highlight)
+                        FlymeKaraokeLine(
+                            line, active, position, fontScale, static = false, wholeLineHighlight = highlight,
+                            attachedBacking = content.attachedBacking[index].orEmpty(),
+                        )
                     }
                 }
             }
@@ -352,6 +371,31 @@ private fun InstantScrollingLyrics(
 }
 
 private const val InterludeItemKey = -1
+
+internal data class ScrollingLyricContent(
+    val leads: List<LyricLine>,
+    val attachedBacking: Map<Int, List<LyricLine>>,
+)
+
+internal fun scrollingLyricContent(lines: List<LyricLine>): ScrollingLyricContent {
+    val normalized = lines.map { line ->
+        if (line.isStatic || line.words.none { it.isBackgroundVocal }) line else line.copy(
+            words = line.words.filterNot { it.isBackgroundVocal },
+            backgroundWords = line.backingVocalWords(),
+            lineStartMs = line.startMs,
+        )
+    }
+    val (backingOnly, leads) = normalized.partition { !it.isStatic && it.words.isEmpty() && it.backgroundWords.isNotEmpty() }
+    if (leads.isEmpty()) {
+        return ScrollingLyricContent(listOf(LyricLine(words = emptyList())), mapOf(0 to backingOnly))
+    }
+    val attached = backingOnly.groupBy { backing ->
+        // A detached voice belongs below the lead that is in focus when it starts.
+        val startMs = backing.backgroundWords.backingVocalInterval().first
+        leads.indexOfLast { !it.isStatic && it.startMs <= startMs }.coerceAtLeast(0)
+    }
+    return ScrollingLyricContent(leads, attached)
+}
 
 internal data class ScrollingLyricFocus(
     val anchorIndex: Int,
@@ -413,6 +457,7 @@ private fun FlymeKaraokeLine(
     textScale: Float,
     static: Boolean,
     wholeLineHighlight: KaraokeRowHighlight? = null,
+    attachedBacking: List<LyricLine> = emptyList(),
 ) {
     val density = LocalDensity.current
     val mainDensity = Density(density.density, density.fontScale * textScale)
@@ -424,6 +469,7 @@ private fun FlymeKaraokeLine(
             isStaticMode = static,
             positionState = position,
             wholeLineHighlight = wholeLineHighlight,
+            attachedBacking = attachedBacking,
             localizationSize = { size ->
                 // Apply the partial scale with the system font scale, then express it in the row's density.
                 val localizedDp = with(density) { (size * localizationScale).toDp() }
