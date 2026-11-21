@@ -50,7 +50,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
         tokenStore = tokenStore,
         bundledToken = BuildConfig.MUSICKIT_DEVELOPER_TOKEN,
     )
-    private val bridge = MusicKitBridge(appContext)
+    private val bridge = MusicKitBridge(appContext) { api.songPreviewUrl(it) }
     // Stations the native SDK cannot queue; null in variants without a second engine.
     private val stationEngine = StationPlaybackEngine.create(appContext)
     @Volatile private var stationEngineActive = false

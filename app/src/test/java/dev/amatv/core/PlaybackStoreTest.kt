@@ -359,6 +359,7 @@ class PlaybackStoreTest {
         override fun saveFadeAlbums(fade: Boolean) = Unit
         override fun saveFadeStations(fade: Boolean) = Unit
         override fun saveFadePlaylists(fade: Boolean) = Unit
+        override fun saveLoudnessMode(mode: dev.amatv.integration.LoudnessMode) = Unit
         override fun saveStationsAsSongs(asSongs: Boolean) = Unit
         override fun saveCacheDiskEnabled(enabled: Boolean) = Unit
         override fun saveCachePrefetchNextTwo(enabled: Boolean) = Unit

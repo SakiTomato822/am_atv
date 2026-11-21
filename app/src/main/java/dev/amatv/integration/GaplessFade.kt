@@ -4,19 +4,18 @@ import android.media.audiofx.AudioEffect
 import android.media.audiofx.DynamicsProcessing
 import android.media.audiofx.Visualizer
 import android.util.Log
-import kotlin.math.abs
 
 /**
  * Turns the native player's output down and up again around a gapless song change. MusicKit has
  * no volume or crossfade API, and plays one song at a time, so this is a fade-out followed by a
- * fade-in (no overlap), applied as DynamicsProcessing input gain on MusicKit's audio session.
- * Only the gain stage is in use: no EQ, compressor or limiter touches the sound.
+ * fade-in, applied together with Sound Check at the input of MusicKit's DynamicsProcessing effect.
  */
 internal class GaplessFade {
     private var effect: DynamicsProcessing? = null
     private var sessionId = 0
     private var attached = false
     private var appliedDb = 0f
+    private var limiterEnabled = false
 
     fun attachment(session: Int): String = when {
         session <= 0 -> "session-unavailable"
@@ -24,33 +23,53 @@ internal class GaplessFade {
         else -> "not-attached"
     }
 
-    /** [db] is the gain in decibels, 0 or below. A session of 0 (unknown) leaves the sound alone. */
-    fun apply(session: Int, db: Float) {
-        if (session <= 0) return
-        val target = if (db > -0.05f) 0f else db
-        if (effect == null || sessionId != session) {
-            if (target == 0f) return
+    /** Returns the normalization component successfully applied to the current audio session. */
+    fun apply(session: Int, fadeDb: Float, loudnessDb: Float, limit: Boolean): Float {
+        if (session <= 0) return 0f
+        val target = combinedPlaybackGain(loudnessDb, fadeDb)
+        if (sessionId != session) {
             release()
+            if (target == 0f && !limit) return 0f
+            sessionId = session
             effect = runCatching {
                 val config = DynamicsProcessing.Config.Builder(
                     DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION, CHANNELS,
-                    false, 0, false, 0, false, 0, false,
+                    false, 0, false, 0, false, 0, true,
                 ).build()
-                DynamicsProcessing(0, session, config).apply {
-                    attached = setEnabled(true) == AudioEffect.SUCCESS
+                val processor = DynamicsProcessing(0, session, config)
+                try {
+                    processor.setLimiterAllChannelsTo(limiter(limit))
+                    check(processor.setEnabled(true) == AudioEffect.SUCCESS)
+                    processor
+                } catch (e: Exception) {
+                    processor.release()
+                    throw e
                 }
-            }.onFailure { Log.w(TAG, "Fade unavailable on session $session: ${it.javaClass.simpleName}") }
-                .getOrNull() ?: return
-            sessionId = session
-            appliedDb = 0f
+            }.onFailure { Log.w(TAG, "DynamicsProcessing unavailable on session $session: ${it.javaClass.simpleName}") }
+                .getOrNull()
+            attached = effect != null
+            limiterEnabled = limit
         }
-        if (abs(target - appliedDb) < 0.1f) return
-        runCatching { effect?.setInputGainAllChannelsTo(target) }.onSuccess { appliedDb = target }
+        val processor = effect ?: return 0f
+        return runCatching {
+            if (limit && !limiterEnabled) {
+                processor.setLimiterAllChannelsTo(limiter(true))
+                limiterEnabled = true
+            }
+            if (target != appliedDb) {
+                processor.setInputGainAllChannelsTo(target)
+                appliedDb = target
+            }
+            if (!limit && limiterEnabled) {
+                processor.setLimiterAllChannelsTo(limiter(false))
+                limiterEnabled = false
+            }
+            loudnessDb
+        }.getOrDefault(0f)
     }
 
     fun reset() {
-        if (appliedDb != 0f) runCatching { effect?.setInputGainAllChannelsTo(0f) }
-        appliedDb = 0f
+        apply(sessionId, fadeDb = 0f, loudnessDb = 0f, limit = false)
     }
 
     fun release() {
@@ -59,11 +78,16 @@ internal class GaplessFade {
         sessionId = 0
         attached = false
         appliedDb = 0f
+        limiterEnabled = false
     }
 
     private companion object {
         const val TAG = "AMATV-Fade"
         const val CHANNELS = 2
+
+        fun limiter(enabled: Boolean) = DynamicsProcessing.Limiter(
+            true, enabled, 0, 1f, 60f, 100f, LOUDNESS_CEILING_DB, 0f,
+        )
     }
 }
 

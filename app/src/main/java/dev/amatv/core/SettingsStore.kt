@@ -3,7 +3,9 @@ package dev.amatv.core
 import android.content.Context
 import dev.amatv.BuildConfig
 import dev.amatv.integration.ContentCache
-import dev.amatv.integration.FlymePlaybackOptions
+import dev.amatv.integration.FLYME_PLAYBACK_PREFS
+import dev.amatv.integration.LOUDNESS_PREF
+import dev.amatv.integration.LoudnessMode
 import dev.amatv.integration.LyricTextSize
 import dev.amatv.integration.PlaybackRepeatMode
 import dev.amatv.integration.QueuePreferences
@@ -41,6 +43,7 @@ data class SettingsState(
     val fadeStations: Boolean = true,
     val fadePlaylists: Boolean = true,
     val stationsAsSongs: Boolean = false,
+    val loudnessMode: LoudnessMode = LoudnessMode.Loud,
 
     // 缓存偏好 (content-cache)
     val cacheDiskEnabled: Boolean = true,
@@ -97,6 +100,7 @@ interface SettingsStorage {
     fun saveFadeStations(fade: Boolean)
     fun saveFadePlaylists(fade: Boolean)
     fun saveStationsAsSongs(asSongs: Boolean)
+    fun saveLoudnessMode(mode: LoudnessMode)
 
     fun saveCacheDiskEnabled(enabled: Boolean)
     fun saveCachePrefetchNextTwo(enabled: Boolean)
@@ -105,7 +109,7 @@ interface SettingsStorage {
 class SharedPreferencesSettingsStorage(context: Context) : SettingsStorage {
     private val appContext = context.applicationContext
     private val playbackPrefs = appContext.getSharedPreferences("am_atv_playback_preferences", Context.MODE_PRIVATE)
-    private val flymePrefs = appContext.getSharedPreferences("am_atv_flyme_playback", Context.MODE_PRIVATE)
+    private val flymePrefs = appContext.getSharedPreferences(FLYME_PLAYBACK_PREFS, Context.MODE_PRIVATE)
     private val cachePrefs = appContext.getSharedPreferences("content-cache", Context.MODE_PRIVATE)
 
     override fun loadInitialState(): SettingsState {
@@ -144,6 +148,7 @@ class SharedPreferencesSettingsStorage(context: Context) : SettingsStorage {
             fadeStations = flymePrefs.getBoolean(KEY_FADE_STATIONS, true),
             fadePlaylists = flymePrefs.getBoolean(KEY_FADE_PLAYLISTS, true),
             stationsAsSongs = flymePrefs.getBoolean(KEY_STATIONS_AS_SONGS, false),
+            loudnessMode = LoudnessMode.fromPreference(flymePrefs.getString(LOUDNESS_PREF, null)),
             cacheDiskEnabled = cachePrefs.getBoolean(KEY_CACHE_ENABLED, true),
             cachePrefetchNextTwo = cachePrefs.getBoolean(KEY_CACHE_PREFETCH_NEXT_TWO, true),
         )
@@ -225,6 +230,10 @@ class SharedPreferencesSettingsStorage(context: Context) : SettingsStorage {
 
     override fun saveStationsAsSongs(asSongs: Boolean) {
         flymePrefs.edit().putBoolean(KEY_STATIONS_AS_SONGS, asSongs).apply()
+    }
+
+    override fun saveLoudnessMode(mode: LoudnessMode) {
+        flymePrefs.edit().putString(LOUDNESS_PREF, mode.name).apply()
     }
 
     override fun saveCacheDiskEnabled(enabled: Boolean) {
@@ -379,6 +388,11 @@ class SettingsStore(
     fun setStationsAsSongs(asSongs: Boolean) {
         mutableState.value = mutableState.value.copy(stationsAsSongs = asSongs)
         storage.saveStationsAsSongs(asSongs)
+    }
+
+    fun setLoudnessMode(mode: LoudnessMode) {
+        storage.saveLoudnessMode(mode)
+        mutableState.value = mutableState.value.copy(loudnessMode = mode)
     }
 
     fun setCacheDiskEnabled(enabled: Boolean) {

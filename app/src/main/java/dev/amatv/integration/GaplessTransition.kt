@@ -71,12 +71,14 @@ class GaplessTransition internal constructor(
     }
 
     @Synchronized
-    internal fun finish(atMs: Long, catalogId: String, route: String, session: Int, fade: String): String {
+    internal fun finish(
+        atMs: Long, catalogId: String, route: String, session: Int, fade: String, loudnessDb: Float = 0f,
+    ): String {
         mark(GaplessStage.Advanced, atMs)
         val timing = summarizeGaplessTiming(path, times)
         return "id=$id path=${path.label} catalog=$catalogId endSource=${end?.source ?: "-"} " +
             "reason=${end?.reason ?: "-"} $timing route=$route session=${session.takeIf { it > 0 } ?: "unknown"} " +
-            "fade=$fade fadeOut=${fadeOut ?: "-"} fadeIn=${fadeIn ?: "-"}"
+            "fade=$fade fadeOut=${fadeOut ?: "-"} fadeIn=${fadeIn ?: "-"} loudnessDb=$loudnessDb"
     }
 }
 

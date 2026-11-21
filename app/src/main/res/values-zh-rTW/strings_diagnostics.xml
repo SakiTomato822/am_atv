@@ -24,6 +24,12 @@
     <string name="playback_option_on">開</string>
     <string name="playback_option_off">關</string>
     <string name="playback_fade_title">歌曲間淡入淡出</string>
+    <string name="playback_loudness_title">音量平衡</string>
+    <string name="playback_loudness_summary">讓每首歌的音量更一致。檔位越高整體越響，小聲的歌會調得更大聲。</string>
+    <string name="playback_loudness_off">關</string>
+    <string name="playback_loudness_standard">標準</string>
+    <string name="playback_loudness_loud">響亮</string>
+    <string name="playback_loudness_loudest">最響</string>
     <string name="playback_fade_summary">無縫切歌時，前一首最後 2 秒淡出、下一首開頭 0.8 秒淡入。選擇要在哪裡使用。</string>
     <string name="playback_fade_albums">專輯</string>
     <string name="playback_fade_stations">電台</string>

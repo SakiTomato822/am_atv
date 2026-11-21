@@ -51,6 +51,7 @@ import dev.amatv.core.SettingsState
 import dev.amatv.core.SettingsStore
 import dev.amatv.integration.ContentCacheStorage
 import dev.amatv.integration.LogRecorder
+import dev.amatv.integration.LoudnessMode
 import dev.amatv.integration.MusicConnectionState
 import dev.amatv.integration.MusicServices
 import dev.amatv.artwork.ArtworkImages
@@ -312,6 +313,22 @@ internal fun FolioSettingsPage(
                         onCheckedChange = { settingsStore.autoplayEnabled = it },
                     )
                     SettingsRow(
+                        title = stringResource(R.string.playback_loudness_title),
+                        subtitle = stringResource(R.string.playback_loudness_summary),
+                        controlBelow = true,
+                    ) {
+                        FolioSegmentedPills(
+                            options = listOf(
+                                LoudnessMode.Off to stringResource(R.string.playback_loudness_off),
+                                LoudnessMode.Standard to stringResource(R.string.playback_loudness_standard),
+                                LoudnessMode.Loud to stringResource(R.string.playback_loudness_loud),
+                                LoudnessMode.Loudest to stringResource(R.string.playback_loudness_loudest),
+                            ),
+                            selected = settings.loudnessMode,
+                            onSelect = settingsStore::setLoudnessMode,
+                        )
+                    }
+                    SettingsRow(
                         title = stringResource(R.string.playback_fade_title),
                         subtitle = stringResource(R.string.playback_fade_summary),
                         showDivider = false,
@@ -539,6 +556,7 @@ private fun SettingsRow(
     title: String,
     subtitle: String? = null,
     showDivider: Boolean = true,
+    controlBelow: Boolean = false,
     control: @Composable () -> Unit,
 ) {
     val palette = LocalFolioPalette.current
@@ -570,7 +588,10 @@ private fun SettingsRow(
                     )
                 }
             }
-            control()
+            if (!controlBelow) control()
+        }
+        if (controlBelow) {
+            Box(Modifier.padding(start = 4.dp, end = 4.dp, bottom = 12.dp)) { control() }
         }
         if (showDivider) {
             Box(Modifier.fillMaxWidth().height(1.dp).background(palette.rb))

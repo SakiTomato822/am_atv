@@ -66,6 +66,7 @@ class SettingsStoreTest {
         override fun saveFadeAlbums(fade: Boolean) { savedFadeAlbums = fade }
         override fun saveFadeStations(fade: Boolean) { savedFadeStations = fade }
         override fun saveFadePlaylists(fade: Boolean) { savedFadePlaylists = fade }
+        override fun saveLoudnessMode(mode: dev.amatv.integration.LoudnessMode) = Unit
         override fun saveStationsAsSongs(asSongs: Boolean) { savedStationsAsSongs = asSongs }
         override fun saveCacheDiskEnabled(enabled: Boolean) { savedCacheDiskEnabled = enabled }
         override fun saveCachePrefetchNextTwo(enabled: Boolean) { savedCachePrefetchNextTwo = enabled }

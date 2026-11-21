@@ -20,6 +20,7 @@ import dev.amatv.BuildConfig
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.io.File
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Proxy
 import java.util.concurrent.atomic.AtomicLong
@@ -80,7 +81,10 @@ data class PlaybackSnapshot(
  * Reflection isolates version-specific controller methods. Developers supply
  * the licensed SDK in app/libs; no Apple binary is redistributed here.
  */
-class MusicKitBridge(private val context: Context) {
+class MusicKitBridge(
+    private val context: Context,
+    catalogPreviewUrl: suspend (String) -> String? = { null },
+) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var authenticationManager: Any? = null
     @Volatile private var controller: Any? = null
@@ -133,8 +137,15 @@ class MusicKitBridge(private val context: Context) {
     )
     /** Fade at gapless song changes for the current queue; the app sets it per kind of queue. */
     @Volatile var fadeEnabled = false
-    private val fade = GaplessFade()
-    private val sessionLevel = SessionLevel()
+    private var fade = GaplessFade()
+    private var sessionLevel = SessionLevel()
+    private val loudnessPrefs = context.getSharedPreferences(FLYME_PLAYBACK_PREFS, Context.MODE_PRIVATE)
+    private val loudness by lazy {
+        LoudnessRepository(LoudnessCache(File(context.noBackupFilesDir, "sound-check-v1.json")), catalogPreviewUrl)
+    }
+    private var trackLoudness: NativeTrackLoudness? = null
+    private var appliedLoudnessDb = 0f
+    private var lastFadeDb = 0f
     private val tailLoudness = TailLoudness()
     /** The song whose loudness [tailLoudness] holds, and whether its ending is fading by itself. */
     private var levelCatalogId: String? = null
@@ -146,8 +157,9 @@ class MusicKitBridge(private val context: Context) {
     private val fadeTick = object : Runnable {
         override fun run() {
             val handler = playbackHandler ?: return
+            if (Looper.myLooper() !== handler.looper) return
             tickFade()
-            handler.postDelayed(this, FADE_TICK_MS)
+            if (handler === playbackHandler) handler.postDelayed(this, FADE_TICK_MS)
         }
     }
     @Volatile private var pendingSound: PendingSound? = null
@@ -246,7 +258,6 @@ class MusicKitBridge(private val context: Context) {
         fadeInCatalogId = null
         playbackHandler?.let { handler ->
             handler.removeCallbacks(fadeTick)
-            handler.post { fade.reset() }
             handler.post(fadeTick)
         }
         val storeId = checkNotNull(track.catalogId) { AppText.text(R.string.services_catalog_id_missing) }
@@ -259,6 +270,8 @@ class MusicKitBridge(private val context: Context) {
         postPlaybackAction("prepare") {
             if (generation != prepareGeneration.get()) return@postPlaybackAction
             activeGeneration = generation
+            resetTrackGain()
+            prefetchLoudness(track)
             nativeSongQueue = NativeSongQueue()
             requestedNativeIndex = null
             queuedLookaheadCatalogId = null
@@ -322,6 +335,7 @@ class MusicKitBridge(private val context: Context) {
             lookaheadTrace = lookahead?.catalogId?.let { catalogId ->
                 transition?.let { TransitionPlayback(generation, catalogId, it) }
             }
+            lookahead?.let(::prefetchLoudness)
             syncLookahead()
         }
     }
@@ -386,23 +400,82 @@ class MusicKitBridge(private val context: Context) {
 
     fun skipToNext() = invokeController("skipToNextItem")
 
-    /**
-     * Playback thread, every [FADE_TICK_MS]: fade out over the last seconds of a song that will
-     * continue gaplessly into the queued one, and fade that song in. Anything else plays at full level.
-     */
+    private fun loudnessMode() = LoudnessMode.fromPreference(loudnessPrefs.getString(LOUDNESS_PREF, null))
+
+    private fun prefetchLoudness(track: Track) {
+        if (track.catalogKind == CatalogKind.Song && loudnessMode() != LoudnessMode.Off) loudness.request(track)
+    }
+
+    private fun resetTrackGain() {
+        trackLoudness = null
+        appliedLoudnessDb = 0f
+        lastFadeDb = 0f
+        fade.reset()
+    }
+
+    @Synchronized
+    private fun syncTrackLoudness(generation: Long, track: Track, slot: Int?) {
+        if (generation != prepareGeneration.get() || generation != activeGeneration) return
+        val requested = requestedTrack ?: return
+        if (requested.catalogKind != CatalogKind.Song ||
+            (requestedNativeIndex != null && requestedNativeIndex != slot) ||
+            (preparing && requested.catalogId != track.catalogId) ||
+            (endedCatalogId != null && endedCatalogId != track.catalogId && lookahead?.catalogId != track.catalogId)
+        ) return
+        val active = trackLoudness
+        if (active?.generation == generation && active.trackId == track.id && active.slot == slot) return
+        val mode = loudnessMode()
+        val cached = if (mode == LoudnessMode.Off) null else loudness.cached(track.catalogId)
+        val pending = if (mode == LoudnessMode.Off || cached != null) null else loudness.request(track)
+        val lookup = when {
+            mode == LoudnessMode.Off -> LoudnessLookup(null, "missing", "disabled")
+            cached != null -> LoudnessLookup(cached, "cache")
+            pending != null -> LoudnessLookup(null, "missing", "lookup-pending")
+            track.catalogId?.startsWith("i.") == true || track.resourceId?.startsWith("i.") == true ->
+                LoudnessLookup(null, "missing", "library-upload")
+            else -> LoudnessLookup(null, "missing", "no-catalog-id")
+        }
+        trackLoudness = NativeTrackLoudness(generation, track.id, slot, track.catalogId, mode, lookup, pending)
+        lastFadeDb = 0f
+        tickFade()
+    }
+
+    /** Playback thread: update the fade and any one-time normalization ramp in one effect. */
+    @Synchronized
     private fun tickFade() {
         val current = controller ?: return
-        if (!fadeEnabled) {
-            fade.reset()
-            sessionLevel.release()
+        val generation = prepareGeneration.get()
+        if (activeGeneration != generation) return
+        val session = MusicKitAudioSession.currentId()
+        val playing = (current.callOrNull("getPlaybackState") as? Int) == PLAYBACK_STATE_PLAYING
+        if (fadeEnabled && playing) {
+            applyGaplessFade(current, session)
+        } else {
+            if (!fadeEnabled) {
+                lastFadeDb = 0f
+                sessionLevel.release()
+            }
+            applyTrackGain(session, lastFadeDb, playing)
+        }
+    }
+
+    private fun applyTrackGain(session: Int, fadeDb: Float, playing: Boolean) {
+        lastFadeDb = fadeDb
+        val active = trackLoudness?.takeIf { it.generation == activeGeneration }
+        appliedLoudnessDb = active?.apply(fade, session, fadeDb, playing, SystemClock.elapsedRealtime())
+            ?: fade.apply(session, fadeDb, 0f, limit = false)
+    }
+
+    private fun applyGaplessFade(current: Any, session: Int) {
+        val position = current.callOrNull("getCurrentPosition") as? Long
+        val duration = (current.callOrNull("getDuration") as? Long)?.takeIf { it > 0L }
+        if (position == null || duration == null) {
+            applyTrackGain(session, lastFadeDb, playing = true)
             return
         }
-        if ((current.callOrNull("getPlaybackState") as? Int) != PLAYBACK_STATE_PLAYING) return
-        val position = current.callOrNull("getCurrentPosition") as? Long ?: return
-        val duration = (current.callOrNull("getDuration") as? Long)?.takeIf { it > 0L } ?: return
-        val currentId = current.callOrNull("getCurrentItem")?.let(::trackFromQueueItem)?.catalogId
+        val currentId = current.callOrNull("getCurrentItem")?.callOrNull("getItem")
+            ?.callOrNull("getSubscriptionStoreId") as? String
         val remaining = duration - position
-        val session = MusicKitAudioSession.currentId()
         if (currentId != levelCatalogId) {
             // A new song: an ending that faded by itself is followed by a plain start too.
             previousTailQuiet = tailDecision == true
@@ -430,7 +503,7 @@ class MusicKitBridge(private val context: Context) {
             if (fadingIn != null && currentId == fadingIn) fadeInCatalogId = null
             0f
         }
-        fade.apply(session, minOf(outDb, inDb))
+        applyTrackGain(session, minOf(outDb, inDb), playing = true)
         if (outDb < 0f) lookaheadTrace?.timing?.fade(outgoing = true, fade.attachment(session))
         if (inDb < 0f) playingTrace?.takeIf { it.catalogId == currentId }
             ?.timing?.fade(outgoing = false, fade.attachment(session))
@@ -457,16 +530,19 @@ class MusicKitBridge(private val context: Context) {
         diagnostics.lastGaplessEnd = GaplessEnd(generation, catalogId, atMs, source, reason)
     }
 
+    @Synchronized
     private fun recordCompletedTransition(trace: TransitionPlayback, observedAt: Long) {
-        synchronized(this) {
-            if (playingTrace !== trace || trace.generation != prepareGeneration.get()) return
-            playingTrace = null
-            trace.timing.mark(GaplessStage.Advanced, observedAt)
-        }
+        if (playingTrace !== trace || trace.generation != prepareGeneration.get()) return
+        playingTrace = null
+        trace.timing.mark(GaplessStage.Advanced, observedAt)
         val session = MusicKitAudioSession.currentId()
+        applyTrackGain(session, lastFadeDb, playing = true)
         val fadeStatus = if (fadeEnabled) fade.attachment(session) else "disabled"
+        val loudnessDb = appliedLoudnessDb
         mainHandler.post {
-            diagnostics.recordGapless(trace.timing.finish(observedAt, trace.catalogId, diagnosticAudioRoute(), session, fadeStatus))
+            diagnostics.recordGapless(
+                trace.timing.finish(observedAt, trace.catalogId, diagnosticAudioRoute(), session, fadeStatus, loudnessDb),
+            )
         }
     }
 
@@ -528,7 +604,8 @@ class MusicKitBridge(private val context: Context) {
         queuedLookaheadCatalogId = null
         gaplessAdvanceCatalogId = null
         fadeInCatalogId = null
-        fade.reset()
+        resetTrackGain()
+        prefetchLoudness(track)
         val now = SystemClock.elapsedRealtime()
         playingTrace = transition?.let { TransitionPlayback(newGeneration, catalogId, it) }
         playbackIntent.begin(catalogId, 0L, desiredPlaying, now)
@@ -603,6 +680,11 @@ class MusicKitBridge(private val context: Context) {
         val listener = controllerListener
         val oldHandler = playbackHandler
         val oldThread = playbackThread
+        val oldFade = fade
+        val oldLevel = sessionLevel
+        oldHandler?.removeCallbacks(fadeTick)
+        fade = GaplessFade()
+        sessionLevel = SessionLevel()
         val cleanup = {
             if (currentController != null && listener != null) {
                 runCatching {
@@ -612,8 +694,8 @@ class MusicKitBridge(private val context: Context) {
                 }
             }
             runCatching { currentController?.callVoid("release") }
-            fade.release()
-            sessionLevel.release()
+            oldFade.release()
+            oldLevel.release()
             oldThread?.quitSafely()
             Unit
         }
@@ -737,6 +819,14 @@ class MusicKitBridge(private val context: Context) {
                                 ?.timing?.mark(GaplessStage.ItemChanged, now)
                             lookaheadTrace?.takeIf { it.generation == generation && it.catalogId == catalogId }
                                 ?.timing?.mark(GaplessStage.ItemChanged, now)
+                            playbackHandler?.post {
+                                if (generation == prepareGeneration.get() && currentController === controller) {
+                                    currentController.callOrNull("getCurrentItem")?.let(::trackFromQueueItem)?.let { track ->
+                                        val slot = currentController.callOrNull("getPlaybackQueueIndex") as? Int
+                                        syncTrackLoudness(generation, track, slot)
+                                    }
+                                }
+                            }
                             Log.d(TAG, method.name)
                             dispatchSnapshot()
                         }
@@ -926,6 +1016,9 @@ class MusicKitBridge(private val context: Context) {
         val buffering = currentController.callOrNull("isBuffering") as? Boolean ?: false
         val trace = playingTrace?.takeIf { it.generation == generation }
         val observedAt = SystemClock.elapsedRealtime()
+        if (currentQueueItem != null && !unrequestedAfterEnd && currentTrack != null) {
+            syncTrackLoudness(generation, currentTrack, index)
+        }
         if (trace != null && currentQueueItem != null && trace.catalogId == observedCatalogId) {
             trace.timing.buffering(buffering, observedAt)
         }
@@ -1124,6 +1217,8 @@ class MusicKitBridge(private val context: Context) {
             artworkColors = fallback?.takeIf { storeId == null || it.catalogId == storeId }?.artworkColors
                 ?: lookahead?.takeIf { storeId != null && it.catalogId == storeId }?.artworkColors,
             playbackQueueId = queueItem.callOrNull("getPlaybackQueueId") as? Long,
+            previewUrl = fallback?.takeIf { it.catalogId == storeId }?.previewUrl
+                ?: lookahead?.takeIf { it.catalogId == storeId }?.previewUrl,
         )
     }
 
