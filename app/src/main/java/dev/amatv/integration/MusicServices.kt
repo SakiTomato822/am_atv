@@ -168,7 +168,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
         val client = stationEngine as? WebEditorialBrowseClient ?: throw WebEditorialException("GeckoUnavailable")
         val storefront = api.effectiveStorefront()
         val language = api.editorialBrowseLanguage(languageTag)
-        Log.i(BROWSE_LOG_TAG, "channel=gecko GET /v1/editorial/$storefront/groupings language=$language")
+        Log.i(BROWSE_LOG_TAG, "channel=gecko selected storefront=$storefront language=$language")
         val response = client.editorial(storefront, language, developerTokens.token(), tokenStore.readUserToken())
         val shelves = try {
             api.parseEditorialBrowseShelves(response.root)

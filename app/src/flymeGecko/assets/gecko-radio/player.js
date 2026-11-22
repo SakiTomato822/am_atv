@@ -1,6 +1,5 @@
 "use strict";
-// Headless MusicKit JS station player and editorial client. The bridge returns
-// editorial JSON and status, and keeps credentials and vendor error text in the page.
+// Headless MusicKit JS station player and editorial client.
 let radioMusic = null;
 let radioGeneration = 0;
 let radioPrepared = false;
@@ -60,7 +59,30 @@ function radioSend(kind, detail) {
   window.postMessage({ type: "amatv-radio-event", nonce: radioConfig.nonce, kind, ...detail }, location.origin);
 }
 
-function radioScriptFailed() { radioSend("fatal", { reason: "NETWORK_ERROR" }); }
+// Keep the redactor available for SDK errors after radioConfig is cleared.
+const radioBrowseLog = (() => {
+  const credentials = [radioConfig.developerToken, radioConfig.userToken].filter(Boolean);
+  return message => {
+    for (const credential of credentials) {
+      message = message.split(credential).join("[redacted]");
+      message = message.split(encodeURIComponent(credential)).join("[redacted]");
+    }
+    message = message
+      .replace(/\bBearer\s+[^\s"',;]+/gi, "Bearer [redacted]")
+      .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[redacted]")
+      .replace(/[\r\n\t]+/g, " ")
+      .slice(0, 512);
+    radioSend("browseLog", { message });
+  };
+})();
+
+radioBrowseLog("page script start");
+window.addEventListener("load", () => radioBrowseLog("page load end"));
+
+function radioScriptFailed() {
+  radioBrowseLog("musickit.js load end success=false");
+  radioSend("fatal", { reason: "NETWORK_ERROR" });
+}
 
 function radioReason(error) {
   const status = Number(error && (error.status || error.statusCode || error.response && error.response.status));
@@ -148,6 +170,7 @@ function editorialHttpStatus(response) {
 }
 
 async function radioEditorial({ id, storefront, language }) {
+  radioBrowseLog(`api.music start id=${id}`);
   try {
     const result = await radioMusic.api.music(`/v1/editorial/${encodeURIComponent(storefront)}/groupings`, {
       name: "music", platform: "web", tabs: "nonsubscriber", l: language, extend: "editorialArtwork",
@@ -156,8 +179,12 @@ async function radioEditorial({ id, storefront, language }) {
     const httpStatus = editorialHttpStatus(result.response) || editorialHttpStatus(result) ||
       editorialHttpStatus(body && body.errors && body.errors[0]);
     if ((httpStatus !== null && httpStatus >= 400) || (body && body.errors && body.errors.length)) {
+      const error = body && body.errors && body.errors[0];
+      radioBrowseLog(`api.music end id=${id} httpStatus=${httpStatus ?? "unknown"} error=MusicKitApiError ` +
+        `message=${error && (error.detail || error.title) || "API returned an error response"}`);
       radioSend("editorial", { id, httpStatus, errorName: "MusicKitApiError" });
     } else {
+      radioBrowseLog(`api.music end id=${id} httpStatus=${httpStatus ?? "unknown"} error=none`);
       radioSend("editorial", { id, httpStatus, body });
     }
   } catch (error) {
@@ -166,6 +193,8 @@ async function radioEditorial({ id, storefront, language }) {
       editorialHttpStatus(error && error.response) || editorialHttpStatus(error);
     const name = error && error.name;
     const errorName = typeof name === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,39}$/.test(name) ? name : "Error";
+    radioBrowseLog(`api.music end id=${id} httpStatus=${httpStatus ?? "unknown"} error=${errorName} ` +
+      `message=${error && (error.message || error.statusText) || "unavailable"}`);
     radioSend("editorial", { id, httpStatus, errorName });
   }
 }
@@ -197,6 +226,8 @@ window.addEventListener("message", event => {
 
 document.addEventListener("musickitloaded", async () => {
   const tokenKey = radioTokenKey(radioConfig.developerToken);
+  const hasUserToken = Boolean(radioConfig.userToken);
+  radioBrowseLog(`MusicKit.configure start hasUserToken=${hasUserToken}`);
   try {
     if (tokenKey && radioConfig.userToken) localStorage.setItem(tokenKey, radioConfig.userToken);
     await MusicKit.configure({
@@ -204,6 +235,7 @@ document.addEventListener("musickitloaded", async () => {
       app: { name: radioConfig.appName, build: radioConfig.appBuild },
     });
     radioMusic = MusicKit.getInstance();
+    radioBrowseLog(`MusicKit.configure end authorized=${radioMusic.isAuthorized === true} hasUserToken=${hasUserToken}`);
     const events = MusicKit.Events || {};
     const on = (name, handler) => { if (events[name]) radioMusic.addEventListener(events[name], handler); };
     on("playbackStateDidChange", () => radioReport(true));
@@ -223,6 +255,7 @@ document.addEventListener("musickitloaded", async () => {
       drm: radioDrm, previewOnly: radioMusic.previewOnly === true,
     });
   } catch (error) {
+    radioBrowseLog(`MusicKit initialization failed error=${radioReason(error)} message=${error && error.message || "unavailable"}`);
     radioSend("fatal", { reason: radioReason(error) });
   } finally {
     // StoreKit keeps the token in memory; the profile must not retain a plaintext copy.

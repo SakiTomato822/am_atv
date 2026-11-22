@@ -51,10 +51,6 @@ internal class GeckoStationEngine(context: Context) : StationPlaybackEngine, Web
 
     private data class Request(val station: Track, val generation: Long, val play: Boolean)
     private data class Tokens(val developer: String, val user: String?)
-    private data class EditorialRequest(
-        val command: JSONObject,
-        val response: CompletableDeferred<WebEditorialResponse> = CompletableDeferred(),
-    )
 
     // Main-thread state.
     private var bootJob: Job? = null
@@ -64,9 +60,9 @@ internal class GeckoStationEngine(context: Context) : StationPlaybackEngine, Web
     private var extension: WebExtension? = null
     private var port: WebExtension.Port? = null
     private var pageReady = false
-    private var editorialReady = false
+    private var editorialReady = CompletableDeferred<Unit>()
     private var nextEditorialId = 0L
-    private val editorialRequests = mutableMapOf<Long, EditorialRequest>()
+    private val editorialRequests = mutableMapOf<Long, CompletableDeferred<WebEditorialResponse>>()
     private var pending: Request? = null
     private var active: Request? = null
     private var focusRequest: AudioFocusRequest? = null
@@ -141,22 +137,38 @@ internal class GeckoStationEngine(context: Context) : StationPlaybackEngine, Web
     ): WebEditorialResponse = withContext(Dispatchers.Main.immediate) {
         val requestTokens = Tokens(developerToken, userToken)
         val booted = session != null || bootJob?.isActive == true
-        if (booted && active != null) {
+        val reuse = booted && (active != null || (tokens == requestTokens && !editorialReady.isCancelled))
+        val readyForEditorial = editorialReady.isCompleted && !editorialReady.isCancelled
+        Log.i(BROWSE_LOG_TAG, "channel=gecko session=${if (reuse) "reuse" else "new"} " +
+            "runtimeInitialized=${GeckoAuthRuntime.isInitialized} pageReady=$readyForEditorial hasUserToken=${!userToken.isNullOrBlank()}")
+        if (reuse && active != null) {
             // Reuse the station's configured developer token while it owns the session.
             if (tokens?.user != userToken) throw WebEditorialException("StationSessionBusy")
-        } else if (!booted || tokens != requestTokens) {
+        } else if (!reuse) {
             closeBrowser()
             tokens = requestTokens
         }
+        val ready = editorialReady
+        withTimeoutOrNull(EDITORIAL_STARTUP_TIMEOUT_MS) {
+            if (!reuse) boot(requestTokens)
+            ready.await()
+        } ?: run {
+            if (editorialReady === ready && active == null) closeBrowser("StartupTimeout")
+            throw WebEditorialException("StartupTimeout")
+        }
+
         val id = ++nextEditorialId
-        val request = EditorialRequest(JSONObject().put("cmd", "editorial").put("id", id)
-            .put("storefront", storefront).put("language", language))
-        editorialRequests[id] = request
+        val response = CompletableDeferred<WebEditorialResponse>()
+        editorialRequests[id] = response
         try {
-            if (editorialReady) send(request.command)
-            else if (session == null && bootJob?.isActive != true) boot(requestTokens)
-            withTimeoutOrNull(EDITORIAL_TIMEOUT_MS) { request.response.await() }
-                ?: throw WebEditorialException("Timeout")
+            withTimeoutOrNull(EDITORIAL_TIMEOUT_MS) {
+                val bridgePort = port?.takeIf { editorialReady === ready }
+                    ?: throw WebEditorialException("BridgeDisconnected")
+                Log.i(BROWSE_LOG_TAG, "channel=gecko GET /v1/editorial/$storefront/groupings language=$language id=$id")
+                bridgePort.postMessage(JSONObject().put("cmd", "editorial").put("id", id)
+                    .put("storefront", storefront).put("language", language))
+                response.await()
+            } ?: throw WebEditorialException("Timeout")
         } finally {
             editorialRequests.remove(id)
         }
@@ -185,9 +197,11 @@ internal class GeckoStationEngine(context: Context) : StationPlaybackEngine, Web
         bootJob = scope.launch {
             var created: AuthLoopbackServer? = null
             try {
+                Log.i(BROWSE_LOG_TAG, "channel=gecko runtime acquiring initialized=${GeckoAuthRuntime.isInitialized}")
                 val runtime = GeckoAuthRuntime.get(appContext)
                 val bridge = runtime.webExtensionController
                     .ensureBuiltIn("resource://android/assets/gecko-radio/", EXTENSION_ID).stationAwait()
+                Log.i(BROWSE_LOG_TAG, "channel=gecko runtime ready")
                 extension = bridge
                 val loopback = withContext(Dispatchers.IO) {
                     AuthLoopbackServer { origin -> page(origin, bootTokens) }.also { created = it }
@@ -198,6 +212,7 @@ internal class GeckoStationEngine(context: Context) : StationPlaybackEngine, Web
                 browser.webExtensionController.setMessageDelegate(bridge, messageDelegate, NATIVE_APP)
                 browser.open(runtime)
                 browser.setActive(true)
+                Log.i(BROWSE_LOG_TAG, "channel=gecko page load requested")
                 browser.loadUri(loopback.origin.url)
                 Log.i(TAG, "Station browser booting")
             } catch (cancelled: CancellationException) {
@@ -206,6 +221,7 @@ internal class GeckoStationEngine(context: Context) : StationPlaybackEngine, Web
             } catch (error: Throwable) {
                 created?.close()
                 Log.w(TAG, "Station browser failed to start: ${error.javaClass.simpleName}")
+                Log.w(BROWSE_LOG_TAG, "channel=gecko startup failed error=${error.javaClass.simpleName}")
                 closeBrowser(error.javaClass.simpleName)
                 (pending ?: active)?.let { fail(it, PlaybackFailureKind.Unexpected) }
             }
@@ -257,6 +273,17 @@ internal class GeckoStationEngine(context: Context) : StationPlaybackEngine, Web
             // A headless player never opens windows (e.g. MusicKit's sign-in popup).
             override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession>? = null
         }
+        progressDelegate = object : GeckoSession.ProgressDelegate {
+            override fun onPageStart(session: GeckoSession, url: String) {
+                if (server?.origin?.ownsUrl(url) == true) Log.i(BROWSE_LOG_TAG, "channel=gecko page load start")
+            }
+
+            override fun onPageStop(session: GeckoSession, success: Boolean) {
+                if (session === this@GeckoStationEngine.session) {
+                    Log.i(BROWSE_LOG_TAG, "channel=gecko page load end success=$success")
+                }
+            }
+        }
         contentDelegate = object : GeckoSession.ContentDelegate {
             override fun onCrash(session: GeckoSession) = browserStopped(session)
             override fun onKill(session: GeckoSession) = browserStopped(session)
@@ -275,8 +302,10 @@ internal class GeckoStationEngine(context: Context) : StationPlaybackEngine, Web
                 return
             }
             this@GeckoStationEngine.port?.disconnect()
+            if (editorialReady.isCancelled) editorialReady = CompletableDeferred()
             this@GeckoStationEngine.port = port
             port.setDelegate(portDelegate)
+            Log.i(BROWSE_LOG_TAG, "channel=gecko bridge connected")
         }
     }
 
@@ -291,27 +320,31 @@ internal class GeckoStationEngine(context: Context) : StationPlaybackEngine, Web
         override fun onDisconnect(port: WebExtension.Port) {
             if (port === this@GeckoStationEngine.port) {
                 this@GeckoStationEngine.port = null
-                editorialReady = false
+                pageReady = false
+                Log.w(BROWSE_LOG_TAG, "channel=gecko bridge disconnected")
+                val ready = editorialReady
+                editorialReady = CompletableDeferred<Unit>().apply {
+                    completeExceptionally(WebEditorialException("BridgeDisconnected"))
+                }
                 failEditorialRequests("BridgeDisconnected")
+                ready.completeExceptionally(WebEditorialException("BridgeDisconnected"))
             }
         }
     }
 
     private fun onPageMessage(data: JSONObject) {
         when (data.optString("kind")) {
-            "editorialReady" -> {
-                editorialReady = true
-                editorialRequests.values.forEach { send(it.command) }
-            }
+            "editorialReady" -> editorialReady.complete(Unit)
+            "browseLog" -> Log.i(BROWSE_LOG_TAG, "channel=gecko js ${data.optString("message")}")
             "editorial" -> {
                 val request = editorialRequests.remove(data.optLong("id")) ?: return
                 val status = data.optInt("httpStatus").takeIf { it in 100..599 }
                 val name = data.optString("errorName").takeIf(String::isNotEmpty)
                 val body = data.optJSONObject("body")
                 if (name != null || body == null) {
-                    request.response.completeExceptionally(WebEditorialException(name ?: "InvalidJson", status))
+                    request.completeExceptionally(WebEditorialException(name ?: "InvalidJson", status))
                 } else {
-                    request.response.complete(WebEditorialResponse(body, status))
+                    request.complete(WebEditorialResponse(body, status))
                 }
             }
             "ready" -> {
@@ -415,16 +448,17 @@ internal class GeckoStationEngine(context: Context) : StationPlaybackEngine, Web
     private fun failEditorialRequests(reason: String) {
         val requests = editorialRequests.values.toList()
         editorialRequests.clear()
-        requests.forEach { it.response.completeExceptionally(WebEditorialException(reason)) }
+        requests.forEach { it.completeExceptionally(WebEditorialException(reason)) }
     }
 
     private fun closeBrowser(reason: String = "SessionClosed") {
         bootJob?.cancel()
         bootJob = null
-        editorialReady = false
-        failEditorialRequests(reason)
-        port?.disconnect()
+        val ready = editorialReady
+        editorialReady = CompletableDeferred()
+        val closingPort = port
         port = null
+        closingPort?.disconnect()
         session?.let { browser ->
             extension?.let { runCatching { browser.webExtensionController.setMessageDelegate(it, null, NATIVE_APP) } }
             runCatching { browser.close() }
@@ -434,6 +468,8 @@ internal class GeckoStationEngine(context: Context) : StationPlaybackEngine, Web
         server = null
         pageReady = false
         tokens = null
+        failEditorialRequests(reason)
+        ready.completeExceptionally(WebEditorialException(reason))
     }
 
     // GeckoView leaves Android audio focus to the embedder.
@@ -479,7 +515,8 @@ internal class GeckoStationEngine(context: Context) : StationPlaybackEngine, Web
         const val EXTENSION_ID = "amatv-radio@dev.amatv"
         const val NATIVE_APP = "amatv_radio"
         const val CONTEXT_ID = "amatv-station-player"
-        const val EDITORIAL_TIMEOUT_MS = 15_000L
+        const val EDITORIAL_STARTUP_TIMEOUT_MS = 60_000L
+        const val EDITORIAL_TIMEOUT_MS = 20_000L
         val SAFE_REASON = Regex("[A-Za-z_]{2,40}")
     }
 }
