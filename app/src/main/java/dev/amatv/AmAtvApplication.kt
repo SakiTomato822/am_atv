@@ -9,8 +9,10 @@ import dev.amatv.core.AccountStore
 import dev.amatv.core.ContentStore
 import dev.amatv.core.LibraryActions
 import dev.amatv.core.LyricsStore
+import dev.amatv.core.PlayHistoryStore
 import dev.amatv.core.PlaybackStore
 import dev.amatv.core.SettingsStore
+import dev.amatv.core.SharedPreferencesPlayHistoryStorage
 import dev.amatv.core.SharedPreferencesSettingsStorage
 import dev.amatv.core.detectLowPerformanceHardware
 import dev.amatv.i18n.AppText
@@ -28,6 +30,7 @@ class AmAtvApplication : Application() {
     lateinit var lyricsStore: LyricsStore
     lateinit var accountStore: AccountStore
     lateinit var contentStore: ContentStore
+    lateinit var playHistoryStore: PlayHistoryStore
     val musicServices by lazy { MusicServices(this) }
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -46,6 +49,7 @@ class AmAtvApplication : Application() {
             coroutineScope = applicationScope,
             clock = SystemClock::elapsedRealtime,
             diagnostics = musicServices.playbackDiagnostics,
+            playHistoryStore = playHistoryStore,
         ).also { it.attach() }
     }
 
@@ -59,6 +63,10 @@ class AmAtvApplication : Application() {
             onCacheDiskChanged = { contentCache.setEnabled(it) },
             onCachePrefetchChanged = { contentCache.setPrefetch(it) },
             lowPerformanceHardware = isMainProcess && detectLowPerformanceHardware(this),
+        )
+        playHistoryStore = PlayHistoryStore(
+            storage = SharedPreferencesPlayHistoryStorage(this),
+            coroutineScope = applicationScope,
         )
         libraryActions = LibraryActions(
             api = musicServices.api,

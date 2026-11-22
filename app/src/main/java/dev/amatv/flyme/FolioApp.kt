@@ -128,11 +128,13 @@ fun FolioApp(
     val accountStore = app.accountStore
     val contentStore = app.contentStore
     val lyricsStore = app.lyricsStore
+    val playHistoryStore = app.playHistoryStore
     val playbackStore = app.playbackStore
 
     val settingsState by settingsStore.state.collectAsState()
     val accountState by accountStore.state.collectAsState()
     val contentState by contentStore.state.collectAsState()
+    val playHistoryEntries by playHistoryStore.entries.collectAsState()
     val playbackState by playbackStore.state.collectAsState()
     val queueState by playbackStore.queueController.state.collectAsState()
     val isLight = rememberFolioIsLight(settingsState)
@@ -161,6 +163,7 @@ fun FolioApp(
     // B1b: the player sheet. B2: the detail stack (albums, playlists, artists). Both are UI state only.
     var playerOpen by remember { FolioPlayerSession.openState }
     var detailStack by FolioDetailSession.stack
+    var playHistoryOpen by remember { mutableStateOf(false) }
     val browseNavigation = remember { FolioBrowseNavigation() }
     DisposableEffect(browseNavigation) { onDispose { browseNavigation.root = null } }
     var playerOrigin by remember { mutableStateOf<FolioArtworkOrigin?>(null) }
@@ -198,6 +201,7 @@ fun FolioApp(
     val selectedPage = titleTransition?.to ?: pagerState.currentPage
 
     fun openDetail(item: Track) {
+        playHistoryOpen = false
         val origin = browseNavigation.clickedArtwork
         val bounds = if (browseMotion.spatial) origin?.boundsIn(browseNavigation, selectedPage) else null
         detailStack = detailStack + FolioDetailEntry(item, origin, bounds)
@@ -296,6 +300,7 @@ fun FolioApp(
     fun signOut() {
         contentStore.resetLibraryPagination()
         playbackStore.onSignedOut()
+        playHistoryStore.clear()
         PlaybackPreferences(context).clearSession()
         scope.launch {
             services.contentCache.clear { ArtworkImages.clear(context) }
@@ -521,6 +526,7 @@ fun FolioApp(
                                                     contentStore.loadMoreLibraryShelf(shelfId, accountState.connectionState)
                                                 },
                                                 onOpenItem = ::openItem,
+                                                onOpenHistory = { playHistoryOpen = true },
                                             )
                                             FolioRootPage.Search -> FolioSearchPage(
                                                 currentTrack = playbackState.track,
@@ -529,6 +535,8 @@ fun FolioApp(
                                                 search = services::search,
                                                 suggest = services::searchSuggestions,
                                                 onOpenItem = ::openItem,
+                                                recentPlayEntries = playHistoryEntries,
+                                                onOpenAllHistory = { playHistoryOpen = true },
                                             )
                                         }
                                     }
@@ -536,6 +544,19 @@ fun FolioApp(
                             }
                         }
                     }
+
+                    FolioPlayHistoryLayer(
+                        open = playHistoryOpen,
+                        handleBack = !playerOpen && detailStack.isEmpty(),
+                        entries = playHistoryEntries,
+                        currentTrack = playbackState.track,
+                        isPlaying = playbackState.playWhenReady,
+                        statusTop = statusTop,
+                        bottomPadding = contentBottomPadding,
+                        onBack = { playHistoryOpen = false },
+                        onPlayTrack = ::openItem,
+                        onClearHistory = { playHistoryStore.clear() },
+                    )
 
                     CompositionLocalProvider(LocalFolioBrowseBackdrop provides backdrop) {
                         val displayTrack = playbackState.track.let {
