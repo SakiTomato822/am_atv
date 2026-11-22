@@ -3,8 +3,8 @@ package dev.amatv.integration
 import java.nio.ByteBuffer
 import kotlin.math.log10
 
-enum class LoudnessMode(val offsetDb: Float) {
-    Off(0f), Standard(0f), Loud(4f), Loudest(7f);
+enum class LoudnessMode(val offsetDb: Float, internal val peakHeadroomDb: Float) {
+    Off(0f, 0f), Standard(0f, 0f), Loud(4f, 6f), Loudest(7f, 9f);
 
     companion object {
         internal fun fromPreference(value: String?): LoudnessMode =
@@ -17,9 +17,14 @@ internal const val LOUDNESS_PREF = "loudness_mode"
 internal const val FLYME_PLAYBACK_PREFS = "am_atv_flyme_playback"
 
 internal data class SoundCheck(val gainDb: Float, val peakDb: Float) {
+    private val peakLimitedGainDb: Float get() = LOUDNESS_CEILING_DB - peakDb
+
     fun gainFor(mode: LoudnessMode): Float =
         if (mode == LoudnessMode.Off) 0f
-        else minOf(gainDb + mode.offsetDb, LOUDNESS_CEILING_DB - peakDb)
+        else minOf(gainDb + mode.offsetDb, peakLimitedGainDb + mode.peakHeadroomDb)
+
+    fun targetHeadroomUsedDb(mode: LoudnessMode): Float =
+        (gainFor(mode) - peakLimitedGainDb).coerceIn(0f, mode.peakHeadroomDb)
 }
 
 internal object SoundCheckParser {

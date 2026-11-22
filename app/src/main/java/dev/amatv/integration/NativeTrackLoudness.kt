@@ -42,11 +42,13 @@ internal class NativeTrackLoudness(
                 effect.attachment(session) == "attached" -> "apply-failed"
                 else -> effect.attachment(session)
             }
+            val targetHeadroomUsedDb = lookup.tag?.targetHeadroomUsedDb(mode) ?: 0f
             Log.i(
                 LOUDNESS_LOG,
                 "catalogId=${catalogId ?: "-"} tagDb=${lookup.tag?.gainDb ?: "-"} " +
                     "peakDbFS=${lookup.tag?.peakDb ?: "-"} mode=$mode appliedDb=$applied " +
-                    "source=${lookup.source} reason=$reason",
+                    "source=${lookup.source} reason=$reason " +
+                    "targetHeadroomUsed=${targetHeadroomUsedDb > 0f} targetHeadroomUsedDb=$targetHeadroomUsedDb",
             )
             loggedLookup = lookup
             loggedGain = applied

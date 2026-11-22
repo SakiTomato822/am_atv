@@ -5,11 +5,13 @@ import dev.amatv.model.Track
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.nio.ByteBuffer
+import kotlin.math.abs
 
 class LoudnessTest {
     @get:Rule val folder = TemporaryFolder()
@@ -34,16 +36,45 @@ class LoudnessTest {
         assertNull(SoundCheckParser.parseTag("236 229"))
     }
 
-    @Test fun appliesFourModesAndCapsThePeakAtMinusOne() {
+    @Test fun appliesFourModesAndAllowsPeakHeadroomOnlyInLoudAndLoudest() {
         val tag = SoundCheck(gainDb = 2f, peakDb = -12f)
         assertEquals(0f, tag.gainFor(LoudnessMode.Off), 0f)
         assertEquals(2f, tag.gainFor(LoudnessMode.Standard), 0f)
         assertEquals(6f, tag.gainFor(LoudnessMode.Loud), 0f)
         assertEquals(9f, tag.gainFor(LoudnessMode.Loudest), 0f)
         assertEquals(LoudnessMode.Loud, LoudnessMode.fromPreference(null))
-        assertEquals(2f, tag.copy(peakDb = -3f).gainFor(LoudnessMode.Loudest), 0f)
-        assertEquals(-0.5f, tag.copy(peakDb = -0.5f).gainFor(LoudnessMode.Standard), 0f)
+        val highPeak = SoundCheck(gainDb = 7f, peakDb = -0.5f)
+        assertEquals(0f, highPeak.gainFor(LoudnessMode.Off), 0f)
+        assertEquals(-0.5f, highPeak.gainFor(LoudnessMode.Standard), 0f)
+        assertEquals(5.5f, highPeak.gainFor(LoudnessMode.Loud), 0f)
+        assertEquals(8.5f, highPeak.gainFor(LoudnessMode.Loudest), 0f)
         assertEquals(-5f, SoundCheck(-9f, -0.5f).gainFor(LoudnessMode.Loud), 0f)
+    }
+
+    @Test fun balancesTheFourMeasuredTracksWithinOneAndAHalfDbOfTheLoudReference() {
+        val tracks = mapOf(
+            "周華健《皇后大道東上彩虹妹妹愛的故事》" to SoundCheck(0.6f, -0.4f),
+            "張雨生《口是心非》" to SoundCheck(2.5f, -3.6f),
+            "孫盛希《人樣》" to SoundCheck(-8.8f, -0.1f),
+            "孫盛希《曖》" to SoundCheck(-7.3f, -1.7f),
+        )
+        val loudReferenceDb = 4f
+        for ((name, tag) in tracks) {
+            val relativeLoudnessDb = tag.gainFor(LoudnessMode.Loud) - tag.gainDb
+            assertTrue(
+                "$name: expected +$loudReferenceDb dB relative to the Sound Check reference, got $relativeLoudnessDb dB",
+                abs(relativeLoudnessDb - loudReferenceDb) <= 1.5f,
+            )
+        }
+    }
+
+    @Test fun reportsOnlyTheHeadroomUsedByTheTargetGain() {
+        val tag = SoundCheck(gainDb = 0.6f, peakDb = -0.4f)
+        assertEquals(0f, tag.targetHeadroomUsedDb(LoudnessMode.Off), 0f)
+        assertEquals(0f, tag.targetHeadroomUsedDb(LoudnessMode.Standard), 0f)
+        assertEquals(5.2f, tag.targetHeadroomUsedDb(LoudnessMode.Loud), 0.001f)
+        assertEquals(8.2f, tag.targetHeadroomUsedDb(LoudnessMode.Loudest), 0.001f)
+        assertEquals(0f, SoundCheck(-8.8f, -0.1f).targetHeadroomUsedDb(LoudnessMode.Loud), 0f)
     }
 
     @Test fun persistsCacheAndEvictsTheOldestStoredEntry() {
