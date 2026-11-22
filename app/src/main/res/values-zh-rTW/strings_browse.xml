@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="browse_new_releases_for_you">為你推薦的新發行</string>
     <string name="browse_library_sign_in">登入以存取你的 Apple Music 媒體庫</string>
     <string name="browse_apple_connected">Apple Music 帳號已連結</string>
     <string name="browse_apple_sign_in">登入 Apple Music</string>

@@ -4,6 +4,8 @@ import android.os.SystemClock
 import dev.amatv.R
 import dev.amatv.data.MockCatalog
 import dev.amatv.i18n.AppText
+import dev.amatv.integration.BROWSE_LOG_TAG
+import dev.amatv.integration.BROWSE_PERSONAL_RELEASES_ID
 import dev.amatv.integration.LibraryCollection
 import dev.amatv.integration.LibraryPage
 import dev.amatv.integration.MusicConnectionState
@@ -87,6 +89,8 @@ interface ContentOperations {
     suspend fun saveShelves(name: String, languageTag: String, shelves: List<ContentShelf>)
     suspend fun savedPlaylistIndex(): List<Track>?
     suspend fun recommendationShelves(): List<ContentShelf>
+    suspend fun personalizedNewReleases(): ContentShelf?
+    suspend fun editorialBrowseShelves(languageTag: String): List<ContentShelf>
     suspend fun recentlyPlayedTracks(): List<Track>
     suspend fun recentlyPlayed(): List<Track>
     suspend fun charts(types: String = "albums,songs,playlists"): List<Track>
@@ -326,6 +330,12 @@ class ContentStore(
                 shelvesByDestination = if (operations.isCatalogConfigured) emptyMap() else demoShelves(),
                 loadingDestinations = emptySet(),
             )
+        } else if (previous.connectionState != inputs.connectionState) {
+            _state.value = _state.value.copy(
+                shelvesByDestination = _state.value.shelvesByDestination - Destination.Browse,
+                savedShelfDestinations = _state.value.savedShelfDestinations - Destination.Browse,
+                loadingDestinations = loadingDestinations,
+            )
         } else {
             _state.value = _state.value.copy(
                 loadingDestinations = loadingDestinations,
@@ -385,6 +395,10 @@ class ContentStore(
                 cancellableResult {
                     withContext(ioDispatcher) { operations.savedShelves(snapshotName, contentLanguageTag) }
                 }.getOrNull()
+                    ?.let { shelves ->
+                        if (target == Destination.Browse) shelves.filterNot { it.id == "browse-videos" }
+                        else shelves
+                    }
                     ?.takeIf { it.isNotEmpty() && _state.value.shelvesByDestination[target].isNullOrEmpty() }
                     ?.let { saved ->
                         _state.value = _state.value.copy(
@@ -493,61 +507,25 @@ class ContentStore(
                         }
 
                         Destination.Browse -> {
-                            val songs = async(ioDispatcher) { cancellableResult { operations.charts("songs") } }
-                            val albums = async(ioDispatcher) { cancellableResult { operations.charts("albums") } }
-                            val playlists = async(ioDispatcher) { cancellableResult { operations.charts("playlists") } }
-                            val videos = async(ioDispatcher) { cancellableResult { operations.charts("music-videos") } }
-                            val radio = async(ioDispatcher) { cancellableResult { operations.liveRadio() } }
-
-                            buildList {
-                                songs.await().fold(
-                                    onSuccess = { items ->
-                                        if (items.isNotEmpty()) {
-                                            add(
-                                                ContentShelf(
-                                                    id = "browse-songs",
-                                                    title = AppText.text(R.string.app_new_top_tracks),
-                                                    items = items,
-                                                    featured = true,
-                                                ),
-                                            )
-                                        }
-                                    },
-                                    onFailure = errors::add,
-                                )
-                                albums.await().fold(
-                                    onSuccess = { items ->
-                                        if (items.isNotEmpty()) {
-                                            add(ContentShelf("browse-albums", AppText.text(R.string.app_top_albums), items))
-                                        }
-                                    },
-                                    onFailure = errors::add,
-                                )
-                                playlists.await().fold(
-                                    onSuccess = { items ->
-                                        if (items.isNotEmpty()) {
-                                            add(ContentShelf("browse-playlists", AppText.text(R.string.app_featured_playlists), items))
-                                        }
-                                    },
-                                    onFailure = errors::add,
-                                )
-                                videos.await().fold(
-                                    onSuccess = { items ->
-                                        if (items.isNotEmpty()) {
-                                            add(ContentShelf("browse-videos", AppText.text(R.string.app_top_music_videos), items))
-                                        }
-                                    },
-                                    onFailure = errors::add,
-                                )
-                                radio.await().fold(
-                                    onSuccess = { items ->
-                                        if (items.isNotEmpty()) {
-                                            add(ContentShelf("browse-radio", AppText.text(R.string.app_apple_music_radio), items))
-                                        }
-                                    },
-                                    onFailure = errors::add,
-                                )
+                            val personal = async(ioDispatcher) {
+                                if (connectionState != MusicConnectionState.SignedIn) return@async null
+                                cancellableResult { operations.personalizedNewReleases() }.getOrElse { failure ->
+                                    logWarning(BROWSE_LOG_TAG, "Personalized releases unavailable: ${failure.javaClass.simpleName}")
+                                    _state.value.shelvesFor(target).firstOrNull { it.id == BROWSE_PERSONAL_RELEASES_ID }
+                                }
                             }
+                            val editorial = withContext(ioDispatcher) {
+                                cancellableResult { operations.editorialBrowseShelves(contentLanguageTag) }
+                            }
+                            val editorialShelves = editorial.getOrDefault(emptyList())
+                            val publicShelves = editorialShelves.ifEmpty {
+                                val reason = editorial.exceptionOrNull()?.javaClass?.simpleName ?: "empty editorials"
+                                logWarning(BROWSE_LOG_TAG, "Falling back to charts and live radio: $reason")
+                                loadBrowseCharts(errors)
+                            }
+                            val personalShelf = personal.await()
+                            if (publicShelves.isEmpty() && target in _state.value.savedShelfDestinations) emptyList()
+                            else listOfNotNull(personalShelf) + publicShelves
                         }
 
                         Destination.Library -> {
@@ -700,6 +678,27 @@ class ContentStore(
         }
         shelfJobs[target] = job
         job.start()
+    }
+
+    private suspend fun loadBrowseCharts(errors: MutableList<Throwable>): List<ContentShelf> = coroutineScope {
+        val songs = async(ioDispatcher) { cancellableResult { operations.charts("songs") } }
+        val albums = async(ioDispatcher) { cancellableResult { operations.charts("albums") } }
+        val playlists = async(ioDispatcher) { cancellableResult { operations.charts("playlists") } }
+        val radio = async(ioDispatcher) { cancellableResult { operations.liveRadio() } }
+        buildList {
+            fun addShelf(result: Result<List<Track>>, id: String, title: Int, featured: Boolean = false) {
+                result.fold(
+                    onSuccess = { items ->
+                        if (items.isNotEmpty()) add(ContentShelf(id, AppText.text(title), items, featured = featured))
+                    },
+                    onFailure = errors::add,
+                )
+            }
+            addShelf(songs.await(), "browse-songs", R.string.app_new_top_tracks, featured = true)
+            addShelf(albums.await(), "browse-albums", R.string.app_top_albums)
+            addShelf(playlists.await(), "browse-playlists", R.string.app_featured_playlists)
+            addShelf(radio.await(), "browse-radio", R.string.app_apple_music_radio)
+        }
     }
 
     fun ensureDefaultSearch() {

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="browse_new_releases_for_you">为你推荐的新发行</string>
     <string name="browse_library_sign_in">登录以访问你的 Apple Music 资料库</string>
     <string name="browse_apple_connected">Apple Music 账号已关联</string>
     <string name="browse_apple_sign_in">登录 Apple Music</string>

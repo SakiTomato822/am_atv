@@ -1,5 +1,6 @@
 package dev.amatv.core
 
+import dev.amatv.integration.BROWSE_PERSONAL_RELEASES_ID
 import dev.amatv.integration.LibraryCollection
 import dev.amatv.integration.LibraryPage
 import dev.amatv.integration.MusicConnectionState
@@ -39,6 +40,8 @@ class ContentStoreTest {
         var beforeSaveShelves: suspend (String) -> Unit = {}
 
         var recommendationShelvesHandler: suspend () -> List<ContentShelf> = { emptyList() }
+        var personalizedNewReleasesHandler: suspend () -> ContentShelf? = { null }
+        var editorialBrowseShelvesHandler: suspend (String) -> List<ContentShelf> = { emptyList() }
         var recentlyPlayedTracksHandler: suspend () -> List<Track> = { emptyList() }
         var recentlyPlayedHandler: suspend () -> List<Track> = { emptyList() }
         var chartsHandler: suspend (String) -> List<Track> = { emptyList() }
@@ -73,6 +76,9 @@ class ContentStoreTest {
             recommendationShelvesCallCount++
             return recommendationShelvesHandler()
         }
+        override suspend fun personalizedNewReleases(): ContentShelf? = personalizedNewReleasesHandler()
+        override suspend fun editorialBrowseShelves(languageTag: String): List<ContentShelf> =
+            editorialBrowseShelvesHandler(languageTag)
 
         override suspend fun recentlyPlayedTracks(): List<Track> {
             libraryRequestCount++
@@ -299,6 +305,100 @@ class ContentStoreTest {
 
             store.loadDestination(Destination.Home, MusicConnectionState.SignedIn, 0, "en-US")
             assertEquals(1, ops.recommendationShelvesCallCount)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun browseShowsSnapshotThenPersonalizedAndEditorialShelvesInOrder() = runBlocking {
+        val scope = testScope()
+        try {
+            val editorialGate = CompletableDeferred<Unit>()
+            val saved = ContentShelf("saved", "Saved", listOf(testTrack("saved")))
+            val personal = ContentShelf(BROWSE_PERSONAL_RELEASES_ID, "For You", listOf(testTrack("personal")))
+            val editorial = listOf(
+                ContentShelf("new", "最新專輯", listOf(testTrack("new"))),
+                ContentShelf("featured", "精選歌單", listOf(testTrack("featured"))),
+            )
+            val ops = FakeContentOperations().apply {
+                savedShelvesMap["Browse:zh-TW"] = listOf(saved)
+                personalizedNewReleasesHandler = { personal }
+                editorialBrowseShelvesHandler = { language ->
+                    assertEquals("zh-TW", language)
+                    editorialGate.await()
+                    editorial
+                }
+            }
+            val store = testStore(ops, scope)
+            store.loadDestination(Destination.Browse, MusicConnectionState.SignedIn, 0, "zh-TW")
+            assertEquals(listOf(saved), store.state.value.shelvesFor(Destination.Browse))
+            assertTrue(store.state.value.isLoading(Destination.Browse))
+
+            editorialGate.complete(Unit)
+            assertEquals(listOf(personal) + editorial, store.state.value.shelvesFor(Destination.Browse))
+            assertEquals(listOf(personal) + editorial, ops.savedShelvesMap["Browse:zh-TW"])
+            assertEquals(0, ops.chartsCallCount)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun browseKeepsSnapshotWhenOnlyPersonalizationRefreshSucceeds() = runBlocking {
+        val scope = testScope()
+        try {
+            val saved = ContentShelf("saved", "Saved", listOf(testTrack("saved")))
+            val personal = ContentShelf(BROWSE_PERSONAL_RELEASES_ID, "For You", listOf(testTrack("personal")))
+            val ops = FakeContentOperations().apply {
+                savedShelvesMap["Browse:en-US"] = listOf(saved)
+                personalizedNewReleasesHandler = { personal }
+            }
+            val store = testStore(ops, scope)
+            store.loadDestination(Destination.Browse, MusicConnectionState.SignedIn, 0, "en-US")
+
+            assertEquals(listOf(saved), store.state.value.shelvesFor(Destination.Browse))
+            assertTrue(Destination.Browse in store.state.value.savedShelfDestinations)
+            assertFalse(store.state.value.isLoading(Destination.Browse))
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun signedOutBrowseFallsBackWhenEditorialIsEmpty() = runBlocking {
+        assertBrowseFallback(MusicConnectionState.ReadyToSignIn) { emptyList() }
+    }
+
+    @Test
+    fun signedInBrowseFallsBackWhenEditorialFails() = runBlocking {
+        assertBrowseFallback(MusicConnectionState.SignedIn) { error("Editorial request failed") }
+    }
+
+    private fun assertBrowseFallback(
+        connectionState: MusicConnectionState,
+        loadEditorial: suspend (String) -> List<ContentShelf>,
+    ) {
+        val scope = testScope()
+        try {
+            var personalCalls = 0
+            val ops = FakeContentOperations().apply {
+                editorialBrowseShelvesHandler = loadEditorial
+                personalizedNewReleasesHandler = {
+                    personalCalls++
+                    ContentShelf("personal", "For You", listOf(testTrack("personal")))
+                }
+                chartsHandler = { type -> listOf(testTrack(type)) }
+                liveRadioHandler = { listOf(testTrack("radio")) }
+            }
+            val store = testStore(ops, scope)
+            store.loadDestination(Destination.Browse, connectionState, 0, "en-US")
+            val signedIn = connectionState == MusicConnectionState.SignedIn
+            val chartIds = listOf("browse-songs", "browse-albums", "browse-playlists", "browse-radio")
+            val expectedIds = if (signedIn) listOf("personal") + chartIds else chartIds
+            assertEquals(expectedIds, store.state.value.shelvesFor(Destination.Browse).map { it.id })
+            assertEquals(if (signedIn) 1 else 0, personalCalls)
+            assertEquals(3, ops.chartsCallCount)
         } finally {
             scope.cancel()
         }

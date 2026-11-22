@@ -159,6 +159,9 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
 
     suspend fun recommendations(): List<Track> = api.recommendations()
     override suspend fun recommendationShelves(): List<ContentShelf> = api.recommendationShelves()
+    override suspend fun personalizedNewReleases(): ContentShelf? = api.personalizedNewReleases()
+    override suspend fun editorialBrowseShelves(languageTag: String): List<ContentShelf> =
+        api.editorialBrowseShelves(languageTag)
     override suspend fun recentlyPlayed(): List<Track> = api.recentlyPlayed()
     override suspend fun recentlyPlayedTracks(): List<Track> = api.recentlyPlayedTracks()
     override suspend fun recentlyAdded(): List<Track> = api.recentlyAdded()

@@ -26,6 +26,8 @@ import java.net.URLEncoder
 import java.util.Locale
 
 internal const val SEARCH_LOG_TAG = "AMATV-Search"
+internal const val BROWSE_LOG_TAG = "AMATV-Browse"
+internal const val BROWSE_PERSONAL_RELEASES_ID = "browse-personal-new-releases"
 
 internal data class CatalogSearchTerm(val displayTerm: String, val searchTerm: String)
 
@@ -174,70 +176,92 @@ class AppleMusicApi(
         needsUserToken = true,
     )
 
+    private suspend fun recommendationRoot(): JSONObject = requestRoot(
+        // The web home shows about twenty groups; ten cut off genres, stations and artists.
+        path = "/v1/me/recommendations?limit=${if (BuildConfig.FLYME_AUTO) 20 else 10}" +
+            "&extend=editorialArtwork,editorialVideo",
+        needsUserToken = true,
+    )
+
     suspend fun recommendationShelves(): List<ContentShelf> {
-        val root = requestRoot(
-            // The web home shows about twenty groups; ten cut off genres, stations and artists.
-            path = "/v1/me/recommendations?limit=${if (BuildConfig.FLYME_AUTO) 20 else 10}" +
-                "&extend=editorialArtwork,editorialVideo",
-            needsUserToken = true,
-        )
+        val root = recommendationRoot()
         return withContext(parseDispatcher) {
-        val recommendations = root.optJSONArray("data") ?: JSONArray()
-        val shelves = buildList {
-            for (index in 0 until recommendations.length()) {
-                val recommendation = recommendations.optJSONObject(index) ?: continue
-                val attributes = recommendation.optJSONObject("attributes")
-                val title = attributes?.displayText("title")
-                    ?: attributes?.displayText("name")
-                    ?: AppText.text(R.string.services_recommended_for_you)
-                val contents = recommendation.optJSONObject("relationships")
-                    ?.optJSONObject("contents")
-                    ?: continue
-                val tracks = parseResources(contents)
-                if (tracks.isNotEmpty()) {
-                    add(
-                        ContentShelf(
+            val groups = parseRecommendationGroups(root)
+            val shelves = groups.map { it.shelf }.let { shelves ->
+                if (!BuildConfig.FLYME_AUTO) shelves
+                else listOfNotNull(topPicks(groups)) + shelves
+            }
+            val motionCount = shelves.sumOf { shelf ->
+                shelf.items.count { it.motionArtworkUrl != null }
+            }
+            Log.i(TAG, "Home motion artwork: $motionCount/${shelves.sumOf { it.items.size }}")
+            if (shelves.isNotEmpty()) return@withContext shelves
+            val fallback = parseResources(root)
+            if (fallback.isEmpty()) emptyList() else listOf(
+                ContentShelf("recommendations", AppText.text(R.string.services_top_picks_for_you), fallback, featured = true),
+            )
+        }
+    }
+
+    private data class RecommendationGroup(val shelf: ContentShelf, val kind: String?)
+
+    private fun parseRecommendationGroups(root: JSONObject): List<RecommendationGroup> = buildList {
+        val recommendations = root.optJSONArray("data") ?: return@buildList
+        for (index in 0 until recommendations.length()) {
+            val recommendation = recommendations.optJSONObject(index) ?: continue
+            val attributes = recommendation.optJSONObject("attributes")
+            val contents = recommendation.optJSONObject("relationships")?.optJSONObject("contents") ?: continue
+            val tracks = parseResources(contents)
+            if (tracks.isNotEmpty()) {
+                add(
+                    RecommendationGroup(
+                        shelf = ContentShelf(
                             id = "recommendation:${recommendation.optString("id", index.toString())}",
-                            title = title,
+                            title = attributes?.displayText("title") ?: attributes?.displayText("name")
+                                ?: AppText.text(R.string.services_recommended_for_you),
                             items = tracks,
                             featured = isEmpty() && !BuildConfig.FLYME_AUTO,
                         ),
-                    )
-                }
+                        kind = attributes?.optString("kind"),
+                    ),
+                )
             }
-        }.let { groups ->
-            if (!BuildConfig.FLYME_AUTO) groups
-            else listOfNotNull(topPicks(recommendations, groups)) + groups
         }
-        val motionCount = shelves.sumOf { shelf ->
-            shelf.items.count { it.motionArtworkUrl != null }
-        }
-        Log.i(TAG, "Home motion artwork: $motionCount/${shelves.sumOf { it.items.size }}")
-        if (shelves.isNotEmpty()) return@withContext shelves
-        val fallback = parseResources(root)
-        if (fallback.isEmpty()) emptyList() else listOf(
-            ContentShelf("recommendations", AppText.text(R.string.services_top_picks_for_you), fallback, featured = true),
+    }
+
+    private fun newReleaseGroupIndex(groups: List<RecommendationGroup>): Int =
+        groups.indices.drop(1).firstOrNull { index ->
+            val group = groups[index]
+            group.kind != "recently-played" && group.shelf.items.all { it.catalogKind == CatalogKind.Album }
+        } ?: -1
+
+    suspend fun personalizedNewReleases(): ContentShelf? {
+        val root = recommendationRoot()
+        return withContext(parseDispatcher) { parsePersonalizedNewReleases(root) }
+    }
+
+    internal fun parsePersonalizedNewReleases(root: JSONObject): ContentShelf? {
+        val groups = parseRecommendationGroups(root)
+        return groups.getOrNull(newReleaseGroupIndex(groups))?.shelf?.copy(
+            id = BROWSE_PERSONAL_RELEASES_ID,
+            title = AppText.text(R.string.browse_new_releases_for_you),
+            featured = false,
         )
-        }
     }
 
     /**
      * Apple Music Web's "Top Picks for You" is assembled by Apple's own web service. Rebuild it
      * from the public groups: the lead item of each, labelled with why it is there.
      */
-    private fun topPicks(recommendations: JSONArray, groups: List<ContentShelf>): ContentShelf? {
-        var newReleaseSeen = false
+    private fun topPicks(groups: List<RecommendationGroup>): ContentShelf? {
+        val newReleaseIndex = newReleaseGroupIndex(groups)
         val picks = groups.mapIndexedNotNull { index, group ->
-            val kind = recommendations.optJSONObject(index)?.optJSONObject("attributes")?.optString("kind")
-            if (kind == "recently-played") return@mapIndexedNotNull null
-            val item = group.items.firstOrNull() ?: return@mapIndexedNotNull null
+            if (group.kind == "recently-played") return@mapIndexedNotNull null
+            val item = group.shelf.items.first()
             val reason = when {
                 index == 0 -> R.string.services_pick_made_for_you
-                group.items.all { it.catalogKind == CatalogKind.Station } -> R.string.services_pick_station
-                !newReleaseSeen && group.items.all { it.catalogKind == CatalogKind.Album } -> {
-                    newReleaseSeen = true
-                    R.string.services_pick_new_release
-                }
+                group.shelf.items.all { it.catalogKind == CatalogKind.Station } -> R.string.services_pick_station
+                index == newReleaseIndex -> R.string.services_pick_new_release
                 else -> R.string.services_pick_for_you
             }
             item.copy(pickReason = AppText.text(reason))
@@ -245,6 +269,70 @@ class AppleMusicApi(
         return picks.takeIf { it.size >= 3 }?.let {
             ContentShelf("top-picks", AppText.text(R.string.services_top_picks_for_you), it, featured = true)
         }
+    }
+
+    suspend fun editorialBrowseShelves(languageTag: String): List<ContentShelf> {
+        val storefront = effectiveStorefront()
+        val path = editorialBrowsePath(storefront, languageTag)
+        Log.i(BROWSE_LOG_TAG, "GET $path")
+        val root = requestRoot(path, needsUserToken = false, editorialBrowse = true)
+        return withContext(parseDispatcher) {
+            parseEditorialBrowseShelves(root).also { shelves ->
+                val counts = shelves.joinToString { "${it.id}:${it.items.size}" }
+                Log.i(BROWSE_LOG_TAG, "GET $path shelves=${shelves.size} items=[$counts]")
+            }
+        }
+    }
+
+    internal fun parseEditorialBrowseShelves(root: JSONObject): List<ContentShelf> {
+        val grouping = root.optJSONArray("data")?.optJSONObject(0) ?: return emptyList()
+        val tab = grouping.editorialRelationship("tabs").firstOrNull() ?: return emptyList()
+        return tab.editorialRelationship("children").mapIndexedNotNull { index, element ->
+            val attributes = element.optJSONObject("attributes") ?: return@mapIndexedNotNull null
+            val resources = when (attributes.optString("editorialElementKind")) {
+                "326", "327", "345", "387" -> element.editorialRelationship("contents")
+                "316", "385", "488" -> element.editorialRelationship("children").flatMap { child ->
+                    child.editorialRelationship("contents").take(1)
+                }
+                else -> return@mapIndexedNotNull null
+            }
+            val items = resources.mapNotNull { resource ->
+                val type = resource.optString("type")
+                val kind = when (type) {
+                    "albums" -> CatalogKind.Album
+                    "playlists" -> CatalogKind.Playlist
+                    "songs" -> CatalogKind.Song
+                    "stations" -> CatalogKind.Station
+                    else -> return@mapNotNull null
+                }
+                val id = (resource.opt("id") as? String)?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+                resource.optJSONObject("attributes")?.toTrack(id, kind, resourceType = type)
+            }.toList()
+            if (items.isEmpty()) return@mapIndexedNotNull null
+            val id = element.optString("id").ifBlank { index.toString() }
+            ContentShelf(
+                id = "browse-editorial:$index:$id",
+                title = attributes.displayText("name") ?: attributes.displayText("title").orEmpty(),
+                items = items,
+            )
+        }.toList()
+    }
+
+    private fun JSONObject.editorialRelationship(name: String): Sequence<JSONObject> {
+        val data = optJSONObject("relationships")?.optJSONObject(name)?.optJSONArray("data")
+            ?: return emptySequence()
+        return (0 until data.length()).asSequence().mapNotNull(data::optJSONObject)
+    }
+
+    internal fun editorialBrowsePath(storefront: String, languageTags: String): String {
+        val firstTag = languageTags.substringBefore(',')
+        val languageTag = when (firstTag) {
+            "zh-CN" -> "zh-Hans-CN"
+            "zh-TW" -> "zh-Hant-TW"
+            else -> firstTag
+        }
+        return "/v1/editorial/$storefront/groupings?name=music&platform=web&tabs=nonsubscriber" +
+            "&l=${URLEncoder.encode(languageTag, "UTF-8")}&extend=editorialArtwork"
     }
 
     suspend fun recentlyPlayed(): List<Track> = request(
@@ -790,6 +878,7 @@ class AppleMusicApi(
         method: String = "GET",
         postBody: String? = null,
         suggestionTermLength: Int? = null,
+        editorialBrowse: Boolean = false,
     ): JSONObject = withContext(Dispatchers.IO) {
         val musicUserToken = userToken()
         if (needsUserToken) {
@@ -801,7 +890,8 @@ class AppleMusicApi(
 
         suspend fun execute(forceTokenRefresh: Boolean): Pair<Int, String> {
             val developerToken = developerTokens.token(forceRefresh = forceTokenRefresh)
-            val url = "https://api.music.apple.com$path"
+            val host = if (editorialBrowse) "https://amp-api-edge.music.apple.com" else "https://api.music.apple.com"
+            val url = "$host$path"
             val headers = buildMap {
                 put("Authorization", "Bearer $developerToken")
                 put("Accept", "application/json")
@@ -809,6 +899,11 @@ class AppleMusicApi(
             }
             val connection = URI(url).toURL().openConnection() as HttpURLConnection
             return try {
+                if (editorialBrowse) {
+                    connection.instanceFollowRedirects = false
+                    connection.setRequestProperty("Origin", "https://music.apple.com")
+                    connection.setRequestProperty("Referer", "https://music.apple.com/")
+                }
                 connection.requestMethod = method
                 connection.connectTimeout = 10_000
                 connection.readTimeout = 15_000
@@ -819,6 +914,7 @@ class AppleMusicApi(
                     connection.outputStream.bufferedWriter(Charsets.UTF_8).use { it.write(postBody) }
                 }
                 val status = connection.responseCode
+                if (editorialBrowse) Log.i(BROWSE_LOG_TAG, "GET $path httpStatus=$status")
                 if (suggestionTermLength != null) {
                     Log.d(SEARCH_LOG_TAG, "suggestions response termLength=$suggestionTermLength httpStatus=$status")
                 }

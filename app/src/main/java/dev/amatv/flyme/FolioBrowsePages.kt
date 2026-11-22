@@ -152,8 +152,10 @@ internal fun FolioBrowsePage(
             ),
         ) {
             shelves.forEachIndexed { shelfIdx, shelf ->
-                item(key = "browse-sec-${shelf.id}", contentType = "section-title") {
-                    FolioSectionTitle(shelf.title)
+                if (shelf.title.isNotBlank()) {
+                    item(key = "browse-sec-${shelf.id}", contentType = "section-title") {
+                        FolioSectionTitle(shelf.title)
+                    }
                 }
                 val rows = shelfRows[shelfIdx]
                 itemsIndexed(

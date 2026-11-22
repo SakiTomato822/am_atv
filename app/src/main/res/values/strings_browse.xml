@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="browse_new_releases_for_you">New Releases for You</string>
     <string name="browse_library_sign_in">Sign in to access your Apple Music library</string>
     <string name="browse_apple_connected">Apple Music account connected</string>
     <string name="browse_apple_sign_in">Sign In to Apple Music</string>
