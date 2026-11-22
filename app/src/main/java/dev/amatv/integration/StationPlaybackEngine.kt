@@ -42,20 +42,6 @@ interface StationPlaybackEngine {
     }
 }
 
-internal interface WebEditorialBrowseClient {
-    suspend fun editorial(
-        storefront: String,
-        language: String,
-        developerToken: String,
-        userToken: String?,
-    ): WebEditorialResponse
-}
-
-internal data class WebEditorialResponse(val root: JSONObject, val httpStatus: Int?)
-
-internal class WebEditorialException(val errorName: String, val httpStatus: Int? = null) :
-    IllegalStateException(errorName)
-
 /** Generations far above MusicKitBridge's counter so the two engines never collide. */
 internal const val WEB_STATION_GENERATION_BASE = 1L shl 40
 

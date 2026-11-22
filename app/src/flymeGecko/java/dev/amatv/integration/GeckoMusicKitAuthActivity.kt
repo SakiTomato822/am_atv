@@ -408,8 +408,6 @@ class GeckoMusicKitAuthActivity : Activity() {
 internal object GeckoAuthRuntime {
     private var instance: GeckoRuntime? = null
 
-    val isInitialized: Boolean get() = instance != null
-
     fun get(context: Context): GeckoRuntime = instance ?: GeckoRuntime.create(
         context.applicationContext,
         GeckoRuntimeSettings.Builder()

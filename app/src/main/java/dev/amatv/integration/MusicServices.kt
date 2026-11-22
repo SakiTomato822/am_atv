@@ -5,7 +5,6 @@ import dev.amatv.i18n.AppText
 
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import dev.amatv.BuildConfig
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.LyricLine
@@ -51,6 +50,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
         tokenStore = tokenStore,
         bundledToken = BuildConfig.MUSICKIT_DEVELOPER_TOKEN,
     )
+    private val webDeveloperToken = WebDeveloperToken(appContext.getSharedPreferences("am_atv_web_token", Context.MODE_PRIVATE))
     private val bridge = MusicKitBridge(appContext) { api.songPreviewUrl(it) }
     // Stations the native SDK cannot queue; null in variants without a second engine.
     private val stationEngine = StationPlaybackEngine.create(appContext)
@@ -162,22 +162,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
     override suspend fun recommendationShelves(): List<ContentShelf> = api.recommendationShelves()
     override suspend fun personalizedNewReleases(): ContentShelf? = api.personalizedNewReleases()
     override suspend fun editorialBrowseShelves(languageTag: String): List<ContentShelf> =
-        api.editorialBrowseShelves(languageTag)
-
-    override suspend fun webEditorialBrowseShelves(languageTag: String): List<ContentShelf> {
-        val client = stationEngine as? WebEditorialBrowseClient ?: throw WebEditorialException("GeckoUnavailable")
-        val storefront = api.effectiveStorefront()
-        val language = api.editorialBrowseLanguage(languageTag)
-        Log.i(BROWSE_LOG_TAG, "channel=gecko selected storefront=$storefront language=$language")
-        val response = client.editorial(storefront, language, developerTokens.token(), tokenStore.readUserToken())
-        val shelves = try {
-            api.parseEditorialBrowseShelves(response.root)
-        } catch (_: org.json.JSONException) {
-            throw WebEditorialException("InvalidJson", response.httpStatus)
-        }
-        Log.i(BROWSE_LOG_TAG, "channel=gecko httpStatus=${response.httpStatus ?: "unknown"} shelves=${shelves.size}")
-        return shelves
-    }
+        api.editorialBrowseShelves(languageTag, webDeveloperToken)
     override suspend fun recentlyPlayed(): List<Track> = api.recentlyPlayed()
     override suspend fun recentlyPlayedTracks(): List<Track> = api.recentlyPlayedTracks()
     override suspend fun recentlyAdded(): List<Track> = api.recentlyAdded()

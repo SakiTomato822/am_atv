@@ -20,6 +20,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URLEncoder
@@ -271,17 +272,65 @@ class AppleMusicApi(
         }
     }
 
-    suspend fun editorialBrowseShelves(languageTag: String): List<ContentShelf> {
-        val storefront = effectiveStorefront()
-        val path = editorialBrowsePath(storefront, languageTag)
-        Log.i(BROWSE_LOG_TAG, "channel=native GET $path")
-        val root = requestRoot(path, needsUserToken = false, editorialBrowse = true)
-        return withContext(parseDispatcher) {
-            parseEditorialBrowseShelves(root).also { shelves ->
-                val counts = shelves.joinToString { "${it.id}:${it.items.size}" }
-                Log.i(BROWSE_LOG_TAG, "channel=native shelves=${shelves.size} items=[$counts]")
+    internal suspend fun editorialBrowseShelves(languageTag: String, webTokens: WebDeveloperToken): List<ContentShelf> =
+        withContext(Dispatchers.IO) {
+            val storefront = effectiveStorefront()
+            val path = editorialBrowsePath(storefront, languageTag)
+            val musicUserToken = userToken()?.takeIf(String::isNotBlank)
+            repeat(2) {
+                currentCoroutineContext().ensureActive()
+                val token = webTokens.token(storefront)
+                var rejected = false
+                for (host in listOf("amp-api.music.apple.com", "amp-api-edge.music.apple.com")) {
+                    val (status, shelves) = requestWebEditorial(host, path, token, musicUserToken)
+                    if (shelves.isNotEmpty()) return@withContext shelves
+                    if (status == HttpURLConnection.HTTP_UNAUTHORIZED) {
+                        if (musicUserToken == null) {
+                            rejected = true
+                        } else {
+                            val (publicStatus, publicShelves) = requestWebEditorial(host, path, token, null)
+                            if (publicShelves.isNotEmpty()) return@withContext publicShelves
+                            rejected = rejected || publicStatus == HttpURLConnection.HTTP_UNAUTHORIZED
+                        }
+                    }
+                }
+                if (!rejected) return@withContext emptyList()
+                webTokens.invalidate(token)
             }
+            emptyList()
         }
+
+    private suspend fun requestWebEditorial(
+        host: String,
+        path: String,
+        token: String,
+        musicUserToken: String?,
+    ): Pair<Int?, List<ContentShelf>> {
+        currentCoroutineContext().ensureActive()
+        val headers = buildMap {
+            put("Authorization", "Bearer $token")
+            put("Origin", APPLE_MUSIC_WEB_ORIGIN)
+            put("Referer", "$APPLE_MUSIC_WEB_ORIGIN/")
+            put("Accept", "application/json")
+            if (musicUserToken != null) put("Music-User-Token", musicUserToken)
+        }
+        val log = "channel=web-editorial host=$host hasUserToken=${musicUserToken != null}"
+        val (status, body) = try {
+            getWebBrowseResource(URI("https://$host$path"), headers)
+        } catch (error: IOException) {
+            Log.w(BROWSE_LOG_TAG, "$log httpStatus=unavailable shelves=0 error=${error.javaClass.simpleName}")
+            return null to emptyList()
+        }
+        val shelves = if (status in 200..299) {
+            try {
+                withContext(parseDispatcher) { parseEditorialBrowseShelves(JSONObject(body)) }
+            } catch (_: JSONException) {
+                Log.w(BROWSE_LOG_TAG, "$log httpStatus=$status shelves=0 error=InvalidJson")
+                return status to emptyList()
+            }
+        } else emptyList()
+        Log.i(BROWSE_LOG_TAG, "$log httpStatus=$status shelves=${shelves.size}")
+        return status to shelves
     }
 
     internal fun parseEditorialBrowseShelves(root: JSONObject): List<ContentShelf> {
@@ -884,8 +933,7 @@ class AppleMusicApi(
         method: String = "GET",
         postBody: String? = null,
         suggestionTermLength: Int? = null,
-        editorialBrowse: Boolean = false,
-        browseChannel: String? = if (editorialBrowse) "native" else null,
+        browseChannel: String? = null,
     ): JSONObject = withContext(Dispatchers.IO) {
         val musicUserToken = userToken()
         if (needsUserToken) {
@@ -897,8 +945,7 @@ class AppleMusicApi(
 
         suspend fun execute(forceTokenRefresh: Boolean): Pair<Int, String> {
             val developerToken = developerTokens.token(forceRefresh = forceTokenRefresh)
-            val host = if (editorialBrowse) "https://amp-api-edge.music.apple.com" else "https://api.music.apple.com"
-            val url = "$host$path"
+            val url = "https://api.music.apple.com$path"
             val headers = buildMap {
                 put("Authorization", "Bearer $developerToken")
                 put("Accept", "application/json")
@@ -906,11 +953,6 @@ class AppleMusicApi(
             }
             val connection = URI(url).toURL().openConnection() as HttpURLConnection
             return try {
-                if (editorialBrowse) {
-                    connection.instanceFollowRedirects = false
-                    connection.setRequestProperty("Origin", "https://music.apple.com")
-                    connection.setRequestProperty("Referer", "https://music.apple.com/")
-                }
                 connection.requestMethod = method
                 connection.connectTimeout = 10_000
                 connection.readTimeout = 15_000

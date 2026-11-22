@@ -5,7 +5,6 @@ import dev.amatv.integration.CatalogRequestException
 import dev.amatv.integration.LibraryCollection
 import dev.amatv.integration.LibraryPage
 import dev.amatv.integration.MusicConnectionState
-import dev.amatv.integration.WebEditorialException
 import dev.amatv.integration.catalogHttpFailure
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.ContentShelf
@@ -45,8 +44,6 @@ class ContentStoreTest {
         var recommendationShelvesHandler: suspend () -> List<ContentShelf> = { emptyList() }
         var personalizedNewReleasesHandler: suspend () -> ContentShelf? = { null }
         var editorialBrowseShelvesHandler: suspend (String) -> List<ContentShelf> = { emptyList() }
-        var webEditorialBrowseShelvesHandler: suspend (String) -> List<ContentShelf> =
-            { throw AssertionError("Unexpected Gecko editorial request") }
         var recentlyPlayedTracksHandler: suspend () -> List<Track> = { emptyList() }
         var recentlyPlayedHandler: suspend () -> List<Track> = { emptyList() }
         var chartsHandler: suspend (String) -> List<Track> = { emptyList() }
@@ -84,8 +81,6 @@ class ContentStoreTest {
         override suspend fun personalizedNewReleases(): ContentShelf? = personalizedNewReleasesHandler()
         override suspend fun editorialBrowseShelves(languageTag: String): List<ContentShelf> =
             editorialBrowseShelvesHandler(languageTag)
-        override suspend fun webEditorialBrowseShelves(languageTag: String): List<ContentShelf> =
-            webEditorialBrowseShelvesHandler(languageTag)
 
         override suspend fun recentlyPlayedTracks(): List<Track> {
             libraryRequestCount++
@@ -318,19 +313,18 @@ class ContentStoreTest {
     }
 
     @Test
-    fun browseShowsSnapshotThenPersonalizedAndEditorialShelvesInOrder() = runBlocking {
+    fun browseShowsSnapshotThenReplacesItWithWebEditorial() = runBlocking {
         val scope = testScope()
         try {
             val editorialGate = CompletableDeferred<Unit>()
             val saved = ContentShelf("saved", "Saved", listOf(testTrack("saved")))
-            val personal = ContentShelf(BROWSE_PERSONAL_RELEASES_ID, "For You", listOf(testTrack("personal")))
             val editorial = listOf(
                 ContentShelf("new", "最新專輯", listOf(testTrack("new"))),
                 ContentShelf("featured", "精選歌單", listOf(testTrack("featured"))),
             )
             val ops = FakeContentOperations().apply {
                 savedShelvesMap["Browse:zh-TW"] = listOf(saved)
-                personalizedNewReleasesHandler = { personal }
+                personalizedNewReleasesHandler = { throw AssertionError("Unexpected fallback recommendation request") }
                 editorialBrowseShelvesHandler = { language ->
                     assertEquals("zh-TW", language)
                     editorialGate.await()
@@ -343,8 +337,8 @@ class ContentStoreTest {
             assertTrue(store.state.value.isLoading(Destination.Browse))
 
             editorialGate.complete(Unit)
-            assertEquals(listOf(personal) + editorial, store.state.value.shelvesFor(Destination.Browse))
-            assertEquals(listOf(personal) + editorial, ops.savedShelvesMap["Browse:zh-TW"])
+            assertEquals(editorial, store.state.value.shelvesFor(Destination.Browse))
+            assertEquals(editorial, ops.savedShelvesMap["Browse:zh-TW"])
             assertEquals(0, ops.chartsCallCount)
         } finally {
             scope.cancel()
@@ -352,14 +346,12 @@ class ContentStoreTest {
     }
 
     @Test
-    fun browseKeepsSnapshotWhenOnlyPersonalizationRefreshSucceeds() = runBlocking {
+    fun browseKeepsSnapshotWhenEditorialAndChartsAreEmpty() = runBlocking {
         val scope = testScope()
         try {
             val saved = ContentShelf("saved", "Saved", listOf(testTrack("saved")))
-            val personal = ContentShelf(BROWSE_PERSONAL_RELEASES_ID, "For You", listOf(testTrack("personal")))
             val ops = FakeContentOperations().apply {
                 savedShelvesMap["Browse:en-US"] = listOf(saved)
-                personalizedNewReleasesHandler = { personal }
             }
             val store = testStore(ops, scope)
             store.loadDestination(Destination.Browse, MusicConnectionState.SignedIn, 0, "en-US")
@@ -385,50 +377,48 @@ class ContentStoreTest {
     }
 
     @Test
-    fun browseTriesGeckoAfterNative401Or403BeforeCharts() = runBlocking {
-        val editorial = ContentShelf("gecko", "Editorial", listOf(testTrack("new")))
-        for (status in listOf(401, 403)) {
-            val scope = testScope()
-            try {
-                val calls = mutableListOf<String>()
-                val ops = FakeContentOperations().apply {
-                    editorialBrowseShelvesHandler = {
-                        calls += "native"
-                        throw CatalogRequestException(catalogHttpFailure(status), "HTTP $status", status)
-                    }
-                    webEditorialBrowseShelvesHandler = { language ->
-                        calls += "gecko:$language"
-                        listOf(editorial)
-                    }
+    fun browsePublishesWebEditorialBeforePendingChartsFinish() = runBlocking {
+        val scope = testScope()
+        try {
+            val editorialGate = CompletableDeferred<Unit>()
+            val chartGate = CompletableDeferred<Unit>()
+            val editorial = ContentShelf("editorial", "Editorial", listOf(testTrack("new")))
+            val ops = FakeContentOperations().apply {
+                editorialBrowseShelvesHandler = {
+                    editorialGate.await()
+                    listOf(editorial)
                 }
-                val store = testStore(ops, scope)
-                store.loadDestination(Destination.Browse, MusicConnectionState.SignedIn, 0, "zh-TW")
-                assertEquals(listOf("native", "gecko:zh-TW"), calls)
-                assertEquals(listOf(editorial), store.state.value.shelvesFor(Destination.Browse))
-                assertEquals(0, ops.chartsCallCount)
-            } finally {
-                scope.cancel()
+                chartsHandler = { type ->
+                    chartGate.await()
+                    listOf(testTrack(type))
+                }
             }
+            val store = testStore(ops, scope)
+            store.loadDestination(Destination.Browse, MusicConnectionState.SignedIn, 0, "zh-TW")
+            assertEquals(3, ops.chartsCallCount)
+
+            editorialGate.complete(Unit)
+            assertEquals(listOf(editorial), store.state.value.shelvesFor(Destination.Browse))
+            assertFalse(store.state.value.isLoading(Destination.Browse))
+            chartGate.complete(Unit)
+            assertEquals(listOf(editorial), store.state.value.shelvesFor(Destination.Browse))
+        } finally {
+            scope.cancel()
         }
     }
 
     @Test
-    fun browseShowsChartsWhileGeckoIsPendingAndReplacesThemWithEditorial() = runBlocking {
+    fun browseShowsChartsWhileWebRequestIsPendingAndReplacesThemWithEditorial() = runBlocking {
         val scope = testScope()
         try {
-            val geckoGate = CompletableDeferred<Unit>()
-            val editorial = ContentShelf("gecko", "Editorial", listOf(testTrack("new")))
-            val personal = ContentShelf("personal", "For You", listOf(testTrack("personal")))
+            val editorialGate = CompletableDeferred<Unit>()
+            val editorial = ContentShelf("editorial", "Editorial", listOf(testTrack("new")))
             val ops = FakeContentOperations().apply {
                 editorialBrowseShelvesHandler = {
-                    throw CatalogRequestException(catalogHttpFailure(401), "HTTP 401", 401)
-                }
-                webEditorialBrowseShelvesHandler = {
-                    geckoGate.await()
+                    editorialGate.await()
                     listOf(editorial)
                 }
                 chartsHandler = { type -> listOf(testTrack(type)) }
-                personalizedNewReleasesHandler = { personal }
             }
             val store = testStore(ops, scope)
             store.loadDestination(Destination.Browse, MusicConnectionState.SignedIn, 0, "zh-TW")
@@ -437,9 +427,9 @@ class ContentStoreTest {
                 store.state.value.shelvesFor(Destination.Browse).map { it.id })
             assertTrue(ops.savedSnapshotCalls.isEmpty())
 
-            geckoGate.complete(Unit)
-            assertEquals(listOf(personal, editorial), store.state.value.shelvesFor(Destination.Browse))
-            assertEquals(listOf(personal, editorial), ops.savedShelvesMap["Browse:zh-TW"])
+            editorialGate.complete(Unit)
+            assertEquals(listOf(editorial), store.state.value.shelvesFor(Destination.Browse))
+            assertEquals(listOf(editorial), ops.savedShelvesMap["Browse:zh-TW"])
             assertEquals(3, ops.chartsCallCount)
             assertFalse(store.state.value.isLoading(Destination.Browse))
         } finally {
@@ -448,33 +438,38 @@ class ContentStoreTest {
     }
 
     @Test
-    fun browseFallsBackToChartsWhenGeckoFailsOrReturnsNoShelves() = runBlocking {
-        for (geckoFailure in listOf(null, WebEditorialException("MKError", 403))) {
-            val scope = testScope()
-            try {
-                var geckoCalled = false
-                val ops = FakeContentOperations().apply {
-                    editorialBrowseShelvesHandler = {
-                        throw CatalogRequestException(catalogHttpFailure(401), "HTTP 401", 401)
-                    }
-                    webEditorialBrowseShelvesHandler = {
-                        geckoCalled = true
-                        if (geckoFailure != null) throw geckoFailure
-                        emptyList()
-                    }
-                    chartsHandler = { type ->
-                        assertTrue(geckoCalled)
-                        listOf(testTrack(type))
-                    }
+    fun browseKeepsChartsVisibleWhileLoadingFallbackRecommendations() = runBlocking {
+        val scope = testScope()
+        try {
+            val editorialGate = CompletableDeferred<Unit>()
+            val personalGate = CompletableDeferred<Unit>()
+            val saved = ContentShelf("saved", "Saved", listOf(testTrack("saved")))
+            val personal = ContentShelf(BROWSE_PERSONAL_RELEASES_ID, "For You", listOf(testTrack("personal")))
+            val ops = FakeContentOperations().apply {
+                savedShelvesMap["Browse:zh-TW"] = listOf(saved)
+                editorialBrowseShelvesHandler = {
+                    editorialGate.await()
+                    emptyList()
                 }
-                val store = testStore(ops, scope)
-                store.loadDestination(Destination.Browse, MusicConnectionState.SignedIn, 0, "en-US")
-                assertEquals(listOf("browse-songs", "browse-albums", "browse-playlists"),
-                    store.state.value.shelvesFor(Destination.Browse).map { it.id })
-                assertEquals(3, ops.chartsCallCount)
-            } finally {
-                scope.cancel()
+                chartsHandler = { type -> listOf(testTrack(type)) }
+                personalizedNewReleasesHandler = {
+                    personalGate.await()
+                    personal
+                }
             }
+            val store = testStore(ops, scope)
+            store.loadDestination(Destination.Browse, MusicConnectionState.SignedIn, 0, "zh-TW")
+            assertEquals(listOf(saved), store.state.value.shelvesFor(Destination.Browse))
+
+            editorialGate.complete(Unit)
+            val charts = store.state.value.shelvesFor(Destination.Browse)
+            assertEquals(listOf("browse-songs", "browse-albums", "browse-playlists"), charts.map { it.id })
+
+            personalGate.complete(Unit)
+            assertEquals(listOf(personal) + charts, store.state.value.shelvesFor(Destination.Browse))
+            assertEquals(3, ops.chartsCallCount)
+        } finally {
+            scope.cancel()
         }
     }
 
