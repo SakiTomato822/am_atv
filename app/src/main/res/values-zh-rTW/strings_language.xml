@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="nav_home">現在收聽</string>
-    <string name="nav_browse">最新發行</string>
+    <string name="nav_browse">新發現</string>
     <string name="nav_sing">歡唱</string>
     <string name="nav_videos">音樂影片</string>
     <string name="nav_radio">廣播</string>
