@@ -413,6 +413,41 @@ class ContentStoreTest {
     }
 
     @Test
+    fun browseShowsChartsWhileGeckoIsPendingAndReplacesThemWithEditorial() = runBlocking {
+        val scope = testScope()
+        try {
+            val geckoGate = CompletableDeferred<Unit>()
+            val editorial = ContentShelf("gecko", "Editorial", listOf(testTrack("new")))
+            val personal = ContentShelf("personal", "For You", listOf(testTrack("personal")))
+            val ops = FakeContentOperations().apply {
+                editorialBrowseShelvesHandler = {
+                    throw CatalogRequestException(catalogHttpFailure(401), "HTTP 401", 401)
+                }
+                webEditorialBrowseShelvesHandler = {
+                    geckoGate.await()
+                    listOf(editorial)
+                }
+                chartsHandler = { type -> listOf(testTrack(type)) }
+                personalizedNewReleasesHandler = { personal }
+            }
+            val store = testStore(ops, scope)
+            store.loadDestination(Destination.Browse, MusicConnectionState.SignedIn, 0, "zh-TW")
+
+            assertEquals(listOf("browse-songs", "browse-albums", "browse-playlists"),
+                store.state.value.shelvesFor(Destination.Browse).map { it.id })
+            assertTrue(ops.savedSnapshotCalls.isEmpty())
+
+            geckoGate.complete(Unit)
+            assertEquals(listOf(personal, editorial), store.state.value.shelvesFor(Destination.Browse))
+            assertEquals(listOf(personal, editorial), ops.savedShelvesMap["Browse:zh-TW"])
+            assertEquals(3, ops.chartsCallCount)
+            assertFalse(store.state.value.isLoading(Destination.Browse))
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
     fun browseFallsBackToChartsWhenGeckoFailsOrReturnsNoShelves() = runBlocking {
         for (geckoFailure in listOf(null, WebEditorialException("MKError", 403))) {
             val scope = testScope()

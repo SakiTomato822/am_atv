@@ -517,10 +517,7 @@ class ContentStore(
                                     _state.value.shelvesFor(target).firstOrNull { it.id == BROWSE_PERSONAL_RELEASES_ID }
                                 }
                             }
-                            val publicShelves = loadBrowseEditorial(contentLanguageTag).ifEmpty {
-                                logWarning(BROWSE_LOG_TAG, "channel=charts Falling back to charts and live radio")
-                                loadBrowseCharts(errors)
-                            }
+                            val publicShelves = this@launch.loadBrowsePublicShelves(contentLanguageTag, errors)
                             val personalShelf = personal.await()
                             if (publicShelves.isEmpty() && target in _state.value.savedShelfDestinations) emptyList()
                             else listOfNotNull(personalShelf) + publicShelves
@@ -678,14 +675,53 @@ class ContentStore(
         job.start()
     }
 
-    private suspend fun loadBrowseEditorial(languageTag: String): List<ContentShelf> = withContext(ioDispatcher) {
-        val native = cancellableResult { operations.editorialBrowseShelves(languageTag) }
-        val failure = native.exceptionOrNull() ?: return@withContext native.getOrThrow()
+    private suspend fun CoroutineScope.loadBrowsePublicShelves(
+        languageTag: String,
+        errors: MutableList<Throwable>,
+    ): List<ContentShelf> {
+        val native = withContext(ioDispatcher) { cancellableResult { operations.editorialBrowseShelves(languageTag) } }
+        native.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
+        val failure = native.exceptionOrNull()
         val status = (failure as? CatalogRequestException)?.httpStatus
-        logWarning(BROWSE_LOG_TAG,
-            "channel=native httpStatus=${status ?: "unknown"} shelves=0 error=${failure.javaClass.simpleName}")
-        if (status != 401 && status != 403) return@withContext emptyList()
+        if (failure != null) {
+            logWarning(BROWSE_LOG_TAG,
+                "channel=native httpStatus=${status ?: "unknown"} shelves=0 error=${failure.javaClass.simpleName}")
+        }
 
+        if (status == 401 || status == 403) {
+            val editorial = async(start = CoroutineStart.UNDISPATCHED) { loadBrowseWebEditorial(languageTag) }
+            val charts = if (!editorial.isCompleted && _state.value.shelvesFor(Destination.Browse).isEmpty()) {
+                // The shelf job owns this work so an in-flight HTTP call cannot delay publishing editorial.
+                async {
+                    logWarning(BROWSE_LOG_TAG, "channel=charts Loading charts and live radio while Gecko is pending")
+                    val chartErrors = mutableListOf<Throwable>()
+                    val shelves = loadBrowseCharts(chartErrors)
+                    if (!editorial.isCompleted && shelves.isNotEmpty()) {
+                        val current = _state.value
+                        _state.value = current.copy(
+                            shelvesByDestination = current.shelvesByDestination + (Destination.Browse to shelves),
+                        )
+                    }
+                    shelves to chartErrors
+                }
+            } else null
+            val shelves = editorial.await()
+            if (shelves.isNotEmpty()) {
+                charts?.cancel()
+                return shelves
+            }
+            if (charts != null) {
+                val (fallback, chartErrors) = charts.await()
+                errors += chartErrors
+                return fallback
+            }
+        }
+
+        logWarning(BROWSE_LOG_TAG, "channel=charts Falling back to charts and live radio")
+        return loadBrowseCharts(errors)
+    }
+
+    private suspend fun loadBrowseWebEditorial(languageTag: String): List<ContentShelf> = withContext(ioDispatcher) {
         cancellableResult { operations.webEditorialBrowseShelves(languageTag) }.getOrElse { webFailure ->
             val error = webFailure as? WebEditorialException
             logWarning(BROWSE_LOG_TAG, "channel=gecko httpStatus=${error?.httpStatus ?: "unknown"} shelves=0 " +
