@@ -1,6 +1,6 @@
 "use strict";
-// Headless MusicKit JS station player. Messages carry state only: never token
-// values, request URLs, vendor error text or response bodies.
+// Headless MusicKit JS station player and editorial client. The bridge returns
+// editorial JSON and status, and keeps credentials and vendor error text in the page.
 let radioMusic = null;
 let radioGeneration = 0;
 let radioPrepared = false;
@@ -142,10 +142,39 @@ async function radioPrepare(command) {
   if (generation === radioGeneration) radioReport(true);
 }
 
+function editorialHttpStatus(response) {
+  const status = Number(response && (response.status || response.statusCode));
+  return Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
+}
+
+async function radioEditorial({ id, storefront, language }) {
+  try {
+    const result = await radioMusic.api.music(`/v1/editorial/${encodeURIComponent(storefront)}/groupings`, {
+      name: "music", platform: "web", tabs: "nonsubscriber", l: language, extend: "editorialArtwork",
+    });
+    const body = result.data;
+    const httpStatus = editorialHttpStatus(result.response) || editorialHttpStatus(result) ||
+      editorialHttpStatus(body && body.errors && body.errors[0]);
+    if ((httpStatus !== null && httpStatus >= 400) || (body && body.errors && body.errors.length)) {
+      radioSend("editorial", { id, httpStatus, errorName: "MusicKitApiError" });
+    } else {
+      radioSend("editorial", { id, httpStatus, body });
+    }
+  } catch (error) {
+    // MusicKit v3 attaches the failed Fetch Response to MKError.data.
+    const httpStatus = editorialHttpStatus(error && error.data) ||
+      editorialHttpStatus(error && error.response) || editorialHttpStatus(error);
+    const name = error && error.name;
+    const errorName = typeof name === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,39}$/.test(name) ? name : "Error";
+    radioSend("editorial", { id, httpStatus, errorName });
+  }
+}
+
 async function radioCommand(command) {
   if (!radioMusic || !command) return;
   try {
     switch (command.cmd) {
+      case "editorial": return await radioEditorial(command);
       case "prepare": return await radioPrepare(command);
       case "play": return await radioMusic.play();
       case "pause": return radioMusic.pause();
@@ -187,6 +216,7 @@ document.addEventListener("musickitloaded", async () => {
       if (generation === radioGeneration) radioSend("error", { generation, reason });
     });
     setInterval(() => radioReport(false), 1000);
+    radioSend("editorialReady", {});
     radioDrm = await radioWidevine();
     radioSend("ready", {
       authorized: radioMusic.isAuthorized === true, nativeHls: radioNativeHls,

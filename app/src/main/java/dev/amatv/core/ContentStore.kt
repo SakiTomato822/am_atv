@@ -6,9 +6,11 @@ import dev.amatv.data.MockCatalog
 import dev.amatv.i18n.AppText
 import dev.amatv.integration.BROWSE_LOG_TAG
 import dev.amatv.integration.BROWSE_PERSONAL_RELEASES_ID
+import dev.amatv.integration.CatalogRequestException
 import dev.amatv.integration.LibraryCollection
 import dev.amatv.integration.LibraryPage
 import dev.amatv.integration.MusicConnectionState
+import dev.amatv.integration.WebEditorialException
 import dev.amatv.integration.mergeLibraryPage
 import dev.amatv.integration.retryCatalogRequest
 import dev.amatv.model.ContentShelf
@@ -91,10 +93,11 @@ interface ContentOperations {
     suspend fun recommendationShelves(): List<ContentShelf>
     suspend fun personalizedNewReleases(): ContentShelf?
     suspend fun editorialBrowseShelves(languageTag: String): List<ContentShelf>
+    suspend fun webEditorialBrowseShelves(languageTag: String): List<ContentShelf>
     suspend fun recentlyPlayedTracks(): List<Track>
     suspend fun recentlyPlayed(): List<Track>
-    suspend fun charts(types: String = "albums,songs,playlists"): List<Track>
-    suspend fun liveRadio(): List<Track>
+    suspend fun charts(types: String = "albums,songs,playlists", browseFallback: Boolean = false): List<Track>
+    suspend fun liveRadio(browseFallback: Boolean = false): List<Track>
     suspend fun recentlyAdded(): List<Track>
     suspend fun libraryArtistsPage(nextPage: String? = null): LibraryPage
     suspend fun libraryAlbumsPage(nextPage: String? = null): LibraryPage
@@ -514,13 +517,8 @@ class ContentStore(
                                     _state.value.shelvesFor(target).firstOrNull { it.id == BROWSE_PERSONAL_RELEASES_ID }
                                 }
                             }
-                            val editorial = withContext(ioDispatcher) {
-                                cancellableResult { operations.editorialBrowseShelves(contentLanguageTag) }
-                            }
-                            val editorialShelves = editorial.getOrDefault(emptyList())
-                            val publicShelves = editorialShelves.ifEmpty {
-                                val reason = editorial.exceptionOrNull()?.javaClass?.simpleName ?: "empty editorials"
-                                logWarning(BROWSE_LOG_TAG, "Falling back to charts and live radio: $reason")
+                            val publicShelves = loadBrowseEditorial(contentLanguageTag).ifEmpty {
+                                logWarning(BROWSE_LOG_TAG, "channel=charts Falling back to charts and live radio")
                                 loadBrowseCharts(errors)
                             }
                             val personalShelf = personal.await()
@@ -680,25 +678,46 @@ class ContentStore(
         job.start()
     }
 
+    private suspend fun loadBrowseEditorial(languageTag: String): List<ContentShelf> = withContext(ioDispatcher) {
+        val native = cancellableResult { operations.editorialBrowseShelves(languageTag) }
+        val failure = native.exceptionOrNull() ?: return@withContext native.getOrThrow()
+        val status = (failure as? CatalogRequestException)?.httpStatus
+        logWarning(BROWSE_LOG_TAG,
+            "channel=native httpStatus=${status ?: "unknown"} shelves=0 error=${failure.javaClass.simpleName}")
+        if (status != 401 && status != 403) return@withContext emptyList()
+
+        cancellableResult { operations.webEditorialBrowseShelves(languageTag) }.getOrElse { webFailure ->
+            val error = webFailure as? WebEditorialException
+            logWarning(BROWSE_LOG_TAG, "channel=gecko httpStatus=${error?.httpStatus ?: "unknown"} shelves=0 " +
+                "error=${error?.errorName ?: webFailure.javaClass.simpleName}")
+            emptyList()
+        }
+    }
+
     private suspend fun loadBrowseCharts(errors: MutableList<Throwable>): List<ContentShelf> = coroutineScope {
-        val songs = async(ioDispatcher) { cancellableResult { operations.charts("songs") } }
-        val albums = async(ioDispatcher) { cancellableResult { operations.charts("albums") } }
-        val playlists = async(ioDispatcher) { cancellableResult { operations.charts("playlists") } }
-        val radio = async(ioDispatcher) { cancellableResult { operations.liveRadio() } }
+        val songs = async(ioDispatcher) { cancellableResult { operations.charts("songs", browseFallback = true) } }
+        val albums = async(ioDispatcher) { cancellableResult { operations.charts("albums", browseFallback = true) } }
+        val playlists = async(ioDispatcher) { cancellableResult { operations.charts("playlists", browseFallback = true) } }
+        val radio = async(ioDispatcher) { cancellableResult { operations.liveRadio(browseFallback = true) } }
         buildList {
             fun addShelf(result: Result<List<Track>>, id: String, title: Int, featured: Boolean = false) {
                 result.fold(
                     onSuccess = { items ->
                         if (items.isNotEmpty()) add(ContentShelf(id, AppText.text(title), items, featured = featured))
                     },
-                    onFailure = errors::add,
+                    onFailure = { failure ->
+                        errors.add(failure)
+                        val status = (failure as? CatalogRequestException)?.httpStatus
+                        logWarning(BROWSE_LOG_TAG, "channel=charts shelf=$id httpStatus=${status ?: "unknown"} " +
+                            "error=${failure.javaClass.simpleName}")
+                    },
                 )
             }
             addShelf(songs.await(), "browse-songs", R.string.app_new_top_tracks, featured = true)
             addShelf(albums.await(), "browse-albums", R.string.app_top_albums)
             addShelf(playlists.await(), "browse-playlists", R.string.app_featured_playlists)
             addShelf(radio.await(), "browse-radio", R.string.app_apple_music_radio)
-        }
+        }.also { logWarning(BROWSE_LOG_TAG, "channel=charts shelves=${it.size}") }
     }
 
     fun ensureDefaultSearch() {

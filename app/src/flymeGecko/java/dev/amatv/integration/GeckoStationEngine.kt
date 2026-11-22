@@ -12,6 +12,7 @@ import dev.amatv.R
 import dev.amatv.i18n.AppText
 import dev.amatv.model.Track
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -19,6 +20,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.GeckoResult
@@ -38,7 +40,7 @@ import kotlin.coroutines.resumeWithException
  * the app's existing account token, so no second sign-in is needed. All Gecko
  * calls run on the main thread; public methods may be called from any thread.
  */
-class GeckoStationEngine(context: Context) : StationPlaybackEngine {
+internal class GeckoStationEngine(context: Context) : StationPlaybackEngine, WebEditorialBrowseClient {
     private val appContext = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -48,7 +50,11 @@ class GeckoStationEngine(context: Context) : StationPlaybackEngine {
     @Volatile private var latest: PlaybackSnapshot? = null
 
     private data class Request(val station: Track, val generation: Long, val play: Boolean)
-    private data class Tokens(val developer: String, val user: String)
+    private data class Tokens(val developer: String, val user: String?)
+    private data class EditorialRequest(
+        val command: JSONObject,
+        val response: CompletableDeferred<WebEditorialResponse> = CompletableDeferred(),
+    )
 
     // Main-thread state.
     private var bootJob: Job? = null
@@ -58,6 +64,9 @@ class GeckoStationEngine(context: Context) : StationPlaybackEngine {
     private var extension: WebExtension? = null
     private var port: WebExtension.Port? = null
     private var pageReady = false
+    private var editorialReady = false
+    private var nextEditorialId = 0L
+    private val editorialRequests = mutableMapOf<Long, EditorialRequest>()
     private var pending: Request? = null
     private var active: Request? = null
     private var focusRequest: AudioFocusRequest? = null
@@ -124,6 +133,35 @@ class GeckoStationEngine(context: Context) : StationPlaybackEngine {
         this.listener = listener
     }
 
+    override suspend fun editorial(
+        storefront: String,
+        language: String,
+        developerToken: String,
+        userToken: String?,
+    ): WebEditorialResponse = withContext(Dispatchers.Main.immediate) {
+        val requestTokens = Tokens(developerToken, userToken)
+        val booted = session != null || bootJob?.isActive == true
+        if (booted && active != null) {
+            // Reuse the station's configured developer token while it owns the session.
+            if (tokens?.user != userToken) throw WebEditorialException("StationSessionBusy")
+        } else if (!booted || tokens != requestTokens) {
+            closeBrowser()
+            tokens = requestTokens
+        }
+        val id = ++nextEditorialId
+        val request = EditorialRequest(JSONObject().put("cmd", "editorial").put("id", id)
+            .put("storefront", storefront).put("language", language))
+        editorialRequests[id] = request
+        try {
+            if (editorialReady) send(request.command)
+            else if (session == null && bootJob?.isActive != true) boot(requestTokens)
+            withTimeoutOrNull(EDITORIAL_TIMEOUT_MS) { request.response.await() }
+                ?: throw WebEditorialException("Timeout")
+        } finally {
+            editorialRequests.remove(id)
+        }
+    }
+
     private fun start(request: Request, requestTokens: Tokens) {
         if (request.generation != generations.get()) return
         active = request
@@ -168,7 +206,7 @@ class GeckoStationEngine(context: Context) : StationPlaybackEngine {
             } catch (error: Throwable) {
                 created?.close()
                 Log.w(TAG, "Station browser failed to start: ${error.javaClass.simpleName}")
-                closeBrowser()
+                closeBrowser(error.javaClass.simpleName)
                 (pending ?: active)?.let { fail(it, PlaybackFailureKind.Unexpected) }
             }
         }
@@ -251,12 +289,31 @@ class GeckoStationEngine(context: Context) : StationPlaybackEngine {
         }
 
         override fun onDisconnect(port: WebExtension.Port) {
-            if (port === this@GeckoStationEngine.port) this@GeckoStationEngine.port = null
+            if (port === this@GeckoStationEngine.port) {
+                this@GeckoStationEngine.port = null
+                editorialReady = false
+                failEditorialRequests("BridgeDisconnected")
+            }
         }
     }
 
     private fun onPageMessage(data: JSONObject) {
         when (data.optString("kind")) {
+            "editorialReady" -> {
+                editorialReady = true
+                editorialRequests.values.forEach { send(it.command) }
+            }
+            "editorial" -> {
+                val request = editorialRequests.remove(data.optLong("id")) ?: return
+                val status = data.optInt("httpStatus").takeIf { it in 100..599 }
+                val name = data.optString("errorName").takeIf(String::isNotEmpty)
+                val body = data.optJSONObject("body")
+                if (name != null || body == null) {
+                    request.response.completeExceptionally(WebEditorialException(name ?: "InvalidJson", status))
+                } else {
+                    request.response.complete(WebEditorialResponse(body, status))
+                }
+            }
             "ready" -> {
                 pageReady = true
                 val authorized = data.optBoolean("authorized")
@@ -297,7 +354,7 @@ class GeckoStationEngine(context: Context) : StationPlaybackEngine {
                 val reason = data.optString("reason")
                 Log.w(TAG, "Station player unavailable reason=${reason.takeIf { it.matches(SAFE_REASON) } ?: "Error"}")
                 val request = pending ?: active
-                closeBrowser()
+                closeBrowser(reason.takeIf { it.matches(SAFE_REASON) } ?: "Error")
                 request?.let { fail(it, webStationFailureKind(reason)) }
             }
         }
@@ -355,9 +412,17 @@ class GeckoStationEngine(context: Context) : StationPlaybackEngine {
         request?.let { fail(it, PlaybackFailureKind.Unexpected) }
     }
 
-    private fun closeBrowser() {
+    private fun failEditorialRequests(reason: String) {
+        val requests = editorialRequests.values.toList()
+        editorialRequests.clear()
+        requests.forEach { it.response.completeExceptionally(WebEditorialException(reason)) }
+    }
+
+    private fun closeBrowser(reason: String = "SessionClosed") {
         bootJob?.cancel()
         bootJob = null
+        editorialReady = false
+        failEditorialRequests(reason)
         port?.disconnect()
         port = null
         session?.let { browser ->
@@ -414,6 +479,7 @@ class GeckoStationEngine(context: Context) : StationPlaybackEngine {
         const val EXTENSION_ID = "amatv-radio@dev.amatv"
         const val NATIVE_APP = "amatv_radio"
         const val CONTEXT_ID = "amatv-station-player"
+        const val EDITORIAL_TIMEOUT_MS = 15_000L
         val SAFE_REASON = Regex("[A-Za-z_]{2,40}")
     }
 }

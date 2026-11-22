@@ -274,12 +274,12 @@ class AppleMusicApi(
     suspend fun editorialBrowseShelves(languageTag: String): List<ContentShelf> {
         val storefront = effectiveStorefront()
         val path = editorialBrowsePath(storefront, languageTag)
-        Log.i(BROWSE_LOG_TAG, "GET $path")
+        Log.i(BROWSE_LOG_TAG, "channel=native GET $path")
         val root = requestRoot(path, needsUserToken = false, editorialBrowse = true)
         return withContext(parseDispatcher) {
             parseEditorialBrowseShelves(root).also { shelves ->
                 val counts = shelves.joinToString { "${it.id}:${it.items.size}" }
-                Log.i(BROWSE_LOG_TAG, "GET $path shelves=${shelves.size} items=[$counts]")
+                Log.i(BROWSE_LOG_TAG, "channel=native shelves=${shelves.size} items=[$counts]")
             }
         }
     }
@@ -325,14 +325,18 @@ class AppleMusicApi(
     }
 
     internal fun editorialBrowsePath(storefront: String, languageTags: String): String {
+        val language = editorialBrowseLanguage(languageTags)
+        return "/v1/editorial/$storefront/groupings?name=music&platform=web&tabs=nonsubscriber" +
+            "&l=${URLEncoder.encode(language, "UTF-8")}&extend=editorialArtwork"
+    }
+
+    internal fun editorialBrowseLanguage(languageTags: String): String {
         val firstTag = languageTags.substringBefore(',')
-        val languageTag = when (firstTag) {
+        return when (firstTag) {
             "zh-CN" -> "zh-Hans-CN"
             "zh-TW" -> "zh-Hant-TW"
             else -> firstTag
         }
-        return "/v1/editorial/$storefront/groupings?name=music&platform=web&tabs=nonsubscriber" +
-            "&l=${URLEncoder.encode(languageTag, "UTF-8")}&extend=editorialArtwork"
     }
 
     suspend fun recentlyPlayed(): List<Track> = request(
@@ -647,20 +651,22 @@ class AppleMusicApi(
         return playable
     }
 
-    suspend fun charts(types: String = "albums,songs,playlists"): List<Track> {
+    suspend fun charts(types: String = "albums,songs,playlists", browseFallback: Boolean = false): List<Track> {
         val sf = effectiveStorefront()
         return request(
             path = "/v1/catalog/$sf/charts?types=$types&limit=14&" +
                 "extend=editorialArtwork,editorialVideo",
             needsUserToken = false,
+            browseChannel = "charts".takeIf { browseFallback },
         )
     }
 
-    suspend fun liveRadio(): List<Track> {
+    suspend fun liveRadio(browseFallback: Boolean = false): List<Track> {
         val sf = effectiveStorefront()
         return request(
             path = "/v1/catalog/$sf/stations?filter%5Bfeatured%5D=apple-music-live-radio",
             needsUserToken = false,
+            browseChannel = "charts".takeIf { browseFallback },
         )
     }
 
@@ -867,8 +873,8 @@ class AppleMusicApi(
         return CollectionTrackPage(tracks, next)
     }
 
-    private suspend fun request(path: String, needsUserToken: Boolean): List<Track> {
-        val root = requestRoot(path, needsUserToken)
+    private suspend fun request(path: String, needsUserToken: Boolean, browseChannel: String? = null): List<Track> {
+        val root = requestRoot(path, needsUserToken, browseChannel = browseChannel)
         return withContext(parseDispatcher) { parseResources(root) }
     }
 
@@ -879,6 +885,7 @@ class AppleMusicApi(
         postBody: String? = null,
         suggestionTermLength: Int? = null,
         editorialBrowse: Boolean = false,
+        browseChannel: String? = if (editorialBrowse) "native" else null,
     ): JSONObject = withContext(Dispatchers.IO) {
         val musicUserToken = userToken()
         if (needsUserToken) {
@@ -914,7 +921,7 @@ class AppleMusicApi(
                     connection.outputStream.bufferedWriter(Charsets.UTF_8).use { it.write(postBody) }
                 }
                 val status = connection.responseCode
-                if (editorialBrowse) Log.i(BROWSE_LOG_TAG, "GET $path httpStatus=$status")
+                if (browseChannel != null) Log.i(BROWSE_LOG_TAG, "channel=$browseChannel GET $path httpStatus=$status")
                 if (suggestionTermLength != null) {
                     Log.d(SEARCH_LOG_TAG, "suggestions response termLength=$suggestionTermLength httpStatus=$status")
                 }

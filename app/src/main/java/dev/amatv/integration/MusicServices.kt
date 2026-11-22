@@ -5,6 +5,7 @@ import dev.amatv.i18n.AppText
 
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import dev.amatv.BuildConfig
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.LyricLine
@@ -162,6 +163,21 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
     override suspend fun personalizedNewReleases(): ContentShelf? = api.personalizedNewReleases()
     override suspend fun editorialBrowseShelves(languageTag: String): List<ContentShelf> =
         api.editorialBrowseShelves(languageTag)
+
+    override suspend fun webEditorialBrowseShelves(languageTag: String): List<ContentShelf> {
+        val client = stationEngine as? WebEditorialBrowseClient ?: throw WebEditorialException("GeckoUnavailable")
+        val storefront = api.effectiveStorefront()
+        val language = api.editorialBrowseLanguage(languageTag)
+        Log.i(BROWSE_LOG_TAG, "channel=gecko GET /v1/editorial/$storefront/groupings language=$language")
+        val response = client.editorial(storefront, language, developerTokens.token(), tokenStore.readUserToken())
+        val shelves = try {
+            api.parseEditorialBrowseShelves(response.root)
+        } catch (_: org.json.JSONException) {
+            throw WebEditorialException("InvalidJson", response.httpStatus)
+        }
+        Log.i(BROWSE_LOG_TAG, "channel=gecko httpStatus=${response.httpStatus ?: "unknown"} shelves=${shelves.size}")
+        return shelves
+    }
     override suspend fun recentlyPlayed(): List<Track> = api.recentlyPlayed()
     override suspend fun recentlyPlayedTracks(): List<Track> = api.recentlyPlayedTracks()
     override suspend fun recentlyAdded(): List<Track> = api.recentlyAdded()
@@ -188,9 +204,9 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
     fun cachedArtistAlbums(artist: Track): LibraryPage? = artistLibraryPages.peek(artist.detailKey() to null)
     internal suspend fun savedArtistAlbums(artist: Track): List<Track>? =
         readDetail("artist-albums/${artist.detailKey()}", ::decodeDetailTracks)
-    override suspend fun charts(types: String): List<Track> =
-        api.charts(types)
-    override suspend fun liveRadio(): List<Track> = api.liveRadio()
+    override suspend fun charts(types: String, browseFallback: Boolean): List<Track> =
+        api.charts(types, browseFallback)
+    override suspend fun liveRadio(browseFallback: Boolean): List<Track> = api.liveRadio(browseFallback)
     override suspend fun search(term: String): List<Track> = api.search(term)
 
     internal suspend fun searchSuggestions(term: String): CatalogSearchSuggestions = api.searchSuggestions(term)

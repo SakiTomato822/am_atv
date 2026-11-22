@@ -1,9 +1,12 @@
 package dev.amatv.core
 
 import dev.amatv.integration.BROWSE_PERSONAL_RELEASES_ID
+import dev.amatv.integration.CatalogRequestException
 import dev.amatv.integration.LibraryCollection
 import dev.amatv.integration.LibraryPage
 import dev.amatv.integration.MusicConnectionState
+import dev.amatv.integration.WebEditorialException
+import dev.amatv.integration.catalogHttpFailure
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.Destination
@@ -42,6 +45,8 @@ class ContentStoreTest {
         var recommendationShelvesHandler: suspend () -> List<ContentShelf> = { emptyList() }
         var personalizedNewReleasesHandler: suspend () -> ContentShelf? = { null }
         var editorialBrowseShelvesHandler: suspend (String) -> List<ContentShelf> = { emptyList() }
+        var webEditorialBrowseShelvesHandler: suspend (String) -> List<ContentShelf> =
+            { throw AssertionError("Unexpected Gecko editorial request") }
         var recentlyPlayedTracksHandler: suspend () -> List<Track> = { emptyList() }
         var recentlyPlayedHandler: suspend () -> List<Track> = { emptyList() }
         var chartsHandler: suspend (String) -> List<Track> = { emptyList() }
@@ -79,6 +84,8 @@ class ContentStoreTest {
         override suspend fun personalizedNewReleases(): ContentShelf? = personalizedNewReleasesHandler()
         override suspend fun editorialBrowseShelves(languageTag: String): List<ContentShelf> =
             editorialBrowseShelvesHandler(languageTag)
+        override suspend fun webEditorialBrowseShelves(languageTag: String): List<ContentShelf> =
+            webEditorialBrowseShelvesHandler(languageTag)
 
         override suspend fun recentlyPlayedTracks(): List<Track> {
             libraryRequestCount++
@@ -87,12 +94,12 @@ class ContentStoreTest {
 
         override suspend fun recentlyPlayed(): List<Track> = recentlyPlayedHandler()
 
-        override suspend fun charts(types: String): List<Track> {
+        override suspend fun charts(types: String, browseFallback: Boolean): List<Track> {
             chartsCallCount++
             return chartsHandler(types)
         }
 
-        override suspend fun liveRadio(): List<Track> = liveRadioHandler()
+        override suspend fun liveRadio(browseFallback: Boolean): List<Track> = liveRadioHandler()
 
         override suspend fun recentlyAdded(): List<Track> {
             libraryRequestCount++
@@ -372,7 +379,68 @@ class ContentStoreTest {
 
     @Test
     fun signedInBrowseFallsBackWhenEditorialFails() = runBlocking {
-        assertBrowseFallback(MusicConnectionState.SignedIn) { error("Editorial request failed") }
+        assertBrowseFallback(MusicConnectionState.SignedIn) {
+            throw CatalogRequestException(catalogHttpFailure(500), "HTTP 500", 500)
+        }
+    }
+
+    @Test
+    fun browseTriesGeckoAfterNative401Or403BeforeCharts() = runBlocking {
+        val editorial = ContentShelf("gecko", "Editorial", listOf(testTrack("new")))
+        for (status in listOf(401, 403)) {
+            val scope = testScope()
+            try {
+                val calls = mutableListOf<String>()
+                val ops = FakeContentOperations().apply {
+                    editorialBrowseShelvesHandler = {
+                        calls += "native"
+                        throw CatalogRequestException(catalogHttpFailure(status), "HTTP $status", status)
+                    }
+                    webEditorialBrowseShelvesHandler = { language ->
+                        calls += "gecko:$language"
+                        listOf(editorial)
+                    }
+                }
+                val store = testStore(ops, scope)
+                store.loadDestination(Destination.Browse, MusicConnectionState.SignedIn, 0, "zh-TW")
+                assertEquals(listOf("native", "gecko:zh-TW"), calls)
+                assertEquals(listOf(editorial), store.state.value.shelvesFor(Destination.Browse))
+                assertEquals(0, ops.chartsCallCount)
+            } finally {
+                scope.cancel()
+            }
+        }
+    }
+
+    @Test
+    fun browseFallsBackToChartsWhenGeckoFailsOrReturnsNoShelves() = runBlocking {
+        for (geckoFailure in listOf(null, WebEditorialException("MKError", 403))) {
+            val scope = testScope()
+            try {
+                var geckoCalled = false
+                val ops = FakeContentOperations().apply {
+                    editorialBrowseShelvesHandler = {
+                        throw CatalogRequestException(catalogHttpFailure(401), "HTTP 401", 401)
+                    }
+                    webEditorialBrowseShelvesHandler = {
+                        geckoCalled = true
+                        if (geckoFailure != null) throw geckoFailure
+                        emptyList()
+                    }
+                    chartsHandler = { type ->
+                        assertTrue(geckoCalled)
+                        listOf(testTrack(type))
+                    }
+                }
+                val store = testStore(ops, scope)
+                store.loadDestination(Destination.Browse, MusicConnectionState.SignedIn, 0, "en-US")
+                assertEquals(listOf("browse-songs", "browse-albums", "browse-playlists"),
+                    store.state.value.shelvesFor(Destination.Browse).map { it.id })
+                assertEquals(3, ops.chartsCallCount)
+            } finally {
+                scope.cancel()
+            }
+        }
     }
 
     private fun assertBrowseFallback(
