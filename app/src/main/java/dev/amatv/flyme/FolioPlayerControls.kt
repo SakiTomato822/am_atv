@@ -106,6 +106,7 @@ import kotlin.math.roundToLong
 internal class FolioPlayerAnchorCoordsHolder {
     var translateButtonCoords by mutableStateOf<LayoutCoordinates?>(null)
     var queueButtonCoords by mutableStateOf<LayoutCoordinates?>(null)
+    var posterButtonCoords by mutableStateOf<LayoutCoordinates?>(null)
 }
 
 internal val LocalFolioPlayerAnchors = compositionLocalOf<FolioPlayerAnchorCoordsHolder?> { null }
@@ -373,12 +374,14 @@ internal fun FolioPlayerHeader(
                 )
             }
 
+            val anchors = LocalFolioPlayerAnchors.current
             val modeCd = stringResource(
                 if (isPosterMode) R.string.folio_player_toggle_lyrics else R.string.folio_player_toggle_poster,
             )
             Box(
                 modifier = Modifier
                     .size(tierSpec.pib)
+                    .onPlaced { anchors?.posterButtonCoords = it }
                     .folioPlayerGlass(
                         isLight = headerGlassLight,
                         shape = CircleShape,

@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -62,6 +63,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
@@ -99,6 +102,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 /**
  * Full-screen Folio 15 Now Playing layer overlay.
@@ -419,6 +423,21 @@ internal fun BoxScope.FolioPlayerLayer(
             lowPerformance = settings.lowPerformance,
         ) { glassEnv ->
             val anchorHolder = remember { FolioPlayerAnchorCoordsHolder() }
+            var playerRootCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+            var showStyleToggleHint by remember { mutableStateOf(false) }
+            LaunchedEffect(open, playbackState.hasCurrentTrack) {
+                if (shouldShowStyleToggleHint(open, playbackState.hasCurrentTrack, app.welcomePreferences.hintStyleToggleShown)) {
+                    app.welcomePreferences.hintStyleToggleShown = true
+                    showStyleToggleHint = true
+                }
+            }
+            LaunchedEffect(showStyleToggleHint) {
+                if (showStyleToggleHint) {
+                    delay(4_000L)
+                    showStyleToggleHint = false
+                }
+            }
+            LaunchedEffect(posterPreferred) { showStyleToggleHint = false }
             CompositionLocalProvider(
                 LocalFolioControlAccent provides controlAccent,
                 LocalFolioReducedMotion provides reducedMotion,
@@ -428,13 +447,10 @@ internal fun BoxScope.FolioPlayerLayer(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .then(
-                        if (glassEnv.coordHolder != null) {
-                            Modifier.onPlaced { glassEnv.coordHolder.rootCoords = it }
-                        } else {
-                            Modifier
-                        },
-                    )
+                    .onGloballyPositioned { coords ->
+                        playerRootCoords = coords
+                        glassEnv.coordHolder?.rootCoords = coords
+                    }
                     .then(pullDown.layer),
             ) {
                 FolioPlayerBackdrop(
@@ -931,6 +947,33 @@ internal fun BoxScope.FolioPlayerLayer(
                         renderControlsSlot(Modifier.fillMaxWidth(), 464.dp, Dp.Unspecified)
                     }
                 }
+                val rootC = playerRootCoords?.takeIf { it.isAttached }
+                val ttC = anchorHolder.posterButtonCoords?.takeIf { it.isAttached }
+                val density = LocalDensity.current
+                val bubbleModifier = if (rootC != null && ttC != null) {
+                    val rect = rootC.localBoundingBoxOf(ttC, clipBounds = false)
+                    val endPad = ((rootC.size.width - rect.right).coerceAtLeast(0f) / density.density).dp
+                    val topOffsetPx = (rect.bottom + with(density) { 8.dp.toPx() }).roundToInt()
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(end = max(12.dp, endPad))
+                        .offset { IntOffset(0, topOffsetPx) }
+                } else {
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(
+                            top = statusTop + tierSpec.topPad + tierSpec.pib + 8.dp,
+                            end = tierSpec.horizontalPad,
+                        )
+                }
+                FolioHintBubble(
+                    visible = showStyleToggleHint && open && !lyricsSettingsOpen,
+                    text = stringResource(R.string.welcome_hint_style_toggle),
+                    pointerBiasX = 0.86f,
+                    lowPerformance = settings.lowPerformance,
+                    onDismiss = { showStyleToggleHint = false },
+                    modifier = bubbleModifier,
+                )
             }
 
             BackHandler(enabled = open && lyricsSettingsOpen) { lyricsSettingsOpen = false }

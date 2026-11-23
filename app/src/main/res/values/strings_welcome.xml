@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="welcome_brand" translatable="false">AM Folio</string>
+    <string name="welcome_skip">Skip</string>
+    <string name="welcome_sound_cd">Toggle sound</string>
+    <string name="welcome_next">Next</string>
+    <string name="welcome_done">Done</string>
+
+    <string name="welcome_p1_sub">Apple Music, made for the drive.</string>
+    <string name="welcome_p1_cta">Start</string>
+    <string name="welcome_p1_fine">An unofficial Flyme Auto client adapted from Sam’s open-source AM for TV.</string>
+
+    <string name="welcome_p2_title">Sign in to Apple Music first</string>
+    <string name="welcome_p2_sub">Sign in so the rest of this walkthrough uses songs you recently played and real lyrics. Requires a subscription; best done while parked.</string>
+    <string name="welcome_p2_signin">Sign in here</string>
+    <string name="welcome_p2_later">Later</string>
+
+    <string name="welcome_p3_title">Lyrics light up word by word</string>
+    <string name="welcome_p3_sub">Sing along without losing your place. Backing vocals follow smaller, with translations underneath.</string>
+
+    <string name="welcome_p4_title">Two ways to view Now Playing</string>
+    <string name="welcome_p4_sub">Use Flow for ambient cover colors, or Poster for oversized type. Tap Tt in the top right anytime.</string>
+    <string name="welcome_style_flow">Flow</string>
+    <string name="welcome_style_poster">Poster</string>
+
+    <string name="welcome_p5_title">Track changes without a gap</string>
+    <string name="welcome_p5_sub1">When playing through an album, the next track cues up early — only 56–89 ms between songs in our in-car tests.</string>
+    <string name="welcome_p5_sub2">Loudness balances automatically across tracks, so you won’t need to reach for the volume.</string>
+    <string name="welcome_gapless_tag">0.08 s gap</string>
+
+    <string name="welcome_p6_title">A few quick choices</string>
+    <string name="welcome_opt_style">Now Playing</string>
+    <string name="welcome_opt_lyric_size">Lyrics size</string>
+    <string name="welcome_opt_loudness">Volume balance</string>
+    <string name="welcome_loudness_hint_off">Keep each song at its original mastering level</string>
+    <string name="welcome_loudness_hint_std">Match Apple’s reference loudness (quieter)</string>
+    <string name="welcome_loudness_hint_loud">Lift quiet tracks for more consistent transitions</string>
+    <string name="welcome_loudness_hint_max">Maximum boost — best for highway road noise</string>
+    <string name="welcome_p6_fine">You can change these later in Settings</string>
+
+    <string name="welcome_replay_settings">View welcome guide</string>
+    <string name="welcome_home_signin_banner">Sign in to Apple Music to play music</string>
+    <string name="welcome_hint_low_perf">Reduced animations for smoother performance on this device. Adjustable in Settings.</string>
+    <string name="welcome_hint_pivot_scrub">Hold the top bar and drag to jump pages</string>
+    <string name="welcome_hint_style_toggle">Tap here to switch Flow / Poster</string>
+</resources>

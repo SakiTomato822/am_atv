@@ -14,6 +14,8 @@ import dev.amatv.core.PlaybackStore
 import dev.amatv.core.SettingsStore
 import dev.amatv.core.SharedPreferencesPlayHistoryStorage
 import dev.amatv.core.SharedPreferencesSettingsStorage
+import dev.amatv.core.SharedPreferencesWelcomePreferences
+import dev.amatv.core.WelcomePreferences
 import dev.amatv.core.detectLowPerformanceHardware
 import dev.amatv.i18n.AppText
 import dev.amatv.integration.ContentCache
@@ -26,6 +28,7 @@ import kotlinx.coroutines.SupervisorJob
 
 class AmAtvApplication : Application() {
     lateinit var settingsStore: SettingsStore
+    lateinit var welcomePreferences: WelcomePreferences
     lateinit var libraryActions: LibraryActions
     lateinit var lyricsStore: LyricsStore
     lateinit var accountStore: AccountStore
@@ -64,6 +67,7 @@ class AmAtvApplication : Application() {
             onCachePrefetchChanged = { contentCache.setPrefetch(it) },
             lowPerformanceHardware = isMainProcess && detectLowPerformanceHardware(this),
         )
+        welcomePreferences = SharedPreferencesWelcomePreferences(this)
         playHistoryStore = PlayHistoryStore(
             storage = SharedPreferencesPlayHistoryStorage(this),
             coroutineScope = applicationScope,

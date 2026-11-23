@@ -86,6 +86,7 @@ internal fun FolioSettingsPage(
     onRefresh: () -> Unit,
     onNotice: (String) -> Unit,
     onRegisterScrollToTop: (suspend () -> Unit) -> Unit = {},
+    onOpenWelcome: () -> Unit = {},
 ) {
     val palette = LocalFolioPalette.current
     val tierSpec = LocalFolioTierSpec.current
@@ -409,13 +410,28 @@ internal fun FolioSettingsPage(
                 FolioSettingsSection.About -> {
                     SettingsRow(
                         title = stringResource(R.string.flyme_app_name),
-                        showDivider = false,
                     ) {
                         Text(
                             text = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                             color = palette.fg2,
                             fontFamily = fontFamily,
                             fontSize = 14.sp,
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(onClick = onOpenWelcome)
+                            .padding(horizontal = 4.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.welcome_replay_settings),
+                            color = palette.fg,
+                            fontFamily = fontFamily,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 16.sp,
                         )
                     }
                 }

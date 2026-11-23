@@ -34,11 +34,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -65,6 +67,7 @@ import dev.amatv.AmAtvApplication
 import dev.amatv.BuildConfig
 import dev.amatv.R
 import dev.amatv.core.PlaybackEvent
+import dev.amatv.core.shouldShowWelcome
 import dev.amatv.i18n.AppText
 import dev.amatv.integration.MusicConnectionState
 import dev.amatv.integration.MusicKitWebAuthActivity
@@ -125,6 +128,7 @@ fun FolioApp(
 
     val services = app.musicServices
     val settingsStore = app.settingsStore
+    val welcomePrefs = app.welcomePreferences
     val accountStore = app.accountStore
     val contentStore = app.contentStore
     val lyricsStore = app.lyricsStore
@@ -161,6 +165,7 @@ fun FolioApp(
     }
 
     // B1b: the player sheet. B2: the detail stack (albums, playlists, artists). Both are UI state only.
+    var welcomeOpen by remember { mutableStateOf(shouldShowWelcome(welcomePrefs.welcomeVersion)) }
     var playerOpen by remember { FolioPlayerSession.openState }
     var detailStack by FolioDetailSession.stack
     var playHistoryOpen by remember { mutableStateOf(false) }
@@ -173,16 +178,27 @@ fun FolioApp(
     }
 
     var toastMessage by remember { mutableStateOf<String?>(null) }
+    var toastDurationMs by remember { mutableLongStateOf(1_700L) }
     var serviceMessage by remember { mutableStateOf<String?>(null) }
 
     fun showToast(message: String) {
+        toastDurationMs = 1_700L
         toastMessage = message
     }
 
-    LaunchedEffect(toastMessage) {
+    LaunchedEffect(toastMessage, toastDurationMs) {
         if (toastMessage != null) {
-            delay(1_700L)
+            delay(toastDurationMs)
             toastMessage = null
+        }
+    }
+
+    val lowPerfHintText = stringResource(R.string.welcome_hint_low_perf)
+    LaunchedEffect(welcomeOpen, settingsState.lowPerformanceMode, settingsState.autoLowPerformanceReason) {
+        if (!welcomeOpen && shouldTriggerAutoLowPerfHint(settingsState, welcomePrefs.hintLowPerfShown)) {
+            welcomePrefs.hintLowPerfShown = true
+            toastDurationMs = 3_000L
+            toastMessage = lowPerfHintText
         }
     }
 
@@ -235,6 +251,34 @@ fun FolioApp(
     LaunchedEffect(pagerState.currentPage) {
         FolioUiSession.onPageChanged(pagerState.currentPage)
     }
+    var rootSwipeCount by remember { mutableIntStateOf(0) }
+    var showPivotScrubHint by remember { mutableStateOf(false) }
+    LaunchedEffect(pagerState, welcomeOpen) {
+        var settledPage = pagerState.currentPage
+        var sawUserDrag = false
+        snapshotFlow { pagerState.isScrollInProgress to pagerState.currentPage }
+            .collect { (scrolling, curPage) ->
+                if (scrolling && titleTransition == null && !welcomeOpen) {
+                    sawUserDrag = true
+                } else if (!scrolling) {
+                    if (sawUserDrag && curPage != settledPage) {
+                        rootSwipeCount++
+                        if (shouldShowPivotScrubHint(rootSwipeCount, welcomePrefs.hintPivotScrubShown)) {
+                            welcomePrefs.hintPivotScrubShown = true
+                            showPivotScrubHint = true
+                        }
+                    }
+                    settledPage = curPage
+                    sawUserDrag = false
+                }
+            }
+    }
+    LaunchedEffect(showPivotScrubHint) {
+        if (showPivotScrubHint) {
+            delay(4_000L)
+            showPivotScrubHint = false
+        }
+    }
 
     val webAuthenticationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -257,7 +301,7 @@ fun FolioApp(
                     lyricsStore.onCacheCleared()
                     contentStore.onSignedIn()
                     serviceMessage = null
-                    selectTab(FolioRootPage.Home.index)
+                    if (!welcomeOpen) selectTab(FolioRootPage.Home.index)
                 }
                 .onFailure {
                     val err = it.message ?: AppText.text(R.string.app_sign_in_failed)
@@ -510,6 +554,7 @@ fun FolioApp(
                                                 onRefresh = ::refreshAll,
                                                 onNotice = ::showToast,
                                                 onRegisterScrollToTop = registerScrollToTop,
+                                                onOpenWelcome = { welcomeOpen = true },
                                             )
                                             FolioRootPage.Home -> FolioHomePage(
                                                 contentState = contentState,
@@ -657,6 +702,45 @@ fun FolioApp(
                             playerOpen = false
                             openDetail(item)
                         },
+                    )
+
+                    FolioHintBubble(
+                        visible = showPivotScrubHint && !welcomeOpen && !playerOpen && detailStack.isEmpty(),
+                        text = stringResource(R.string.welcome_hint_pivot_scrub),
+                        pointerBiasX = 0.25f,
+                        lowPerformance = settingsState.lowPerformance,
+                        onDismiss = { showPivotScrubHint = false },
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(
+                                top = statusTop + folioDetailTopMargin + tierSpec.pvh + 6.dp,
+                                start = tierSpec.px,
+                            ),
+                    )
+
+                    FolioWelcomeOverlay(
+                        open = welcomeOpen,
+                        settingsStore = settingsStore,
+                        settingsState = settingsState,
+                        accountState = accountState,
+                        contentState = contentState,
+                        playHistoryEntries = playHistoryEntries,
+                        playbackState = playbackState,
+                        services = services,
+                        welcomePrefs = welcomePrefs,
+                        statusTop = statusTop,
+                        navBottom = navBottom,
+                        onStartSignIn = ::startSignIn,
+                        onNotice = { msg -> showToast(msg) },
+                        onRequestBrowseLoad = {
+                            contentStore.loadDestination(
+                                destination = Destination.Browse,
+                                connectionState = accountState.connectionState,
+                                reloadGeneration = contentState.reloadGeneration,
+                                contentLanguageTag = contentLanguageTag,
+                            )
+                        },
+                        onClose = { welcomeOpen = false },
                     )
 
                     // Bottom transient toast matching `.toast` in H5

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="welcome_skip">跳过</string>
+    <string name="welcome_sound_cd">声音</string>
+    <string name="welcome_next">下一步</string>
+    <string name="welcome_done">好了</string>
+
+    <string name="welcome_p1_sub">在车上好好听 Apple Music。</string>
+    <string name="welcome_p1_cta">开始</string>
+    <string name="welcome_p1_fine">一个非官方的 Flyme Auto 客户端，改自 Sam 的开源项目 AM for TV。</string>
+
+    <string name="welcome_p2_title">先登录 Apple Music</string>
+    <string name="welcome_p2_sub">登录之后，接下来的演示就用你自己最近听的歌和真歌词。需要订阅；车停稳了再登录比较好。</string>
+    <string name="welcome_p2_signin">在车机上登录</string>
+    <string name="welcome_p2_later">稍后</string>
+
+    <string name="welcome_p3_title">歌词会一个字一个字地亮</string>
+    <string name="welcome_p3_sub">跟着唱也不会跟丢。和声小一号跟在后面，有翻译的歌会放在下面。</string>
+
+    <string name="welcome_p4_title">播放页有两种样子</string>
+    <string name="welcome_p4_sub">喜欢封面的颜色就用流光，想看大字就用海报。播放的时候点右上角 Tt 就能换。</string>
+    <string name="welcome_style_flow">流光</string>
+    <string name="welcome_style_poster">海报</string>
+
+    <string name="welcome_p5_title">切歌听不出断点</string>
+    <string name="welcome_p5_sub1">专辑连着放时，下一首会提前准备好。我们在车上测过，两首歌之间只空了 56–89 毫秒。</string>
+    <string name="welcome_p5_sub2">不同歌曲的音量也会自动拉齐，换歌不用再伸手调。</string>
+    <string name="welcome_gapless_tag">空了 0.08 秒</string>
+
+    <string name="welcome_p6_title">最后调几样</string>
+    <string name="welcome_opt_style">播放页</string>
+    <string name="welcome_opt_lyric_size">歌词大小</string>
+    <string name="welcome_opt_loudness">音量平衡</string>
+    <string name="welcome_loudness_hint_off">不做处理，保持每首歌原本的音量</string>
+    <string name="welcome_loudness_hint_std">按 Apple 的响度标准对齐，偏安静</string>
+    <string name="welcome_loudness_hint_loud">安静的歌也拉上来，切歌音量更一致</string>
+    <string name="welcome_loudness_hint_max">整体最响，适合高速路噪大的时候</string>
+    <string name="welcome_p6_fine">以后在设置里也能改</string>
+
+    <string name="welcome_replay_settings">查看欢迎页</string>
+    <string name="welcome_home_signin_banner">登录 Apple Music 后才能播放</string>
+    <string name="welcome_hint_low_perf">这台车机比较吃力，已减少动画，可以在设置里改</string>
+    <string name="welcome_hint_pivot_scrub">按住顶栏左右拖，可以快速跳页</string>
+    <string name="welcome_hint_style_toggle">点这里换流光 / 海报</string>
+</resources>

@@ -1,5 +1,7 @@
 package dev.amatv.flyme
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -14,13 +16,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -79,6 +88,11 @@ internal fun FolioHomePage(
                 bottom = bottomPadding,
             ),
         ) {
+            if (shouldShowUnsignedHomeBanner(connectionState)) {
+                item(key = "home-signin-banner", contentType = "signin-banner") {
+                    UnsignedHomeSignInBanner(onSignIn = onSignIn)
+                }
+            }
             shelves.forEachIndexed { shelfIdx, shelf ->
                 item(key = "home-sec-${shelf.id}", contentType = "section-title") {
                     FolioSectionTitle(shelf.title)
@@ -111,6 +125,44 @@ internal fun FolioHomePage(
                     item(key = "home-sp-${shelf.id}", contentType = "shelf-gap") { Spacer(Modifier.height(14.dp)) }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun UnsignedHomeSignInBanner(
+    onSignIn: () -> Unit,
+) {
+    val palette = LocalFolioPalette.current
+    val fontFamily = LocalFolioFontFamily.current
+    val prefix = stringResource(R.string.welcome_home_signin_banner)
+    val action = stringResource(R.string.app_sign_in)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp, bottom = 14.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(palette.rb)
+                .clickable(role = Role.Button, onClick = onSignIn)
+                .padding(horizontal = 14.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = buildAnnotatedString {
+                    withStyle(SpanStyle(color = palette.fg2)) {
+                        append(prefix)
+                        append(" · ")
+                    }
+                    withStyle(SpanStyle(color = palette.accent, fontWeight = FontWeight.SemiBold)) {
+                        append(action)
+                    }
+                },
+                fontFamily = fontFamily,
+                fontSize = 14.sp,
+            )
         }
     }
 }
@@ -157,6 +209,11 @@ internal fun FolioBrowsePage(
                 bottom = bottomPadding,
             ),
         ) {
+            if (shouldShowUnsignedHomeBanner(connectionState)) {
+                item(key = "home-signin-banner", contentType = "signin-banner") {
+                    UnsignedHomeSignInBanner(onSignIn = onSignIn)
+                }
+            }
             shelves.forEachIndexed { shelfIdx, shelf ->
                 if (shelf.title.isNotBlank()) {
                     item(key = "browse-sec-${shelf.id}", contentType = "section-title") {
