@@ -12,6 +12,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -28,8 +30,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -37,6 +43,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
@@ -49,6 +56,7 @@ import dev.amatv.model.CatalogKind
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.Track
 import dev.amatv.artwork.rememberArtworkPalette
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /** The pager remains composed beneath the detail layer, retaining its page and scroll position. */
@@ -192,6 +200,8 @@ private fun FolioDetailPage(
                     awaitPointerEventScope { while (true) awaitPointerEvent() }
                 },
         )
+        val scope = rememberCoroutineScope()
+        var scrollToTopAction by remember { mutableStateOf<suspend () -> Unit>({}) }
         Column(Modifier.fillMaxSize().padding(top = statusTop + folioDetailTopMargin)) {
             Row(
                 modifier = Modifier.fillMaxWidth().height(spec.ib)
@@ -204,6 +214,16 @@ private fun FolioDetailPage(
                     contentDescription = stringResource(R.string.browse_back),
                     onClick = onBack,
                 )
+                Spacer(
+                    Modifier
+                        .weight(1f)
+                        .height(spec.ib)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            role = Role.Button,
+                        ) { scope.launch { scrollToTopAction() } },
+                )
             }
             Spacer(Modifier.height(folioDetailBodyGap))
 
@@ -211,10 +231,12 @@ private fun FolioDetailPage(
                 FolioArtistDetail(
                     item, artist.first, artist.second, layout, services, playback,
                     bottomPadding, onOpenItem,
+                    onRegisterScrollToTop = { scrollToTopAction = it },
                 )
             } else {
                 FolioCollectionDetail(
                     item, layout, services, playback, bottomPadding, homeShelves, onOpenItem, onPlayCollection,
+                    onRegisterScrollToTop = { scrollToTopAction = it },
                 )
             }
         }

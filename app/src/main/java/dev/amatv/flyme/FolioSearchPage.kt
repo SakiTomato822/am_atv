@@ -74,10 +74,12 @@ internal fun FolioSearchPage(
     onOpenItem: (Track, List<Track>) -> Unit,
     recentPlayEntries: List<PlayHistoryEntry> = emptyList(),
     onOpenAllHistory: () -> Unit = {},
+    onRegisterScrollToTop: (suspend () -> Unit) -> Unit = {},
 ) {
     val palette = LocalFolioPalette.current
     val tierSpec = LocalFolioTierSpec.current
     val fontFamily = LocalFolioFontFamily.current
+    val listState = rememberFolioScrollToTopState(onRegisterScrollToTop)
     val session = folioSearchSession
     val query = session.query
     val submission = session.submission
@@ -128,6 +130,7 @@ internal fun FolioSearchPage(
         }
 
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 start = tierSpec.px,

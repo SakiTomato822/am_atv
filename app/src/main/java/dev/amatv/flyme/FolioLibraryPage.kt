@@ -79,6 +79,7 @@ internal fun FolioLibraryPage(
     onLoadMoreShelf: (String) -> Unit,
     onOpenItem: (Track, List<Track>) -> Unit,
     onOpenHistory: () -> Unit = {},
+    onRegisterScrollToTop: (suspend () -> Unit) -> Unit = {},
 ) {
     val palette = LocalFolioPalette.current
     val tierSpec = LocalFolioTierSpec.current
@@ -111,7 +112,7 @@ internal fun FolioLibraryPage(
     val tracks = remember(shelf, sort, descending, collator) {
         sortLibrary(shelf?.items.orEmpty(), sort, descending, collator)
     }
-    val listState = key(selectedTab) { rememberLazyListState() }
+    val listState = key(selectedTab) { rememberFolioScrollToTopState(onRegisterScrollToTop) }
     val nearEnd by remember(listState) {
         derivedStateOf {
             val total = listState.layoutInfo.totalItemsCount

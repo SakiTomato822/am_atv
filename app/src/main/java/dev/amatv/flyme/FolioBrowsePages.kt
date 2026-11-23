@@ -40,8 +40,10 @@ internal fun FolioHomePage(
     onRetry: () -> Unit,
     onSignIn: () -> Unit,
     onOpenItem: (Track, List<Track>) -> Unit,
+    onRegisterScrollToTop: (suspend () -> Unit) -> Unit = {},
 ) {
     val tierSpec = LocalFolioTierSpec.current
+    val listState = rememberFolioScrollToTopState(onRegisterScrollToTop)
     val homeShelves = contentState.shelvesFor(Destination.Home)
     val shelves = remember(homeShelves) { homeShelfOrder(homeShelves) }
     val loading = contentState.isLoading(Destination.Home)
@@ -68,6 +70,7 @@ internal fun FolioHomePage(
             }
         }
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 start = tierSpec.px,
@@ -121,8 +124,10 @@ internal fun FolioBrowsePage(
     onRetry: () -> Unit,
     onSignIn: () -> Unit,
     onOpenItem: (Track, List<Track>) -> Unit,
+    onRegisterScrollToTop: (suspend () -> Unit) -> Unit = {},
 ) {
     val tierSpec = LocalFolioTierSpec.current
+    val listState = rememberFolioScrollToTopState(onRegisterScrollToTop)
     val shelves = contentState.shelvesFor(Destination.Browse)
     val loading = contentState.isLoading(Destination.Browse)
 
@@ -143,6 +148,7 @@ internal fun FolioBrowsePage(
         val cols = adaptiveColumnCount(innerWidth, tierSpec.gw, 14.dp)
         val shelfRows = remember(shelves, cols) { shelves.map { it.items.chunked(cols) } }
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 start = tierSpec.px,

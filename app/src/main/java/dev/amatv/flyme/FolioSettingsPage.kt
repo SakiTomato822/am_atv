@@ -85,13 +85,14 @@ internal fun FolioSettingsPage(
     onSignOut: () -> Unit,
     onRefresh: () -> Unit,
     onNotice: (String) -> Unit,
+    onRegisterScrollToTop: (suspend () -> Unit) -> Unit = {},
 ) {
     val palette = LocalFolioPalette.current
     val tierSpec = LocalFolioTierSpec.current
     val fontFamily = LocalFolioFontFamily.current
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
-    val listState = rememberLazyListState()
+    val listState = rememberFolioScrollToTopState(onRegisterScrollToTop)
 
     val cacheSettings by services.contentCache.settings.collectAsState()
     var cacheStorage by remember { mutableStateOf<ContentCacheStorage?>(null) }

@@ -1,6 +1,8 @@
 package dev.amatv.flyme
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -18,6 +20,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
@@ -27,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -34,6 +39,7 @@ import androidx.compose.ui.unit.sp
 import dev.amatv.R
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
+import kotlinx.coroutines.launch
 
 internal data class FolioDetailLayout(
     val coverSize: Int,
@@ -79,6 +85,8 @@ internal fun FolioDetailHeader(
     val shape = if (isArtist) CircleShape else RoundedCornerShape(12.dp)
     val cover = LocalFolioDetailCoverTransition.current
     val spatial = LocalFolioBrowseMotion.current.spatial
+    val scope = rememberCoroutineScope()
+    val titleBounce = rememberFolioTapBounce()
     if (cover != null && spatial) {
         DisposableEffect(cover) { onDispose { cover.entry.header = null } }
     }
@@ -94,6 +102,20 @@ internal fun FolioDetailHeader(
             letterSpacing = (-0.5).sp,
             maxLines = if (isArtist) 1 else Int.MAX_VALUE,
             overflow = if (isArtist) TextOverflow.Ellipsis else TextOverflow.Clip,
+            modifier = Modifier
+                .graphicsLayer {
+                    val s = titleBounce.scale
+                    scaleX = s
+                    scaleY = s
+                }
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    role = Role.Button,
+                ) {
+                    titleBounce.trigger()
+                    scope.launch { listState.folioScrollToTop() }
+                },
         )
         byline?.invoke()
         if (meta != null) FolioDetailLabel(meta)

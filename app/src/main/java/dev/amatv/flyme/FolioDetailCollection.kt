@@ -40,6 +40,7 @@ internal fun FolioCollectionDetail(
     homeShelves: List<ContentShelf>,
     onOpenItem: (Track, List<Track>) -> Unit,
     onPlayCollection: (Track, List<Track>, Int, Boolean) -> Unit,
+    onRegisterScrollToTop: (suspend () -> Unit) -> Unit = {},
 ) {
     val spec = LocalFolioTierSpec.current
     val album = collection.catalogKind == CatalogKind.Album
@@ -77,7 +78,7 @@ internal fun FolioCollectionDetail(
         ).joinToString(" · ")
     }
 
-    val listState = rememberLazyListState()
+    val listState = rememberFolioScrollToTopState(onRegisterScrollToTop)
     BoxWithConstraints(Modifier.fillMaxSize().padding(start = spec.px, end = spec.pr)) {
         val gap = 14.dp
         val columns = adaptiveColumnCount(maxWidth, spec.gw, gap)

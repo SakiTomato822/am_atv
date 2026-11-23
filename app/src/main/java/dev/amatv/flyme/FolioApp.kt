@@ -34,6 +34,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -450,6 +451,7 @@ fun FolioApp(
                         onPlayCollection = playbackStore::playCollection,
                         handleBack = !playerOpen,
                     ) {
+                        val scrollToTopHandlers = remember { mutableStateMapOf<Int, suspend () -> Unit>() }
                         Column(Modifier.fillMaxSize()) {
                             // Metro Pivot header anchored directly below status bar (aligns with top-right MiniPlayer on Wide/Ultrawide)
                             FolioPivotBar(
@@ -459,6 +461,11 @@ fun FolioApp(
                                 } ?: (pagerState.currentPage + pagerState.currentPageOffsetFraction),
                                 selectedPage = selectedPage,
                                 onSelectPage = ::selectTab,
+                                onScrollCurrentPageToTop = {
+                                    scrollToTopHandlers[pagerState.currentPage]?.let { fn ->
+                                        scope.launch { fn() }
+                                    }
+                                },
                                 onRightEdgePxChanged = { rightPx ->
                                     if (pivotRightEdgePx != rightPx) pivotRightEdgePx = rightPx
                                 },
@@ -487,6 +494,9 @@ fun FolioApp(
                                     ).zIndex(if (pageIdx == selectedPage) 1f else 0f),
                                 ) {
                                     CompositionLocalProvider(LocalFolioBrowseTab provides pageIdx) {
+                                        val registerScrollToTop: (suspend () -> Unit) -> Unit = { fn ->
+                                            scrollToTopHandlers[pageIdx] = fn
+                                        }
                                         when (FolioRootPage.entries[pageIdx]) {
                                             FolioRootPage.Settings -> FolioSettingsPage(
                                                 settingsStore = settingsStore,
@@ -499,6 +509,7 @@ fun FolioApp(
                                                 onSignOut = ::signOut,
                                                 onRefresh = ::refreshAll,
                                                 onNotice = ::showToast,
+                                                onRegisterScrollToTop = registerScrollToTop,
                                             )
                                             FolioRootPage.Home -> FolioHomePage(
                                                 contentState = contentState,
@@ -508,6 +519,7 @@ fun FolioApp(
                                                 onRetry = ::refreshAll,
                                                 onSignIn = ::startSignIn,
                                                 onOpenItem = ::openItem,
+                                                onRegisterScrollToTop = registerScrollToTop,
                                             )
                                             FolioRootPage.Browse -> FolioBrowsePage(
                                                 contentState = contentState,
@@ -517,6 +529,7 @@ fun FolioApp(
                                                 onRetry = ::refreshAll,
                                                 onSignIn = ::startSignIn,
                                                 onOpenItem = ::openItem,
+                                                onRegisterScrollToTop = registerScrollToTop,
                                             )
                                             FolioRootPage.Library -> FolioLibraryPage(
                                                 contentState = contentState,
@@ -531,6 +544,7 @@ fun FolioApp(
                                                 },
                                                 onOpenItem = ::openItem,
                                                 onOpenHistory = { playHistoryOpen = true },
+                                                onRegisterScrollToTop = registerScrollToTop,
                                             )
                                             FolioRootPage.Search -> FolioSearchPage(
                                                 currentTrack = playbackState.track,
@@ -541,6 +555,7 @@ fun FolioApp(
                                                 onOpenItem = ::openItem,
                                                 recentPlayEntries = playHistoryEntries,
                                                 onOpenAllHistory = { playHistoryOpen = true },
+                                                onRegisterScrollToTop = registerScrollToTop,
                                             )
                                         }
                                     }

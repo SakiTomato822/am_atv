@@ -84,6 +84,7 @@ internal fun FolioArtistDetail(
     playback: PlaybackState,
     bottomPadding: Dp,
     onOpenItem: (Track, List<Track>) -> Unit,
+    onRegisterScrollToTop: (suspend () -> Unit) -> Unit = {},
 ) {
     val spec = LocalFolioTierSpec.current
     val page = data.value
@@ -103,7 +104,7 @@ internal fun FolioArtistDetail(
         scope.launch { more[shelfId] = loadFolioArtistShelf(services, href) }
     }
 
-    val listState = rememberLazyListState()
+    val listState = rememberFolioScrollToTopState(onRegisterScrollToTop)
     BoxWithConstraints(Modifier.fillMaxSize().padding(start = spec.px, end = spec.pr)) {
         val columns = adaptiveColumnCount(maxWidth, spec.liw, spec.lstGap)
         LazyColumn(state = listState, contentPadding = PaddingValues(bottom = bottomPadding)) {
