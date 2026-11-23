@@ -16,7 +16,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import dev.amatv.R
 import dev.amatv.core.WelcomePreferences
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -29,6 +28,14 @@ private const val BGM_EXTERNAL_FADE_MS = 1_000L
 private const val BGM_QUICK_FADE_MS = 350L
 private const val BGM_EXIT_FADE_MS = 450L
 
+private enum class BgmPlayerState {
+    Idle,
+    Prepared,
+    Started,
+    Paused,
+    Released,
+}
+
 @Stable
 internal class FolioWelcomeBgmController(
     context: Context,
@@ -39,11 +46,11 @@ internal class FolioWelcomeBgmController(
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     private var player: MediaPlayer? = null
+    private var playerState: BgmPlayerState = BgmPlayerState.Idle
     private var focusRequest: AudioFocusRequest? = null
     private var fadeJob: Job? = null
     private var currentVolume: Float = 0f
     private var pausedForExternalFlow: Boolean = false
-    private var released: Boolean = false
 
     var isMutedUi by mutableStateOf(prefs.bgmMuted || audioManager.isMusicActive)
         private set
@@ -57,31 +64,22 @@ internal class FolioWelcomeBgmController(
                 if (isActivelyPlaying) animateVolume(BGM_DUCK_VOLUME, 250L)
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                fadeJob?.cancel()
-                player?.takeIf { it.isPlaying }?.pause()
-                isActivelyPlaying = false
+                pausePlayback()
             }
             AudioManager.AUDIOFOCUS_LOSS -> {
-                fadeJob?.cancel()
-                player?.takeIf { it.isPlaying }?.pause()
-                isActivelyPlaying = false
+                pausePlayback()
                 isMutedUi = true
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
-                if (!released && !prefs.bgmMuted && !pausedForExternalFlow) {
-                    ensurePlayer()?.let { media ->
-                        if (!media.isPlaying) media.start()
-                        isActivelyPlaying = true
-                        isMutedUi = false
-                        animateVolume(BGM_NORMAL_VOLUME, 500L)
-                    }
+                if (playerState != BgmPlayerState.Released && !prefs.bgmMuted && !pausedForExternalFlow) {
+                    startPreparedOrPaused(BGM_NORMAL_VOLUME, 500L)
                 }
             }
         }
     }
 
     fun startIfAllowed(isAppPlaying: Boolean) {
-        if (released) return
+        if (playerState == BgmPlayerState.Released) return
         val canPlay = shouldPlayWelcomeBgm(
             isMusicActive = audioManager.isMusicActive,
             isAppPlaying = isAppPlaying,
@@ -93,12 +91,8 @@ internal class FolioWelcomeBgmController(
             isMutedUi = true
             return
         }
-        val media = ensurePlayer() ?: return
         currentVolume = 0f
-        media.setVolume(0f, 0f)
-        if (!media.isPlaying) media.start()
-        isActivelyPlaying = true
-        animateVolume(BGM_NORMAL_VOLUME, BGM_FADE_IN_MS)
+        startPreparedOrPaused(BGM_NORMAL_VOLUME, BGM_FADE_IN_MS, resetToZero = true)
     }
 
     fun toggleMute(isAppPlaying: Boolean) {
@@ -109,8 +103,7 @@ internal class FolioWelcomeBgmController(
             fadeJob?.cancel()
             fadeJob = scope.launch {
                 rampVolume(0f, BGM_QUICK_FADE_MS)
-                player?.takeIf { it.isPlaying }?.pause()
-                isActivelyPlaying = false
+                pausePlaybackInternal()
                 abandonAudioFocus()
             }
         } else {
@@ -119,14 +112,11 @@ internal class FolioWelcomeBgmController(
                 isMutedUi = true
                 return
             }
-            val media = ensurePlayer() ?: return
-            if (!media.isPlaying) {
-                currentVolume = 0f
-                media.setVolume(0f, 0f)
-                media.start()
-            }
-            isActivelyPlaying = true
-            animateVolume(BGM_NORMAL_VOLUME, BGM_FADE_IN_MS)
+            startPreparedOrPaused(
+                targetVolume = BGM_NORMAL_VOLUME,
+                fadeDurationMs = BGM_FADE_IN_MS,
+                resetToZero = playerState != BgmPlayerState.Started,
+            )
         }
     }
 
@@ -136,31 +126,22 @@ internal class FolioWelcomeBgmController(
         fadeJob?.cancel()
         fadeJob = scope.launch {
             rampVolume(0f, BGM_EXTERNAL_FADE_MS)
-            player?.takeIf { it.isPlaying }?.pause()
-            isActivelyPlaying = false
+            pausePlaybackInternal()
         }
     }
 
     fun resumeAfterExternalFlow(isAppPlaying: Boolean) {
-        if (!pausedForExternalFlow || released) return
+        if (!pausedForExternalFlow || playerState == BgmPlayerState.Released) return
         pausedForExternalFlow = false
-        if (prefs.bgmMuted || isAppPlaying || audioManager.isMusicActive) {
+        if (prefs.bgmMuted || isAppPlaying || audioManager.isMusicActive || !requestAudioFocus()) {
             isMutedUi = true
             return
         }
-        if (!requestAudioFocus()) {
-            isMutedUi = true
-            return
-        }
-        val media = ensurePlayer() ?: return
-        if (!media.isPlaying) media.start()
-        isActivelyPlaying = true
-        isMutedUi = false
-        animateVolume(BGM_NORMAL_VOLUME, BGM_FADE_IN_MS)
+        startPreparedOrPaused(BGM_NORMAL_VOLUME, BGM_FADE_IN_MS)
     }
 
     fun fadeOutAndRelease(onReleased: () -> Unit = {}) {
-        if (released) {
+        if (playerState == BgmPlayerState.Released) {
             onReleased()
             return
         }
@@ -176,31 +157,81 @@ internal class FolioWelcomeBgmController(
     }
 
     fun releaseImmediate() {
-        if (released) return
-        released = true
+        if (playerState == BgmPlayerState.Released) return
         fadeJob?.cancel()
         fadeJob = null
         isActivelyPlaying = false
-        player?.run {
-            runCatching { if (isPlaying) stop() }
-            runCatching { release() }
+        val media = player
+        if (media != null) {
+            if (playerState == BgmPlayerState.Started || playerState == BgmPlayerState.Paused) {
+                media.stop()
+            }
+            if (playerState != BgmPlayerState.Idle) {
+                media.release()
+            }
         }
         player = null
+        playerState = BgmPlayerState.Released
         abandonAudioFocus()
     }
 
-    private fun ensurePlayer(): MediaPlayer? {
+    private fun startPreparedOrPaused(
+        targetVolume: Float,
+        fadeDurationMs: Long,
+        resetToZero: Boolean = false,
+    ) {
+        val media = ensurePreparedPlayer() ?: return
+        if (resetToZero) {
+            currentVolume = 0f
+            applyVolume(0f)
+        }
+        if (playerState == BgmPlayerState.Prepared || playerState == BgmPlayerState.Paused) {
+            media.start()
+            playerState = BgmPlayerState.Started
+        }
+        isActivelyPlaying = playerState == BgmPlayerState.Started
+        isMutedUi = false
+        animateVolume(targetVolume, fadeDurationMs)
+    }
+
+    private fun pausePlayback() {
+        fadeJob?.cancel()
+        pausePlaybackInternal()
+    }
+
+    private fun pausePlaybackInternal() {
+        val media = player
+        if (media != null && playerState == BgmPlayerState.Started) {
+            media.pause()
+            playerState = BgmPlayerState.Paused
+        }
+        isActivelyPlaying = false
+    }
+
+    private fun ensurePreparedPlayer(): MediaPlayer? {
+        if (playerState == BgmPlayerState.Released) return null
         player?.let { return it }
-        return MediaPlayer.create(appContext, R.raw.folio_welcome_bgm)?.apply {
-            isLooping = true
-            setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build(),
-            )
-            setVolume(0f, 0f)
-            player = this
+        val created = MediaPlayer.create(appContext, R.raw.folio_welcome_bgm) ?: return null
+        created.isLooping = true
+        created.setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build(),
+        )
+        created.setVolume(0f, 0f)
+        player = created
+        playerState = BgmPlayerState.Prepared
+        return created
+    }
+
+    private fun applyVolume(volume: Float) {
+        val media = player ?: return
+        if (playerState == BgmPlayerState.Prepared ||
+            playerState == BgmPlayerState.Started ||
+            playerState == BgmPlayerState.Paused
+        ) {
+            media.setVolume(volume, volume)
         }
     }
 
@@ -230,7 +261,7 @@ internal class FolioWelcomeBgmController(
     }
 
     private suspend fun rampVolume(target: Float, durationMs: Long) {
-        val media = player ?: return
+        if (player == null || playerState == BgmPlayerState.Idle || playerState == BgmPlayerState.Released) return
         val start = currentVolume
         val steps = (durationMs / 25L).toInt().coerceAtLeast(1)
         val stepMs = durationMs / steps
@@ -238,17 +269,11 @@ internal class FolioWelcomeBgmController(
             val fraction = i / steps.toFloat()
             val v = start + (target - start) * fraction
             currentVolume = v
-            runCatching { media.setVolume(v, v) }
-            if (i < steps) {
-                try {
-                    delay(stepMs)
-                } catch (c: CancellationException) {
-                    throw c
-                }
-            }
+            applyVolume(v)
+            if (i < steps) delay(stepMs)
         }
         currentVolume = target
-        runCatching { media.setVolume(target, target) }
+        applyVolume(target)
     }
 }
 

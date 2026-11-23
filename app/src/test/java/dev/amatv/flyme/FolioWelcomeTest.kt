@@ -1,6 +1,7 @@
 package dev.amatv.flyme
 
 import dev.amatv.core.CURRENT_WELCOME_VERSION
+import dev.amatv.core.ContentState
 import dev.amatv.core.LowPerformanceMode
 import dev.amatv.core.SettingsState
 import dev.amatv.core.WelcomePreferences
@@ -117,5 +118,18 @@ class FolioWelcomeTest {
         assertEquals(30f, computeWelcomeDragOffsetPx(100f, currentIndex = 0, pageCount = 6), 0.01f)
         assertEquals(-30f, computeWelcomeDragOffsetPx(-100f, currentIndex = 5, pageCount = 6), 0.01f)
         assertEquals(100f, computeWelcomeDragOffsetPx(100f, currentIndex = 1, pageCount = 6), 0.01f)
+    }
+
+    @Test
+    fun emptyEditorialContentProducesEmptyWallAndShowcaseWithoutMockFallback() {
+        val emptyState = ContentState()
+        assertTrue(buildWelcomeWallRows(emptyState).isEmpty())
+        assertTrue(
+            selectWelcomeShowcaseTracks(
+                connectionState = MusicConnectionState.ReadyToSignIn,
+                contentState = emptyState,
+                playHistoryEntries = emptyList(),
+            ).isEmpty(),
+        )
     }
 }

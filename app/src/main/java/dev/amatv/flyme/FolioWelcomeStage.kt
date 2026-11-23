@@ -49,6 +49,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
@@ -169,6 +170,7 @@ internal fun WelcomeCoverWall(
         val tilePx = with(density) { tileDp.toPx() }
         val gapPx = with(density) { gapDp.toPx() }
 
+        if (rows.isEmpty()) return@BoxWithConstraints
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -176,46 +178,50 @@ internal fun WelcomeCoverWall(
             verticalArrangement = Arrangement.spacedBy(gapDp, Alignment.CenterVertically),
         ) {
             rows.forEachIndexed { rowIdx, rowTracks ->
-                val halfSpanPx = rowTracks.size * (tilePx + gapPx)
-                val progress = if (rowIdx % 2 == 1) reverseFraction else forwardFraction
-                val rowShiftPx = -halfSpanPx * progress
-                Row(
-                    modifier = Modifier
-                        .graphicsLayer { translationX = rowShiftPx },
-                    horizontalArrangement = Arrangement.spacedBy(gapDp),
-                ) {
-                    repeat(2) { copyIdx ->
-                        rowTracks.forEachIndexed { colIdx, track ->
-                            val tileKey = "$rowIdx-$copyIdx-$colIdx"
-                            val reportCandidate = !lowPerformance && wallAlpha > 0.2f && rowIdx in 1..3 &&
-                                rootCoords != null && rootCoords.isAttached
-                            FolioArtwork(
-                                track = track,
-                                shape = RoundedCornerShape(cornerDp),
-                                modifier = Modifier
-                                    .size(tileDp)
-                                    .graphicsLayer {
-                                        alpha = if (hiddenFlyTileKey == tileKey) 0f else 1f
-                                    }
-                                    .then(
-                                        if (reportCandidate) {
-                                            Modifier.onGloballyPositioned { coords ->
-                                                val root = rootCoords.takeIf { it.isAttached } ?: return@onGloballyPositioned
-                                                if (!coords.isAttached) return@onGloballyPositioned
-                                                val rect = root.localBoundingBoxOf(coords, clipBounds = false)
-                                                val rw = root.size.width.toFloat()
-                                                val rh = root.size.height.toFloat()
-                                                if (rect.left > rw * 0.52f &&
-                                                    rect.right < rw - 10f &&
-                                                    rect.top > rh * 0.18f &&
-                                                    rect.bottom < rh * 0.80f
-                                                ) {
-                                                    onReportFlyCandidate(tileKey, rect)
-                                                }
+                key(rowIdx) {
+                    val halfSpanPx = rowTracks.size * (tilePx + gapPx)
+                    val progress = if (rowIdx % 2 == 1) reverseFraction else forwardFraction
+                    val rowShiftPx = -halfSpanPx * progress
+                    Row(
+                        modifier = Modifier
+                            .graphicsLayer { translationX = rowShiftPx },
+                        horizontalArrangement = Arrangement.spacedBy(gapDp),
+                    ) {
+                        repeat(2) { copyIdx ->
+                            rowTracks.forEachIndexed { colIdx, track ->
+                                val tileKey = "$rowIdx-$copyIdx-$colIdx"
+                                key(tileKey) {
+                                    val reportCandidate = !lowPerformance && wallAlpha > 0.2f && rowIdx in 1..3 &&
+                                        rootCoords != null && rootCoords.isAttached
+                                    FolioArtwork(
+                                        track = track,
+                                        shape = RoundedCornerShape(cornerDp),
+                                        modifier = Modifier
+                                            .size(tileDp)
+                                            .graphicsLayer {
+                                                alpha = if (hiddenFlyTileKey == tileKey) 0f else 1f
                                             }
-                                        } else Modifier,
-                                    ),
-                            )
+                                            .then(
+                                                if (reportCandidate) {
+                                                    Modifier.onGloballyPositioned { coords ->
+                                                        val root = rootCoords.takeIf { it.isAttached } ?: return@onGloballyPositioned
+                                                        if (!coords.isAttached) return@onGloballyPositioned
+                                                        val rect = root.localBoundingBoxOf(coords, clipBounds = false)
+                                                        val rw = root.size.width.toFloat()
+                                                        val rh = root.size.height.toFloat()
+                                                        if (rect.left > rw * 0.52f &&
+                                                            rect.right < rw - 10f &&
+                                                            rect.top > rh * 0.18f &&
+                                                            rect.bottom < rh * 0.80f
+                                                        ) {
+                                                            onReportFlyCandidate(tileKey, rect)
+                                                        }
+                                                    }
+                                                } else Modifier,
+                                            ),
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -244,7 +250,8 @@ internal fun SharedDemoPlayerStage(
     u: Dp,
     modifier: Modifier = Modifier,
 ) {
-    val safeTrackIdx = activeTrackIdx.coerceIn(0, (tracks.size - 1).coerceAtLeast(0))
+    if (tracks.isEmpty()) return
+    val safeTrackIdx = activeTrackIdx.coerceIn(0, tracks.lastIndex)
     val activeTrack = tracks[safeTrackIdx]
     val shape = RoundedCornerShape(u * 1.6f)
     val springSpec = if (lowPerformance || !animated) {
@@ -358,12 +365,14 @@ internal fun SharedDemoPlayerStage(
                     .fillMaxHeight()
                     .graphicsLayer { translationX = animatedStripShift },
             ) {
-                tracks.forEach { t ->
-                    FolioArtwork(
-                        track = t,
-                        shape = RoundedCornerShape(0.dp),
-                        modifier = Modifier.size(covWidthDp, covHeightDp),
-                    )
+                tracks.forEachIndexed { trackIdx, t ->
+                    key(trackIdx, t.id) {
+                        FolioArtwork(
+                            track = t,
+                            shape = RoundedCornerShape(0.dp),
+                            modifier = Modifier.size(covWidthDp, covHeightDp),
+                        )
+                    }
                 }
             }
         }
@@ -486,18 +495,20 @@ internal fun SharedDemoPlayerStage(
                 verticalAlignment = Alignment.Bottom,
             ) {
                 heights.forEachIndexed { idx, frac ->
-                    val animFrac by animateFloatAsState(
-                        targetValue = frac,
-                        animationSpec = if (lowPerformance) tween(160) else spring(0.8f, 320f),
-                        label = "lvl-$idx",
-                    )
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxHeight(animFrac)
-                            .clip(RoundedCornerShape(stageWidthDp * 0.008f))
-                            .background(Color.White.copy(alpha = 0.9f)),
-                    )
+                    key(idx) {
+                        val animFrac by animateFloatAsState(
+                            targetValue = frac,
+                            animationSpec = if (lowPerformance) tween(160) else spring(0.8f, 320f),
+                            label = "lvl-$idx",
+                        )
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .fillMaxHeight(animFrac)
+                                .clip(RoundedCornerShape(stageWidthDp * 0.008f))
+                                .background(Color.White.copy(alpha = 0.9f)),
+                        )
+                    }
                 }
             }
         }

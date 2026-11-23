@@ -10,10 +10,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalConfiguration
 import dev.amatv.core.ContentState
 import dev.amatv.core.PlayHistoryEntry
-import dev.amatv.data.MockCatalog
 import dev.amatv.integration.LyricsLocalizationRequest
+import dev.amatv.integration.LyricsRequestResult
 import dev.amatv.integration.MusicConnectionState
 import dev.amatv.integration.MusicServices
+import dev.amatv.integration.requestLyricsWithRetry
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Destination
 import dev.amatv.model.LyricLine
@@ -35,17 +36,12 @@ private const val WALL_ROW_COUNT = 5
 private const val WALL_TILES_PER_ROW = 14
 private const val MAX_WELCOME_LYRIC_LINES = 8
 
-internal fun buildWelcomeWallRows(
-    contentState: ContentState,
-    playHistoryEntries: List<PlayHistoryEntry>,
-): List<List<Track>> {
-    val browseItems = contentState.shelvesFor(Destination.Browse).flatMap { it.items }
-    val homeItems = contentState.shelvesFor(Destination.Home).flatMap { it.items }
-    val historyTracks = playHistoryEntries.map { it.toTrack() }
-    val candidates = (browseItems + homeItems + historyTracks)
+internal fun buildWelcomeWallRows(contentState: ContentState): List<List<Track>> {
+    val candidates = contentState.shelvesFor(Destination.Browse)
+        .flatMap { it.items }
         .filter { !it.artworkUrl.isNullOrBlank() }
         .distinctBy { it.artworkUrl }
-        .ifEmpty { MockCatalog.tracks }
+    if (candidates.isEmpty()) return emptyList()
 
     return List(WALL_ROW_COUNT) { row ->
         List(WALL_TILES_PER_ROW) { col ->
@@ -62,20 +58,17 @@ internal fun selectWelcomeShowcaseTracks(
     val browseItems = contentState.shelvesFor(Destination.Browse).flatMap { it.items }
     val browseSongs = browseItems.filter { it.catalogKind == CatalogKind.Song && !it.artworkUrl.isNullOrBlank() }
     val browseWithArtwork = browseItems.filter { !it.artworkUrl.isNullOrBlank() }
-    val editorialFallback = (browseSongs + browseWithArtwork).distinctBy { it.title to it.artist }
+    val editorialBrowse = (browseSongs + browseWithArtwork).distinctBy { it.title to it.artist }
 
-    val selected = if (connectionState == MusicConnectionState.SignedIn) {
+    return if (connectionState == MusicConnectionState.SignedIn) {
         val historyTracks = playHistoryEntries.map { it.toTrack() }
-        val signedInCandidates = historyTracks + contentState.recentTracks + editorialFallback
-        signedInCandidates
-            .filter { it.title.isNotBlank() }
+        (historyTracks + contentState.recentTracks + editorialBrowse)
+            .filter { it.title.isNotBlank() && !it.artworkUrl.isNullOrBlank() }
             .distinctBy { it.title to it.artist }
             .take(3)
     } else {
-        editorialFallback.take(3)
+        editorialBrowse.take(3)
     }
-
-    return selected.ifEmpty { MockCatalog.tracks.take(3) }
 }
 
 /** Rebases the opening lyric slice so the welcome demo starts singing immediately at t = 0. */
@@ -116,8 +109,8 @@ internal fun rememberWelcomeDemoContent(
     lyricTranslationEnabled: Boolean,
     lyricPronunciationEnabled: Boolean,
 ): WelcomeDemoContent {
-    val wallRows = remember(contentState.shelvesByDestination, playHistoryEntries) {
-        buildWelcomeWallRows(contentState, playHistoryEntries)
+    val wallRows = remember(contentState.shelvesByDestination) {
+        buildWelcomeWallRows(contentState)
     }
     val showcaseTracks = remember(connectionState, contentState.shelvesByDestination, contentState.recentTracks, playHistoryEntries) {
         selectWelcomeShowcaseTracks(connectionState, contentState, playHistoryEntries)
@@ -135,29 +128,28 @@ internal fun rememberWelcomeDemoContent(
         lyricPronunciationEnabled,
         appLanguageTag,
     ) {
-        if (connectionState != MusicConnectionState.SignedIn || leadTrack == null) {
+        if (connectionState != MusicConnectionState.SignedIn || leadTrack?.catalogId == null) {
             fetchedLyrics = null
             return@LaunchedEffect
         }
         val key = "${leadTrack.lyricsIdentity()}|$lyricTranslationEnabled|$lyricPronunciationEnabled"
-        val loaded = runCatching {
-            withContext(Dispatchers.IO) {
-                val resolved = if (leadTrack.catalogId != null) leadTrack else {
-                    runCatching { services.resolvePlayableTrack(leadTrack) }.getOrNull() ?: leadTrack
-                }
-                if (resolved.catalogId == null) emptyList() else {
-                    val loc = LyricsLocalizationRequest(
-                        languageTag = appLanguageTag,
-                        pronunciationLanguageTag = "en-US",
-                        includeTranslations = lyricTranslationEnabled,
-                        includePronunciations = lyricPronunciationEnabled,
-                    )
-                    services.lyricsFor(resolved, loc)
-                        .map { it.forDisplay(showTranslation = true, showPronunciation = lyricPronunciationEnabled) }
-                }
-            }
-        }.getOrDefault(emptyList())
-        fetchedLyrics = key to rebaseWelcomeLyricSlice(loaded)
+        val loc = LyricsLocalizationRequest(
+            languageTag = appLanguageTag,
+            pronunciationLanguageTag = "en-US",
+            includeTranslations = lyricTranslationEnabled,
+            includePronunciations = lyricPronunciationEnabled,
+        )
+        val result = withContext(Dispatchers.IO) {
+            requestLyricsWithRetry({ services.lyricsFor(leadTrack, loc) })
+        }
+        val lines = when (result) {
+            is LyricsRequestResult.Available -> result.lines
+                .map { it.forDisplay(showTranslation = true, showPronunciation = lyricPronunciationEnabled) }
+            LyricsRequestResult.Unavailable,
+            is LyricsRequestResult.RetryableFailure,
+            -> emptyList()
+        }
+        fetchedLyrics = key to rebaseWelcomeLyricSlice(lines)
     }
 
     val currentKey = leadTrack?.let { "${it.lyricsIdentity()}|$lyricTranslationEnabled|$lyricPronunciationEnabled" }

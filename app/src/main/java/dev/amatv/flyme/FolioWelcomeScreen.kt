@@ -40,6 +40,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -355,11 +356,12 @@ private fun FolioWelcomeScreenContent(
         }
     }
 
-    // Active showcase track ambient tint
-    val currentShowcaseTrack = demoContent.showcaseTracks[
-        gaplessTrackIdx.coerceIn(0, (demoContent.showcaseTracks.size - 1).coerceAtLeast(0)),
-    ]
-    val paletteResult = rememberArtworkPaletteResult(currentShowcaseTrack.artworkUrl, currentShowcaseTrack.palette)
+    // Active showcase track ambient tint (returns default color when showcaseTracks is empty)
+    val currentShowcaseTrack = demoContent.showcaseTracks.getOrNull(gaplessTrackIdx.coerceAtLeast(0))
+    val paletteResult = rememberArtworkPaletteResult(
+        url = currentShowcaseTrack?.artworkUrl,
+        fallback = currentShowcaseTrack?.palette ?: listOf(Color(0xFF40304A)),
+    )
     val ambientTint by animateColorAsState(
         targetValue = paletteResult.colors.firstOrNull() ?: Color(0xFF40304A),
         animationSpec = tween(if (lowPerformance) 150 else 800),
@@ -481,7 +483,7 @@ private fun FolioWelcomeScreenContent(
             animationSpec = tween(if (lowPerformance) 150 else 800),
             label = "amb-glow-alpha",
         )
-        if (ambAlpha > 0.01f) {
+        if (currentShowcaseTrack != null && ambAlpha > 0.01f) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -580,7 +582,7 @@ private fun FolioWelcomeScreenContent(
         )
         val stageBaseWidthDp = u * 52f
 
-        if (stageAlpha > 0.005f || stageTarget.alpha > 0f) {
+        if (demoContent.showcaseTracks.isNotEmpty() && (stageAlpha > 0.005f || stageTarget.alpha > 0f)) {
             SharedDemoPlayerStage(
                 tracks = demoContent.showcaseTracks,
                 activeTrackIdx = if (currentPageId == WelcomePageId.Gapless) gaplessTrackIdx else 0,
@@ -618,7 +620,7 @@ private fun FolioWelcomeScreenContent(
 
         // Flying cover overlay from Wall -> Lyrics Stage Cover
         val flyRect = activeFlyRect
-        if (flyRect != null && flyAlpha.value > 0.01f) {
+        if (flyRect != null && currentShowcaseTrack != null && flyAlpha.value > 0.01f) {
             val lyricsStageTarget = stageTargetFor(WelcomePageId.Lyrics, isPhonePortrait)
             val destStageW = with(density) { (u * 52f).toPx() } * lyricsStageTarget.scale
             val destStageH = destStageW * 9f / 16f
@@ -707,24 +709,26 @@ private fun FolioWelcomeScreenContent(
         ) {
             val dotHeight = if (isPhonePortrait) (u * 1.4f).coerceAtLeast(5.dp) else (u * 0.55f).coerceAtLeast(5.dp)
             val activeWidth = if (isPhonePortrait) (u * 6f).coerceAtLeast(20.dp) else (u * 2.4f).coerceAtLeast(22.dp)
-            pages.forEachIndexed { idx, _ ->
-                val active = idx == currentIndex
-                val pillWidth by animateDpAsState(
-                    targetValue = if (active) activeWidth else dotHeight,
-                    animationSpec = if (lowPerformance) tween(150) else spring(0.8f, 450f),
-                    label = "ind-w-$idx",
-                )
-                val dotAlpha by animateFloatAsState(
-                    targetValue = if (active) 0.95f else 0.28f,
-                    animationSpec = tween(220),
-                    label = "ind-a-$idx",
-                )
-                Box(
-                    modifier = Modifier
-                        .size(width = pillWidth, height = dotHeight)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = dotAlpha)),
-                )
+            pages.forEachIndexed { idx, dotPageId ->
+                key(dotPageId) {
+                    val active = idx == currentIndex
+                    val pillWidth by animateDpAsState(
+                        targetValue = if (active) activeWidth else dotHeight,
+                        animationSpec = if (lowPerformance) tween(150) else spring(0.8f, 450f),
+                        label = "ind-w-$idx",
+                    )
+                    val dotAlpha by animateFloatAsState(
+                        targetValue = if (active) 0.95f else 0.28f,
+                        animationSpec = tween(220),
+                        label = "ind-a-$idx",
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(width = pillWidth, height = dotHeight)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = dotAlpha)),
+                    )
+                }
             }
         }
     }
@@ -762,19 +766,20 @@ private fun WelcomePageTextsLayer(
     val btnSize = if (isPhonePortrait) (u.value * 3.9f).sp else (u.value * 1.55f).sp
 
     pages.forEachIndexed { idx, pageId ->
-        val isCurrent = pageId == currentPageId
-        val baseShiftPx = (if (idx < curIdx) -1f else 1f) * 4f * uPx
-        val alpha by animateFloatAsState(
-            targetValue = if (isCurrent) 1f else 0f,
-            animationSpec = tween(if (lowPerformance) 150 else 320),
-            label = "tx-a-${pageId.name}",
-        )
-        val slideX by animateFloatAsState(
-            targetValue = if (isCurrent) 0f else baseShiftPx,
-            animationSpec = if (lowPerformance) tween(160) else spring(0.84f, 340f),
-            label = "tx-x-${pageId.name}",
-        )
-        if (!isCurrent && alpha < 0.01f) return@forEachIndexed
+        key(pageId) {
+            val isCurrent = pageId == currentPageId
+            val baseShiftPx = (if (idx < curIdx) -1f else 1f) * 4f * uPx
+            val alpha by animateFloatAsState(
+                targetValue = if (isCurrent) 1f else 0f,
+                animationSpec = tween(if (lowPerformance) 150 else 320),
+                label = "tx-a-${pageId.name}",
+            )
+            val slideX by animateFloatAsState(
+                targetValue = if (isCurrent) 0f else baseShiftPx,
+                animationSpec = if (lowPerformance) tween(160) else spring(0.84f, 340f),
+                label = "tx-x-${pageId.name}",
+            )
+            if (isCurrent || alpha >= 0.01f) {
 
         val alignment: Alignment
         val blockModifier: Modifier
@@ -903,18 +908,21 @@ private fun WelcomePageTextsLayer(
                             )
                         }
                         if (connectionState == MusicConnectionState.Demo && !demoSetupMessage.isNullOrBlank()) {
-                            WelcomeStaggerItem(isCurrent, 2, uPx, lowPerformance) {
-                                Text(
-                                    text = demoSetupMessage,
-                                    color = Color(0xFFFF8A9B),
-                                    fontFamily = fontFamily,
-                                    fontSize = fineSize,
-                                    lineHeight = fineSize * 1.5f,
-                                    modifier = Modifier.padding(top = u * (if (isPhonePortrait) 2.5f else 1.1f)),
-                                )
+                            key("signin-demo-msg") {
+                                WelcomeStaggerItem(isCurrent, 2, uPx, lowPerformance) {
+                                    Text(
+                                        text = demoSetupMessage,
+                                        color = Color(0xFFFF8A9B),
+                                        fontFamily = fontFamily,
+                                        fontSize = fineSize,
+                                        lineHeight = fineSize * 1.5f,
+                                        modifier = Modifier.padding(top = u * (if (isPhonePortrait) 2.5f else 1.1f)),
+                                    )
+                                }
                             }
                         }
-                        WelcomeStaggerItem(isCurrent, 3, uPx, lowPerformance) {
+                        key("signin-acts") {
+                            WelcomeStaggerItem(isCurrent, 3, uPx, lowPerformance) {
                             Row(
                                 modifier = Modifier.padding(top = u * (if (isPhonePortrait) 6f else 2.8f)),
                                 horizontalArrangement = Arrangement.spacedBy(u * (if (isPhonePortrait) 5f else 2.4f)),
@@ -942,6 +950,7 @@ private fun WelcomePageTextsLayer(
                                     )
                                 }
                             }
+                        }
                         }
                     }
 
@@ -1216,6 +1225,8 @@ private fun WelcomePageTextsLayer(
                 }
             }
         }
+            }
+        }
     }
 }
 
@@ -1329,32 +1340,34 @@ private fun <T> WelcomeSlidingSegment(
             horizontalArrangement = Arrangement.spacedBy(pad),
         ) {
             options.forEachIndexed { idx, (value, label) ->
-                val isSelected = idx == selectedIdx
-                Box(
-                    modifier = Modifier
-                        .then(if (equalWidth) Modifier.weight(1f) else Modifier)
-                        .height(itemHeight)
-                        .onGloballyPositioned { coords ->
-                            boundsByIndex[idx] = coords.positionInParent().x to coords.size.width.toFloat()
-                        }
-                        .clip(thumbShape)
-                        .clickable(
-                            enabled = enabled,
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            role = Role.RadioButton,
-                            onClick = { onSelect(value) },
+                key(idx) {
+                    val isSelected = idx == selectedIdx
+                    Box(
+                        modifier = Modifier
+                            .then(if (equalWidth) Modifier.weight(1f) else Modifier)
+                            .height(itemHeight)
+                            .onGloballyPositioned { coords ->
+                                boundsByIndex[idx] = coords.positionInParent().x to coords.size.width.toFloat()
+                            }
+                            .clip(thumbShape)
+                            .clickable(
+                                enabled = enabled,
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                role = Role.RadioButton,
+                                onClick = { onSelect(value) },
+                            )
+                            .then(if (equalWidth) Modifier else Modifier.padding(horizontal = itemPadX)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (isSelected) Color(0xFF0B0A0E) else Color.White.copy(alpha = 0.68f),
+                            fontFamily = LocalFolioFontFamily.current,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = textSize,
                         )
-                        .then(if (equalWidth) Modifier else Modifier.padding(horizontal = itemPadX)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = label,
-                        color = if (isSelected) Color(0xFF0B0A0E) else Color.White.copy(alpha = 0.68f),
-                        fontFamily = LocalFolioFontFamily.current,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = textSize,
-                    )
+                    }
                 }
             }
         }
