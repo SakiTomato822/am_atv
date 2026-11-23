@@ -13,14 +13,14 @@ class ShelfSnapshotCodecTest {
     fun shelvesSurviveARoundTrip() {
         val pick = Track(
             id = "pl.1", title = "Top Picks", artist = "Apple Music", album = "",
-            durationMs = 1L, palette = listOf(Color(0xFF112233)), lyrics = emptyList(),
+            durationMs = 1L, palette = listOf(Color(0xFF112233), Color(0xFF334455)), lyrics = emptyList(),
             catalogId = "pl.1", catalogKind = CatalogKind.Playlist, artworkUrl = "https://example.com/a.jpg",
             pickReason = "Made for You",
             artworkColors = AppleArtworkColors(bgColor = "123456", textColor4 = "e2a001"),
         )
         val song = Track(
             id = "1", title = "Song", artist = "Artist", album = "Album", durationMs = 200_000L,
-            palette = listOf(Color(0xFF445566)), lyrics = emptyList(), catalogId = "1",
+            palette = listOf(Color(0xFF445566), Color(0xFF667788)), lyrics = emptyList(), catalogId = "1",
             isExplicit = true, dateAddedMs = 1_700_000_000_000L,
         )
         val shelves = listOf(
