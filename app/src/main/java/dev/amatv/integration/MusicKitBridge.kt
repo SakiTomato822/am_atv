@@ -936,10 +936,21 @@ class MusicKitBridge(
                                 confirmLookahead(generation, index, count, currentId)
                             }
                             val ready = confirmedLookahead
+                            val completed = isCompletedPlaybackItem(
+                                eventGeneration = generation,
+                                requestGeneration = prepareGeneration.get(),
+                                prepared = !preparing,
+                                requestedCatalogId = requestedTrack?.catalogId,
+                                endedCatalogId = endedTrack?.catalogId,
+                                expectedNativeQueueId = preparedNativeQueueId,
+                                endedNativeQueueId = endedTrack?.playbackQueueId,
+                                endPositionMs = endPosition,
+                                durationMs = endedTrack?.durationMs ?: 0L,
+                            )
                             val continuesNatively = ready != null && ready.matchesPlan(
                                 lookahead?.catalogId, lookaheadTrace?.timing?.entryId,
                             ) && count == ready.index + 1 && (index == ready.index - 1 || index == ready.index) &&
-                                endedTrack?.catalogId == requestedTrack?.catalogId
+                                completed
                             lastEndedAtMs = SystemClock.elapsedRealtime()
                             playingTrace?.takeIf {
                                 it.generation == generation && it.timing.matchesPreviousEnd(generation, endedTrack?.catalogId)
@@ -953,17 +964,7 @@ class MusicKitBridge(
                                     pendingSound = PendingSound(it.catalogId, it.title, lastEndedAtMs, gapless = true, afterEnd = true)
                                     fadeInCatalogId = it.catalogId
                                 }
-                            } else if (isCompletedPlaybackItem(
-                                eventGeneration = generation,
-                                requestGeneration = prepareGeneration.get(),
-                                prepared = !preparing,
-                                requestedCatalogId = requestedTrack?.catalogId,
-                                endedCatalogId = endedTrack?.catalogId,
-                                expectedNativeQueueId = preparedNativeQueueId,
-                                endedNativeQueueId = endedTrack?.playbackQueueId,
-                                endPositionMs = endPosition,
-                                durationMs = endedTrack?.durationMs ?: 0L,
-                            )) {
+                            } else if (completed && reportedEndGeneration != generation) {
                                 nativeSongQueue.pendingAppend?.let {
                                     logLookahead(it, "rejected", index, count, "unconfirmed-at-end")
                                 }
@@ -1159,6 +1160,7 @@ class MusicKitBridge(
         // The SDK sometimes never reports the end; the intent machine then decides it ended.
         if (decision.ended && reportedEndGeneration != generation) {
             reportedEndGeneration = generation
+            nativeSongQueue.pendingAppend?.let { logLookahead(it, "rejected", index, count, "unconfirmed-at-end") }
             lastEndedAtMs = SystemClock.elapsedRealtime()
             recordGaplessEnd(
                 generation, requestedTrack?.catalogId, playbackIntent.inferredEndAtMs ?: lastEndedAtMs, "inferred-completion",

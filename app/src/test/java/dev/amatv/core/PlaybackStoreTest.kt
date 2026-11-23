@@ -706,6 +706,11 @@ class PlaybackStoreTest {
             assertTrue(h.store.state.value.playbackPrepared)
             assertTrue(h.store.state.value.isPlaying)
             assertEquals(1, h.player.prepareCalls.size)
+
+            h.player.emit(snapshot(s1, generation = 1L, isEnded = true))
+            assertEquals(s2.id, h.store.state.value.track.id)
+            assertEquals(s2.id, h.store.state.value.snapshot?.currentTrack?.id)
+            assertEquals(1, h.store.queueController.state.value.history.size)
         } finally {
             h.close()
         }
@@ -759,6 +764,36 @@ class PlaybackStoreTest {
             yield()
             assertEquals(d.id, h.store.state.value.track.id)
             assertEquals(2, h.player.prepareCalls.size)
+        } finally {
+            h.close()
+        }
+    }
+
+    @Test
+    fun handoffThatRacesAQueueEditSettlesTheAppEntryAndStopsTheStaleSong() = runBlocking {
+        val h = createHarness(coroutineContext, flymeAuto = true)
+        try {
+            h.store.attach()
+            yield()
+            val a = song("419")
+            val b = song("420")
+            h.store.playTrack(a, listOf(a, b))
+            yield()
+            h.player.emit(snapshot(a, 1L, positionMs = 500L, isPlaying = true))
+            h.delayGate.fireOne(1_500L)
+            assertEquals(b, h.player.currentLookahead)
+
+            h.store.pausePlayback()
+            assertEquals(b, h.player.currentLookahead)
+            h.store.dispatchQueueAction(StartupQueueAction.ClearUpcoming)
+            h.player.emit(snapshot(b, 1L, positionMs = 10L, isPlaying = true, gaplessAdvanceCatalogId = b.catalogId))
+
+            assertEquals(a.id, h.store.state.value.track.id)
+            assertEquals(a.id, h.player.publishedSnapshots.last().first.currentTrack?.id)
+            assertTrue(h.player.publishedSnapshots.last().first.isEnded)
+            assertFalse(h.store.state.value.isPlaying)
+            assertFalse(h.store.state.value.playWhenReady)
+            assertEquals(1, h.player.prepareCalls.size)
         } finally {
             h.close()
         }
@@ -865,6 +900,41 @@ class PlaybackStoreTest {
             assertEquals(1, h.store.queueController.state.value.history.size)
             assertEquals(s1.id, h.store.queueController.state.value.history[0].track.id)
             assertEquals(2, h.player.prepareCalls.size)
+        } finally {
+            h.close()
+        }
+    }
+
+    @Test
+    fun finalSongIgnoresWrongNativeOccurrenceAndIdleFlapsUntilExplicitReplay() = runBlocking {
+        val h = createHarness(coroutineContext)
+        try {
+            h.store.attach()
+            yield()
+            val song = song("503")
+            val playing = song.copy(playbackQueueId = 10L)
+            h.store.playTrack(song, listOf(song))
+            yield()
+
+            h.player.emit(snapshot(playing, 1L, positionMs = 170_000L, isPlaying = true))
+            h.player.emit(snapshot(playing.copy(playbackQueueId = 9L), 1L, isEnded = true))
+            assertTrue(h.store.state.value.playWhenReady)
+            val ended = snapshot(playing, 1L, positionMs = 180_000L, isEnded = true)
+            h.player.emit(ended)
+            val publications = h.player.publishedSnapshots.size
+            h.player.emit(snapshot(playing, 1L, positionMs = 0L, isPlaying = true))
+            h.player.emit(ended)
+            assertEquals(publications, h.player.publishedSnapshots.size)
+            assertTrue(h.store.state.value.snapshot?.isEnded == true)
+            assertFalse(h.store.state.value.isPlaying)
+            assertFalse(h.store.state.value.playWhenReady)
+
+            h.player.systemCallbacks?.play?.invoke()
+            yield()
+            assertEquals(2, h.player.prepareCalls.size)
+            assertEquals(0L, h.player.prepareCalls.last().second)
+            h.player.emit(ended)
+            assertTrue(h.store.state.value.playWhenReady)
         } finally {
             h.close()
         }

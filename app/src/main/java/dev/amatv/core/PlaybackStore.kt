@@ -149,7 +149,8 @@ class PlaybackStore(
     private var adoptingGaplessEntryId: Long? = null
     private var queueNavigation: StartupQueueAction? = null
     private var manualNextLookahead: GaplessLookahead? = null
-    private var advancingEndedTrackId: String? = null
+    private var completedOccurrence: NativeOccurrence? = null
+    private var activeNativeItem: Pair<NativeOccurrence, Long>? = null
     private var pendingRestore: PlaybackSession? =
         startupCheckpoint?.takeIf { initialTrack.catalogId != null }
     private var playbackRequestJob: Job? = null
@@ -179,6 +180,21 @@ class PlaybackStore(
         val currentEntryId: Long?,
         val upcomingEditRevision: Long,
     )
+
+    private data class NativeOccurrence(val generation: Long, val sessionId: Long, val entryId: Long)
+
+    private fun nativeOccurrence(generation: Long): NativeOccurrence? {
+        val queue = queueController.state.value
+        return queue.current?.let { NativeOccurrence(generation, queue.sessionId, it.entryId) }
+    }
+
+    private fun settleCompletion(occurrence: NativeOccurrence, route: String) {
+        completedOccurrence = occurrence
+        diagnostics?.recordGapless(
+            "completion=$route generation=${occurrence.generation} session=${occurrence.sessionId} entry=${occurrence.entryId}",
+        )
+        playHistoryStore?.onTrackFinished(_state.value.track, clock(), currentPlayHistorySource())
+    }
 
     private data class WaitingKey(
         val waitingEntryId: Long?,
@@ -758,11 +774,17 @@ class PlaybackStore(
         if (waitingQueueEntryIdFlow.value != null) return
         val requestedTrack = requestedPlaybackTrack()
         if (requestedTrack.catalogId != null) {
+            val replay = completedOccurrence?.let { it == nativeOccurrence(it.generation) } == true &&
+                (currentPlaybackSnapshot()?.isEnded == true || expectedPlaybackGeneration == 0L) &&
+                playbackRequestJob?.isActive != true
             if (lastPlaybackFailure != null ||
+                replay ||
                 (expectedPlaybackGeneration == 0L && playbackRequestJob?.isActive != true)
             ) {
                 selectionGeneration++
-                launchNativePlayback(requestedTrack, requestedPlaybackPositionMs())
+                val position = if (replay) 0L else requestedPlaybackPositionMs()
+                _state.value = _state.value.copy(positionAnchorMs = position)
+                launchNativePlayback(requestedTrack, position)
             } else if (expectedPlaybackGeneration != 0L) {
                 player.play()
             }
@@ -821,7 +843,6 @@ class PlaybackStore(
             return
         }
         val initialTrack = withCachedLyrics(nextTrack)
-        advancingEndedTrackId = null
         val ready = _state.value.playWhenReady
         val manualLookahead = manualNextLookahead?.takeIf {
             it.entryId == queueController.state.value.current?.entryId
@@ -1171,6 +1192,8 @@ class PlaybackStore(
 
     private fun applyPlaybackSnapshot(snapshot: PlaybackSnapshot) {
         if (snapshot.requestGeneration == 0L || snapshot.requestGeneration != expectedPlaybackGeneration) return
+        val occurrence = nativeOccurrence(snapshot.requestGeneration)
+        if (occurrence != null && completedOccurrence == occurrence) return
         if (snapshot.errorMessage != null) {
             publishSystemSnapshot(snapshot)
             handlePlaybackFailure(
@@ -1185,28 +1208,62 @@ class PlaybackStore(
         if (pendingCatalogId != null &&
             (!snapshot.hasPlayerCurrentTrack || snapshot.currentTrack?.catalogId != pendingCatalogId)
         ) return
-        publishSystemSnapshot(snapshot)
+        val actual = snapshot.currentTrack
+        val nativeId = actual?.playbackQueueId?.takeIf { snapshot.hasPlayerCurrentTrack }
+        val expectedNativeId = activeNativeItem?.takeIf { it.first == occurrence }?.second
+        val queued = gaplessLookahead
+        val requested = requestedPlaybackTrack()
+        val handoff = snapshot.isPrepared && occurrence != null && queued != null &&
+            snapshot.gaplessAdvanceCatalogId != null && snapshot.hasPlayerCurrentTrack &&
+            queued.currentEntryId == occurrence.entryId &&
+            queued.track.catalogId == snapshot.gaplessAdvanceCatalogId &&
+            actual?.catalogId == queued.track.catalogId &&
+            (nativeId == null || nativeId != expectedNativeId) &&
+            queueController.peekAutoNext()?.entryId == queued.entryId
+        if (!handoff && occurrence != null && requested.catalogKind == CatalogKind.Song &&
+            snapshot.isPrepared && snapshot.hasPlayerCurrentTrack &&
+            actual?.catalogId != null && actual.catalogId != requested.catalogId &&
+            actual.catalogId == snapshot.gaplessAdvanceCatalogId
+        ) {
+            // The SDK entered the old lookahead before the queue edit reached its handler.
+            player.pause()
+            publishSystemSnapshot(snapshot.copy(
+                currentTrack = requested, hasPlayerCurrentTrack = false, queue = listOf(requested),
+                positionMs = requested.durationMs, durationMs = requested.durationMs,
+                isPlaying = false, isBuffering = false, isEnded = true, gaplessAdvanceCatalogId = null,
+            ))
+            settleCompletion(occurrence, "rejected-handoff")
+            _state.value = _state.value.copy(isPlaying = false, positionAnchorMs = requested.durationMs)
+            naturalEndTiming = GaplessEnd(
+                occurrence.generation, requested.catalogId, snapshot.capturedAtElapsedRealtimeMs,
+                "rejected-handoff", "queue-plan-changed",
+            )
+            advanceNextTrack()
+            return
+        }
+        if (!handoff && queueController.state.value.current?.track?.catalogKind == CatalogKind.Song && actual != null) {
+            if (actual.catalogId != requested.catalogId ||
+                (expectedNativeId != null && nativeId != null && nativeId != expectedNativeId)
+            ) return
+        }
+        publishSystemSnapshot(if (snapshot.isEnded) snapshot.copy(isPlaying = false, isBuffering = false) else snapshot)
         if (snapshot.notice != lastPlaybackNotice) {
             snapshot.notice?.let { emitMessage(it) }
             lastPlaybackNotice = snapshot.notice
         }
         if (!snapshot.isPrepared) return
-        val queued = gaplessLookahead
-        if (snapshot.gaplessAdvanceCatalogId != null && queued != null &&
-            queued.track.catalogId == snapshot.gaplessAdvanceCatalogId &&
-            snapshot.currentTrack?.catalogId == queued.track.catalogId &&
-            queueController.peekAutoNext()?.entryId == queued.entryId
-        ) {
+        if (handoff) {
             gaplessLookahead = null
             lookaheadTiming = null
             requestTiming = null
-            playHistoryStore?.onTrackFinished(_state.value.track, clock(), currentPlayHistorySource())
+            settleCompletion(occurrence, "native-handoff")
             adoptingGaplessEntryId = queued.entryId
             try {
                 queueController.advanceNext(manual = false)
             } finally {
                 adoptingGaplessEntryId = null
             }
+            activeNativeItem = nativeOccurrence(snapshot.requestGeneration)?.let { next -> nativeId?.let { next to it } }
             return
         }
         _state.value = _state.value.copy(playbackPrepared = true)
@@ -1219,18 +1276,11 @@ class PlaybackStore(
             networkRetryJob = null
             queueController.state.value.current?.let { queueController.markCurrentPlaybackStarted(it.entryId) }
         }
-        val currentStateBeforeEnded = _state.value
-        val endedEntryKey = queueController.state.value.current?.entryId?.toString()
-            ?: currentStateBeforeEnded.track.id
-        if (!snapshot.isEnded && snapshot.currentTrack?.catalogId == currentStateBeforeEnded.track.catalogId) {
-            advancingEndedTrackId = null
-        }
-        if (snapshot.isEnded && snapshot.currentTrack?.catalogId == currentStateBeforeEnded.track.catalogId &&
-            advancingEndedTrackId != endedEntryKey
+        if (snapshot.isEnded && occurrence != null &&
+            actual?.catalogId != null && actual.catalogId == _state.value.track.catalogId
         ) {
-            advancingEndedTrackId = endedEntryKey
-            playHistoryStore?.onTrackFinished(currentStateBeforeEnded.track, clock(), currentPlayHistorySource())
-            _state.value = _state.value.copy(isPlaying = false)
+            settleCompletion(occurrence, "ended")
+            _state.value = _state.value.copy(isPlaying = false, positionAnchorMs = snapshot.positionMs)
             if (isStationPlayback()) {
                 setExpectedPlaybackGeneration(0L)
                 _state.value = _state.value.copy(
@@ -1239,11 +1289,14 @@ class PlaybackStore(
                 )
             } else {
                 naturalEndTiming = diagnostics?.lastGaplessEnd?.takeIf {
-                    it.generation == snapshot.requestGeneration && it.catalogId == snapshot.currentTrack?.catalogId
+                    it.generation == snapshot.requestGeneration && it.catalogId == actual.catalogId
                 }
                 advanceNextTrack(isAuto = true)
             }
             return
+        }
+        if (occurrence != null && nativeId != null && queueController.state.value.current?.track?.catalogKind == CatalogKind.Song) {
+            activeNativeItem = occurrence to nativeId
         }
         val trackChanged = snapshot.currentTrack != null && (
             _state.value.track.id != snapshot.currentTrack.id ||
@@ -1273,7 +1326,8 @@ class PlaybackStore(
         }
         val drift = abs(snapshot.positionMs - currentPredictedMs)
         val seekOrDrift = drift > 500L
-        val playStateChanged = snapshot.isPlaying != afterTrackState.isPlaying
+        val playing = snapshot.isPlaying && afterTrackState.playWhenReady
+        val playStateChanged = playing != afterTrackState.isPlaying
         _state.value = afterTrackState.copy(
             positionAnchorMs = if (trackChanged || playStateChanged || seekOrDrift) {
                 snapshot.positionMs
@@ -1281,7 +1335,7 @@ class PlaybackStore(
             playStartedRealtimeMs = if (trackChanged || playStateChanged || seekOrDrift) {
                 snapshot.capturedAtElapsedRealtimeMs
             } else afterTrackState.playStartedRealtimeMs,
-            isPlaying = if (playStateChanged) snapshot.isPlaying else afterTrackState.isPlaying,
+            isPlaying = playing,
             playbackMessage = null,
         )
     }
