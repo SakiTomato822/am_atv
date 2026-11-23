@@ -151,7 +151,7 @@ class AppleMusicLyricsClient(
                 HttpURLConnection.HTTP_NOT_FOUND ->
                     AppText.text(R.string.services_lyrics_unavailable)
                 else -> AppText.text(R.string.services_lyrics_http_error, status)
-            })
+            }, status)
         }
 
         debugDumpDir?.let { dir ->

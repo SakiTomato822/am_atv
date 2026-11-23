@@ -297,10 +297,21 @@ class NativePlaybackIntentTest {
         assertEquals(PlaybackFailureKind.Network, intent.observe(probe(now = 47_000L)).failure)
     }
 
-    @Test fun onlyTheSdkIoTypeIdentifiesANativeNetworkFailure() {
+    @Test fun sdkIoTypeIdentifiesANativeNetworkFailure() {
         assertEquals(PlaybackFailureKind.Network, classifyPlaybackFailure(1, null, null))
         assertEquals(PlaybackFailureKind.Network, classifyPlaybackFailure(1, 401, 403))
         assertEquals(PlaybackFailureKind.Unexpected, classifyPlaybackFailure(null, null, null))
+    }
+
+    @Test fun queueTypeRecognizesConcreteNetworkCausesWithoutChangingContentRestriction() {
+        val dns = java.lang.reflect.InvocationTargetException(java.net.UnknownHostException("offline"))
+        val tls = IllegalStateException(javax.net.ssl.SSLHandshakeException("offline"))
+        assertEquals(NativeNetworkCause.Dns, nativeNetworkCause(dns))
+        assertEquals(NativeNetworkCause.TlsHandshake, nativeNetworkCause(tls))
+        assertEquals(PlaybackFailureKind.Network, classifyPlaybackFailure(3, null, null, dns))
+        assertEquals(PlaybackFailureKind.Network, classifyPlaybackFailure(3, null, null, tls))
+        assertEquals(PlaybackFailureKind.Unexpected, classifyPlaybackFailure(3, 3082, null, tls))
+        assertEquals(PlaybackFailureKind.Unexpected, classifyPlaybackFailure(2, null, null, tls))
     }
 
     @Test fun drmLeaseAndAgeVerificationDoNotMeanTheAccountNeedsToSignInAgain() {

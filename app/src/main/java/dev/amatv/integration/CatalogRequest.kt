@@ -1,8 +1,11 @@
 package dev.amatv.integration
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import org.json.JSONObject
+import java.io.IOException
 
 /** HTTP catalog failures carry service meaning, unlike MusicKit's native component codes. */
 internal enum class CatalogFailureReason { Unavailable, Authorization, Transient }
@@ -20,29 +23,45 @@ internal fun catalogHttpFailure(status: Int): CatalogFailureReason = when (statu
 }
 
 /** A reflected/suspended request may wrap its original service error or cancellation. */
-internal fun Throwable.catalogFailureReason(): CatalogFailureReason? {
+internal fun Throwable.requestCauses(): List<Throwable> {
     val causes = generateSequence(this) { it.cause }.take(8).toList()
     causes.filterIsInstance<CancellationException>().firstOrNull()?.let { throw it }
-    return causes.filterIsInstance<CatalogRequestException>().firstOrNull()?.reason
+    return causes
 }
+
+internal fun Throwable.catalogFailureReason(): CatalogFailureReason? =
+    requestCauses().filterIsInstance<CatalogRequestException>().firstOrNull()?.reason
+
+internal fun retryableReadStatus(status: Int?): Boolean = status == null || status == 408 ||
+    status == 429 || status in 500..599
 
 /** Resolve metadata with bounded transport retries; auth and unavailable are final verdicts. */
 internal suspend fun <T> retryCatalogRequest(
     fetch: suspend () -> T,
     wait: suspend (Long) -> Unit = { delay(it) },
+): T = retryReadRequest(fetch, wait) { causes ->
+    val catalog = causes.filterIsInstance<CatalogRequestException>().firstOrNull()
+    if (catalog != null) catalog.reason == CatalogFailureReason.Transient && retryableReadStatus(catalog.httpStatus)
+    else causes.any { it is IOException }
+}
+
+internal suspend fun <T> retryReadRequest(
+    fetch: suspend () -> T,
+    wait: suspend (Long) -> Unit,
+    isTransient: (List<Throwable>) -> Boolean,
 ): T {
     val delays = longArrayOf(2_000L, 5_000L)
-    for (attempt in 0..delays.size) {
+    var attempt = 0
+    while (true) {
+        currentCoroutineContext().ensureActive()
         try {
-            return fetch()
+            return fetch().also { currentCoroutineContext().ensureActive() }
         } catch (error: Exception) {
-            if (classifyPlaybackFailure(null, null, null, error) != PlaybackFailureKind.Network ||
-                attempt == delays.size
-            ) throw error
-            wait(delays[attempt])
+            val causes = error.requestCauses()
+            if (attempt == delays.size || !isTransient(causes)) throw error
         }
+        wait(delays[attempt++])
     }
-    error("Catalog retry loop did not complete")
 }
 
 internal fun requireEquivalentCatalogSongId(

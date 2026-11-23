@@ -1406,7 +1406,11 @@ class MusicKitBridge(
     private fun describePlaybackError(error: Any?): String = when (classifyNativeFailure(error)) {
         PlaybackFailureKind.TrackUnavailable -> AppText.text(R.string.services_track_unavailable)
         PlaybackFailureKind.Authorization -> AppText.text(R.string.services_playback_auth_required)
-        PlaybackFailureKind.Network -> AppText.text(R.string.services_apple_connection_failed)
+        PlaybackFailureKind.Network -> AppText.text(
+            if (nativeNetworkCause(error as? Throwable) == NativeNetworkCause.TlsHandshake) {
+                R.string.services_connection_verification_failed
+            } else R.string.services_apple_connection_failed,
+        )
         PlaybackFailureKind.PositionRestore -> AppText.text(R.string.services_playback_restore_failed)
         PlaybackFailureKind.Unexpected -> if (isContentRestrictedFailure(
                 runCatching { error?.javaClass?.getMethod("getErrorCode")?.invoke(error) as? Int }.getOrNull())
@@ -1540,7 +1544,7 @@ internal fun nativePlaybackErrorDiagnostics(error: Any?): String {
         "type=${errorType(errorNumber("getType"))} " +
         "code=${code(errorNumber("getErrorCode"))} " +
         "component=${code(errorNumber("getComponentErrorCode"))} " +
-        "causeTypes=$causeTypes messageHints=$messageHints"
+        "causeTypes=$causeTypes messageHints=$messageHints networkCause=${nativeNetworkCause(error as? Throwable) ?: "-"}"
 }
 
 /** Reduce exception text to fixed labels; never write vendor messages, URLs, or query data to logcat. */

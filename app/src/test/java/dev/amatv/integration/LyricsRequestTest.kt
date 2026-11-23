@@ -65,4 +65,17 @@ class LyricsRequestTest {
             fail("Cancellation must propagate")
         } catch (_: CancellationException) { assertEquals(1, calls) }
     }
+
+    @Test fun permanentHttpAndParseFailuresDoNotSpendTheReadRetryBudget() = runBlocking {
+        val failures = listOf(
+            LyricsRequestException(LyricsFailureReason.Transient, "bad request", 400),
+            org.json.JSONException("bad response"),
+        )
+        for (failure in failures) {
+            assertEquals(
+                LyricsRequestResult.RetryableFailure(LyricsFailureReason.Transient),
+                requestLyricsWithRetry(fetch = { throw failure }, wait = { fail("Must not busy-retry") }),
+            )
+        }
+    }
 }
