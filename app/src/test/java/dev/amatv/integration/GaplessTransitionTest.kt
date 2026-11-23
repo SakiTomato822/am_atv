@@ -54,6 +54,7 @@ class GaplessTransitionTest {
             GaplessStage.Advanced to 220L,
         )
         assertEquals("gapMs=90", summarizeGaplessTiming(GaplessPath.Manual, times).substringBefore(' '))
+        assertEquals("gapMs=90", summarizeGaplessTiming(GaplessPath.ManualNative, times).substringBefore(' '))
         assertEquals("gapMs=-", summarizeGaplessTiming(GaplessPath.Native, times).substringBefore(' '))
     }
 

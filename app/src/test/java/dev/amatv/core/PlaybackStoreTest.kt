@@ -173,7 +173,10 @@ class PlaybackStoreTest {
         var skipNextCalls = 0
         var skipPreviousCalls = 0
         val queuedSongCalls = mutableListOf<String?>()
+        val lookaheadSkipCalls = mutableListOf<String?>()
+        val loudnessRequests = mutableListOf<Track>()
         var nativeQueueSongs = emptySet<String>()
+        var confirmedLookaheadId: String? = null
         val lookaheadHistory = mutableListOf<Track?>()
         var currentLookahead: Track? = null
         val fadeHistory = mutableListOf<Boolean>()
@@ -218,14 +221,27 @@ class PlaybackStoreTest {
             skipPreviousCalls++
         }
 
-        override suspend fun playQueuedSong(track: Track, transition: dev.amatv.integration.GaplessTransition?): Long? {
+        override suspend fun playQueuedSong(
+            track: Track,
+            transition: dev.amatv.integration.GaplessTransition?,
+            confirmedLookaheadOnly: Boolean,
+        ): Long? {
             queuedSongCalls += track.catalogId
+            if (confirmedLookaheadOnly) {
+                lookaheadSkipCalls += track.catalogId
+                return if (track.catalogId == confirmedLookaheadId) nextGeneration++ else null
+            }
             return if (track.catalogId in nativeQueueSongs) nextGeneration++ else null
         }
 
         override fun setLookahead(next: Track?, transition: dev.amatv.integration.GaplessTransition?) {
             currentLookahead = next
+            confirmedLookaheadId = null
             lookaheadHistory += next
+        }
+
+        override fun prefetchLoudness(track: Track) {
+            loudnessRequests += track
         }
 
         override fun setFadeEnabled(enabled: Boolean) {
@@ -714,15 +730,21 @@ class PlaybackStoreTest {
                 while (h.player.currentLookahead != c) yield()
             }
             h.player.nativeQueueSongs = setOf("411", "412", "413")
-            val resolvesBeforeNavigation = h.player.resolvedCalls.size
-
             h.player.systemCallbacks?.previous?.invoke()
             yield()
             assertEquals(a.id, h.store.state.value.track.id)
+            h.player.emit(snapshot(a, 2L, positionMs = 10L, isPlaying = true))
+            h.delayGate.fireOne(1_500L)
+            h.player.confirmedLookaheadId = b.catalogId
             h.store.skip(1)
             yield()
+            h.player.emit(snapshot(b, 3L, positionMs = 10L, isPlaying = true))
+            h.delayGate.fireOne(1_500L)
+            h.player.confirmedLookaheadId = c.catalogId
+            val resolvesBeforeNext = h.player.resolvedCalls.size
             h.store.skip(1)
             yield()
+            assertEquals(resolvesBeforeNext, h.player.resolvedCalls.size)
             h.player.emit(snapshot(b, 3L, isPlaying = true))
             assertEquals(c.id, h.store.state.value.track.id)
             h.player.emit(snapshot(c, 4L, positionMs = 300L, isPlaying = true))
@@ -733,12 +755,88 @@ class PlaybackStoreTest {
             assertEquals(a.id, h.store.state.value.track.id)
             assertEquals(listOf("411", "412", "413", "411"), h.player.queuedSongCalls)
             assertEquals(1, h.player.prepareCalls.size)
-            assertEquals(resolvesBeforeNavigation, h.player.resolvedCalls.size)
-
             h.store.selectQueueTrack(3)
             yield()
             assertEquals(d.id, h.store.state.value.track.id)
             assertEquals(2, h.player.prepareCalls.size)
+        } finally {
+            h.close()
+        }
+    }
+
+    @Test
+    fun nextFallsBackBeforeAppendConfirmationOrAfterShuffle() = runBlocking {
+        for (shuffleAfterAppend in listOf(false, true)) {
+            val h = createHarness(coroutineContext)
+            try {
+                val a = song("8011")
+                val b = song("8012")
+                h.store.attach()
+                yield()
+                h.store.playTrack(a, listOf(a, b))
+                yield()
+                h.player.emit(snapshot(a, 1L, positionMs = 500L, isPlaying = true))
+                h.delayGate.fireOne(1_500L)
+                assertEquals(b, h.player.currentLookahead)
+                if (shuffleAfterAppend) {
+                    h.player.confirmedLookaheadId = b.catalogId
+                    h.store.dispatchQueueAction(StartupQueueAction.ToggleShuffle)
+                }
+                h.store.skip(1)
+                yield()
+                assertEquals(listOf(a, b), h.player.prepareCalls.map { it.first })
+                assertEquals(
+                    if (shuffleAfterAppend) emptyList() else listOf(b.catalogId),
+                    h.player.lookaheadSkipCalls,
+                )
+            } finally {
+                h.close()
+            }
+        }
+    }
+
+    @Test
+    fun neighboringResolutionAndSoundCheckFollowSelectionAndUpcomingEdits() = runBlocking {
+        val h = createHarness(coroutineContext, flymeAuto = false)
+        try {
+            val tracks = (1..7).map { song("802$it") }
+            val (_, b, c, d, e) = tracks
+            val f = tracks[5]
+            val g = tracks[6]
+            val equivalentB = b.copy(id = "apple:8032", catalogId = "8032")
+            h.player.resolveHook = { if (it == b) equivalentB else it }
+            h.store.attach()
+            yield()
+            h.store.playTrack(d, tracks)
+            assertEquals(listOf(d), h.player.loudnessRequests)
+            assertTrue(h.player.prepareCalls.isEmpty())
+            yield()
+            h.player.emit(snapshot(d, 1L, positionMs = 500L, isPlaying = true))
+            withTimeout(1_000L) {
+                while (h.player.loudnessRequests.size < 5) yield()
+            }
+            assertEquals(setOf(b, c, e, f), h.player.resolvedCalls.drop(1).toSet())
+            assertEquals(setOf(equivalentB, c, e, f), h.player.loudnessRequests.drop(1).toSet())
+
+            h.store.skip(1)
+            yield()
+            h.player.loudnessRequests.clear()
+            h.player.resolvedCalls.clear()
+            h.player.emit(snapshot(e, 2L, positionMs = 500L, isPlaying = true))
+            withTimeout(1_000L) {
+                while (h.player.loudnessRequests.size < 4) yield()
+            }
+            assertEquals(setOf(c, d, f, g), h.player.resolvedCalls.toSet())
+            assertEquals(setOf(c, d, f, g), h.player.loudnessRequests.toSet())
+
+            h.player.loudnessRequests.clear()
+            h.player.resolvedCalls.clear()
+            h.store.dispatchQueueAction(StartupQueueAction.ClearUpcoming)
+            withTimeout(1_000L) {
+                while (h.player.loudnessRequests.size < 2) yield()
+            }
+            assertEquals(setOf(c, d), h.player.resolvedCalls.toSet())
+            assertEquals(setOf(c, d), h.player.loudnessRequests.toSet())
         } finally {
             h.close()
         }
@@ -889,10 +987,10 @@ class PlaybackStoreTest {
                 h.delayGate.fireOne(1_500L)
                 assertEquals(s3, h.player.currentLookahead)
 
-                h.player.nativeQueueSongs = setOf(checkNotNull(s3.catalogId))
+                h.player.confirmedLookaheadId = s3.catalogId
                 h.store.skip(1)
                 yield()
-                assertEquals(listOf(s2.catalogId, s3.catalogId), h.player.queuedSongCalls)
+                assertEquals(listOf(s3.catalogId), h.player.lookaheadSkipCalls)
                 assertEquals(2, h.player.prepareCalls.size)
             } finally {
                 h.close()

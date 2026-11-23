@@ -136,6 +136,9 @@ class PlaybackQueueController(
     )
     val state: StateFlow<QueueState> = _state.asStateFlow()
 
+    var upcomingEditRevision: Long = 0L
+        private set
+
     private var nextEntryId = 1L
     private var nextSessionId = 1L
     private var playbackSessionActive = false
@@ -369,6 +372,7 @@ class PlaybackQueueController(
     }
 
     fun clearUpcoming() {
+        upcomingEditRevision++
         cancelRefill()
         _state.update { curr ->
             curr.copy(
@@ -385,6 +389,7 @@ class PlaybackQueueController(
 
     fun setInfinite(enabled: Boolean) {
         if (_state.value.infinite == enabled) return
+        upcomingEditRevision++
         playbackPrefs.autoplayEnabled = enabled
         if (!enabled) {
             cancelRefill()
@@ -405,6 +410,7 @@ class PlaybackQueueController(
 
     fun setShuffle(enabled: Boolean) {
         if (_state.value.shuffle == enabled) return
+        upcomingEditRevision++
         playbackPrefs.shuffleEnabled = enabled
         _state.update { curr ->
             if (enabled) {
@@ -427,6 +433,7 @@ class PlaybackQueueController(
 
     fun setRepeat(mode: PlaybackRepeatMode) {
         if (_state.value.repeat == mode) return
+        upcomingEditRevision++
         playbackPrefs.repeatMode = mode
         if (mode != PlaybackRepeatMode.Off) cancelRefill()
         _state.update { it.copy(repeat = mode, awaitingNext = false, autoplayStatus = AutoplayStatus.Idle) }
@@ -505,6 +512,7 @@ class PlaybackQueueController(
         if (seedChanged) cancelRefill()
         fun Track.updated(): Track = if (isSameSource()) {
             copy(id = resolved.id, catalogId = resolved.catalogId,
+                previewUrl = previewUrl.takeIf { catalogId == resolved.catalogId },
                 resourceId = resourceId ?: libraryId ?: original.catalogId,
                 resourceType = resourceType ?: if (libraryId != null) "library-songs" else "songs")
         } else this

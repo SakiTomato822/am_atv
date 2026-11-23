@@ -125,11 +125,14 @@ class MusicKitBridge(
     private data class TransitionPlayback(
         val generation: Long, val catalogId: String, val timing: GaplessTransition, val startPositionMs: Long = 0L,
     )
-    private data class AppendRequest(val generation: Long, val timing: GaplessTransition)
+    private data class AppendRequest(
+        val generation: Long, val index: Int, val catalogId: String, val timing: GaplessTransition?,
+    )
 
     @Volatile private var lookaheadTrace: TransitionPlayback? = null
     @Volatile private var playingTrace: TransitionPlayback? = null
     private val appendRequests = ArrayDeque<AppendRequest>()
+    private var confirmedLookahead: AppendRequest? = null
     /** Diagnostics: a song change still waiting for its first audible position. */
     private class PendingSound(
         val catalogId: String?, val title: String, val startedMs: Long,
@@ -356,6 +359,7 @@ class MusicKitBridge(
             return
         }
         queuedLookaheadCatalogId = null
+        confirmedLookahead = null
         if (following > 0) {
             @Suppress("UNCHECKED_CAST")
             val items = (currentController.callOrNull("getQueueItems") as? List<Any?>).orEmpty().filterNotNull()
@@ -375,16 +379,16 @@ class MusicKitBridge(
             }
         }
         if (wanted == null || currentController.callOrNull("canAppendToPlaybackQueue") != true) return
-        val append = lookaheadTrace?.let { AppendRequest(it.generation, it.timing) }
+        val append = AppendRequest(prepareGeneration.get(), index + 1, checkNotNull(wanted.catalogId), lookaheadTrace?.timing)
         runCatching {
             val provider = createCatalogPlaybackQueueProvider(wanted, Class.forName(QUEUE_BUILDER))
             val addQueueItems = currentController.javaClass.methods.first {
                 it.name == "addQueueItems" && it.parameterTypes.size == 2
             }
-            if (append != null) synchronized(appendRequests) {
+            synchronized(appendRequests) {
                 appendRequests.removeAll { it.generation != append.generation }
                 appendRequests.addLast(append)
-                append.timing.mark(GaplessStage.Append, SystemClock.elapsedRealtime())
+                append.timing?.mark(GaplessStage.Append, SystemClock.elapsedRealtime())
             }
             addQueueItems.invoke(currentController, provider, INSERTION_TYPE_AT_END)
             nativeSongQueue.record(index + 1, checkNotNull(wanted.catalogId), null)
@@ -392,7 +396,8 @@ class MusicKitBridge(
             nativeQueueEdited = true
             Log.i(TAG, "Gapless lookahead queued catalog=${wanted.catalogId}")
         }.onFailure {
-            if (append != null) synchronized(appendRequests) { appendRequests.remove(append) }
+            synchronized(appendRequests) { appendRequests.remove(append) }
+            if (confirmedLookahead == append) confirmedLookahead = null
             Log.w(TAG, "Gapless lookahead failed: ${it.javaClass.simpleName}")
             diagnostics.record(AppText.text(R.string.diagnostics_lookahead_failed, wanted.title, it.javaClass.simpleName))
         }
@@ -402,7 +407,7 @@ class MusicKitBridge(
 
     private fun loudnessMode() = LoudnessMode.fromPreference(loudnessPrefs.getString(LOUDNESS_PREF, null))
 
-    private fun prefetchLoudness(track: Track) {
+    fun prefetchLoudness(track: Track) {
         if (track.catalogKind == CatalogKind.Song && loudnessMode() != LoudnessMode.Off) loudness.request(track)
     }
 
@@ -560,20 +565,26 @@ class MusicKitBridge(
     }
 
     /** Only a manual move within the app queue may reuse the controller's current songs. */
-    suspend fun playQueuedSong(track: Track, transition: GaplessTransition? = null): Long? {
+    suspend fun playQueuedSong(
+        track: Track, transition: GaplessTransition?, confirmedLookaheadOnly: Boolean,
+    ): Long? {
         val handler = playbackHandler ?: return null
         val generation = prepareGeneration.get()
         return suspendCancellableCoroutine { result ->
             val posted = handler.post {
                 if (!result.isActive) return@post
-                result.resumeWith(runCatching { playQueuedSongOnHandler(track, generation, transition) })
+                result.resumeWith(runCatching {
+                    playQueuedSongOnHandler(track, generation, transition, confirmedLookaheadOnly)
+                })
             }
             if (!posted) result.resume(null)
         }
     }
 
     @Synchronized
-    private fun playQueuedSongOnHandler(track: Track, generation: Long, transition: GaplessTransition?): Long? {
+    private fun playQueuedSongOnHandler(
+        track: Track, generation: Long, transition: GaplessTransition?, confirmedLookaheadOnly: Boolean,
+    ): Long? {
         val current = controller ?: return null
         if (generation != prepareGeneration.get() || generation != activeGeneration ||
             requestedTrack?.catalogKind != CatalogKind.Song || pendingPlaybackError != null ||
@@ -585,12 +596,29 @@ class MusicKitBridge(
         val nativeTrack = current.callOrNull("getCurrentItem")?.let(::trackFromQueueItem) ?: return null
         nativeTrack.catalogId?.let { nativeSongQueue.record(index, it, nativeTrack.playbackQueueId) }
         val atRequestedItem = requestedNativeIndex == null || requestedNativeIndex == index
-        val command = nativeSongQueue.command(
-            catalogId, index, count,
-            canSeek = atRequestedItem && current.callOrNull("canSeek") == true,
-            canSkipNext = atRequestedItem && current.callOrNull("canSkipToNextItem") == true,
-            canSkipById = current.callOrNull("canSkipToQueueItem") == true,
-        ) ?: return null
+        val canSkipNext = atRequestedItem && current.callOrNull("canSkipToNextItem") == true
+        val command = if (confirmedLookaheadOnly) {
+            val append = confirmedLookahead?.takeIf {
+                it.generation == generation && it.index == index + 1 && it.catalogId == catalogId &&
+                    queuedLookaheadCatalogId == catalogId && !preparing
+            } ?: return null
+            if (!canSkipNext || append.index >= count || !nativeSongQueue.matches(append.index, catalogId)) return null
+            transition?.let { timing ->
+                timing.start(GaplessPath.ManualNative, SystemClock.elapsedRealtime())
+                timing.timeOf(GaplessStage.Requested)?.let { timing.mark(GaplessStage.Resolved, it) }
+                for (stage in listOf(GaplessStage.Append, GaplessStage.Added)) {
+                    append.timing?.timeOf(stage)?.let { timing.mark(stage, it) }
+                }
+            }
+            NativeSongQueue.Command.Next(append.index)
+        } else {
+            nativeSongQueue.command(
+                catalogId, index, count,
+                canSeek = atRequestedItem && current.callOrNull("canSeek") == true,
+                canSkipNext = canSkipNext,
+                canSkipById = current.callOrNull("canSkipToQueueItem") == true,
+            ) ?: return null
+        }
 
         val newGeneration = prepareGeneration.incrementAndGet()
         requestedTrack = track
@@ -602,6 +630,7 @@ class MusicKitBridge(
         lookahead = null
         lookaheadTrace = null
         queuedLookaheadCatalogId = null
+        confirmedLookahead = null
         gaplessAdvanceCatalogId = null
         fadeInCatalogId = null
         resetTrackGain()
@@ -805,7 +834,8 @@ class MusicKitBridge(
                                 val append = appendRequests.firstOrNull { it.generation == generation }
                                 if (append != null) {
                                     appendRequests.remove(append)
-                                    append.timing.mark(GaplessStage.Added, SystemClock.elapsedRealtime())
+                                    append.timing?.mark(GaplessStage.Added, SystemClock.elapsedRealtime())
+                                    confirmedLookahead = append
                                 }
                             }
                             Log.d(TAG, method.name)

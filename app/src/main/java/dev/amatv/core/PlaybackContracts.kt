@@ -23,8 +23,13 @@ interface PlayerOperations : RecommendationProvider {
     fun seekTo(positionMs: Long)
     fun skipToNext()
     fun skipToPrevious()
-    suspend fun playQueuedSong(track: Track, transition: GaplessTransition? = null): Long?
+    suspend fun playQueuedSong(
+        track: Track,
+        transition: GaplessTransition? = null,
+        confirmedLookaheadOnly: Boolean = false,
+    ): Long?
     fun setLookahead(next: Track?, transition: GaplessTransition? = null)
+    fun prefetchLoudness(track: Track)
     fun setFadeEnabled(enabled: Boolean)
     suspend fun stationSongs(stationId: String): List<Track>
     suspend fun prefetchLibraryDetails()

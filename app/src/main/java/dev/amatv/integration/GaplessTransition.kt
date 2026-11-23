@@ -1,7 +1,7 @@
 package dev.amatv.integration
 
 internal enum class GaplessPath(val label: String) {
-    Native("native"), Fallback("fallback"), Manual("manual"),
+    Native("native"), Fallback("fallback"), Manual("manual"), ManualNative("manual-native"),
 }
 
 internal enum class GaplessStage(val label: String) {
@@ -91,7 +91,10 @@ internal fun summarizeGaplessTiming(path: GaplessPath, times: Map<GaplessStage, 
     }
 
     val selected = times.getValue(GaplessStage.Selected)
-    val gapStart = if (path == GaplessPath.Manual) GaplessStage.Requested else GaplessStage.Ended
+    val gapStart = when (path) {
+        GaplessPath.Manual, GaplessPath.ManualNative -> GaplessStage.Requested
+        GaplessPath.Native, GaplessPath.Fallback -> GaplessStage.Ended
+    }
     return buildString {
         append("gapMs=${duration(gapStart, GaplessStage.Advanced)} ")
         append("resolveMs=${duration(GaplessStage.Selected, GaplessStage.Resolved)} ")
