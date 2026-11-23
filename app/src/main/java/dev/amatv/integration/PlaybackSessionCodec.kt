@@ -5,6 +5,7 @@ import androidx.compose.ui.graphics.toArgb
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Destination
 import dev.amatv.model.Track
+import dev.amatv.model.fallbackTrackPalette
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -189,18 +190,20 @@ internal fun Track.toSessionJson() = JSONObject()
     .put("explicit", isExplicit)
 
 internal fun JSONObject.toSessionTrack(): Track {
+    val id = getString("id")
+    val catalogId = optionalString("catalogId")
     val colors = optJSONArray("palette")
     return Track(
-        id = getString("id"),
+        id = id,
         title = getString("title"),
         artist = getString("artist"),
         album = optString("album"),
         durationMs = optLong("durationMs").coerceAtLeast(1L),
-        palette = if (colors == null || colors.length() == 0) {
-            listOf(Color(0xFF202428))
+        palette = if (colors == null || colors.length() < 2) {
+            fallbackTrackPalette(catalogId ?: id.removePrefix("apple:"))
         } else (0 until colors.length()).map { Color(colors.getInt(it)) },
         lyrics = emptyList(),
-        catalogId = optionalString("catalogId"),
+        catalogId = catalogId,
         catalogKind = enumValueOrDefault(optString("catalogKind"), CatalogKind.Song),
         resourceId = optString("resourceId").takeIf { it.isNotBlank() && it != "null" },
         resourceType = optString("resourceType").takeIf { it.isNotBlank() && it != "null" },

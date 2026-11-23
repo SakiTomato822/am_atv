@@ -5,6 +5,7 @@ import androidx.compose.runtime.Immutable
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Destination
 import dev.amatv.model.Track
+import dev.amatv.model.fallbackTrackPalette
 import dev.amatv.playback.ContextKind
 import java.time.DayOfWeek
 import java.time.Instant
@@ -49,18 +50,21 @@ data class PlayHistoryEntry(
     val playedAtMs: Long,
     val source: PlayHistorySource,
 ) {
-    fun toTrack(): Track = Track(
-        id = catalogId?.takeIf(String::isNotBlank) ?: songKey,
-        title = title,
-        artist = artist,
-        album = album,
-        durationMs = 0L,
-        palette = emptyList(),
-        lyrics = emptyList(),
-        catalogId = catalogId,
-        catalogKind = CatalogKind.Song,
-        artworkUrl = artworkUrl,
-    )
+    fun toTrack(): Track {
+        val id = catalogId?.takeIf(String::isNotBlank) ?: songKey
+        return Track(
+            id = id,
+            title = title,
+            artist = artist,
+            album = album,
+            durationMs = 0L,
+            palette = fallbackTrackPalette(id),
+            lyrics = emptyList(),
+            catalogId = catalogId,
+            catalogKind = CatalogKind.Song,
+            artworkUrl = artworkUrl,
+        )
+    }
 }
 
 @Immutable

@@ -15,10 +15,10 @@ import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
 import android.util.Log
-import androidx.compose.ui.graphics.Color
 import dev.amatv.BuildConfig
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
+import dev.amatv.model.fallbackTrackPalette
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.File
 import java.lang.reflect.InvocationTargetException
@@ -1207,7 +1207,7 @@ class MusicKitBridge(
             artist = artist,
             album = album,
             durationMs = duration,
-            palette = fallback?.palette ?: playbackPalette(identity),
+            palette = fallback?.palette ?: fallbackTrackPalette(identity),
             lyrics = fallback?.lyrics.orEmpty(),
             catalogId = storeId,
             catalogKind = CatalogKind.Song,
@@ -1220,16 +1220,6 @@ class MusicKitBridge(
             previewUrl = fallback?.takeIf { it.catalogId == storeId }?.previewUrl
                 ?: lookahead?.takeIf { it.catalogId == storeId }?.previewUrl,
         )
-    }
-
-    private fun playbackPalette(seed: String): List<Color> {
-        val palettes = listOf(
-            listOf(Color(0xFF361044), Color(0xFF9D205D), Color(0xFFE06F66)),
-            listOf(Color(0xFF102B46), Color(0xFF176E80), Color(0xFFC99A58)),
-            listOf(Color(0xFF24203E), Color(0xFF56529C), Color(0xFFE2746B)),
-            listOf(Color(0xFF12382F), Color(0xFF348563), Color(0xFFD0C348)),
-        )
-        return palettes[(seed.hashCode() and Int.MAX_VALUE) % palettes.size]
     }
 
     private fun Any.callOrNull(name: String): Any? = runCatching {

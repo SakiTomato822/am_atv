@@ -1,10 +1,12 @@
 package dev.amatv.integration
 
+import androidx.compose.ui.graphics.Color
 import dev.amatv.model.AppleArtworkColors
 import dev.amatv.model.Destination
 import dev.amatv.model.Track
 import dev.amatv.model.LyricLine
 import dev.amatv.model.LyricWord
+import dev.amatv.model.fallbackTrackPalette
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -85,6 +87,21 @@ class PlaybackSessionCodecTest {
         val original = session(1).copy(queue = listOf(track("1").copy(artworkColors = colors)))
         val restored = PlaybackSessionCodec.decode(PlaybackSessionCodec.encode(original))!!
         assertEquals(colors, restored.queue.single().artworkColors)
+    }
+
+    @Test fun decodingEmptyOrSingleColorPalettesRestoresGradientColors() {
+        val original = session(3).copy(queue = listOf(
+            track("1"),
+            track("2").copy(palette = listOf(Color(0xFF202428))),
+            track("3").copy(palette = listOf(Color.Red, Color.Blue)),
+        ))
+
+        val restored = PlaybackSessionCodec.decode(PlaybackSessionCodec.encode(original))!!
+        for (track in restored.queue.take(2)) {
+            assertTrue(track.palette.distinct().size >= 2)
+            assertEquals(fallbackTrackPalette(track.id), track.palette)
+        }
+        assertEquals(original.queue.last().palette, restored.queue.last().palette)
     }
 
     @Test fun versionOneMigrationPreservesValidQueueAndAssignsAppEntryIds() {

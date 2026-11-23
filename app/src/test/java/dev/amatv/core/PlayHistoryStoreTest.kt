@@ -3,6 +3,7 @@ package dev.amatv.core
 import dev.amatv.data.MockCatalog
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Destination
+import dev.amatv.model.fallbackTrackPalette
 import dev.amatv.playback.ContextKind
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
@@ -45,6 +46,19 @@ class PlayHistoryStoreTest {
         artworkUrl = "https://example.com/$id.jpg",
         lyrics = emptyList(),
     )
+
+    @Test
+    fun historyTrackUsesGradientPaletteBeforeArtworkLoads() {
+        val entry = PlayHistoryEntry("legacy-key", "cat-1", "Song", "Artist", "Album", null, 0L, PlayHistorySource.Search)
+
+        for (historyEntry in listOf(entry, entry.copy(catalogId = null), entry.copy(catalogId = ""))) {
+            val track = historyEntry.toTrack()
+            val expectedId = if (historyEntry == entry) "cat-1" else "legacy-key"
+            assertEquals(expectedId, track.id)
+            assertTrue(track.palette.distinct().size >= 2)
+            assertEquals(fallbackTrackPalette(expectedId), track.palette)
+        }
+    }
 
     @Test
     fun recordsAfterThirtySecondsActivePlaybackOrTrackCompletion() {

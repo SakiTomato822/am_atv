@@ -4,12 +4,12 @@ import dev.amatv.R
 import dev.amatv.i18n.AppText
 
 import android.util.Log
-import androidx.compose.ui.graphics.Color
 import dev.amatv.BuildConfig
 import dev.amatv.model.AppleArtworkColors
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.ContentShelf
 import dev.amatv.model.Track
+import dev.amatv.model.fallbackTrackPalette
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -1139,7 +1139,6 @@ class AppleMusicApi(
         val motion = findEditorialMotion() ?: catalogAttrs?.findEditorialMotion()
         val resourceIdentity = "${resourceType.orEmpty()}:$id"
         val stableIdentity = resolvedCatalogId ?: "library:$resourceIdentity"
-        val palettes = paletteFor(stableIdentity)
         return Track(
             id = "apple:$stableIdentity",
             title = name,
@@ -1149,7 +1148,7 @@ class AppleMusicApi(
                 "durationInMillis",
                 catalogAttrs?.optLong("durationInMillis", 48_000L) ?: 48_000L,
             ).coerceAtLeast(1L),
-            palette = palettes,
+            palette = fallbackTrackPalette(stableIdentity),
             lyrics = emptyList(),
             catalogId = resolvedCatalogId,
             catalogKind = kind,
@@ -1255,16 +1254,6 @@ class AppleMusicApi(
         val linkedId = linkedCatalog?.takeIf { it.optString("type") == expectedType }
             ?.optString("id")
         return catalogId(linkedId) ?: catalogId(playParams?.optString("catalogId"))
-    }
-
-    private fun paletteFor(id: String): List<Color> {
-        val palettes = listOf(
-            listOf(Color(0xFF38104E), Color(0xFFA41E62), Color(0xFFE17665)),
-            listOf(Color(0xFF102E49), Color(0xFF147185), Color(0xFFD3A25E)),
-            listOf(Color(0xFF242044), Color(0xFF5B55A7), Color(0xFFEA786D)),
-            listOf(Color(0xFF143A32), Color(0xFF378C69), Color(0xFFD6C94D)),
-        )
-        return palettes[(id.hashCode() and Int.MAX_VALUE) % palettes.size]
     }
 
     private companion object {
