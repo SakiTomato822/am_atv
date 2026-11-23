@@ -26,7 +26,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -60,6 +59,20 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+internal enum class FolioSettingsSection(val labelRes: Int, val itemKey: String) {
+    Account(R.string.app_account, "grp-account"),
+    Appearance(R.string.appearance_title, "grp-look"),
+    Playback(R.string.nav_now_playing, "grp-play"),
+    Lyrics(R.string.player_lyrics, "grp-lyr"),
+    Vehicle(R.string.flyme_media_status, "grp-car"),
+    Storage(R.string.browse_cache_title, "grp-store"),
+    About(R.string.flyme_app_name, "grp-about"),
+    Gapless(R.string.diagnostics_gapless_history, "grp-gapless"),
+}
+
+internal fun settingsSectionIndex(itemKey: String): Int =
+    FolioSettingsSection.entries.indexOfFirst { it.itemKey == itemKey }
+
 @Composable
 internal fun FolioSettingsPage(
     settingsStore: SettingsStore,
@@ -91,74 +104,12 @@ internal fun FolioSettingsPage(
     var showGaplessLog by remember { mutableStateOf(false) }
     val gaplessEntries by services.playbackDiagnostics.gaplessEntries.collectAsState()
 
-    val navLabels = listOf(
-        stringResource(R.string.app_account),
-        stringResource(R.string.appearance_title),
-        stringResource(R.string.nav_now_playing),
-        stringResource(R.string.player_lyrics),
-        stringResource(R.string.flyme_media_status),
-        stringResource(R.string.browse_cache_title),
-        stringResource(R.string.flyme_app_name),
-        stringResource(R.string.diagnostics_gapless_history),
-    )
-    // Exact LazyColumn item indices matching the section headers below.
-    val navIndices = listOf(0, 1, 2, 3, 4, 5, 6)
-    var selectedSection by remember { mutableIntStateOf(0) }
+    var selectedSection by remember { mutableStateOf(FolioSettingsSection.Account) }
 
-    Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(
-                start = tierSpec.px,
-                end = tierSpec.pr,
-                top = 4.dp,
-            ),
-        horizontalArrangement = Arrangement.spacedBy(28.dp),
-    ) {
-        if (tierSpec.showsSettingsSidebar) {
-            Column(
-                modifier = Modifier
-                    .width(230.dp)
-                    .fillMaxHeight()
-                    .padding(bottom = bottomPadding),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                navLabels.forEachIndexed { idx, label ->
-                    val pressed = idx == selectedSection
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(FolioRadii.NavButton))
-                            .background(if (pressed) palette.rb2 else palette.bg.copy(alpha = 0f))
-                            .clickable {
-                                selectedSection = idx
-                                scope.launch { listState.animateScrollToItem(navIndices[idx]) }
-                            }
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                    ) {
-                        Text(
-                            text = label,
-                            color = if (pressed) palette.fg else palette.fg2,
-                            fontFamily = fontFamily,
-                            fontWeight = if (pressed) FontWeight.SemiBold else FontWeight.Normal,
-                            fontSize = 18.sp,
-                        )
-                    }
-                }
-            }
-        }
-
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .weight(1f)
-                .widthIn(max = 760.dp)
-                .fillMaxHeight(),
-            contentPadding = PaddingValues(bottom = bottomPadding),
-        ) {
-            // 0: Account
-            item(key = "grp-account") {
-                SettingsGroup(title = stringResource(R.string.app_account)) {
+    val sectionContent: @Composable (FolioSettingsSection) -> Unit = { section ->
+        SettingsGroup(title = stringResource(section.labelRes)) {
+            when (section) {
+                FolioSettingsSection.Account -> {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -246,11 +197,8 @@ internal fun FolioSettingsPage(
                         MusicConnectionState.Demo -> Unit
                     }
                 }
-            }
 
-            // 1: Appearance
-            item(key = "grp-look") {
-                SettingsGroup(title = stringResource(R.string.appearance_title)) {
+                FolioSettingsSection.Appearance -> {
                     SettingsRow(
                         title = stringResource(R.string.appearance_title),
                     ) {
@@ -302,11 +250,8 @@ internal fun FolioSettingsPage(
                         )
                     }
                 }
-            }
 
-            // 1: Playback
-            item(key = "grp-play") {
-                SettingsGroup(title = stringResource(R.string.nav_now_playing)) {
+                FolioSettingsSection.Playback -> {
                     SettingsToggleRow(
                         title = stringResource(R.string.player_autoplay),
                         checked = settings.autoplayEnabled,
@@ -356,11 +301,8 @@ internal fun FolioSettingsPage(
                         showDivider = false,
                     )
                 }
-            }
 
-            // 3: Lyrics
-            item(key = "grp-lyr") {
-                SettingsGroup(title = stringResource(R.string.player_lyrics)) {
+                FolioSettingsSection.Lyrics -> {
                     SettingsToggleRow(
                         title = stringResource(R.string.player_lyrics_translation),
                         subtitle = stringResource(R.string.player_lyrics_translation_hint),
@@ -375,12 +317,9 @@ internal fun FolioSettingsPage(
                         showDivider = false,
                     )
                 }
-            }
 
-            // 3: Vehicle
-            item(key = "grp-car") {
-                val nativeStatus = services.nativeMediaStatus?.collectAsState()?.value
-                SettingsGroup(title = stringResource(R.string.flyme_media_status)) {
+                FolioSettingsSection.Vehicle -> {
+                    val nativeStatus = services.nativeMediaStatus?.collectAsState()?.value
                     if (nativeStatus != null) {
                         SettingsRow(title = stringResource(R.string.flyme_media_status)) {
                             Text(nativeStatus, color = palette.fg2, fontFamily = fontFamily, fontSize = 14.sp)
@@ -395,14 +334,11 @@ internal fun FolioSettingsPage(
                         )
                     }
                 }
-            }
 
-            // 4: Storage & Logs
-            item(key = "grp-store") {
-                val storage = cacheStorage
-                val cacheUsed = storage?.let { formatStorageSize(it.usedBytes) }
-                    ?: stringResource(R.string.browse_loading)
-                SettingsGroup(title = stringResource(R.string.browse_cache_title)) {
+                FolioSettingsSection.Storage -> {
+                    val storage = cacheStorage
+                    val cacheUsed = storage?.let { formatStorageSize(it.usedBytes) }
+                        ?: stringResource(R.string.browse_loading)
                     SettingsToggleRow(
                         title = stringResource(R.string.browse_cache_disk_on).substringBefore("：").substringBefore(":"),
                         checked = cacheSettings.enabled,
@@ -468,11 +404,8 @@ internal fun FolioSettingsPage(
                         )
                     }
                 }
-            }
 
-            // 5: About
-            item(key = "grp-about") {
-                SettingsGroup(title = stringResource(R.string.flyme_app_name)) {
+                FolioSettingsSection.About -> {
                     SettingsRow(
                         title = stringResource(R.string.flyme_app_name),
                         showDivider = false,
@@ -485,17 +418,73 @@ internal fun FolioSettingsPage(
                         )
                     }
                 }
-            }
 
-            item(key = "grp-gapless") {
-                val title = stringResource(R.string.diagnostics_gapless_history)
-                SettingsGroup(title = title) {
+                FolioSettingsSection.Gapless -> {
                     SettingsToggleRow(
                         title = stringResource(R.string.diagnostics_gapless_show),
                         checked = showGaplessLog,
                         onCheckedChange = { showGaplessLog = it },
                     )
                 }
+            }
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(
+                start = tierSpec.px,
+                end = tierSpec.pr,
+                top = 4.dp,
+            ),
+        horizontalArrangement = Arrangement.spacedBy(28.dp),
+    ) {
+        if (tierSpec.showsSettingsSidebar) {
+            Column(
+                modifier = Modifier
+                    .width(230.dp)
+                    .fillMaxHeight()
+                    .padding(bottom = bottomPadding),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                FolioSettingsSection.entries.forEach { section ->
+                    val pressed = section == selectedSection
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(FolioRadii.NavButton))
+                            .background(if (pressed) palette.rb2 else palette.bg.copy(alpha = 0f))
+                            .clickable {
+                                selectedSection = section
+                                scope.launch {
+                                    listState.animateScrollToItem(settingsSectionIndex(section.itemKey))
+                                }
+                            }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                    ) {
+                        Text(
+                            text = stringResource(section.labelRes),
+                            color = if (pressed) palette.fg else palette.fg2,
+                            fontFamily = fontFamily,
+                            fontWeight = if (pressed) FontWeight.SemiBold else FontWeight.Normal,
+                            fontSize = 18.sp,
+                        )
+                    }
+                }
+            }
+        }
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .weight(1f)
+                .widthIn(max = 760.dp)
+                .fillMaxHeight(),
+            contentPadding = PaddingValues(bottom = bottomPadding),
+        ) {
+            items(FolioSettingsSection.entries, key = { it.itemKey }) { section ->
+                sectionContent(section)
             }
             if (showGaplessLog) {
                 if (gaplessEntries.isEmpty()) {
