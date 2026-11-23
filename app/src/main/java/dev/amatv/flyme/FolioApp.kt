@@ -65,7 +65,6 @@ import dev.amatv.BuildConfig
 import dev.amatv.R
 import dev.amatv.core.PlaybackEvent
 import dev.amatv.i18n.AppText
-import dev.amatv.integration.AuthLaunchGate
 import dev.amatv.integration.MusicConnectionState
 import dev.amatv.integration.MusicKitWebAuthActivity
 import dev.amatv.integration.PlaybackPreferences
@@ -236,20 +235,22 @@ fun FolioApp(
         FolioUiSession.onPageChanged(pagerState.currentPage)
     }
 
-    val authLaunchGate = remember { AuthLaunchGate() }
     val webAuthenticationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
-        authLaunchGate.finish()
-        val data = result.data
-        if (result.resultCode != Activity.RESULT_OK || data == null) {
-            val err = data?.getStringExtra(MusicKitWebAuthActivity.EXTRA_ERROR)
+        val data = result.data ?: return@rememberLauncherForActivityResult
+        val attempt = data.getStringExtra(MusicKitWebAuthActivity.EXTRA_ATTEMPT)
+            ?: return@rememberLauncherForActivityResult
+        if (result.resultCode != Activity.RESULT_OK) {
+            if (!accountStore.cancelSignIn(attempt)) return@rememberLauncherForActivityResult
+            val err = data.getStringExtra(MusicKitWebAuthActivity.EXTRA_ERROR)
                 ?: AppText.text(R.string.app_apple_sign_in_cancelled)
             serviceMessage = err
             showToast(err)
         } else {
-            accountStore.completeSignIn(data)
-                .onSuccess {
+            val completion = accountStore.completeSignIn(attempt, data)
+                ?: return@rememberLauncherForActivityResult
+            completion.onSuccess {
                     playbackStore.onSignedIn()
                     folioSearchSession.invalidateStorefront()
                     lyricsStore.onCacheCleared()
@@ -274,15 +275,16 @@ fun FolioApp(
             selectTab(FolioRootPage.Settings.index)
             return
         }
-        if (!authLaunchGate.tryBegin()) return
+        val attempt = accountStore.beginSignIn() ?: return
         scope.launch {
             try {
-                webAuthenticationLauncher.launch(services.webAuthenticationIntent())
+                val intent = services.webAuthenticationIntent(attempt)
+                if (accountStore.isSignInCurrent(attempt)) webAuthenticationLauncher.launch(intent)
             } catch (cancelled: CancellationException) {
-                authLaunchGate.finish()
+                accountStore.cancelSignIn(attempt)
                 throw cancelled
             } catch (error: Exception) {
-                authLaunchGate.finish()
+                if (!accountStore.cancelSignIn(attempt)) return@launch
                 val msg = error.message ?: AppText.text(R.string.app_apple_sign_in_unavailable)
                 serviceMessage = msg
                 showToast(msg)

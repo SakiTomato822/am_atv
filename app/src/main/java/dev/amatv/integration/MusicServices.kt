@@ -111,7 +111,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
             BuildConfig.MUSICKIT_DEVELOPER_TOKEN, BuildConfig.MUSICKIT_TOKEN_ENDPOINT,
         )
 
-    suspend fun webAuthenticationIntent(): Intent {
+    suspend fun webAuthenticationIntent(attempt: String): Intent {
         // Gecko owns a fresh private profile. Do not initialize the system
         // WebView provider on a compatibility build whose provider may be broken.
         if (!BuildConfig.AUTH_BROWSER_IS_GECKO) webAuthenticationSession.prepareForSignIn()
@@ -119,7 +119,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
         return Intent().setClassName(appContext, BuildConfig.AUTH_BROWSER_ACTIVITY).putExtra(
             MusicKitWebAuthActivity.EXTRA_DEVELOPER_TOKEN,
             developerToken,
-        )
+        ).putExtra(MusicKitWebAuthActivity.EXTRA_ATTEMPT, attempt)
     }
 
     override fun completeWebAuthentication(data: Intent): String {

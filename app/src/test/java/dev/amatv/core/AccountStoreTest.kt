@@ -52,7 +52,7 @@ class AccountStoreTest {
         val store = AccountStore(ops)
         val fakeIntent = Intent()
 
-        val result = store.completeSignIn(fakeIntent)
+        val result = checkNotNull(store.completeSignIn(checkNotNull(store.beginSignIn()), fakeIntent))
 
         assertTrue(result.isSuccess)
         assertEquals(MusicConnectionState.SignedIn, store.state.value.connectionState)
@@ -68,7 +68,7 @@ class AccountStoreTest {
         val store = AccountStore(ops)
         val fakeIntent = Intent()
 
-        val result = store.completeSignIn(fakeIntent)
+        val result = checkNotNull(store.completeSignIn(checkNotNull(store.beginSignIn()), fakeIntent))
 
         assertTrue(result.isFailure)
         assertEquals("Auth failed", result.exceptionOrNull()?.message)
@@ -100,4 +100,20 @@ class AccountStoreTest {
 
         assertEquals(MusicConnectionState.SignedIn, store.state.value.connectionState)
     }
+    @Test
+    fun resultFromBeforeSignOutCannotRestoreSessionOrFinishTheNewAttempt() {
+        val ops = FakeAccountOperations()
+        val store = AccountStore(ops)
+        val old = checkNotNull(store.beginSignIn())
+        store.signOut()
+        val current = checkNotNull(store.beginSignIn())
+        val data = Intent()
+
+        assertEquals(null, store.completeSignIn(old, data))
+        assertEquals(null, ops.lastData)
+        assertFalse(store.state.value.isSignedIn)
+        assertTrue(checkNotNull(store.completeSignIn(current, data)).isSuccess)
+        assertTrue(store.state.value.isSignedIn)
+    }
+
 }

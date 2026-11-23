@@ -64,6 +64,7 @@ class MusicKitWebAuthActivity : Activity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setResult(RESULT_CANCELED, appleSignInResult())
         val developerToken = intent.getStringExtra(EXTRA_DEVELOPER_TOKEN)
         if (developerToken.isNullOrBlank()) {
             finishWithError(getString(R.string.services_auth_token_missing))
@@ -447,7 +448,7 @@ class MusicKitWebAuthActivity : Activity() {
         runOnUiThread {
             popupWebView?.let(::closePopupWebView)
             webView.stopLoading()
-            setResult(RESULT_OK, Intent().putExtra(EXTRA_USER_TOKEN, token))
+            setResult(RESULT_OK, appleSignInResult().putExtra(EXTRA_USER_TOKEN, token))
             finish()
         }
         return true
@@ -461,7 +462,7 @@ class MusicKitWebAuthActivity : Activity() {
     }.getOrDefault(callbackValue)
 
     private fun finishWithError(message: String) {
-        setResult(RESULT_CANCELED, Intent().putExtra(EXTRA_ERROR, message))
+        setResult(RESULT_CANCELED, appleSignInResult().putExtra(EXTRA_ERROR, message))
         finish()
     }
 
@@ -474,7 +475,7 @@ class MusicKitWebAuthActivity : Activity() {
             }
             runOnUiThread {
                 popupWebView?.let(::closePopupWebView)
-                setResult(RESULT_OK, Intent().putExtra(EXTRA_USER_TOKEN, userToken))
+                setResult(RESULT_OK, appleSignInResult().putExtra(EXTRA_USER_TOKEN, userToken))
                 finish()
             }
         }
@@ -488,6 +489,7 @@ class MusicKitWebAuthActivity : Activity() {
     companion object {
         const val EXTRA_DEVELOPER_TOKEN = "dev.amatv.extra.DEVELOPER_TOKEN"
         const val EXTRA_USER_TOKEN = "dev.amatv.extra.MUSIC_USER_TOKEN"
+        const val EXTRA_ATTEMPT = "dev.amatv.extra.AUTH_ATTEMPT"
         const val EXTRA_ERROR = "dev.amatv.extra.AUTH_ERROR"
         private const val JS_BRIDGE = "AndroidMusicAuth"
         private const val AUTH_ORIGIN = "https://am-atv.local/"
@@ -545,3 +547,8 @@ internal fun isAppleAuthorizationHost(host: String?): Boolean {
 
 private fun isAppleAuthResourceHost(host: String): Boolean =
     isAppleAuthorizationHost(host) || host == "cdn-apple.com" || host.endsWith(".cdn-apple.com")
+
+internal fun Activity.appleSignInResult(): Intent = Intent().putExtra(
+    MusicKitWebAuthActivity.EXTRA_ATTEMPT,
+    intent.getStringExtra(MusicKitWebAuthActivity.EXTRA_ATTEMPT),
+)

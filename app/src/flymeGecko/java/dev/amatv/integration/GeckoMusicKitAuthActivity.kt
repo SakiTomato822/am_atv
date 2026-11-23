@@ -2,7 +2,6 @@ package dev.amatv.integration
 
 import android.app.Activity
 import android.content.Context
-import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.util.Log
@@ -63,6 +62,7 @@ class GeckoMusicKitAuthActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setResult(RESULT_CANCELED, appleSignInResult())
         val developerToken = intent.getStringExtra(MusicKitWebAuthActivity.EXTRA_DEVELOPER_TOKEN)
         if (developerToken.isNullOrBlank()) {
             finishWithError(getString(R.string.services_auth_token_missing))
@@ -263,14 +263,14 @@ class GeckoMusicKitAuthActivity : Activity() {
         if (completed || isFinishing) return
         completed = true
         diagnostics.event("MusicKit authorization completed")
-        setResult(RESULT_OK, Intent().putExtra(MusicKitWebAuthActivity.EXTRA_USER_TOKEN, token))
+        setResult(RESULT_OK, appleSignInResult().putExtra(MusicKitWebAuthActivity.EXTRA_USER_TOKEN, token))
         finish()
     }
 
     private fun finishWithError(message: String) {
         if (completed || isFinishing) return
         completed = true
-        setResult(RESULT_CANCELED, Intent().putExtra(MusicKitWebAuthActivity.EXTRA_ERROR, message))
+        setResult(RESULT_CANCELED, appleSignInResult().putExtra(MusicKitWebAuthActivity.EXTRA_ERROR, message))
         finish()
     }
 
