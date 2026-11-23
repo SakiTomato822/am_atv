@@ -407,6 +407,10 @@ class PlaybackStore(
                             gaplessLookahead = null
                             return@collectLatest
                         }
+                        if (gaplessLookahead?.let { it.currentEntryId != key.currentEntryId || it.entryId != next.first } == true) {
+                            gaplessLookahead = null
+                            player.setLookahead(null)
+                        }
                         // Fresh prepares get time to settle. A natural continuation is already loaded.
                         val timing = lookaheadTiming?.takeIf {
                             it.sourceGeneration == expectedPlaybackGeneration && it.entryId == next.first
