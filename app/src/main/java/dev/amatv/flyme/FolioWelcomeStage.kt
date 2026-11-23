@@ -406,14 +406,19 @@ internal fun SharedDemoPlayerStage(
             }
         }
 
-        // Right content area: signed-in genuine karaoke lyrics OR signed-out title & artist
+        // Right content area: lead song karaoke lyrics, or large title & artist when signed out / gapless switched
         val lyricsStartDp = stageWidthDp * (0.45f - 0.02f * posterFraction)
         val lyricsWidthDp = stageWidthDp * (0.50f + 0.02f * posterFraction)
-        val lyricsAlpha = when {
-            showLoudnessBars -> 0.1f
-            gaplessActive -> 0.35f
-            else -> 1f
-        }
+        val renderLyricsLines = shouldRenderWelcomeLyricsLines(
+            showLyricsDemo = showLyricsDemo,
+            gaplessActive = gaplessActive,
+            activeTrackIndex = safeTrackIdx,
+        )
+        val lyricsAlpha by animateFloatAsState(
+            targetValue = welcomeRightPanelAlpha(showLoudnessBars = showLoudnessBars, gaplessActive = gaplessActive),
+            animationSpec = tween(if (lowPerformance) 150 else 280),
+            label = "stage-right-alpha",
+        )
         Box(
             modifier = Modifier
                 .offset(x = lyricsStartDp)
@@ -424,7 +429,7 @@ internal fun SharedDemoPlayerStage(
                     if (!lowPerformance) compositingStrategy = CompositingStrategy.Offscreen
                 }
                 .then(
-                    if (showLyricsDemo && !lowPerformance) {
+                    if (renderLyricsLines && !lowPerformance) {
                         Modifier.drawWithContent {
                             drawContent()
                             drawRect(
@@ -439,41 +444,52 @@ internal fun SharedDemoPlayerStage(
                         }
                     } else Modifier,
                 ),
-            contentAlignment = if (showLyricsDemo) Alignment.TopStart else Alignment.CenterStart,
         ) {
-            if (showLyricsDemo) {
-                WelcomeStageLyricsPreview(
-                    lines = lyricLines,
-                    posterMode = posterMode,
-                    lyricTextSize = lyricTextSize,
-                    stageWidthDp = stageWidthDp,
-                    stageHeightDp = stageHeightDp,
-                    lowPerformance = lowPerformance,
-                )
-            } else {
-                Column(
-                    modifier = Modifier.padding(end = stageWidthDp * 0.05f),
-                    verticalArrangement = Arrangement.spacedBy(stageHeightDp * 0.03f),
+            Crossfade(
+                targetState = renderLyricsLines to safeTrackIdx,
+                animationSpec = tween(if (lowPerformance) 140 else 260),
+                label = "demo-right-content",
+            ) { (showLines, trackIdxNow) ->
+                val shownTrack = tracks[trackIdxNow.coerceIn(0, tracks.lastIndex)]
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = if (showLines) Alignment.TopStart else Alignment.CenterStart,
                 ) {
-                    Text(
-                        text = activeTrack.title,
-                        color = Color.White,
-                        fontFamily = LocalFolioFontFamily.current,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = (stageWidthDp.value * if (posterMode) 0.056f else 0.044f).sp,
-                        lineHeight = (stageWidthDp.value * if (posterMode) 0.062f else 0.050f).sp,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = activeTrack.artist,
-                        color = Color.White.copy(alpha = 0.65f),
-                        fontFamily = LocalFolioFontFamily.current,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = (stageWidthDp.value * if (posterMode) 0.032f else 0.026f).sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    if (showLines) {
+                        WelcomeStageLyricsPreview(
+                            lines = lyricLines,
+                            posterMode = posterMode,
+                            lyricTextSize = lyricTextSize,
+                            stageWidthDp = stageWidthDp,
+                            stageHeightDp = stageHeightDp,
+                            lowPerformance = lowPerformance,
+                        )
+                    } else {
+                        Column(
+                            modifier = Modifier.padding(end = stageWidthDp * 0.05f),
+                            verticalArrangement = Arrangement.spacedBy(stageHeightDp * 0.03f),
+                        ) {
+                            Text(
+                                text = shownTrack.title,
+                                color = Color.White,
+                                fontFamily = LocalFolioFontFamily.current,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = (stageWidthDp.value * if (posterMode) 0.056f else 0.044f).sp,
+                                lineHeight = (stageWidthDp.value * if (posterMode) 0.062f else 0.050f).sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = shownTrack.artist,
+                                color = Color.White.copy(alpha = 0.65f),
+                                fontFamily = LocalFolioFontFamily.current,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = (stageWidthDp.value * if (posterMode) 0.032f else 0.026f).sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
             }
         }

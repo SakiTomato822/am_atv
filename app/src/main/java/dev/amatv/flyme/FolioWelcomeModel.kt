@@ -92,3 +92,18 @@ internal fun shouldShowStyleToggleHint(
     hasCurrentTrack: Boolean,
     alreadyShown: Boolean,
 ): Boolean = !alreadyShown && playerOpen && hasCurrentTrack
+
+internal fun shouldRenderWelcomeLyricsLines(
+    showLyricsDemo: Boolean,
+    gaplessActive: Boolean,
+    activeTrackIndex: Int,
+): Boolean = showLyricsDemo && (!gaplessActive || activeTrackIndex == 0)
+
+internal fun welcomeRightPanelAlpha(
+    showLoudnessBars: Boolean,
+    gaplessActive: Boolean,
+): Float = when {
+    showLoudnessBars -> 0.1f
+    gaplessActive -> 0.35f
+    else -> 1f
+}

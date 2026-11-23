@@ -132,4 +132,21 @@ class FolioWelcomeTest {
             ).isEmpty(),
         )
     }
+
+    @Test
+    fun gaplessDemoDimsLyricsAndReplacesWithNextTrackMetadataUntilLeavingPage() {
+        // Lyrics/Styles/Preferences show lead track lyrics at 1.0f alpha
+        assertTrue(shouldRenderWelcomeLyricsLines(showLyricsDemo = true, gaplessActive = false, activeTrackIndex = 0))
+        assertEquals(1.0f, welcomeRightPanelAlpha(showLoudnessBars = false, gaplessActive = false), 0.001f)
+
+        // On Gapless page, dims to 0.35f; track 0 still matches lead lyrics, tracks 1+ swap to title+artist
+        assertEquals(0.35f, welcomeRightPanelAlpha(showLoudnessBars = false, gaplessActive = true), 0.001f)
+        assertTrue(shouldRenderWelcomeLyricsLines(showLyricsDemo = true, gaplessActive = true, activeTrackIndex = 0))
+        assertFalse(shouldRenderWelcomeLyricsLines(showLyricsDemo = true, gaplessActive = true, activeTrackIndex = 1))
+        assertFalse(shouldRenderWelcomeLyricsLines(showLyricsDemo = true, gaplessActive = true, activeTrackIndex = 2))
+
+        // Leaving Gapless back to Preferences resets gaplessActive = false, activeTrackIndex = 0 -> restores lyrics
+        assertTrue(shouldRenderWelcomeLyricsLines(showLyricsDemo = true, gaplessActive = false, activeTrackIndex = 0))
+        assertEquals(0.10f, welcomeRightPanelAlpha(showLoudnessBars = true, gaplessActive = false), 0.001f)
+    }
 }
