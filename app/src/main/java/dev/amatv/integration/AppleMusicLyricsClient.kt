@@ -10,7 +10,10 @@ import dev.amatv.model.LyricLine
 import dev.amatv.model.LyricTimeline
 import dev.amatv.model.LyricTiming
 import dev.amatv.model.LyricWord
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.w3c.dom.Element
@@ -57,7 +60,7 @@ internal data class TtmlDocuments(
 class AppleMusicLyricsClient(
     private val storefront: String,
     private val storefrontProvider: suspend () -> String = { storefront },
-    private val userToken: () -> String?,
+    private val userToken: suspend () -> String?,
     private val webToken: AppleWebPlaybackTokenClient = AppleWebPlaybackTokenClient(),
     /** Debug builds only: raw syllable-lyrics responses are written here for inspection. */
     private val debugDumpDir: java.io.File? = null,
@@ -90,8 +93,13 @@ class AppleMusicLyricsClient(
             if (lines.isNotEmpty()) return@withContext lines
             contentCache.removeLyrics(cacheKey)
         }
+        suspend fun checkAccount() {
+            currentCoroutineContext().ensureActive()
+            if (userToken() != mediaUserToken) throw CancellationException("Apple Music account changed")
+        }
         suspend fun request(forceBearerRefresh: Boolean): Pair<Int, String> {
             val bearer = webToken.token(forceBearerRefresh)
+            checkAccount()
             val queryMap = localization.queryParameters()
             val query = queryMap.entries.joinToString("&") { (key, value) ->
                 "${key.urlEncoded()}=${value.urlEncoded()}"
@@ -100,7 +108,7 @@ class AppleMusicLyricsClient(
                 "${requestStorefront.urlEncoded()}/songs/${catalogId.urlEncoded()}/" +
                 "syllable-lyrics" + if (query.isNotEmpty()) "?$query" else ""
             val connection = URI(url).toURL().openConnection() as HttpURLConnection
-            return try {
+            val response = try {
                 connection.requestMethod = "GET"
                 connection.connectTimeout = 10_000
                 connection.readTimeout = 18_000
@@ -120,6 +128,8 @@ class AppleMusicLyricsClient(
             } finally {
                 connection.disconnect()
             }
+            checkAccount()
+            return response
         }
 
         var (status, body) = request(forceBearerRefresh = false)

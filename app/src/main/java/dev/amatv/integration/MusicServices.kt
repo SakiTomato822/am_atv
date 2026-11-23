@@ -84,7 +84,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
     private val appleLyrics = AppleMusicLyricsClient(
         storefront = BuildConfig.APPLE_MUSIC_STOREFRONT,
         storefrontProvider = api::userStorefront,
-        userToken = tokenStore::readUserToken,
+        userToken = { api.useCurrentUserToken { it } },
         debugDumpDir = if (BuildConfig.DEBUG) java.io.File(appContext.cacheDir, "lyrics-ttml") else null,
         contentCache = contentCache,
     )
@@ -126,7 +126,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
         val userToken = checkNotNull(
             data.getStringExtra(MusicKitWebAuthActivity.EXTRA_USER_TOKEN),
         ) { AppText.text(R.string.services_auth_invalid_user_token) }
-        tokenStore.writeUserToken(userToken)
+        api.updateAccount { tokenStore.writeUserToken(userToken) }
         clearDetailPages(dropSnapshots = true)
         mediaSession.clear()
         flymeMediaSource?.clear()
@@ -147,6 +147,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
     }
 
     override fun signOut() {
+        api.updateAccount(tokenStore::clear)
         shelfSnapshots.clear()
         webAuthenticationSession.markLocalWebSessionForReset()
         songSpectrum.setActive(false)
@@ -154,7 +155,6 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
         flymeMediaSource?.clear()
         bridge.release()
         releaseStationEngine()
-        tokenStore.clear()
         clearDetailPages(dropSnapshots = true)
     }
 
@@ -323,9 +323,9 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
     override suspend fun lyricsFor(
         track: Track,
         localization: LyricsLocalizationRequest,
-    ): List<LyricLine> {
+    ): List<LyricLine> = api.withAccount {
         val playable = resolvePlayableTrack(track)
-        return appleLyrics.lyricsFor(checkNotNull(playable.catalogId), localization)
+        appleLyrics.lyricsFor(checkNotNull(playable.catalogId), localization)
     }
 
     override fun canWriteCache(): Boolean = contentCache.canWrite()
@@ -345,25 +345,29 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
         positionMs: Long,
         playWhenReady: Boolean,
         transition: GaplessTransition?,
-    ): Long {
-        val userToken = checkNotNull(tokenStore.readUserToken()) { AppText.text(R.string.services_sign_in_apple_music) }
+    ): Long = api.withAccount {
+        val userToken = api.useCurrentUserToken {
+            checkNotNull(it) { AppText.text(R.string.services_sign_in_apple_music) }
+        }
         val developerToken = developerTokens.token()
-        return playbackPreparation.withLock {
+        playbackPreparation.withLock {
             withContext(Dispatchers.Default) {
-                if (playWhenReady) {
-                    mediaSession.playbackRequested()
-                    flymeMediaSource?.playbackRequested()
-                }
-                val station = stationEngine?.takeIf { track.catalogKind == dev.amatv.model.CatalogKind.Station }
-                if (station != null) {
-                    // One audible engine at a time: silence the native queue before the web one starts.
-                    if (!stationEngineActive) bridge.pause()
-                    stationEngineActive = true
-                    station.prepare(track, developerToken, userToken, playWhenReady)
-                } else {
-                    if (stationEngineActive) stationEngine?.stop()
-                    stationEngineActive = false
-                    bridge.preparePlayback(track, developerToken, userToken, positionMs, playWhenReady, transition)
+                api.useCurrentUserToken {
+                    if (playWhenReady) {
+                        mediaSession.playbackRequested()
+                        flymeMediaSource?.playbackRequested()
+                    }
+                    val station = stationEngine?.takeIf { track.catalogKind == dev.amatv.model.CatalogKind.Station }
+                    if (station != null) {
+                        // One audible engine at a time: silence the native queue before the web one starts.
+                        if (!stationEngineActive) bridge.pause()
+                        stationEngineActive = true
+                        station.prepare(track, developerToken, userToken, playWhenReady)
+                    } else {
+                        if (stationEngineActive) stationEngine?.stop()
+                        stationEngineActive = false
+                        bridge.preparePlayback(track, developerToken, userToken, positionMs, playWhenReady, transition)
+                    }
                 }
             }
         }

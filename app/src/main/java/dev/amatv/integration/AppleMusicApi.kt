@@ -116,6 +116,54 @@ class AppleMusicApi(
     private val storefrontPreferences: android.content.SharedPreferences? = null,
     private val userToken: () -> String?,
 ) : dev.amatv.core.LibraryActionsApi {
+    private class Account(val token: String?, val revision: Long) :
+        kotlin.coroutines.AbstractCoroutineContextElement(Key) {
+        companion object Key : kotlin.coroutines.CoroutineContext.Key<Account>
+    }
+
+    private val accountLock = Any()
+    private val accountRevision = java.util.concurrent.atomic.AtomicLong()
+
+    private fun captureAccount(): Account = synchronized(accountLock) {
+        Account(userToken()?.takeIf(String::isNotBlank), accountRevision.get())
+    }
+
+    private fun requireCurrent(account: Account) {
+        if (account.revision != accountRevision.get() || account.token != userToken()?.takeIf(String::isNotBlank)) {
+            throw kotlinx.coroutines.CancellationException("Apple Music account changed")
+        }
+    }
+
+    private suspend fun currentAccount(): Account = currentCoroutineContext()[Account] ?: captureAccount()
+
+    internal suspend fun <T> withAccount(block: suspend () -> T): T {
+        val account = currentAccount()
+        requireCurrent(account)
+        return withContext(account) {
+            try {
+                block()
+            } finally {
+                requireCurrent(account)
+            }
+        }
+    }
+
+    internal suspend fun <T> useCurrentUserToken(block: (String?) -> T): T {
+        val account = currentAccount()
+        currentCoroutineContext().ensureActive()
+        return synchronized(accountLock) {
+            requireCurrent(account)
+            block(account.token)
+        }
+    }
+
+    internal fun updateAccount(changeToken: () -> Unit) = synchronized(accountLock) {
+        changeToken()
+        accountRevision.incrementAndGet()
+        userStorefrontCache = null
+        catalogSongResolver.invalidate()
+    }
+
     private data class UserStorefrontCache(val userToken: String, val storefront: String)
 
     private val parseDispatcher = Dispatchers.Default.limitedParallelism(2)
@@ -138,25 +186,29 @@ class AppleMusicApi(
             ?.getString(KEY_STOREFRONT, null)?.takeIf { it.matches(Regex("[a-z]{2}")) }
     }
 
-    suspend fun userStorefront(): String {
-        val currentUserToken = userToken()?.takeIf(String::isNotBlank)
-            ?: throw CatalogRequestException(CatalogFailureReason.Authorization,
-                AppText.text(R.string.services_sign_in_apple_music))
-        userStorefrontCache?.takeIf { it.userToken == currentUserToken }?.let { return it.storefront }
-        return userStorefrontMutex.withLock {
-            userStorefrontCache?.takeIf { it.userToken == currentUserToken }?.let { return@withLock it.storefront }
-            // The token is stored only as a digest; a new sign-in therefore asks Apple again.
-            val tokenDigest = storefrontTokenDigest(currentUserToken)
-            cachedUserStorefront(currentUserToken)?.let { saved ->
-                    userStorefrontCache = UserStorefrontCache(currentUserToken, saved)
-                    return@withLock saved
+    suspend fun userStorefront(): String = withAccount {
+        val account = currentAccount()
+        val token = account.token ?: throw CatalogRequestException(CatalogFailureReason.Authorization,
+            AppText.text(R.string.services_sign_in_apple_music))
+        userStorefrontCache?.takeIf { it.userToken == token }?.let { return@withAccount it.storefront }
+        userStorefrontMutex.withLock {
+            requireCurrent(account)
+            cachedUserStorefront(token)?.let { saved ->
+                synchronized(accountLock) {
+                    requireCurrent(account)
+                    userStorefrontCache = UserStorefrontCache(token, saved)
                 }
+                return@withLock saved
+            }
             val root = requestRoot(path = "/v1/me/storefront", needsUserToken = true)
             val resolved = parseUserStorefrontId(root)
                 ?: error(AppText.text(R.string.services_user_storefront_missing))
-            userStorefrontCache = UserStorefrontCache(currentUserToken, resolved)
-            storefrontPreferences?.edit()?.putString(KEY_STOREFRONT_TOKEN, tokenDigest)
-                ?.putString(KEY_STOREFRONT, resolved)?.apply()
+            synchronized(accountLock) {
+                requireCurrent(account)
+                userStorefrontCache = UserStorefrontCache(token, resolved)
+                storefrontPreferences?.edit()?.putString(KEY_STOREFRONT_TOKEN, storefrontTokenDigest(token))
+                    ?.putString(KEY_STOREFRONT, resolved)?.apply()
+            }
             Log.i(TAG, "Apple user storefront=$resolved")
             resolved
         }
@@ -166,10 +218,8 @@ class AppleMusicApi(
         java.security.MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
 
-    suspend fun effectiveStorefront(): String {
-        val currentUserToken = userToken()?.takeIf(String::isNotBlank)
-        if (currentUserToken == null) return storefront
-        return runCatching { userStorefront() }.getOrNull() ?: storefront
+    suspend fun effectiveStorefront(): String = withAccount {
+        if (currentAccount().token == null) storefront else userStorefront()
     }
 
     suspend fun recommendations(): List<Track> = request(
@@ -273,28 +323,34 @@ class AppleMusicApi(
     }
 
     internal suspend fun editorialBrowseShelves(languageTag: String, webTokens: WebDeveloperToken): List<ContentShelf> =
-        withContext(Dispatchers.IO) {
+        withAccount {
             val storefront = effectiveStorefront()
             val path = editorialBrowsePath(storefront, languageTag)
-            val musicUserToken = userToken()?.takeIf(String::isNotBlank)
+            val musicUserToken = currentAccount().token
             repeat(2) {
                 currentCoroutineContext().ensureActive()
                 val token = webTokens.token(storefront)
                 var rejected = false
                 for (host in listOf("amp-api.music.apple.com", "amp-api-edge.music.apple.com")) {
-                    val (status, shelves) = requestWebEditorial(host, path, token, musicUserToken)
-                    if (shelves.isNotEmpty()) return@withContext shelves
+                    requireCurrent(currentAccount())
+                    val (status, shelves) = withContext(Dispatchers.IO) {
+                        requestWebEditorial(host, path, token, musicUserToken)
+                    }
+                    if (shelves.isNotEmpty()) return@withAccount shelves
                     if (status == HttpURLConnection.HTTP_UNAUTHORIZED) {
                         if (musicUserToken == null) {
                             rejected = true
                         } else {
-                            val (publicStatus, publicShelves) = requestWebEditorial(host, path, token, null)
-                            if (publicShelves.isNotEmpty()) return@withContext publicShelves
+                            requireCurrent(currentAccount())
+                            val (publicStatus, publicShelves) = withContext(Dispatchers.IO) {
+                                requestWebEditorial(host, path, token, null)
+                            }
+                            if (publicShelves.isNotEmpty()) return@withAccount publicShelves
                             rejected = rejected || publicStatus == HttpURLConnection.HTTP_UNAUTHORIZED
                         }
                     }
                 }
-                if (!rejected) return@withContext emptyList()
+                if (!rejected) return@withAccount emptyList()
                 webTokens.invalidate(token)
             }
             emptyList()
@@ -307,6 +363,8 @@ class AppleMusicApi(
         musicUserToken: String?,
     ): Pair<Int?, List<ContentShelf>> {
         currentCoroutineContext().ensureActive()
+        val account = currentAccount()
+        requireCurrent(account)
         val headers = buildMap {
             put("Authorization", "Bearer $token")
             put("Origin", APPLE_MUSIC_WEB_ORIGIN)
@@ -321,6 +379,7 @@ class AppleMusicApi(
             Log.w(BROWSE_LOG_TAG, "$log httpStatus=unavailable shelves=0 error=${error.javaClass.simpleName}")
             return null to emptyList()
         }
+        requireCurrent(account)
         val shelves = if (status in 200..299) {
             try {
                 withContext(parseDispatcher) { parseEditorialBrowseShelves(JSONObject(body)) }
@@ -494,14 +553,14 @@ class AppleMusicApi(
      * The catalog side of a saved artist: top songs, albums and singles, so the
      * artist page is not limited to what the user happened to save.
      */
-    suspend fun catalogArtistPage(artist: Track): CatalogArtistPage {
+    suspend fun catalogArtistPage(artist: Track): CatalogArtistPage = withAccount {
         val catalogId = if (artist.resourceType == LibraryCollection.Artists.resourceType) {
             val libraryId = checkNotNull(artist.resourceId) { "Library artist ID is missing" }
             require(libraryId.matches(Regex("[A-Za-z0-9._-]+"))) { "Library artist ID is invalid" }
             val linked = requestRoot("/v1/me/library/artists/$libraryId/catalog", needsUserToken = true)
             linked.optJSONArray("data")?.optJSONObject(0)?.optString("id")
         } else artist.catalogId
-        if (catalogId == null || !catalogId.matches(Regex("[0-9]+"))) return CatalogArtistPage()
+        if (catalogId == null || !catalogId.matches(Regex("[0-9]+"))) return@withAccount CatalogArtistPage()
         val storefront = effectiveStorefront()
         val root = requestRoot(
             "/v1/catalog/$storefront/artists/$catalogId?views=${ARTIST_VIEWS.joinToString(",") { it.first }}" +
@@ -527,21 +586,24 @@ class AppleMusicApi(
             more += withContext(parseDispatcher) { parseResources(pageRoot) }
             next = pageRoot.optString("next").takeIf { it.startsWith("/v1/") }
         }
-        return page.copy(topSongs = (page.topSongs + more).distinctBy { it.id }, complete = complete)
+        return@withAccount page.copy(topSongs = (page.topSongs + more).distinctBy { it.id }, complete = complete)
     }
 
     /**
      * Whether a catalog song is in Favorite Songs; null when unknown. Favorites are their own list
      * since iOS 17.1 (not the old "love" rating), read through the song's inFavorites attribute.
      */
-    override suspend fun isFavorite(catalogSongId: String): Boolean? {
+    override suspend fun isFavorite(catalogSongId: String): Boolean? = withAccount {
         require(catalogSongId.matches(Regex("[0-9]+"))) { "Catalog song ID is invalid" }
         val root = runCatching {
             requestRoot("/v1/catalog/${effectiveStorefront()}/songs/$catalogSongId?extend=inFavorites",
                 needsUserToken = true)
-        }.getOrNull() ?: return null
-        val attributes = root.optJSONArray("data")?.optJSONObject(0)?.optJSONObject("attributes") ?: return null
-        return if (attributes.has("inFavorites")) attributes.optBoolean("inFavorites") else null
+        }.getOrElse { error ->
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            return@withAccount null
+        }
+        val attributes = root.optJSONArray("data")?.optJSONObject(0)?.optJSONObject("attributes") ?: return@withAccount null
+        return@withAccount if (attributes.has("inFavorites")) attributes.optBoolean("inFavorites") else null
     }
 
     /**
@@ -549,20 +611,20 @@ class AppleMusicApi(
      * the public API answers DELETE /v1/me/favorites with 40012 "Insufficient Permissions"
      * ('Favorites:DELETE:IdsQuery'); only Apple's own apps may unfavorite.
      */
-    override suspend fun addFavorite(catalogSongId: String) {
+    override suspend fun addFavorite(catalogSongId: String): Unit = withAccount {
         require(catalogSongId.matches(Regex("[0-9]+"))) { "Catalog song ID is invalid" }
         requestRoot("/v1/me/favorites?ids%5Bsongs%5D=$catalogSongId", needsUserToken = true,
-            method = "POST", postBody = "")
+            method = "POST", postBody = "", refreshAfterUnauthorized = false)
     }
 
     /**
      * Adds the catalog song to the user's personal iCloud Music Library.
      * POST /v1/me/library?ids[songs]=<id>
      */
-    override suspend fun addToLibrary(catalogSongId: String) {
+    override suspend fun addToLibrary(catalogSongId: String): Unit = withAccount {
         require(catalogSongId.matches(Regex("[0-9]+"))) { "Catalog song ID is invalid" }
         requestRoot("/v1/me/library?ids%5Bsongs%5D=$catalogSongId", needsUserToken = true,
-            method = "POST", postBody = "")
+            method = "POST", postBody = "", refreshAfterUnauthorized = false)
     }
 
     /**
@@ -570,7 +632,7 @@ class AppleMusicApi(
      * Logs response status and library-related keys for verification.
      * Returns true if in library, false if definitively absent, or null if unknown.
      */
-    override suspend fun isSongInLibrary(catalogSongId: String): Boolean? {
+    override suspend fun isSongInLibrary(catalogSongId: String): Boolean? = withAccount {
         require(catalogSongId.matches(Regex("[0-9]+"))) { "Catalog song ID is invalid" }
         val root = requestRoot("/v1/catalog/${effectiveStorefront()}/songs/$catalogSongId?include=library",
             needsUserToken = true)
@@ -579,11 +641,11 @@ class AppleMusicApi(
         val relationships = data0.optJSONObject("relationships")
 
         if (relationships == null || !relationships.has("library")) {
-            return null
+            return@withAccount null
         }
-        val libraryObj = relationships.optJSONObject("library") ?: return null
-        val libraryData = libraryObj.optJSONArray("data") ?: return null
-        return libraryData.length() > 0
+        val libraryObj = relationships.optJSONObject("library") ?: return@withAccount null
+        val libraryData = libraryObj.optJSONArray("data") ?: return@withAccount null
+        return@withAccount libraryData.length() > 0
     }
 
     internal fun parseArtistPage(root: JSONObject, catalogId: String): CatalogArtistPage {
@@ -599,19 +661,19 @@ class AppleMusicApi(
      * The rest of an artist page shelf (Apple Music's "See All"), following [moreHref] page by page.
      * Only catalog artist views are followed; at most [ARTIST_VIEW_MAX_PAGES] pages.
      */
-    suspend fun catalogArtistViewMore(moreHref: String): List<Track> {
+    suspend fun catalogArtistViewMore(moreHref: String): List<Track> = withAccount {
         require(moreHref.startsWith("/v1/catalog/") && "/artists/" in moreHref && "/view/" in moreHref) {
             "Not an artist view page"
         }
         val items = mutableListOf<Track>()
         var next: String? = moreHref
         repeat(ARTIST_VIEW_MAX_PAGES) {
-            val href = next ?: return items
+            val href = next ?: return@withAccount items
             val root = requestRoot(href, needsUserToken = false)
             items += withContext(parseDispatcher) { parseResources(root) }
             next = root.optString("next").takeIf { it.startsWith("/v1/catalog/") }
         }
-        return items
+        return@withAccount items
     }
 
     /** The catalog artist of a song or album, so the player and album pages can open it. */
@@ -621,15 +683,15 @@ class AppleMusicApi(
     suspend fun catalogAlbumOf(song: Track): Track? =
         if (song.catalogKind == CatalogKind.Song) catalogRelation(song, "albums", CatalogKind.Album) else null
 
-    private suspend fun catalogRelation(item: Track, relation: String, kind: CatalogKind): Track? {
+    private suspend fun catalogRelation(item: Track, relation: String, kind: CatalogKind): Track? = withAccount {
         val type = when (item.catalogKind) {
             CatalogKind.Song -> "songs"
             CatalogKind.Album -> "albums"
-            else -> return null
+            else -> return@withAccount null
         }
-        val id = item.catalogId?.takeIf { it.matches(Regex("[0-9]+")) } ?: return null
+        val id = item.catalogId?.takeIf { it.matches(Regex("[0-9]+")) } ?: return@withAccount null
         val root = requestRoot("/v1/catalog/${effectiveStorefront()}/$type/$id/$relation", needsUserToken = false)
-        return withContext(parseDispatcher) {
+        return@withAccount withContext(parseDispatcher) {
             val resource = root.optJSONArray("data")?.optJSONObject(0) ?: return@withContext null
             (resource.optJSONObject("attributes") ?: JSONObject())
                 .toTrack(resource.getString("id"), kind, resourceType = relation)
@@ -658,11 +720,13 @@ class AppleMusicApi(
         }
     }
 
-    suspend fun resolveCatalogSongId(id: String): String = catalogSongResolver.resolve(id)
+    suspend fun resolveCatalogSongId(id: String): String = withAccount { catalogSongResolver.resolve(id) }
 
     internal suspend fun songPreviewUrl(catalogId: String): String? =
-        requestRoot("/v1/catalog/${effectiveStorefront()}/songs/$catalogId", needsUserToken = false)
-            .optJSONArray("data")?.optJSONObject(0)?.optJSONObject("attributes")?.songPreviewUrl()
+        withAccount {
+            requestRoot("/v1/catalog/${effectiveStorefront()}/songs/$catalogId", needsUserToken = false)
+                .optJSONArray("data")?.optJSONObject(0)?.optJSONObject("attributes")?.songPreviewUrl()
+        }
 
     private suspend fun libraryCatalogSongId(id: String): String {
         val root = requestRoot(
@@ -700,9 +764,9 @@ class AppleMusicApi(
         return playable
     }
 
-    suspend fun charts(types: String = "albums,songs,playlists", browseFallback: Boolean = false): List<Track> {
+    suspend fun charts(types: String = "albums,songs,playlists", browseFallback: Boolean = false): List<Track> = withAccount {
         val sf = effectiveStorefront()
-        return request(
+        return@withAccount request(
             path = "/v1/catalog/$sf/charts?types=$types&limit=14&" +
                 "extend=editorialArtwork,editorialVideo",
             needsUserToken = false,
@@ -710,17 +774,17 @@ class AppleMusicApi(
         )
     }
 
-    suspend fun liveRadio(browseFallback: Boolean = false): List<Track> {
+    suspend fun liveRadio(browseFallback: Boolean = false): List<Track> = withAccount {
         val sf = effectiveStorefront()
-        return request(
+        return@withAccount request(
             path = "/v1/catalog/$sf/stations?filter%5Bfeatured%5D=apple-music-live-radio",
             needsUserToken = false,
             browseChannel = "charts".takeIf { browseFallback },
         )
     }
 
-    suspend fun search(term: String): List<Track> {
-        if (term.isBlank()) return emptyList()
+    suspend fun search(term: String): List<Track> = withAccount {
+        if (term.isBlank()) return@withAccount emptyList()
         val sf = effectiveStorefront()
         val encoded = URLEncoder.encode(term.trim(), Charsets.UTF_8.name())
         if (BuildConfig.FLYME_AUTO) {
@@ -730,15 +794,15 @@ class AppleMusicApi(
                     "&limit=15&with=topResults",
                 needsUserToken = false,
             )
-            return withContext(parseDispatcher) { parseGroupedSearch(root) }
+            return@withAccount withContext(parseDispatcher) { parseGroupedSearch(root) }
         }
-        return request(
+        return@withAccount request(
             path = "/v1/catalog/$sf/search?term=$encoded&types=songs,albums,playlists,music-videos,stations&limit=15",
             needsUserToken = false,
         )
     }
 
-    internal suspend fun searchSuggestions(term: String): CatalogSearchSuggestions {
+    internal suspend fun searchSuggestions(term: String): CatalogSearchSuggestions = withAccount {
         val termLength = term.length
         Log.d(SEARCH_LOG_TAG, "suggestions request termLength=$termLength")
         val sf = effectiveStorefront()
@@ -752,7 +816,7 @@ class AppleMusicApi(
         val suggestions = withContext(parseDispatcher) { parseSearchSuggestions(root) }
         Log.d(SEARCH_LOG_TAG, "suggestions parsed termLength=$termLength " +
             "terms=${suggestions.terms.size} topResults=${suggestions.topResults.size}")
-        return suggestions
+        return@withAccount suggestions
     }
 
     internal fun parseSearchSuggestions(root: JSONObject): CatalogSearchSuggestions {
@@ -807,17 +871,17 @@ class AppleMusicApi(
     }
 
     /** Search only playable songs for cross-catalog resolution. */
-    suspend fun searchSongs(term: String): List<Track> {
-        if (term.isBlank()) return emptyList()
+    suspend fun searchSongs(term: String): List<Track> = withAccount {
+        if (term.isBlank()) return@withAccount emptyList()
         val sf = effectiveStorefront()
         val encoded = URLEncoder.encode(term.trim(), Charsets.UTF_8.name())
-        return request(
+        return@withAccount request(
             path = "/v1/catalog/$sf/search?term=$encoded&types=songs&limit=25",
             needsUserToken = false,
         ).filter { it.catalogKind == CatalogKind.Song && it.catalogId != null }
     }
 
-    suspend fun createContinuousStation(songId: String): Pair<String?, List<Track>> {
+    suspend fun createContinuousStation(songId: String): Pair<String?, List<Track>> = withAccount {
         val cleanSongId = songId.removePrefix("apple:")
         val type = if (cleanSongId.startsWith("i.")) "library-songs" else "songs"
         val bodyJson = JSONObject().put("data", JSONArray().put(JSONObject().put("id", cleanSongId).put("type", type)))
@@ -827,7 +891,7 @@ class AppleMusicApi(
             method = "POST",
             postBody = bodyJson.toString(),
         )
-        return continuousStationFromResponse(root, ::stationNextTracks)
+        return@withAccount continuousStationFromResponse(root, ::stationNextTracks)
     }
 
     suspend fun stationNextTracks(stationId: String): List<Track> {
@@ -864,12 +928,14 @@ class AppleMusicApi(
         collection: Track,
         onPartial: (List<Track>) -> Unit = {},
         initialPage: CollectionTrackPage? = null,
-    ): List<Track> = collectionTracks(collection, onPartial, initialPage) { path, needsUserToken ->
-        requestRoot(path, needsUserToken)
+    ): List<Track> = withAccount {
+        collectionTracks(collection, onPartial, initialPage) { path, needsUserToken ->
+            requestRoot(path, needsUserToken)
+        }
     }
 
     internal suspend fun firstCollectionTrackPage(collection: Track): CollectionTrackPage =
-        withContext(parseDispatcher) {
+        withAccount {
             val request = collection.collectionRequest(effectiveStorefront())
             readCollectionTrackPage(request, request.firstPage) { path, needsUserToken ->
                 requestRoot(path, needsUserToken)
@@ -934,8 +1000,17 @@ class AppleMusicApi(
         postBody: String? = null,
         suggestionTermLength: Int? = null,
         browseChannel: String? = null,
+        refreshAfterUnauthorized: Boolean = true,
     ): JSONObject = withContext(Dispatchers.IO) {
-        val musicUserToken = userToken()
+        val account = currentAccount()
+        requireCurrent(account)
+        val musicUserToken = account.token
+        if (path.startsWith("/v1/catalog/")) {
+            val pathStorefront = path.removePrefix("/v1/catalog/").substringBefore('/')
+            if (pathStorefront != effectiveStorefront()) {
+                throw kotlinx.coroutines.CancellationException("Apple Music storefront changed")
+            }
+        }
         if (needsUserToken) {
             if (musicUserToken.isNullOrBlank()) {
                 throw CatalogRequestException(CatalogFailureReason.Authorization,
@@ -945,6 +1020,8 @@ class AppleMusicApi(
 
         suspend fun execute(forceTokenRefresh: Boolean): Pair<Int, String> {
             val developerToken = developerTokens.token(forceRefresh = forceTokenRefresh)
+            currentCoroutineContext().ensureActive()
+            requireCurrent(account)
             val url = "https://api.music.apple.com$path"
             val headers = buildMap {
                 put("Authorization", "Bearer $developerToken")
@@ -979,9 +1056,11 @@ class AppleMusicApi(
         }
 
         var (status, body) = execute(forceTokenRefresh = false)
-        if (status == HttpURLConnection.HTTP_UNAUTHORIZED) {
+        requireCurrent(account)
+        if (refreshAfterUnauthorized && status == HttpURLConnection.HTTP_UNAUTHORIZED) {
             currentCoroutineContext().ensureActive()
             val retried = execute(forceTokenRefresh = true)
+            requireCurrent(account)
             status = retried.first
             body = retried.second
         }

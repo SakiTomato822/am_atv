@@ -279,6 +279,7 @@ class ContentStore(
         _state.value = _state.value.copy(
             shelvesByDestination = emptyMap(),
             loadingDestinations = setOf(Destination.Home),
+            recentTracks = emptyList(),
             reloadGeneration = _state.value.reloadGeneration + 1,
         )
     }

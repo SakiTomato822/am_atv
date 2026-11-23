@@ -65,6 +65,12 @@ internal class FolioSearchSession(private val scope: CoroutineScope) {
         suggestions = null
     }
 
+    fun invalidateStorefront() {
+        dismissSuggestions()
+        searchJob?.cancel()
+        submission = null
+    }
+
     fun submit(term: String, search: suspend (String) -> List<Track>) {
         dismissSuggestions()
         searchJob?.cancel()

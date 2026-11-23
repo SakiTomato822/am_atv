@@ -251,6 +251,7 @@ fun FolioApp(
             accountStore.completeSignIn(data)
                 .onSuccess {
                     playbackStore.onSignedIn()
+                    folioSearchSession.invalidateStorefront()
                     lyricsStore.onCacheCleared()
                     contentStore.onSignedIn()
                     serviceMessage = null
@@ -300,6 +301,7 @@ fun FolioApp(
     fun signOut() {
         contentStore.resetLibraryPagination()
         playbackStore.onSignedOut()
+        folioSearchSession.invalidateStorefront()
         playHistoryStore.clear()
         PlaybackPreferences(context).clearSession()
         scope.launch {

@@ -32,6 +32,11 @@ internal class CatalogSongResolver(
         require(maxEntries > 0)
     }
 
+    fun invalidate() = synchronized(lock) {
+        scope = null
+        resolvedIds.clear()
+    }
+
     suspend fun resolve(id: String): String {
         val account = accountToken()?.takeIf(String::isNotBlank)
             ?: throw CatalogRequestException(CatalogFailureReason.Authorization, authorizationMessage())
