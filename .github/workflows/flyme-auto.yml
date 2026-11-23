@@ -148,21 +148,15 @@ jobs:
           PY
           (cd dist && sha256sum AMFolio-arm64.apk > SHA256SUMS.txt)
           cat > dist/release-notes.md <<'EOF'
-          AM Folio（余白）15.0 Alpha 14：Flyme Auto 非官方适配版的下一代，ARM64，Android 9+，基于 Sam 的 AM for TV。
+          AM Folio（余白）15.0 Alpha 15：Flyme Auto 非官方适配版的下一代，ARM64，Android 9+，基于 Sam 的 AM for TV。
 
-          15 系列的第十四个测试版。请当作测试版使用。
+          15 系列的第十五个测试版，修 Alpha 14 的一个闪退。请当作测试版使用。
 
-          versionCode 51，包名仍是 dev.amatv.flyme，签名不变，可直接覆盖 14.x / 15.0 Alpha 1～13 安装，保留登录与应用数据。
+          versionCode 52，包名仍是 dev.amatv.flyme，签名不变，可直接覆盖 14.x / 15.0 Alpha 1～14 安装，保留登录与应用数据。
 
-          相对 15.0 Alpha 13 的变化：
+          相对 15.0 Alpha 14 的变化：
 
-          播放
-          - 手动按「下一首」时优先跳到已预加载的歌曲，并提前解析当前曲目前后各两首的播放信息。
-          - 提前读取队列附近歌曲的音量平衡标签。点歌时同时开始读取标签和准备播放。
-
-          修复
-          - 修复打开「最近播放」和「播放历史」时可能出现的崩溃。
-          - 修复部分地区获取 Apple Music 网页访问令牌时未跟随跳转的问题。
+          - 修复设置页点左侧「切歌诊断记录」时闪退的问题。左侧导航和各个分组现在共用同一份定义，点哪一项都会跳到对应的分组。
 
           本版沿用上游 APK 的内置开发者 Token，有效期字段为 2027-04-22，到期前会随新版本更新；不包含签名私钥或任何用户登录凭证。
 
