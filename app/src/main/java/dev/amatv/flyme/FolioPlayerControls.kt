@@ -251,13 +251,12 @@ internal fun FolioPlayerHeader(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy((-6).dp),
                     ) {
-                        FolioMarqueeText(
-                            text = track.title,
+                        FolioMarqueeTrackTitle(
+                            track = track,
                             color = headerColors.fg,
                             fontFamily = fontFamily,
                             fontWeight = FontWeight.Medium,
                             fontSize = 16.sp,
-                            resetKey = track.id,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         FolioExpandedSubtitle(
@@ -308,8 +307,8 @@ internal fun FolioPlayerHeader(
                         ) {
                             val isLarge = collapsedMode == FolioCollapsedHeaderTitleMode.LargeWithCover
                             if (isLarge) {
-                                Text(
-                                    text = track.title,
+                                FolioTrackTitle(
+                                    track = track,
                                     color = headerColors.fg,
                                     fontFamily = fontFamily,
                                     fontWeight = FontWeight.SemiBold,
@@ -319,14 +318,13 @@ internal fun FolioPlayerHeader(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                             } else {
-                                FolioMarqueeText(
-                                    text = track.title,
+                                FolioMarqueeTrackTitle(
+                                    track = track,
                                     color = headerColors.fg,
                                     fontFamily = fontFamily,
                                     fontWeight = FontWeight.Medium,
                                     fontSize = 17.sp,
                                     lineHeight = 20.sp,
-                                    resetKey = track.id,
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                             }
@@ -804,8 +802,8 @@ internal fun FolioCarUnderCoverCollapsedBar(
                     .padding(vertical = 2.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                Text(
-                    text = track.title,
+                FolioTrackTitle(
+                    track = track,
                     color = fg,
                     fontFamily = fontFamily,
                     fontWeight = FontWeight.SemiBold,
@@ -1096,13 +1094,12 @@ internal fun FolioPlayerCollapsedCapsule(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    FolioMarqueeText(
-                        text = track.title,
+                    FolioMarqueeTrackTitle(
+                        track = track,
                         color = fg,
                         fontFamily = fontFamily,
                         fontWeight = FontWeight.Medium,
                         fontSize = 15.sp,
-                        resetKey = track.id,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     if (subtitle.isNotEmpty()) {
@@ -1223,13 +1220,12 @@ internal fun FolioPlayerExpandedControls(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy((-6).dp),
             ) {
-                FolioMarqueeText(
-                    text = track.title,
+                FolioMarqueeTrackTitle(
+                    track = track,
                     color = fg,
                     fontFamily = fontFamily,
                     fontWeight = FontWeight.Medium,
                     fontSize = 20.sp,
-                    resetKey = track.id,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 FolioExpandedSubtitle(
@@ -1305,13 +1301,12 @@ internal fun FolioPlayerExpandedControls(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy((-6).dp),
                 ) {
-                    FolioMarqueeText(
-                        text = track.title,
+                    FolioMarqueeTrackTitle(
+                        track = track,
                         color = fg,
                         fontFamily = fontFamily,
                         fontWeight = FontWeight.Medium,
                         fontSize = 16.sp,
-                        resetKey = track.id,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     FolioExpandedSubtitle(

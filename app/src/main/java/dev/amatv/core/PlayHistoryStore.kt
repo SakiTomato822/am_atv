@@ -49,6 +49,7 @@ data class PlayHistoryEntry(
     val artworkUrl: String?,
     val playedAtMs: Long,
     val source: PlayHistorySource,
+    val isExplicit: Boolean = false,
 ) {
     fun toTrack(): Track {
         val id = catalogId?.takeIf(String::isNotBlank) ?: songKey
@@ -63,6 +64,7 @@ data class PlayHistoryEntry(
             catalogId = catalogId,
             catalogKind = CatalogKind.Song,
             artworkUrl = artworkUrl,
+            isExplicit = isExplicit,
         )
     }
 }
@@ -123,6 +125,7 @@ fun appendPlayHistoryEntry(
                 artworkUrl = entry.artworkUrl ?: head.artworkUrl,
                 playedAtMs = entry.playedAtMs,
                 source = entry.source,
+                isExplicit = entry.isExplicit || head.isExplicit,
             ),
         ) + existing.drop(1)
     } else {
@@ -213,6 +216,7 @@ class PlayHistoryStore(
                     artworkUrl = track.artworkUrl?.takeIf(String::isNotBlank),
                     playedAtMs = wallClock(),
                     source = source,
+                    isExplicit = track.isExplicit,
                 )
                 val updated = appendPlayHistoryEntry(_entries.value, entry, maxEntries)
                 _entries.value = updated
@@ -306,6 +310,7 @@ class SharedPreferencesPlayHistoryStorage(context: Context) : PlayHistoryStorage
                         artworkUrl = obj.optString("artworkUrl").takeIf { it.isNotBlank() },
                         playedAtMs = obj.optLong("playedAtMs", 0L),
                         source = source,
+                        isExplicit = obj.optBoolean("isExplicit"),
                     ),
                 )
             }
@@ -324,6 +329,7 @@ class SharedPreferencesPlayHistoryStorage(context: Context) : PlayHistoryStorage
             entry.artworkUrl?.let { obj.put("artworkUrl", it) }
             obj.put("playedAtMs", entry.playedAtMs)
             obj.put("source", entry.source.name)
+            obj.put("isExplicit", entry.isExplicit)
             array.put(obj)
         }
         prefs.edit().putString(KEY_ENTRIES, array.toString()).apply()

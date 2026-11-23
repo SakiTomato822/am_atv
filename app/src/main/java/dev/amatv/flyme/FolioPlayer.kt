@@ -1051,13 +1051,12 @@ private fun UltrawidePlayerBody(
                     )
                 }
                 Column(verticalArrangement = Arrangement.spacedBy((-4).dp)) {
-                    FolioMarqueeText(
-                        text = track.title,
+                    FolioMarqueeTrackTitle(
+                        track = track,
                         color = fg,
                         fontFamily = fontFamily,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 20.sp,
-                        resetKey = track.id,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     if (track.artist.isNotBlank() || track.album.isNotBlank()) {
@@ -1265,13 +1264,12 @@ private fun VerticalPlayerBody(
                                 modifier = Modifier.weight(1f),
                                 verticalArrangement = Arrangement.spacedBy((-4).dp),
                             ) {
-                                FolioMarqueeText(
-                                    text = track.title,
+                                FolioMarqueeTrackTitle(
+                                    track = track,
                                     color = fg,
                                     fontFamily = LocalFolioFontFamily.current,
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 22.sp,
-                                    resetKey = track.id,
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                                 FolioExpandedSubtitle(
@@ -1928,13 +1926,12 @@ private fun TwoColumnPlayerBody(
                                 modifier = Modifier.widthIn(max = coverSize),
                                 verticalArrangement = Arrangement.spacedBy((-4).dp),
                             ) {
-                                FolioMarqueeText(
-                                    text = track.title,
+                                FolioMarqueeTrackTitle(
+                                    track = track,
                                     color = fg,
                                     fontFamily = fontFamily,
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 18.sp,
-                                    resetKey = track.id,
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                                 if (track.artist.isNotBlank() || track.album.isNotBlank()) {

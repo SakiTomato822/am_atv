@@ -1299,6 +1299,7 @@ class MusicKitBridge(
             artworkColors = fallback?.takeIf { storeId == null || it.catalogId == storeId }?.artworkColors
                 ?: lookahead?.takeIf { storeId != null && it.catalogId == storeId }?.artworkColors,
             playbackQueueId = queueItem.callOrNull("getPlaybackQueueId") as? Long,
+            isExplicit = nativeSongIsExplicit(storeId, requestedTrack, lookahead),
             previewUrl = fallback?.takeIf { it.catalogId == storeId }?.previewUrl
                 ?: lookahead?.takeIf { it.catalogId == storeId }?.previewUrl,
         )
@@ -1490,6 +1491,12 @@ internal fun radioStationContainerType(mediaContainerTypeClass: Class<*>): Int =
         ?: MUSIC_KIT_RADIO_STATION_CONTAINER_TYPE
 
 internal const val MUSIC_KIT_RADIO_STATION_CONTAINER_TYPE = 3
+
+internal fun nativeSongIsExplicit(catalogId: String?, requested: Track?, lookahead: Track?): Boolean {
+    if (catalogId.isNullOrBlank()) return false
+    return requested?.takeIf { it.catalogKind == CatalogKind.Song && it.catalogId == catalogId }?.isExplicit
+        ?: (lookahead?.takeIf { it.catalogKind == CatalogKind.Song && it.catalogId == catalogId }?.isExplicit == true)
+}
 
 /** Queue errors belong to an in-flight request even when the controller still exposes the prior item. */
 internal fun isPlaybackErrorForActiveRequest(

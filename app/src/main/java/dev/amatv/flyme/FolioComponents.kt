@@ -55,6 +55,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -69,6 +70,96 @@ import dev.amatv.model.CatalogKind
 import dev.amatv.model.CatalogOpenAction
 import dev.amatv.model.Track
 import dev.amatv.model.openAction
+
+@Composable
+private fun FolioBadgedTitle(
+    track: Track,
+    modifier: Modifier,
+    centered: Boolean = false,
+    title: @Composable (Modifier) -> Unit,
+) {
+    if (!track.isExplicit) {
+        title(modifier)
+        return
+    }
+    val palette = LocalFolioPalette.current
+    Row(
+        modifier = modifier,
+        horizontalArrangement = if (centered) Arrangement.Center else Arrangement.Start,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        title(Modifier.weight(1f, fill = false))
+        Spacer(Modifier.width(6.dp))
+        Box(
+            modifier = Modifier
+                .size(14.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(palette.fg3)
+                .semantics { contentDescription = "Explicit" },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "E",
+                color = palette.bg,
+                fontFamily = LocalFolioFontFamily.current,
+                fontWeight = FontWeight.Bold,
+                fontSize = 10.sp,
+            )
+        }
+    }
+}
+
+@Composable
+internal fun FolioTrackTitle(
+    track: Track,
+    color: Color,
+    fontSize: TextUnit,
+    fontFamily: FontFamily,
+    fontWeight: FontWeight,
+    maxLines: Int,
+    overflow: TextOverflow,
+    lineHeight: TextUnit = TextUnit.Unspecified,
+) {
+    FolioBadgedTitle(track, Modifier) { modifier ->
+        Text(
+            text = track.title,
+            modifier = modifier,
+            color = color,
+            fontFamily = fontFamily,
+            fontWeight = fontWeight,
+            fontSize = fontSize,
+            lineHeight = lineHeight,
+            maxLines = maxLines,
+            overflow = overflow,
+        )
+    }
+}
+
+@Composable
+internal fun FolioMarqueeTrackTitle(
+    track: Track,
+    color: Color,
+    fontSize: TextUnit,
+    fontFamily: FontFamily,
+    fontWeight: FontWeight,
+    modifier: Modifier,
+    lineHeight: TextUnit = TextUnit.Unspecified,
+    textAlign: TextAlign? = null,
+) {
+    FolioBadgedTitle(track, modifier, centered = textAlign == TextAlign.Center) { titleModifier ->
+        FolioMarqueeText(
+            text = track.title,
+            color = color,
+            fontFamily = fontFamily,
+            fontWeight = fontWeight,
+            fontSize = fontSize,
+            lineHeight = lineHeight,
+            textAlign = textAlign,
+            resetKey = track.id,
+            modifier = titleModifier,
+        )
+    }
+}
 
 @Composable
 internal fun FolioArtwork(
@@ -144,8 +235,8 @@ fun FolioListRowCard(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Text(
-                text = item.title,
+            FolioTrackTitle(
+                track = item,
                 color = palette.fg,
                 fontFamily = fontFamily,
                 fontWeight = FontWeight.Medium,
@@ -199,8 +290,8 @@ fun FolioGridCard(
             shape = shape,
         )
         Spacer(Modifier.height(6.dp))
-        Text(
-            text = item.title,
+        FolioTrackTitle(
+            track = item,
             color = palette.fg,
             fontFamily = fontFamily,
             fontWeight = FontWeight.SemiBold,
@@ -287,37 +378,15 @@ fun FolioSongRow(
         }
 
         Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = track.title,
-                    color = titleColor,
-                    fontFamily = fontFamily,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 16.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                if (track.isExplicit) {
-                    Spacer(Modifier.width(6.dp))
-                    Box(
-                        modifier = Modifier
-                            .size(14.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(palette.fg3)
-                            .semantics { contentDescription = "Explicit" },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = "E",
-                            color = palette.bg,
-                            fontFamily = fontFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 10.sp,
-                        )
-                    }
-                }
-            }
+            FolioTrackTitle(
+                track = track,
+                color = titleColor,
+                fontFamily = fontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = 16.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             if ((showCover || showArtist) && track.artist.isNotBlank()) {
                 Text(
                     text = track.artist,
@@ -507,13 +576,12 @@ private fun FolioMiniPlayerPill(
                     .padding(horizontal = 4.dp),
                 verticalArrangement = Arrangement.Center,
             ) {
-                FolioMarqueeText(
-                    text = track.title,
+                FolioMarqueeTrackTitle(
+                    track = track,
                     color = palette.fg,
                     fontFamily = fontFamily,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = titleSize,
-                    resetKey = track.id,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (track.artist.isNotBlank()) {

@@ -160,14 +160,13 @@ internal fun FolioNoLyricsStateBox(
                     verticalArrangement = Arrangement.spacedBy((-4).dp),
                     modifier = Modifier.widthIn(max = coverSide + 32.dp),
                 ) {
-                    FolioMarqueeText(
-                        text = track.title,
+                    FolioMarqueeTrackTitle(
+                        track = track,
                         color = fg,
                         fontFamily = fontFamily,
                         fontWeight = FontWeight.Medium,
                         fontSize = 21.sp,
                         textAlign = TextAlign.Center,
-                        resetKey = track.id,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     if (track.artist.isNotBlank() || track.album.isNotBlank()) {
@@ -418,8 +417,8 @@ internal fun FolioQueuePanel(
                                 fontSize = 11.sp,
                                 maxLines = 1,
                             )
-                            Text(
-                                text = row.track.title,
+                            FolioTrackTitle(
+                                track = row.track,
                                 color = fg,
                                 fontFamily = fontFamily,
                                 fontWeight = if (row.isCurrent) FontWeight.SemiBold else FontWeight.Normal,
@@ -544,8 +543,8 @@ internal fun FolioQueuePanel(
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
-                            Text(
-                                text = row.track.title,
+                            FolioTrackTitle(
+                                track = row.track,
                                 color = fg.copy(alpha = if (row.section == FolioQueueSectionKind.Played) 0.72f else 1f),
                                 fontFamily = fontFamily,
                                 fontWeight = if (row.isCurrent) FontWeight.SemiBold else FontWeight.Normal,

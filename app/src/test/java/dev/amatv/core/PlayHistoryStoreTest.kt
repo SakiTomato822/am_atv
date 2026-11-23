@@ -61,6 +61,17 @@ class PlayHistoryStoreTest {
     }
 
     @Test
+    fun historyTopRowPreservesAnExplicitRatingForTheSameRecording() {
+        val storage = FakePlayHistoryStorage()
+        val store = PlayHistoryStore(storage)
+        val track = song("same").copy(isExplicit = true)
+        store.onTrackFinished(track, 1_000L, PlayHistorySource.Album)
+        store.onTrackFinished(track.copy(isExplicit = false), 2_000L, PlayHistorySource.Album)
+        val reopened = PlayHistoryStore(storage)
+        assertTrue(reopened.entries.value.single().toTrack().isExplicit)
+    }
+
+    @Test
     fun recordsAfterThirtySecondsActivePlaybackOrTrackCompletion() {
         val storage = FakePlayHistoryStorage()
         var wallMs = 1_700_000_000_000L

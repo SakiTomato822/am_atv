@@ -1309,6 +1309,7 @@ class PlaybackStore(
                 existing.lyrics != withLyrics.lyrics ||
                 existing.title != withLyrics.title ||
                 existing.artist != withLyrics.artist ||
+                existing.isExplicit != withLyrics.isExplicit ||
                 existing.durationMs != withLyrics.durationMs
             ) {
                 updateTrack(withLyrics)
