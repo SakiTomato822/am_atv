@@ -15,6 +15,15 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class FlymeVoiceProtocolTest {
+    @Test fun styleUsesTheFirstNonBlankVendorSlotAndKeepsOriginInfo() {
+        assertEquals(Style("好歌曲", "影视综艺好歌曲"), parse(
+            67108928, "search_slot_style" to " ", "typeName" to "好歌曲", "subTypeName" to "综艺",
+            "originInfo" to "影视综艺好歌曲",
+        ))
+        assertEquals(Style("综艺"), parse(67108928, "subTypeName" to "综艺"))
+        assertEquals(Style("Jazz"), parse(67108928, "search_slot_style" to "Jazz", "typeName" to "其他"))
+    }
+
     @Test fun messageWritesParcelFieldsInVendorOrder() {
         val fields = mutableListOf<Any>()
         FlymeVoiceProtocol.writeMessage("registerEx", "点歌", { fields.add(it) }, { fields.add(it) })

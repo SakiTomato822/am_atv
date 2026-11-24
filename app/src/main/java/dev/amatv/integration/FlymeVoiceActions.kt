@@ -121,9 +121,15 @@ internal fun MusicServices.startFlymeVoice(
                 }
             }
             is Style -> return@start playVoiceSelection(playback, command.name.ifBlank { "音乐风格" }) {
-                val item = search(command.name).firstOrNull(::isVoiceCollection)
-                Log.i(TAG, "path=style style=${command.name} selected=${item?.title} kind=${item?.catalogKind}")
-                item?.let { voiceCollection(it) }
+                val playlist = findVoiceStylePlaylist(command)
+                if (playlist != null) {
+                    Log.i(TAG, "path=library-playlist style=${command.name} origin=${command.originInfo} selected=${playlist.title}")
+                    voiceCollection(playlist)
+                } else {
+                    val item = search(command.name).firstOrNull(::isVoiceCollection)
+                    Log.i(TAG, "path=style fallback=library-playlist-not-found style=${command.name} selected=${item?.title} kind=${item?.catalogKind}")
+                    item?.let { voiceCollection(it) }
+                }
             }
             is Ignored -> Unit
         }
@@ -202,6 +208,18 @@ private fun voiceRecommendation(shelves: List<ContentShelf>): Track? =
 private suspend fun MusicServices.voiceCollection(item: Track): FlymeVoiceQueue =
     if (item.catalogKind == CatalogKind.Station) FlymeVoiceQueue(listOf(item), spokenName = item.title)
     else FlymeVoiceQueue(collectionTracks(item), collection = item, spokenName = item.title)
+
+private suspend fun MusicServices.findVoiceStylePlaylist(command: Style): Track? {
+    if (command.name.isBlank() && command.originInfo.isBlank()) return null
+    val playlists = mutableListOf<Track>()
+    var next: String? = null
+    do {
+        val page = libraryPlaylistsPage(next)
+        playlists += page.items
+        next = page.nextPage
+    } while (next != null)
+    return matchVoiceStylePlaylist(command, playlists)
+}
 
 private suspend fun MusicServices.findVoiceFavorites(content: ContentStore): Track? {
     content.state.value.shelvesFor(Destination.Library).asSequence().flatMap { it.items.asSequence() }

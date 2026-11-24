@@ -141,10 +141,7 @@ internal fun rememberFolioScrollToTopState(
 }
 
 /**
- * Computes Metro pivot title strip translation and left-edge peek state:
- * - Normal pages place the previous tab at most 1/3 across [pivotWidthPx].
- * - Trailing pages stop shifting left once the last tab's right edge aligns with `pivotWidthPx - prPx`
- *   (and never shift past `pxPx` when all tabs already fit).
+ * Places the active title at most one third across [pivotWidthPx] on pages with a left neighbor.
  */
 internal fun computePivotPlacementForPage(
     pageIndex: Int,
@@ -152,7 +149,6 @@ internal fun computePivotPlacementForPage(
     pxPx: Float,
     gapPx: Float,
     pivotWidthPx: Float,
-    prPx: Float = pxPx,
 ): FolioPivotPlacement {
     if (tabWidthsPx.isEmpty()) return FolioPivotPlacement(pxPx, isPeekingLeft = false)
     val clamped = pageIndex.coerceIn(0, tabWidthsPx.lastIndex)
@@ -162,10 +158,9 @@ internal fun computePivotPlacementForPage(
         tabStarts[i] = cursor
         cursor += tabWidthsPx[i] + if (i < tabWidthsPx.lastIndex) gapPx else 0f
     }
-    val totalSpanPx = cursor
     val offsetLeft = tabStarts[clamped]
 
-    val rawTranslationX = if (clamped == 0) {
+    val translationX = if (clamped == 0) {
         pxPx
     } else {
         val prevWidth = tabWidthsPx[clamped - 1]
@@ -174,15 +169,13 @@ internal fun computePivotPlacementForPage(
         minOf(full, limit) - offsetLeft
     }
 
-    val minTranslationX = (pivotWidthPx - prPx) - totalSpanPx
-    val clampedTranslationX = minOf(pxPx, maxOf(rawTranslationX, minTranslationX))
     val isPeekingLeft = tabWidthsPx.indices.any { i ->
-        val left = clampedTranslationX + tabStarts[i]
+        val left = translationX + tabStarts[i]
         val right = left + tabWidthsPx[i]
         left < -0.5f && right > 0.5f
     }
     return FolioPivotPlacement(
-        translationX = clampedTranslationX,
+        translationX = translationX,
         isPeekingLeft = isPeekingLeft,
     )
 }
@@ -459,8 +452,8 @@ internal fun FolioPivotBar(
             val gapPx = tierSpec.pvg.toPx()
             val pivotWidthPx = constraints.maxWidth.toFloat()
 
-            val lowPlacement = computePivotPlacementForPage(lower, widths, pxPx, gapPx, pivotWidthPx, prPx)
-            val highPlacement = computePivotPlacementForPage(upper, widths, pxPx, gapPx, pivotWidthPx, prPx)
+            val lowPlacement = computePivotPlacementForPage(lower, widths, pxPx, gapPx, pivotWidthPx)
+            val highPlacement = computePivotPlacementForPage(upper, widths, pxPx, gapPx, pivotWidthPx)
             val normalStartX = lowPlacement.translationX +
                 (highPlacement.translationX - lowPlacement.translationX) * fraction
             peekStrength[0] = (if (lowPlacement.isPeekingLeft) 1f - fraction else 0f) +

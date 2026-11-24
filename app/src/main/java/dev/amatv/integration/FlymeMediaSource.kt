@@ -75,7 +75,9 @@ internal class FlymeMediaSource(
         }
     }
 
-    internal val infoBinder: Binder = object : Binder() {
+    internal val infoBinder: Binder = playbackInfoBinder { snapshot }
+
+    private fun playbackInfoBinder(readSnapshot: () -> PlaybackSnapshot?): Binder = object : Binder() {
         init { attachInterface(null, INFO) }
         override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
             if (code == INTERFACE_TRANSACTION) {
@@ -84,7 +86,7 @@ internal class FlymeMediaSource(
             }
             if (code !in 1..35 || reply == null) return super.onTransact(code, data, reply, flags)
             data.enforceInterface(INFO)
-            val state = snapshot
+            val state = readSnapshot()
             val track = state?.currentTrack
             reply.writeNoException()
             when (code) {
@@ -98,7 +100,7 @@ internal class FlymeMediaSource(
                 9 -> reply.writeInt(ONLINE)
                 10, 13, 15, 17 -> reply.optionalParcelable(null)
                 11 -> reply.writeInt(when {
-                    state?.isBuffering == true -> 3 // vendor PREPARE
+                    state?.isBuffering == true -> 3 // vendor BUFFERING
                     state?.isPlaying == true -> 1
                     else -> 0 // vendor PAUSED, distinct from Android PlaybackState
                 })
@@ -110,7 +112,8 @@ internal class FlymeMediaSource(
                 26 -> reply.writeString("android.resource://${context.packageName}/${R.drawable.ic_launcher}")
                 27 -> reply.writeString(context.packageName)
                 29 -> reply.writeInt(1) // play/pause control supported
-                31, 32 -> reply.writeInt(-1)
+                31 -> reply.writeInt(0) // MediaCenter maps any nonzero value to VIP required
+                32 -> reply.writeInt(-1)
                 35 -> reply.writeString("audio")
             }
             return true
@@ -197,7 +200,9 @@ internal class FlymeMediaSource(
     fun playbackRequested() = worker.post {
         if (!released) {
             wantsPlay = true
-            safely { requestFocus() }
+            safely {
+                if (requestFocus()) snapshot?.let(::publishOnWorker)
+            }
         }
     }
 
@@ -221,8 +226,7 @@ internal class FlymeMediaSource(
             metadataKey = null
             safely {
                 registration?.let { current ->
-                    rpc(current.media, MEDIA, 6,
-                        { writeStrongBinder(current.token); writeStrongBinder(infoBinder) }, { readInt() })
+                    sendPlaybackInfo(current, null)
                 }
             }
         }
@@ -391,8 +395,8 @@ internal class FlymeMediaSource(
         Log.i(TAG, "Registered $path online source (6)")
         safely {
             val latest = snapshot
-            latest?.let(::publishOnWorker)
             if (if (reconnecting) latest?.isPlaying == true else wantsPlay) requestFocus()
+            latest?.let(::publishOnWorker)
         }
         if (registration == current) updateStatus(ConnectionState.Connected)
     }
@@ -409,14 +413,20 @@ internal class FlymeMediaSource(
         }
     }
 
-    private fun requestFocus() {
-        val current = registration ?: return
+    private fun requestFocus(): Boolean {
+        val current = registration ?: return false
         val accepted = rpc(current.media, MEDIA, 5, { writeStrongBinder(current.token) }, { readInt() != 0 })
         Log.i(TAG, "${current.path} requestPlay (5): accepted=$accepted")
-        if (!accepted) {
+        if (accepted) {
+            // MediaCenter only forwards transaction 6 for its focused token.
+            // An earlier successful reply can represent metadata it did not forward.
+            metadataKey = null
+            lastProgressTime = 0L
+        } else {
             Log.w(TAG, "MediaCenter denied playback focus")
             dispatch { pause() }
         }
+        return accepted
     }
 
     private fun publishOnWorker(value: PlaybackSnapshot) {
@@ -425,17 +435,26 @@ internal class FlymeMediaSource(
         val track = value.currentTrack
         val key = "${track?.id}|${track?.title}|${track?.artist}|${track?.album}|${track?.artworkUrl}|${value.durationMs}|${value.isPlaying}|${value.isBuffering}|${value.errorMessage}"
         if (key != metadataKey) {
-            check(rpc(current.media, MEDIA, 6, {
-                writeStrongBinder(current.token); writeStrongBinder(infoBinder)
-            }, { readInt() != 0 })) { "MediaCenter rejected playback metadata" }
+            sendPlaybackInfo(current, value)
             metadataKey = key
-            Log.i(TAG, "${current.path} updateMusicPlaybackState (6): published")
+            Log.i(TAG, "${current.path} updateMusicPlaybackState (6): published " +
+                "id=${track?.catalogId ?: track?.id} playing=${value.isPlaying} buffering=${value.isBuffering} " +
+                "hasArtwork=${!track?.artworkUrl.isNullOrBlank()} durationMs=${value.durationMs}")
         }
         val now = SystemClock.elapsedRealtime()
         if (now - lastProgressTime >= 1000L) {
             rpc(current.media, MEDIA, 10, { writeStrongBinder(current.token); writeLong(value.positionMs.coerceAtLeast(0L)) }, { Unit })
             lastProgressTime = now
         }
+    }
+
+    private fun sendPlaybackInfo(current: Registration, value: PlaybackSnapshot?) {
+        // The vendor reads PlaybackInfo and PlaybackState separately from the same binder.
+        // Keep both reads on the same snapshot so their item IDs agree across a track change.
+        val info = playbackInfoBinder { value }
+        check(rpc(current.media, MEDIA, 6, {
+            writeStrongBinder(current.token); writeStrongBinder(info)
+        }, { readInt() != 0 })) { "MediaCenter rejected playback metadata" }
     }
 
     private fun dispatch(command: PlaybackMediaSession.Callbacks.() -> Unit): Int {

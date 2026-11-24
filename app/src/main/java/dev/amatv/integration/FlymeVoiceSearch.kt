@@ -2,6 +2,9 @@ package dev.amatv.integration
 
 import dev.amatv.integration.FlymeVoiceCommand.Search
 import dev.amatv.integration.FlymeVoiceCommand.Search.Kind
+import dev.amatv.integration.FlymeVoiceCommand.Style
+import dev.amatv.integration.voice.NameEncoder
+import dev.amatv.integration.voice.NameMatcher
 import dev.amatv.integration.voice.NameRoute
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
@@ -26,6 +29,28 @@ internal suspend fun resolveFlymeVoiceSearch(
     index: VoiceCatalogIndex = VoiceCatalogIndex(command),
 ): FlymeVoiceQueue {
     val library = librarySearch(index.libraryTerm, command.kind.libraryCollection)
+    if (index.requiresExactArtistSong) {
+        val libraryMatch = index.exactArtistSong(library)
+        val catalog = if (libraryMatch == null) search(command.query) else emptyList()
+        val combinedMatch = libraryMatch ?: index.exactArtistSong(catalog)
+        val titleResults = if (combinedMatch == null) search(command.targetTitle) else emptyList()
+        val exact = combinedMatch ?: index.exactArtistSong(titleResults)
+        val selected = exact ?: (catalog + titleResults).firstOrNull { it.catalogKind == CatalogKind.Song }
+        val match = when {
+            combinedMatch != null -> "exact"
+            exact != null -> "exact-title-retry"
+            selected != null -> "fallback-first-result"
+            else -> "none"
+        }
+        val path = when {
+            exact != null -> "matched"
+            selected != null -> "best-match-fallback(selection-protocol-unverified)"
+            else -> "not-found"
+        }
+        log("kind=${command.kind} path=$path match=$match id=${selected?.catalogId ?: selected?.id} " +
+            "name=${selected?.title} queueSize=${if (selected == null) 0 else 1}")
+        return FlymeVoiceQueue(listOfNotNull(selected))
+    }
     var matched = index.rank(library).exact
     var catalog = emptyList<Track>()
     if (matched == null) {
@@ -77,4 +102,31 @@ internal suspend fun resolveFlymeVoiceSearch(
     log("kind=${command.kind} path=$path match=$matchType id=${identified?.catalogId ?: identified?.resourceId ?: identified?.id} " +
         "name=${selected?.title} queueSize=${queue.tracks.size}")
     return queue
+}
+
+internal fun matchVoiceStylePlaylist(
+    command: Style,
+    playlists: List<Track>,
+    encoder: NameEncoder = flymeVoiceNameEncoder(),
+): Track? {
+    val queries = listOf(command.name, command.originInfo).map(encoder::prepare)
+        .filter { it.key.isNotEmpty() }.distinctBy { it.key }
+    val matcher = NameMatcher()
+    return playlists.asSequence().filter { it.catalogKind == CatalogKind.Playlist }.mapNotNull { playlist ->
+        val name = encoder.prepare(playlist.title)
+        if (name.key.isEmpty()) return@mapNotNull null
+        val score = queries.maxOfOrNull { query ->
+            val evidence = matcher.compare(query, name)
+            when {
+                evidence?.literalExact == true -> 3.0
+                query.key == "好歌曲" && playlist.isVoiceFavorites() -> 2.0
+                minOf(query.key.length, name.key.length) >= 2 &&
+                    (query.key.contains(name.key) || name.key.contains(query.key)) ->
+                    1.0 + minOf(query.key.length, name.key.length).toDouble() / maxOf(query.key.length, name.key.length)
+                evidence?.route == NameRoute.Mandarin -> evidence.score
+                else -> 0.0
+            }
+        } ?: 0.0
+        if (score > 0.0) playlist to score else null
+    }.maxByOrNull { it.second }?.first
 }

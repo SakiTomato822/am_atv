@@ -19,7 +19,7 @@ internal sealed interface FlymeVoiceCommand {
     enum class ListSource(val label: String) : FlymeVoiceCommand {
         Favorites("喜好歌曲"), History("最近听过的歌"), Recommendations("每日推荐"), Chart("热门榜"),
     }
-    data class Style(val name: String) : FlymeVoiceCommand
+    data class Style(val name: String, val originInfo: String = "") : FlymeVoiceCommand
     data class Search(
         val kind: Kind,
         val title: String,
@@ -176,7 +176,10 @@ internal object FlymeVoiceProtocol {
             HISTORY -> FlymeVoiceCommand.ListSource.History
             RECOMMENDATIONS -> FlymeVoiceCommand.ListSource.Recommendations
             CHART -> FlymeVoiceCommand.ListSource.Chart
-            STYLE -> FlymeVoiceCommand.Style(json.slot("search_slot_style"))
+            STYLE -> FlymeVoiceCommand.Style(
+                json.slot("search_slot_style").ifEmpty { json.slot("typeName") }.ifEmpty { json.slot("subTypeName") },
+                json.slot("originInfo"),
+            )
             SONG, ARTIST, ARTIST_SONG, ALBUM, ARTIST_ALBUM, SEARCH_SONG, SEARCH_ARTIST, SEARCH_ARTIST_SONG -> {
                 val kind = when (semantic) {
                     SONG, SEARCH_SONG -> FlymeVoiceCommand.Search.Kind.Song

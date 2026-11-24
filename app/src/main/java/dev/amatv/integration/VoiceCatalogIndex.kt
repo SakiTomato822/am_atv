@@ -11,9 +11,7 @@ import dev.amatv.model.Track
 /** The part of the offline voice catalog index that ranks an explicit vendor intent. */
 internal class VoiceCatalogIndex(
     private val request: FlymeVoiceCommand.Search,
-    private val encoder: NameEncoder = NameEncoder(
-        ChineseText::simplified, ChineseText::pinyin, ChineseText::romaji, VOICE_ALIASES, ChineseText::alternatePinyin,
-    ),
+    private val encoder: NameEncoder = flymeVoiceNameEncoder(VOICE_ALIASES),
 ) {
     data class Match(val track: Track, val evidence: NameEvidence, val score: Double)
     data class Ranked(val exact: Match?, val phonetic: Match?)
@@ -24,6 +22,8 @@ internal class VoiceCatalogIndex(
         it.isNotEmpty() && request.kind != FlymeVoiceCommand.Search.Kind.Artist
     }?.let(encoder::prepare)
     private val matcher = NameMatcher()
+    val requiresExactArtistSong = request.kind == FlymeVoiceCommand.Search.Kind.ArtistSong &&
+        target.key.isNotEmpty() && performer != null
 
     val libraryTerm: String get() = aliases[target.key] ?: request.targetTitle.ifEmpty { request.query }
 
@@ -49,6 +49,11 @@ internal class VoiceCatalogIndex(
     fun accepts(track: Track): Boolean {
         if (!request.acceptsVoiceKind(track.catalogKind)) return false
         return performer == null || matcher.compare(performer, encoder.prepare(track.artist))?.isNamedMatch == true
+    }
+
+    fun exactArtistSong(items: List<Track>): Track? = items.firstOrNull { track ->
+        request.acceptsVoiceKind(track.catalogKind) && encoder.key(track.title) == target.key &&
+            artistCreditSeparator.split(track.artist).any { encoder.key(it) == performer?.key }
     }
 
     fun rank(library: List<Track>, catalog: List<Track> = emptyList()): Ranked {
@@ -80,3 +85,8 @@ internal class VoiceCatalogIndex(
     private val NameEvidence.isNamedMatch
         get() = literalExact || route == NameRoute.Alias && exact
 }
+
+internal fun flymeVoiceNameEncoder(aliases: Map<String, String> = emptyMap()) =
+    NameEncoder(ChineseText::simplified, ChineseText::pinyin, ChineseText::romaji, aliases, ChineseText::alternatePinyin)
+
+private val artistCreditSeparator = Regex("""[&、,，＆]|\s+(?:feat\.?|with)\s+""", RegexOption.IGNORE_CASE)

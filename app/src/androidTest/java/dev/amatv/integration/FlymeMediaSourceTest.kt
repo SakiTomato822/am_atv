@@ -97,7 +97,7 @@ class FlymeMediaSourceTest {
             val playing = FakeFlymeMediaCenter(context)
             replacement.connect(FakeFlymeBroker(playing))
             source.awaitState(v4, connected)
-            assertEquals(listOf(19, 7, 8, 6, 5), playing.operations.filterNot { it == 10 })
+            assertEquals(listOf(19, 7, 8, 5, 6), playing.operations.filterNot { it == 10 })
             assertEquals(listOf(1 to "Saved song"), playing.publishedMetadata)
 
             playing.dieOnNextPublish = true
@@ -126,6 +126,25 @@ class FlymeMediaSourceTest {
             })
             source.awaitState(FlymeMediaSource.RegistrationPath.V3, FlymeMediaSource.ConnectionState.Disconnected)
             assertEquals(listOf(FakeFlymeServices.V3_ACTION), services.bindActions)
+        } finally {
+            source.release()
+        }
+    }
+
+    @Test fun focusRepublishesUnchangedMetadataForTheCard() = runBlocking {
+        val services = FakeFlymeServices(context)
+        val source = services.startSource()
+        val media = FakeFlymeMediaCenter(context)
+        try {
+            source.publish(testFlymeSnapshot(isPlaying = false))
+            services.nextBinding(FakeFlymeServices.V3_ACTION).connect(services.pool(null))
+            services.nextBinding(FlymeOpenApiBroker.ACTION).connect(FakeFlymeBroker(media))
+            source.awaitState(FlymeMediaSource.RegistrationPath.V4, FlymeMediaSource.ConnectionState.Connected)
+            assertEquals(0 to "Saved song", media.metadataUpdates.poll(5, TimeUnit.SECONDS))
+
+            source.playbackRequested()
+            assertEquals(0 to "Saved song", media.metadataUpdates.poll(5, TimeUnit.SECONDS))
+            assertEquals(listOf(19, 7, 8, 6, 5, 6), media.operations.filterNot { it == 10 })
         } finally {
             source.release()
         }
@@ -220,6 +239,7 @@ internal class FakeFlymeMediaCenter(private val context: Context) : Binder() {
     val token = Binder()
     val operations = CopyOnWriteArrayList<Int>()
     val publishedMetadata = CopyOnWriteArrayList<Pair<Int, String?>>()
+    val metadataUpdates = LinkedBlockingQueue<Pair<Int, String?>>()
     @Volatile var dieOnNextPublish = false
 
     init { attachInterface(null, FlymeMediaSource.MEDIA) }
@@ -243,6 +263,7 @@ internal class FakeFlymeMediaCenter(private val context: Context) : Binder() {
                     val state = FlymeMediaSource.rpc(info, FlymeMediaSource.INFO, 11, {}, { readInt() })
                     val title = FlymeMediaSource.rpc(info, FlymeMediaSource.INFO, 2, {}, { readString() })
                     publishedMetadata += state to title
+                    metadataUpdates.add(state to title)
                     reply.writeInt(1)
                 }
                 7 -> assertArrayEquals(intArrayOf(6), data.createIntArray())

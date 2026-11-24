@@ -87,6 +87,47 @@ class FlymeVoiceSearchTest {
         assertTrue(logs.single().contains("match=exact id=2"))
     }
 
+    @Test fun buGaiTitleRetryFindsTheDuetInsteadOfPlayingKuBuChuLai() = runTest {
+        val command = Search(Kind.ArtistSong, "不该", "张惠妹")
+        val wrong = item("wrong", "哭不出來", artist = "張惠妹")
+        val solo = item("solo", "不該", artist = "周杰倫")
+        val duet = item("duet", "不該", artist = "周杰倫 & 張惠妹")
+        val terms = mutableListOf<String>()
+        val queue = resolveFlymeVoiceSearch(
+            command,
+            search = { term ->
+                terms += term
+                if (term == command.query) listOf(wrong) else listOf(solo, duet)
+            },
+            artistTopSongs = { error("Unexpected artist lookup") },
+            collectionTracks = { error("Unexpected collection lookup") },
+            log = logs::add,
+            index = VoiceCatalogIndex(command, NameEncoder(simplify = { it.replace('該', '该').replace('張', '张') })),
+        )
+
+        assertEquals(listOf("不该 张惠妹", "不该"), terms)
+        assertEquals(FlymeVoiceQueue(listOf(duet)), queue)
+        assertTrue(logs.single().contains("match=exact-title-retry id=duet"))
+    }
+
+    @Test fun misrecognizedFavoriteSongsMatchesLocalizedLibraryPlaylist() {
+        val command = FlymeVoiceCommand.Style("好歌曲", "影视综艺好歌曲")
+        val chinese = item("zh", "喜好歌曲", CatalogKind.Playlist)
+        val english = item("en", "Favorite Songs", CatalogKind.Playlist)
+        val unrelated = item("other", "摇滚乐", CatalogKind.Playlist)
+        assertEquals(chinese, matchVoiceStylePlaylist(command, listOf(unrelated, chinese)))
+        assertEquals(english, matchVoiceStylePlaylist(command, listOf(unrelated, english)))
+    }
+
+    @Test fun stylePlaylistMatchesOriginContainmentAndPinyin() {
+        val film = item("film", "影视综艺", CatalogKind.Playlist)
+        assertEquals(film, matchVoiceStylePlaylist(FlymeVoiceCommand.Style("主题", "播放影视综艺"), listOf(film)))
+
+        val jazz = item("jazz", "爵士", CatalogKind.Playlist)
+        val encoder = NameEncoder(pinyin = { "jue shi" })
+        assertEquals(jazz, matchVoiceStylePlaylist(FlymeVoiceCommand.Style("绝世"), listOf(jazz), encoder))
+    }
+
     @Test fun missingAlbumDoesNotPlayAnUnrelatedSong() = runTest {
         val queue = resolve(Search(Kind.Album, "Missing", ""), listOf(firstSong))
 
