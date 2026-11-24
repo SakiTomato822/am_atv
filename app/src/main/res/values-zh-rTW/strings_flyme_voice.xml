@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="flyme_voice_setting">車機語音點歌（實驗）</string>
+    <string name="flyme_voice_setting">車機語音點歌（實驗）\n開啟後由 AM Folio 直接連接車機媒體中心，建議關閉其他媒體轉發工具。</string>
     <string name="flyme_voice_status">語音橋 · %1$s</string>
     <string name="flyme_voice_off">未開啟</string>
     <string name="flyme_voice_connecting">連線中</string>

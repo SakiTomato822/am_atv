@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="flyme_voice_setting">Car voice requests (experimental)</string>
+    <string name="flyme_voice_setting">Car voice requests (experimental)\nWhen enabled, AM Folio connects directly to the car’s media center. We recommend turning off other media forwarding tools.</string>
     <string name="flyme_voice_status">Voice bridge · %1$s</string>
     <string name="flyme_voice_off">Off</string>
     <string name="flyme_voice_connecting">Connecting</string>

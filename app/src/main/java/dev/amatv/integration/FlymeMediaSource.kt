@@ -16,8 +16,11 @@ import android.os.Process
 import android.os.SystemClock
 import android.util.Log
 import dev.amatv.R
+import kotlinx.coroutines.android.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
@@ -29,18 +32,20 @@ import java.util.concurrent.atomic.AtomicReference
 internal class FlymeMediaSource(private val context: Context, private val autoBind: Boolean = true) {
     private val thread = HandlerThread("AM-FlymeMedia").apply { start() }
     private val worker = Handler(thread.looper)
+    private val workerDispatcher = worker.asCoroutineDispatcher()
     private val main = Handler(context.mainLooper)
     private val mutableStatus = MutableStateFlow("Not connected")
     val status = mutableStatus.asStateFlow()
-    data class Registration(val media: IBinder, val token: IBinder)
+    enum class V3State { Pending, Registered, NoBinder, Failed }
+    enum class RegistrationPath { V3, V4 }
+    data class Registration(val media: IBinder, val token: IBinder, val path: RegistrationPath)
     private val mutableRegistration = MutableStateFlow<Registration?>(null)
     val registration = mutableRegistration.asStateFlow()
+    private val v3State = MutableStateFlow(if (autoBind) V3State.Pending else V3State.NoBinder)
     @Volatile private var callbacks: PlaybackMediaSession.Callbacks? = null
     @Volatile private var snapshot: PlaybackSnapshot? = null
     @Volatile private var released = false
     private var bound = false
-    private var media: IBinder? = null
-    private var token: IBinder? = null
     private var wantsPlay = false
     private var metadataKey: String? = null
     private var lastProgressTime = 0L
@@ -140,24 +145,19 @@ internal class FlymeMediaSource(private val context: Context, private val autoBi
             worker.post { if (!released) connectMedia(binder) }
         }
         override fun onServiceDisconnected(name: ComponentName) {
-            worker.post {
-                mutableRegistration.value = null
-                media = null; token = null; metadataKey = null; report("Disconnected")
-            }
+            worker.post { disconnectV3() }
         }
         override fun onBindingDied(name: ComponentName) {
             worker.post {
                 if (!released) {
                     unbind()
-                    mutableRegistration.value = null
-                    media = null
-                    token = null
+                    disconnectV3()
                     bind()
                 }
             }
         }
         override fun onNullBinding(name: ComponentName) {
-            worker.post { report("OpenAPI returned no service") }
+            worker.post { v3Unavailable("OpenAPI returned no service") }
         }
     }
 
@@ -192,9 +192,9 @@ internal class FlymeMediaSource(private val context: Context, private val autoBi
             wantsPlay = false
             metadataKey = null
             safely {
-                token?.let { current ->
-                    media?.let { remote -> rpc(remote, MEDIA, 6,
-                        { writeStrongBinder(current); writeStrongBinder(infoBinder) }, { readInt() }) }
+                mutableRegistration.value?.let { current ->
+                    rpc(current.media, MEDIA, 6,
+                        { writeStrongBinder(current.token); writeStrongBinder(infoBinder) }, { readInt() })
                 }
             }
         }
@@ -205,56 +205,136 @@ internal class FlymeMediaSource(private val context: Context, private val autoBi
         callbacks = null
         pendingSnapshot.set(null)
         worker.post {
-            mutableRegistration.value = null
-            safely {
-                token?.let { current -> media?.let { remote ->
-                    rpc(remote, MEDIA, 4, { writeStrongBinder(current) }, { readInt() })
-                } }
-            }
+            mutableRegistration.value?.let(::unregister)
             unbind()
-            media = null
-            token = null
             thread.quitSafely()
         }
     }
 
-    private fun bind(): Unit = safely {
-        val version = context.packageManager.getPackageInfo("ecarx.xsf.mediacenter", 0).longVersionCode
-        check(version == MEDIA_CENTER_VERSION_CODE) { "Unsupported MediaCenter version: $version" }
-        report("Connecting")
-        bound = context.bindService(Intent("ecarx.intent.action.OpenAPIService")
-            .setPackage("com.ecarx.sdk.openapi"), connection, Context.BIND_AUTO_CREATE)
-        if (!bound) report("OpenAPI unavailable; Android media session remains available")
+    private fun bind() {
+        v3State.value = V3State.Pending
+        try {
+            val version = context.packageManager.getPackageInfo("ecarx.xsf.mediacenter", 0).longVersionCode
+            check(version == MEDIA_CENTER_VERSION_CODE) { "Unsupported MediaCenter version: $version" }
+            Log.i(TAG, "V3 binding OpenAPI service")
+            if (mutableRegistration.value == null) report("V3 connecting")
+            bound = context.bindService(Intent("ecarx.intent.action.OpenAPIService")
+                .setPackage("com.ecarx.sdk.openapi"), connection, Context.BIND_AUTO_CREATE)
+            if (!bound) v3Unavailable("OpenAPI bindService=false")
+        } catch (error: Exception) {
+            v3State.value = V3State.Failed
+            Log.w(TAG, "V3 bind failed: ${error.message}", error)
+            if (mutableRegistration.value == null) report("Native media unavailable: V3 ${error.message}")
+        }
     }
 
-    internal fun connectMedia(pool: IBinder): Unit = safely {
-        // Fail on a different protocol rather than send guessed transactions.
-        check(pool.interfaceDescriptor == POOL) { "Unsupported OpenAPI interface" }
-        val remote = checkNotNull(rpc(pool, POOL, 2, {
-            writeInt(Process.myPid()); writeInt(Process.myUid())
-            writeString(context.packageName); writeString("mediacenter")
-        }, { readStrongBinder() })) { "MediaCenter access unavailable" }
+    internal fun connectMedia(pool: IBinder) {
+        val existing = mutableRegistration.value
+        if (existing != null) {
+            Log.i(TAG, "V3 registerInMusic skipped: ${existing.path} already registered")
+            return
+        }
+        try {
+            check(pool.interfaceDescriptor == POOL) { "Unsupported OpenAPI interface" }
+            val remote = rpc(pool, POOL, 2, {
+                writeInt(Process.myPid()); writeInt(Process.myUid())
+                writeString(context.packageName); writeString("mediacenter")
+            }, { readStrongBinder() })
+            if (remote == null) {
+                v3Unavailable("getService (2) returned no MediaCenter Binder")
+                return
+            }
+            Log.i(TAG, "V3 getService (2): MediaCenter Binder received")
+            registerMedia(remote, RegistrationPath.V3)
+            v3State.value = V3State.Registered
+        } catch (error: Exception) {
+            v3State.value = V3State.Failed
+            Log.w(TAG, "V3 connection failed: ${error.message}", error)
+            if (mutableRegistration.value == null) report("Native media unavailable: V3 ${error.message}")
+        }
+    }
+
+    suspend fun awaitV3() = v3State.first { it != V3State.Pending }
+
+    suspend fun registerVoice(remote: IBinder, enabled: () -> Boolean): Registration? = withContext(workerDispatcher) {
+        when (voiceRegistrationPath(enabled() && !released, v3State.value)) {
+            RegistrationPath.V3 -> mutableRegistration.value
+            RegistrationPath.V4 -> mutableRegistration.value ?: try {
+                registerMedia(remote, RegistrationPath.V4)
+            } catch (error: Exception) {
+                report("Native media unavailable: V4 ${error.message}")
+                Log.w(TAG, "V4 registration failed", error)
+                throw error
+            }
+            null -> null
+        }
+    }
+
+    suspend fun unregisterV4() = withContext(workerDispatcher) {
+        mutableRegistration.value?.takeIf { it.path == RegistrationPath.V4 }?.let(::unregister)
+        Unit
+    }
+
+    private fun disconnectV3() {
+        if (mutableRegistration.value?.path == RegistrationPath.V3) {
+            mutableRegistration.value = null
+            metadataKey = null
+        }
+        if (!released) v3Unavailable("OpenAPI disconnected")
+    }
+
+    private fun v3Unavailable(reason: String) {
+        v3State.value = V3State.NoBinder
+        Log.i(TAG, "V3 unavailable: $reason")
+        if (mutableRegistration.value == null) report("Native media unavailable: V3 $reason")
+    }
+
+    private fun registerMedia(remote: IBinder, path: RegistrationPath): Registration {
         check(remote.interfaceDescriptor == MEDIA) { "Unsupported MediaCenter interface" }
         val registered = checkNotNull(rpc(remote, MEDIA, 19, {
             writeString(context.packageName); writeStrongBinder(clientBinder)
         }, { readStrongBinder() })) { "MediaCenter registration returned no token" }
-        media = remote
-        token = registered
-        check(rpc(remote, MEDIA, 7, {
-            writeStrongBinder(registered); writeIntArray(intArrayOf(ONLINE))
-        }, { readInt() != 0 })) { "MediaCenter rejected source type" }
-        rpc(remote, MEDIA, 8, { writeStrongBinder(registered); writeInt(ONLINE) }, { Unit })
-        mutableRegistration.value = Registration(remote, registered)
+        val current = Registration(remote, registered, path)
+        Log.i(TAG, "$path registerInMusic (19): token received")
+        try {
+            rpc(remote, MEDIA, 7, {
+                writeStrongBinder(registered); writeIntArray(intArrayOf(ONLINE))
+            }, { Unit })
+            Log.i(TAG, "$path updateMediaSourceTypeList (7): ONLINE")
+            rpc(remote, MEDIA, 8, { writeStrongBinder(registered); writeInt(ONLINE) }, { Unit })
+            Log.i(TAG, "$path updateCurrentSourceType (8): ONLINE")
+        } catch (error: Exception) {
+            unregister(current)
+            throw error
+        }
+        mutableRegistration.value = current
         metadataKey = null
-        report("Registered online source (6); source-list visibility needs vehicle verification")
+        report("Registered $path online source (6); source-list visibility needs vehicle verification")
         snapshot?.let(::publishOnWorker)
         if (wantsPlay) requestFocus()
+        return current
+    }
+
+    private fun unregister(current: Registration) {
+        if (mutableRegistration.value == current) {
+            mutableRegistration.value = null
+            metadataKey = null
+        }
+        try {
+            check(rpc(current.media, MEDIA, 4, { writeStrongBinder(current.token) }, { readInt() != 0 })) {
+                "MediaCenter rejected unregister"
+            }
+            report("${current.path} unregister (4): completed")
+        } catch (error: Exception) {
+            report("${current.path} unregister (4) failed: ${error.message}")
+            Log.w(TAG, "${current.path} unregister (4) failed", error)
+        }
     }
 
     private fun requestFocus(): Unit = safely {
-        val current = token ?: return@safely
-        val remote = media ?: return@safely
-        val accepted = rpc(remote, MEDIA, 5, { writeStrongBinder(current) }, { readInt() != 0 })
+        val current = mutableRegistration.value ?: return@safely
+        val accepted = rpc(current.media, MEDIA, 5, { writeStrongBinder(current.token) }, { readInt() != 0 })
+        Log.i(TAG, "${current.path} requestPlay (5): accepted=$accepted")
         if (!accepted) {
             report("MediaCenter denied playback focus")
             dispatch { pause() }
@@ -263,19 +343,19 @@ internal class FlymeMediaSource(private val context: Context, private val autoBi
 
     private fun publishOnWorker(value: PlaybackSnapshot): Unit = safely {
         if (value.isEnded || value.errorMessage != null) wantsPlay = false
-        val current = token ?: return@safely
-        val remote = media ?: return@safely
+        val current = mutableRegistration.value ?: return@safely
         val track = value.currentTrack
         val key = "${track?.id}|${track?.title}|${track?.artist}|${track?.album}|${track?.artworkUrl}|${value.durationMs}|${value.isPlaying}|${value.isBuffering}|${value.errorMessage}"
         if (key != metadataKey) {
-            check(rpc(remote, MEDIA, 6, {
-                writeStrongBinder(current); writeStrongBinder(infoBinder)
+            check(rpc(current.media, MEDIA, 6, {
+                writeStrongBinder(current.token); writeStrongBinder(infoBinder)
             }, { readInt() != 0 })) { "MediaCenter rejected playback metadata" }
             metadataKey = key
+            Log.i(TAG, "${current.path} updateMusicPlaybackState (6): published")
         }
         val now = SystemClock.elapsedRealtime()
         if (now - lastProgressTime >= 1000L) {
-            rpc(remote, MEDIA, 10, { writeStrongBinder(current); writeLong(value.positionMs.coerceAtLeast(0L)) }, { Unit })
+            rpc(current.media, MEDIA, 10, { writeStrongBinder(current.token); writeLong(value.positionMs.coerceAtLeast(0L)) }, { Unit })
             lastProgressTime = now
         }
     }
@@ -294,23 +374,33 @@ internal class FlymeMediaSource(private val context: Context, private val autoBi
 
     private fun report(message: String) {
         mutableStatus.value = message
-        Log.i("AM-FlymeMedia", message)
+        Log.i(TAG, message)
     }
 
     private inline fun safely(block: () -> Unit) {
         try { block() } catch (error: Exception) {
             report("Native media unavailable: ${error.message?.take(180) ?: error.javaClass.simpleName}")
-            Log.w("AM-FlymeMedia", "Native media operation failed", error)
+            Log.w(TAG, "${mutableRegistration.value?.path} native media operation failed", error)
         }
     }
 
     companion object {
+        private const val TAG = "AM-FlymeMedia"
         internal const val ONLINE = 6
         internal const val MEDIA_CENTER_VERSION_CODE = 26052922L
         internal const val POOL = "com.ecarx.sdk.openapi.IServicePool"
         internal const val MEDIA = "ecarx.xsf.mediacenter.IMediaCenterSvc"
         internal const val CLIENT = "ecarx.xsf.mediacenter.IMusicClient"
         internal const val INFO = "ecarx.xsf.mediacenter.IMusicPlaybackInfo"
+
+        internal fun voiceRegistrationPath(enabled: Boolean, v3: V3State): RegistrationPath? {
+            if (!enabled) return null
+            return when (v3) {
+                V3State.Registered -> RegistrationPath.V3
+                V3State.NoBinder -> RegistrationPath.V4
+                V3State.Pending, V3State.Failed -> null
+            }
+        }
 
         internal fun <T> rpc(remote: IBinder, descriptor: String, code: Int,
             write: Parcel.() -> Unit, read: Parcel.() -> T): T {

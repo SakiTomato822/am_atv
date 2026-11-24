@@ -25,7 +25,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
@@ -66,7 +65,10 @@ internal class FlymeVoiceBridge(
 
     fun start(scope: CoroutineScope, execute: suspend (FlymeVoiceCommand) -> Unit) {
         scope.launch {
-            request.collectLatest { if (it.enabled) runSession(it, execute) }
+            request.collectLatest {
+                if (it.enabled) runSession(it, execute)
+                else Log.i(TAG, "V4 voice disabled")
+            }
         }
     }
 
@@ -86,7 +88,7 @@ internal class FlymeVoiceBridge(
             override fun onNullBinding(name: ComponentName) = fail("service returned a null binding")
 
             private fun fail(reason: String) {
-                Log.w(TAG, "bindService: $reason ($OPENAPI_PACKAGE)")
+                Log.w(TAG, "V4 bindService: $reason ($OPENAPI_PACKAGE)")
                 session.cancel(reason)
             }
         }
@@ -99,7 +101,9 @@ internal class FlymeVoiceBridge(
         var bindingRequested = false
         var broker: IBinder? = null
         var readinessRegistered = false
+        var registrationRequested = false
         var declarationToken: IBinder? = null
+        var path = "V4"
         var step = "bindService"
         try {
             val bound = context.bindService(
@@ -111,7 +115,7 @@ internal class FlymeVoiceBridge(
                 Log.w(TAG, "bindService=false: V4 service unavailable in $OPENAPI_PACKAGE")
                 return@coroutineScope
             }
-            Log.i(TAG, "bindService=true")
+            Log.i(TAG, "V4 bindService=true")
             val remote = checkNotNull(withTimeoutOrNull(STARTUP_TIMEOUT) { connected.await() }) {
                 "ServiceConnection timed out"
             }
@@ -123,14 +127,14 @@ internal class FlymeVoiceBridge(
                 check(descriptor == BROKER) { "Unexpected broker descriptor: $descriptor" }
                 readinessRegistered = FlymeMediaSource.rpc(remote, BROKER, 2,
                     { writeStrongBinder(readinessCallback) }, { readInt() != 0 })
-                Log.i(TAG, "addRemoteServiceCallback=$readinessRegistered")
+                Log.i(TAG, "V4 addRemoteServiceCallback=$readinessRegistered")
                 FlymeMediaSource.rpc(remote, BROKER, 1, { writeStringArray(arrayOf(SERVICE)) }, { Unit })
-                Log.i(TAG, "init([$SERVICE]): completed (void)")
+                Log.i(TAG, "V4 init([$SERVICE]): completed (void)")
                 val available = FlymeMediaSource.rpc(remote, BROKER, 9, {}, { createStringArrayList() })
                 if (available?.contains(SERVICE) != true && readinessRegistered &&
                     withTimeoutOrNull(READY_TIMEOUT) { ready.await() } == null
                 ) {
-                    Log.i(TAG, "MediaCenter readiness callback timed out; checking broker result")
+                    Log.i(TAG, "V4 MediaCenter readiness callback timed out; checking broker result")
                 }
             }
             step = "getMainBinder"
@@ -138,11 +142,20 @@ internal class FlymeVoiceBridge(
                 checkNotNull(brokerCall(remote, step, "NoParam").binder) { "MediaCenter returned no Binder" }
             }
             step = "registerMusic"
-            val registration = checkNotNull(withTimeoutOrNull(STARTUP_TIMEOUT) {
-                mediaSource.registration.filterNotNull().first()
-            }) { "V3 registration unavailable: ${mediaSource.status.value}" }
-            check(mainBinder == registration.media) { "V4 and V3 returned different MediaCenter Binders" }
-            Log.i(TAG, "registerMusic: reused existing V3 registration (token present)")
+            check(withTimeoutOrNull(STARTUP_TIMEOUT) { mediaSource.awaitV3() } != null) {
+                "V3 MediaCenter lookup timed out"
+            }
+            registrationRequested = true
+            val registration = checkNotNull(mediaSource.registerVoice(mainBinder) { request.value == activeRequest }) {
+                "No MediaCenter registration available: ${mediaSource.status.value}"
+            }
+            path = registration.path.name
+            if (registration.path == FlymeMediaSource.RegistrationPath.V3) {
+                check(mainBinder == registration.media) { "V4 and V3 returned different MediaCenter Binders" }
+                Log.i(TAG, "V3 registerMusic: reused existing registration")
+            } else {
+                Log.i(TAG, "V4 registerMusic: registered using broker MediaCenter Binder")
+            }
             withContext(Dispatchers.IO) {
                 step = "registerEx"
                 brokerCall(remote, step, context.packageName, exCallback)
@@ -153,6 +166,7 @@ internal class FlymeVoiceBridge(
                     "MediaCenter did not acknowledge declaration"
                 }
             }
+            Log.i(TAG, "V4 voice declaration acknowledged using $path registration")
             setPhase(activeRequest, Phase.Declared)
             launch {
                 commands.receiveAsFlow().collectLatest { command ->
@@ -167,11 +181,11 @@ internal class FlymeVoiceBridge(
                 }
             }
             mediaSource.registration.first { it != registration }
-            Log.w(TAG, "registerMusic: V3 registration lost")
+            Log.w(TAG, "$path registerMusic: registration lost")
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            Log.w(TAG, "$step failed: ${error.message}", error)
+            Log.w(TAG, "$path $step failed: ${error.message}", error)
         } finally {
             commands.cancel()
             setPhase(activeRequest, Phase.Unavailable)
@@ -188,12 +202,16 @@ internal class FlymeVoiceBridge(
                             if (readinessRegistered) cleanup("removeRemoteServiceCallback") {
                                 val removed = FlymeMediaSource.rpc(remote, BROKER, 3,
                                     { writeStrongBinder(readinessCallback) }, { readInt() != 0 })
-                                Log.i(TAG, "removeRemoteServiceCallback=$removed")
+                                Log.i(TAG, "V4 removeRemoteServiceCallback=$removed")
                             }
                         }
                     }
                 } finally {
-                    if (bindingRequested) context.unbindService(connection)
+                    try {
+                        if (registrationRequested) mediaSource.unregisterV4()
+                    } finally {
+                        if (bindingRequested) context.unbindService(connection)
+                    }
                 }
             }
         }
@@ -238,7 +256,7 @@ internal class FlymeVoiceBridge(
             FlymeVoiceProtocol.writeMessage(method, param, ::writeString, ::writeByteArray)
             if (binder != null) writeStrongBinder(binder)
         }, { FlymeVoiceProtocol.readReply(this) })
-        Log.i(TAG, "$method: ${response?.describe() ?: "no reply"}")
+        Log.i(TAG, "V4 $method: ${response?.describe() ?: "no reply"}")
         check(response?.accepted == true) { "EAS rejected $method" }
         return response
     }
@@ -247,7 +265,7 @@ internal class FlymeVoiceBridge(
         try {
             action()
         } catch (error: Exception) {
-            Log.w(TAG, "$step failed: ${error.message}", error)
+            Log.w(TAG, "V4 $step failed: ${error.message}", error)
         }
     }
 

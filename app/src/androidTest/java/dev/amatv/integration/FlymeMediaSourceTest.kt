@@ -6,6 +6,7 @@ import android.os.Parcel
 import android.os.Process
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -17,7 +18,11 @@ import java.util.concurrent.TimeUnit
 class FlymeMediaSourceTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
 
-    @Test fun registersOwnIdentityAndOnlineTypeWithoutRequestingPlayback() {
+    @Test fun reusesV3RegistrationAndLeavesItActiveWhenVoiceStops() = verifyRegistration(useV3 = true)
+
+    @Test fun registersV4WithOnlineTypeAndUnregistersWhenVoiceStops() = verifyRegistration(useV3 = false)
+
+    private fun verifyRegistration(useV3: Boolean) = runBlocking {
         val source = FlymeMediaSource(context, autoBind = false)
         val operations = mutableListOf<Int>()
         val token = Binder()
@@ -37,18 +42,22 @@ class FlymeMediaSourceTest {
                     7 -> {
                         assertEquals(token, data.readStrongBinder())
                         assertArrayEquals(intArrayOf(6), data.createIntArray())
-                        reply.writeInt(1)
                     }
                     8 -> {
                         assertEquals(token, data.readStrongBinder())
                         assertEquals(6, data.readInt())
                     }
-                    4 -> reply.writeInt(1)
+                    4 -> {
+                        assertEquals(token, data.readStrongBinder())
+                        reply.writeInt(1)
+                    }
                     else -> fail("Unexpected transaction: $code")
                 }
+                assertEquals(0, data.dataAvail())
                 return true
             }
         }
+        var v3Binder: IBinder? = if (useV3) media else null
         val pool = object : Binder() {
             init { attachInterface(null, FlymeMediaSource.POOL) }
             override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
@@ -59,14 +68,35 @@ class FlymeMediaSourceTest {
                 assertEquals(context.packageName, data.readString())
                 assertEquals("mediacenter", data.readString())
                 requireNotNull(reply).writeNoException()
-                reply.writeStrongBinder(media)
+                reply.writeStrongBinder(v3Binder)
                 return true
             }
         }
         try {
             source.connectMedia(pool)
+            if (!useV3) {
+                assertNull(source.registerVoice(media) { false })
+                assertTrue(operations.isEmpty())
+            }
+            val registration = requireNotNull(source.registerVoice(media) { true })
+            assertEquals(if (useV3) FlymeMediaSource.RegistrationPath.V3 else FlymeMediaSource.RegistrationPath.V4,
+                registration.path)
+            assertEquals(token, registration.token)
             assertTrue(source.status.value.startsWith("Registered"))
+            assertEquals(registration, source.registration.value)
+            assertEquals(registration, source.registerVoice(media) { true })
+            v3Binder = media
+            source.connectMedia(pool)
+            assertEquals(registration, source.registration.value)
             assertEquals(listOf(19, 7, 8), operations)
+            source.unregisterV4()
+            if (useV3) {
+                assertEquals(registration, source.registration.value)
+                assertEquals(listOf(19, 7, 8), operations)
+            } else {
+                assertNull(source.registration.value)
+                assertEquals(listOf(19, 7, 8, 4), operations)
+            }
         } finally { source.release() }
     }
 
