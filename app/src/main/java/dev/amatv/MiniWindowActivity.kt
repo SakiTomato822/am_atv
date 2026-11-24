@@ -32,7 +32,8 @@ class MiniWindowActivity : MainActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (captionSetupAttempted || !WindowHosts.hasFlymeWindowMode() || !isInMultiWindowMode) return
+        // Flyme's small window is its own windowing mode (11), which isInMultiWindowMode does not count.
+        if (captionSetupAttempted || !WindowHosts.hasFlymeWindowMode()) return
         captionSetupAttempted = true
         // Flyme registers the caption in setPhoneWindow, during decor creation.
         window.decorView.doOnAttach { decor ->
@@ -80,7 +81,7 @@ class MiniWindowActivity : MainActivity() {
 
     private fun handleCaptionClick(view: View, decor: View, fullButtonId: Int): Boolean {
         val intercepted = shouldInterceptCaptionClick(
-            view.id, fullButtonId, view.rootView === decor && isInMultiWindowMode,
+            view.id, fullButtonId, view.rootView === decor,
         )
         Log.i(WINDOW_LOG_TAG, "Flyme caption click id=${view.id} intercepted=$intercepted")
         if (intercepted) {

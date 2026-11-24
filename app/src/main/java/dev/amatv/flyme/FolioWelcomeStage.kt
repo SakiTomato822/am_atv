@@ -267,7 +267,8 @@ internal fun SharedDemoPlayerStage(
     }
     val posterFraction by animateFloatAsState(
         targetValue = if (posterMode) 1f else 0f,
-        animationSpec = if (lowPerformance || !animated) tween(160) else spring(0.84f, 300f),
+        // A 0..1 morph: a spring would overshoot past 1 and turn the cover's corner radius negative (crash).
+        animationSpec = if (lowPerformance || !animated) tween(160) else tween(560, easing = FolioMotion.PageEasing),
         label = "demo-poster-frac",
     )
 
