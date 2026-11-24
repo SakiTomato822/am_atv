@@ -69,7 +69,6 @@ import dev.amatv.R
 import dev.amatv.core.PlaybackEvent
 import dev.amatv.core.shouldShowWelcome
 import dev.amatv.i18n.AppText
-import dev.amatv.core.LyricBackgroundStyle
 import dev.amatv.integration.FlymeVoiceDestination
 import dev.amatv.integration.MusicConnectionState
 import dev.amatv.integration.MusicKitWebAuthActivity
@@ -223,10 +222,8 @@ fun FolioApp(
             if (request == null) return@collect
             when (request) {
                 is FlymeVoiceDestination.NowPlaying -> {
-                    if (request.lyrics) {
-                        FolioPlayerSession.queueOpenState.value = false
-                        settingsStore.setLyricStyle(LyricBackgroundStyle.Flow)
-                    }
+                    // Both styles show lyrics: keep the user's chosen style, just close the queue.
+                    if (request.lyrics) FolioPlayerSession.queueOpenState.value = false
                     playerOrigin = null
                     playerOpen = true
                 }
