@@ -148,7 +148,7 @@ jobs:
           PY
           (cd dist && sha256sum AMFolio-arm64.apk > SHA256SUMS.txt)
           cat > dist/release-notes.md <<'EOF'
-          AM Folio 15.0 RC1：Flyme Auto 上的非官方 Apple Music 客户端，ARM64，Android 9+。
+          AM Folio 15.0 RC1：为车载与便携屏幕而设计的非官方 Apple Music 客户端，ARM64，Android 9+。
 
           15 系列的第一个候选版。功能已经基本齐了，接下来以修问题为主。
 
