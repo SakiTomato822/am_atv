@@ -46,7 +46,7 @@ internal object WindowHosts {
      * `start_windowmode`; `-2` forces full screen. Elsewhere, a device with free-form windows gets a
      * portrait window through launch bounds; anything else simply opens full screen.
      */
-    fun switch(from: Activity, toMini: Boolean) {
+    fun switch(from: Activity, toMini: Boolean): Boolean {
         val app = from.applicationContext
         val target = if (toMini) MiniWindowActivity::class.java else MainActivity::class.java
         val intent = Intent(app, target).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -57,11 +57,13 @@ internal object WindowHosts {
                 if (toMini) putBoolean(KEY_START_WINDOW_MODE, true) else putInt(KEY_START_WINDOW_MODE, FORCE_FULL_SCREEN)
             }
         }
-        try {
+        return try {
             app.startActivity(intent, options)
+            true
         } catch (e: RuntimeException) {
             // The current window stays as it is; nothing has been closed yet.
-            Log.w(TAG, "Could not open the ${if (toMini) "small" else "full-screen"} window", e)
+            Log.w(WINDOW_LOG_TAG, "Could not open the ${if (toMini) "small" else "full-screen"} window", e)
+            false
         }
     }
 
@@ -95,4 +97,4 @@ internal object WindowHosts {
     private const val FORCE_FULL_SCREEN = -2
 }
 
-private const val TAG = "AmWindow"
+internal const val WINDOW_LOG_TAG = "AmWindow"
