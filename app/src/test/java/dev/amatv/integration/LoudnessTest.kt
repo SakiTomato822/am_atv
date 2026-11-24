@@ -48,7 +48,10 @@ class LoudnessTest {
         assertEquals(-0.5f, highPeak.gainFor(LoudnessMode.Standard), 0f)
         assertEquals(5.5f, highPeak.gainFor(LoudnessMode.Loud), 0f)
         assertEquals(8.5f, highPeak.gainFor(LoudnessMode.Loudest), 0f)
-        assertEquals(-5f, SoundCheck(-9f, -0.5f).gainFor(LoudnessMode.Loud), 0f)
+        assertEquals(-11f / 3f, SoundCheck(-9f, -0.5f).gainFor(LoudnessMode.Loud), 0.001f)
+        // Luna Say Maybe (preview tag -11.46 dB) versus 还有什么更好的 (-5.08 dB) on the car.
+        assertEquals(-4.488f, SoundCheck(-11.463141f, -0.3007f).gainFor(LoudnessMode.Loud), 0.001f)
+        assertEquals(-1.077f, SoundCheck(-5.07721f, -0.0786f).gainFor(LoudnessMode.Loud), 0.001f)
     }
 
     @Test fun balancesTheFourMeasuredTracksWithinOneAndAHalfDbOfTheLoudReference() {
@@ -108,7 +111,7 @@ class LoudnessTest {
             LoudnessLookup(null, "missing", "lookup-pending"), pending,
         )
         assertEquals(0f, state.gainAt(playing = true, nowMs = 20L), 0f)
-        pending.complete(LoudnessLookup(SoundCheck(-8f, -1f), "network"))
+        pending.complete(LoudnessLookup(SoundCheck(-10f, -1f), "network"))
         assertEquals(0f, state.gainAt(playing = true, nowMs = 100L), 0f)
         assertEquals(-2f, state.gainAt(playing = true, nowMs = 600L), 0f)
         assertEquals(-4f, state.gainAt(playing = true, nowMs = 1_100L), 0f)
