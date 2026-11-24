@@ -1,12 +1,11 @@
 package dev.amatv.integration
 
 import android.app.PendingIntent
-import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
-import android.content.ServiceConnection
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Binder
+import android.os.DeadObjectException
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
@@ -16,11 +15,14 @@ import android.os.Process
 import android.os.SystemClock
 import android.util.Log
 import dev.amatv.R
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.android.asCoroutineDispatcher
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
@@ -29,23 +31,37 @@ import java.util.concurrent.atomic.AtomicReference
  * Uses our real UID/package; the system still decides whether to grant access.
  * No vendor classes, credentials or binaries are embedded. See docs/flyme-auto.md.
  */
-internal class FlymeMediaSource(private val context: Context, private val autoBind: Boolean = true) {
+internal class FlymeMediaSource(
+    private val context: Context,
+    private val autoBind: Boolean = true,
+    private val mediaCenterVersion: () -> Long = {
+        context.packageManager.getPackageInfo("ecarx.xsf.mediacenter", 0).longVersionCode
+    },
+) {
     private val thread = HandlerThread("AM-FlymeMedia").apply { start() }
     private val worker = Handler(thread.looper)
     private val workerDispatcher = worker.asCoroutineDispatcher()
+    private val scope = CoroutineScope(workerDispatcher)
     private val main = Handler(context.mainLooper)
-    private val mutableStatus = MutableStateFlow("Not connected")
-    val status = mutableStatus.asStateFlow()
-    enum class V3State { Pending, Registered, NoBinder, Failed }
     enum class RegistrationPath { V3, V4 }
-    data class Registration(val media: IBinder, val token: IBinder, val path: RegistrationPath)
-    private val mutableRegistration = MutableStateFlow<Registration?>(null)
-    val registration = mutableRegistration.asStateFlow()
-    private val v3State = MutableStateFlow(if (autoBind) V3State.Pending else V3State.NoBinder)
+    enum class ConnectionState { Disconnected, Connecting, Connected }
+    data class Status(val path: RegistrationPath, val state: ConnectionState)
+    private val mutableStatus = MutableStateFlow(Status(RegistrationPath.V3, ConnectionState.Disconnected))
+    val status = mutableStatus.asStateFlow()
+    class Registration(val media: IBinder, val token: IBinder, val path: RegistrationPath)
+    class VoiceSession(val broker: FlymeOpenApiBroker, val registration: Registration)
+    private val mutableVoiceSession = MutableStateFlow<VoiceSession?>(null)
+    val voiceSession = mutableVoiceSession.asStateFlow()
+    private var registration: Registration? = null
+    private var broker: FlymeOpenApiBroker? = null
+    private var brokerMedia: IBinder? = null
+    private var brokerJob: Job? = null
     @Volatile private var callbacks: PlaybackMediaSession.Callbacks? = null
     @Volatile private var snapshot: PlaybackSnapshot? = null
     @Volatile private var released = false
-    private var bound = false
+    private var started = false
+    private var brokerStarted = false
+    private var voiceRequested = false
     private var wantsPlay = false
     private var metadataKey: String? = null
     private var lastProgressTime = 0L
@@ -119,7 +135,13 @@ internal class FlymeMediaSource(private val context: Context, private val autoBi
                 8 -> { // selecting this source opens its UI; it never silently starts audio
                     val source = data.readInt()
                     val accepted = !released && source == ONLINE && launchIntent != null
-                    if (accepted) main.post { if (!released) runCatching { launchIntent?.send() } }
+                    if (accepted) main.post {
+                        if (!released) try {
+                            launchIntent?.send()
+                        } catch (error: PendingIntent.CanceledException) {
+                            Log.w(TAG, "Unable to open selected media source", error)
+                        }
+                    }
                     reply.writeInt(if (accepted) 1 else 0)
                 }
                 10 -> reply.writeStrongBinder(infoBinder)
@@ -140,36 +162,42 @@ internal class FlymeMediaSource(private val context: Context, private val autoBi
         }
     }
 
-    private val connection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName, binder: IBinder) {
-            worker.post { if (!released) connectMedia(binder) }
-        }
-        override fun onServiceDisconnected(name: ComponentName) {
-            worker.post { disconnectV3() }
-        }
-        override fun onBindingDied(name: ComponentName) {
-            worker.post {
-                if (!released) {
-                    unbind()
-                    disconnectV3()
-                    bind()
-                }
-            }
-        }
-        override fun onNullBinding(name: ComponentName) {
-            worker.post { v3Unavailable("OpenAPI returned no service") }
-        }
-    }
+    private val v3Binding = FlymeOpenApiBinding(
+        context, worker, "ecarx.intent.action.OpenAPIService", RegistrationPath.V3,
+        onConnected = ::connectV3,
+        onDisconnected = ::forgetRegistration,
+        onUnavailable = { selectPath(v3HasBinder = false) },
+    )
+    private val v4Binding = FlymeOpenApiBinding(
+        context, worker, FlymeOpenApiBroker.ACTION, RegistrationPath.V4,
+        onConnected = ::connectV4,
+        onDisconnected = ::disconnectV4,
+        onUnavailable = ::disconnectV4,
+    )
 
     fun setCallbacks(value: PlaybackMediaSession.Callbacks?) {
         callbacks = value
-        if (value != null && autoBind) worker.post { if (!released && !bound) bind() }
+        if (value != null && autoBind) worker.post {
+            if (!released && !started) {
+                started = true
+                startV3()
+            }
+        }
+    }
+
+    fun setVoiceEnabled(enabled: Boolean) = worker.post {
+        voiceRequested = enabled
+        if (!released && enabled && registration?.path == RegistrationPath.V3) startBroker()
+    }
+
+    fun voiceConnectionDied(session: VoiceSession) = worker.post {
+        if (!released && broker === session.broker) v4Binding.disconnected("DeadObjectException")
     }
 
     fun playbackRequested() = worker.post {
         if (!released) {
             wantsPlay = true
-            requestFocus()
+            safely { requestFocus() }
         }
     }
 
@@ -181,7 +209,7 @@ internal class FlymeMediaSource(private val context: Context, private val autoBi
         pendingSnapshot.set(value)
         if (publishQueued.compareAndSet(false, true)) worker.post {
             publishQueued.set(false)
-            pendingSnapshot.getAndSet(null)?.let { if (!released) publishOnWorker(it) }
+            pendingSnapshot.getAndSet(null)?.let { if (!released) safely { publishOnWorker(it) } }
         }
     }
 
@@ -192,7 +220,7 @@ internal class FlymeMediaSource(private val context: Context, private val autoBi
             wantsPlay = false
             metadataKey = null
             safely {
-                mutableRegistration.value?.let { current ->
+                registration?.let { current ->
                     rpc(current.media, MEDIA, 6,
                         { writeStrongBinder(current.token); writeStrongBinder(infoBinder) }, { readInt() })
                 }
@@ -205,91 +233,140 @@ internal class FlymeMediaSource(private val context: Context, private val autoBi
         callbacks = null
         pendingSnapshot.set(null)
         worker.post {
-            mutableRegistration.value?.let(::unregister)
-            unbind()
+            registration?.let(::unregister)
+            scope.cancel()
+            v3Binding.unbind()
+            v4Binding.unbind()
             thread.quitSafely()
         }
     }
 
-    private fun bind() {
-        v3State.value = V3State.Pending
-        try {
-            val version = context.packageManager.getPackageInfo("ecarx.xsf.mediacenter", 0).longVersionCode
-            check(version == MEDIA_CENTER_VERSION_CODE) { "Unsupported MediaCenter version: $version" }
-            Log.i(TAG, "V3 binding OpenAPI service")
-            if (mutableRegistration.value == null) report("V3 connecting")
-            bound = context.bindService(Intent("ecarx.intent.action.OpenAPIService")
-                .setPackage("com.ecarx.sdk.openapi"), connection, Context.BIND_AUTO_CREATE)
-            if (!bound) v3Unavailable("OpenAPI bindService=false")
-        } catch (error: Exception) {
-            v3State.value = V3State.Failed
-            Log.w(TAG, "V3 bind failed: ${error.message}", error)
-            if (mutableRegistration.value == null) report("Native media unavailable: V3 ${error.message}")
+    private fun startV3() {
+        val version = try {
+            mediaCenterVersion()
+        } catch (error: PackageManager.NameNotFoundException) {
+            Log.i(TAG, "V3 MediaCenter package unavailable", error)
+            selectPath(v3HasBinder = false)
+            return
+        }
+        if (version == MEDIA_CENTER_VERSION_CODE) {
+            updateStatus(ConnectionState.Connecting)
+            v3Binding.bind()
+        } else {
+            Log.i(TAG, "V3 unsupported MediaCenter version: $version")
+            selectPath(v3HasBinder = false)
         }
     }
 
-    internal fun connectMedia(pool: IBinder) {
-        val existing = mutableRegistration.value
-        if (existing != null) {
-            Log.i(TAG, "V3 registerInMusic skipped: ${existing.path} already registered")
-            return
-        }
+    private fun connectV3(pool: IBinder, reconnecting: Boolean) {
+        if (released) return
+        updateStatus(ConnectionState.Connecting)
         try {
             check(pool.interfaceDescriptor == POOL) { "Unsupported OpenAPI interface" }
             val remote = rpc(pool, POOL, 2, {
                 writeInt(Process.myPid()); writeInt(Process.myUid())
                 writeString(context.packageName); writeString("mediacenter")
             }, { readStrongBinder() })
-            if (remote == null) {
-                v3Unavailable("getService (2) returned no MediaCenter Binder")
-                return
+            when (selectPath(v3HasBinder = remote != null)) {
+                RegistrationPath.V3 -> {
+                    registerMedia(checkNotNull(remote), RegistrationPath.V3, reconnecting)
+                    if (voiceRequested) startBroker()
+                    updateVoiceSession()
+                }
+                RegistrationPath.V4 -> Log.i(TAG, "V3 getService (2) returned no MediaCenter Binder")
             }
-            Log.i(TAG, "V3 getService (2): MediaCenter Binder received")
-            registerMedia(remote, RegistrationPath.V3)
-            v3State.value = V3State.Registered
+        } catch (error: DeadObjectException) {
+            Log.w(TAG, "V3 connection lost during MediaCenter setup", error)
+            v3Binding.disconnected("DeadObjectException")
         } catch (error: Exception) {
-            v3State.value = V3State.Failed
-            Log.w(TAG, "V3 connection failed: ${error.message}", error)
-            if (mutableRegistration.value == null) report("Native media unavailable: V3 ${error.message}")
+            Log.w(TAG, "V3 MediaCenter setup failed", error)
+            updateStatus(ConnectionState.Disconnected)
         }
     }
 
-    suspend fun awaitV3() = v3State.first { it != V3State.Pending }
+    private fun selectPath(v3HasBinder: Boolean): RegistrationPath {
+        val path = registrationPath(v3HasBinder)
+        if (!released && path == RegistrationPath.V4) {
+            v3Binding.unbind()
+            mutableStatus.value = Status(path, ConnectionState.Connecting)
+            val media = brokerMedia
+            if (media != null) completeV4Registration(media, reconnecting = true)
+            else if (!brokerStarted) startBroker()
+            else updateStatus(ConnectionState.Disconnected)
+        }
+        return path
+    }
 
-    suspend fun registerVoice(remote: IBinder, enabled: () -> Boolean): Registration? = withContext(workerDispatcher) {
-        when (voiceRegistrationPath(enabled() && !released, v3State.value)) {
-            RegistrationPath.V3 -> mutableRegistration.value
-            RegistrationPath.V4 -> mutableRegistration.value ?: try {
-                registerMedia(remote, RegistrationPath.V4)
-            } catch (error: Exception) {
-                report("Native media unavailable: V4 ${error.message}")
-                Log.w(TAG, "V4 registration failed", error)
+    private fun startBroker() {
+        if (brokerStarted) return
+        brokerStarted = true
+        v4Binding.bind()
+    }
+
+    private fun connectV4(remote: IBinder, reconnecting: Boolean) {
+        if (released) return
+        if (status.value.path == RegistrationPath.V4) updateStatus(ConnectionState.Connecting)
+        brokerJob = scope.launch {
+            val connected = FlymeOpenApiBroker(remote)
+            try {
+                val media = connected.mainBinder()
+                broker = connected
+                brokerMedia = media
+                if (status.value.path == RegistrationPath.V4) completeV4Registration(media, reconnecting)
+                else updateVoiceSession()
+            } catch (error: CancellationException) {
                 throw error
+            } catch (error: DeadObjectException) {
+                Log.w(TAG, "V4 connection lost during MediaCenter setup", error)
+                v4Binding.disconnected("DeadObjectException")
+            } catch (error: Exception) {
+                Log.w(TAG, "V4 MediaCenter setup failed", error)
+                disconnectV4()
             }
-            null -> null
         }
     }
 
-    suspend fun unregisterV4() = withContext(workerDispatcher) {
-        mutableRegistration.value?.takeIf { it.path == RegistrationPath.V4 }?.let(::unregister)
-        Unit
-    }
-
-    private fun disconnectV3() {
-        if (mutableRegistration.value?.path == RegistrationPath.V3) {
-            mutableRegistration.value = null
-            metadataKey = null
+    private fun completeV4Registration(media: IBinder, reconnecting: Boolean) {
+        try {
+            registerMedia(media, RegistrationPath.V4, reconnecting)
+            updateVoiceSession()
+        } catch (error: DeadObjectException) {
+            Log.w(TAG, "V4 connection lost during MediaCenter registration", error)
+            v4Binding.disconnected("DeadObjectException")
+        } catch (error: Exception) {
+            Log.w(TAG, "V4 MediaCenter registration failed", error)
+            updateStatus(ConnectionState.Disconnected)
         }
-        if (!released) v3Unavailable("OpenAPI disconnected")
     }
 
-    private fun v3Unavailable(reason: String) {
-        v3State.value = V3State.NoBinder
-        Log.i(TAG, "V3 unavailable: $reason")
-        if (mutableRegistration.value == null) report("Native media unavailable: V3 $reason")
+    private fun disconnectV4() {
+        brokerJob?.cancel()
+        broker = null
+        brokerMedia = null
+        mutableVoiceSession.value = null
+        if (status.value.path == RegistrationPath.V4) forgetRegistration()
     }
 
-    private fun registerMedia(remote: IBinder, path: RegistrationPath): Registration {
+    private fun forgetRegistration() {
+        registration = null
+        metadataKey = null
+        lastProgressTime = 0L
+        mutableVoiceSession.value = null
+        updateStatus(ConnectionState.Disconnected)
+    }
+
+    private fun updateVoiceSession() {
+        val connected = broker ?: return
+        val current = registration ?: return
+        if (brokerMedia != current.media) {
+            Log.w(TAG, "V4 broker and ${current.path} registration returned different MediaCenter Binders")
+            return
+        }
+        mutableVoiceSession.value = VoiceSession(connected, current)
+    }
+
+    private fun registerMedia(remote: IBinder, path: RegistrationPath, reconnecting: Boolean) {
+        check(registration == null) { "MediaCenter already registered" }
         check(remote.interfaceDescriptor == MEDIA) { "Unsupported MediaCenter interface" }
         val registered = checkNotNull(rpc(remote, MEDIA, 19, {
             writeString(context.packageName); writeStrongBinder(clientBinder)
@@ -303,47 +380,48 @@ internal class FlymeMediaSource(private val context: Context, private val autoBi
             Log.i(TAG, "$path updateMediaSourceTypeList (7): ONLINE")
             rpc(remote, MEDIA, 8, { writeStrongBinder(registered); writeInt(ONLINE) }, { Unit })
             Log.i(TAG, "$path updateCurrentSourceType (8): ONLINE")
+        } catch (error: DeadObjectException) {
+            throw error
         } catch (error: Exception) {
             unregister(current)
             throw error
         }
-        mutableRegistration.value = current
+        registration = current
         metadataKey = null
-        report("Registered $path online source (6); source-list visibility needs vehicle verification")
-        snapshot?.let(::publishOnWorker)
-        if (wantsPlay) requestFocus()
-        return current
+        Log.i(TAG, "Registered $path online source (6)")
+        safely {
+            val latest = snapshot
+            latest?.let(::publishOnWorker)
+            if (if (reconnecting) latest?.isPlaying == true else wantsPlay) requestFocus()
+        }
+        if (registration == current) updateStatus(ConnectionState.Connected)
     }
 
     private fun unregister(current: Registration) {
-        if (mutableRegistration.value == current) {
-            mutableRegistration.value = null
-            metadataKey = null
-        }
+        if (registration == current) forgetRegistration()
         try {
             check(rpc(current.media, MEDIA, 4, { writeStrongBinder(current.token) }, { readInt() != 0 })) {
                 "MediaCenter rejected unregister"
             }
-            report("${current.path} unregister (4): completed")
+            Log.i(TAG, "${current.path} unregister (4): completed")
         } catch (error: Exception) {
-            report("${current.path} unregister (4) failed: ${error.message}")
             Log.w(TAG, "${current.path} unregister (4) failed", error)
         }
     }
 
-    private fun requestFocus(): Unit = safely {
-        val current = mutableRegistration.value ?: return@safely
+    private fun requestFocus() {
+        val current = registration ?: return
         val accepted = rpc(current.media, MEDIA, 5, { writeStrongBinder(current.token) }, { readInt() != 0 })
         Log.i(TAG, "${current.path} requestPlay (5): accepted=$accepted")
         if (!accepted) {
-            report("MediaCenter denied playback focus")
+            Log.w(TAG, "MediaCenter denied playback focus")
             dispatch { pause() }
         }
     }
 
-    private fun publishOnWorker(value: PlaybackSnapshot): Unit = safely {
+    private fun publishOnWorker(value: PlaybackSnapshot) {
         if (value.isEnded || value.errorMessage != null) wantsPlay = false
-        val current = mutableRegistration.value ?: return@safely
+        val current = registration ?: return
         val track = value.currentTrack
         val key = "${track?.id}|${track?.title}|${track?.artist}|${track?.album}|${track?.artworkUrl}|${value.durationMs}|${value.isPlaying}|${value.isBuffering}|${value.errorMessage}"
         if (key != metadataKey) {
@@ -367,20 +445,20 @@ internal class FlymeMediaSource(private val context: Context, private val autoBi
         return 1
     }
 
-    private fun unbind() {
-        if (bound) runCatching { context.unbindService(connection) }
-        bound = false
-    }
-
-    private fun report(message: String) {
-        mutableStatus.value = message
-        Log.i(TAG, message)
+    private fun updateStatus(state: ConnectionState) {
+        mutableStatus.value = status.value.copy(state = state)
     }
 
     private inline fun safely(block: () -> Unit) {
-        try { block() } catch (error: Exception) {
-            report("Native media unavailable: ${error.message?.take(180) ?: error.javaClass.simpleName}")
-            Log.w(TAG, "${mutableRegistration.value?.path} native media operation failed", error)
+        try {
+            block()
+        } catch (error: DeadObjectException) {
+            val path = status.value.path
+            Log.w(TAG, "$path MediaCenter Binder died", error)
+            val binding = if (path == RegistrationPath.V4) v4Binding else v3Binding
+            binding.disconnected("DeadObjectException")
+        } catch (error: Exception) {
+            Log.w(TAG, "${status.value.path} native media operation failed", error)
         }
     }
 
@@ -393,14 +471,8 @@ internal class FlymeMediaSource(private val context: Context, private val autoBi
         internal const val CLIENT = "ecarx.xsf.mediacenter.IMusicClient"
         internal const val INFO = "ecarx.xsf.mediacenter.IMusicPlaybackInfo"
 
-        internal fun voiceRegistrationPath(enabled: Boolean, v3: V3State): RegistrationPath? {
-            if (!enabled) return null
-            return when (v3) {
-                V3State.Registered -> RegistrationPath.V3
-                V3State.NoBinder -> RegistrationPath.V4
-                V3State.Pending, V3State.Failed -> null
-            }
-        }
+        internal fun registrationPath(v3HasBinder: Boolean) =
+            if (v3HasBinder) RegistrationPath.V3 else RegistrationPath.V4
 
         internal fun <T> rpc(remote: IBinder, descriptor: String, code: Int,
             write: Parcel.() -> Unit, read: Parcel.() -> T): T {

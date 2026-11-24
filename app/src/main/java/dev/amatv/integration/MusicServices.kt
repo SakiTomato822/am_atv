@@ -58,7 +58,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
     private val songSpectrum = SongAudioSpectrum(appContext, bridge::audioSessionId)
     private val mediaSession = PlaybackMediaSession(appContext)
     private val flymeMediaSource = if (BuildConfig.FLYME_NATIVE_MEDIA) FlymeMediaSource(appContext) else null
-    val nativeMediaStatus get() = flymeMediaSource?.status
+    internal val nativeMediaStatus get() = flymeMediaSource?.status
     internal val flymeVoice = flymeMediaSource?.let { FlymeVoiceBridge(appContext, PlaybackPreferences(appContext), it) }
     private var systemPlaybackCallbacks: PlaybackMediaSession.Callbacks? = null
     private val playbackPreparation = Mutex()

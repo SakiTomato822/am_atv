@@ -9,6 +9,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
@@ -18,12 +19,22 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class FlymeVoiceBridgeTest {
+    private fun isolatedContext(prefix: String) = object : ContextWrapper(
+        InstrumentationRegistry.getInstrumentation().targetContext,
+    ) {
+        override fun getSharedPreferences(name: String, mode: Int) =
+            super.getSharedPreferences("${prefix}_$name", mode)
+    }
+
     @Test fun frameworkMessageRoundTripsThroughAndroidParcel() {
         val parcel = Parcel.obtain()
         try {
@@ -68,17 +79,14 @@ class FlymeVoiceBridgeTest {
         val target = InstrumentationRegistry.getInstrumentation().targetContext
         val intent = Intent("com.ecarx.easframework.intent.action.EASFRAMEWORK").setPackage("com.ecarx.sdk.openapi")
         assumeTrue(target.packageManager.resolveService(intent, 0) == null)
-        val isolatedContext = object : ContextWrapper(target) {
-            override fun getSharedPreferences(name: String, mode: Int) =
-                super.getSharedPreferences("voice_test_$name", mode)
-        }
-        val preferences = PlaybackPreferences(isolatedContext)
+        val preferences = PlaybackPreferences(isolatedContext("voice_test"))
         preferences.flymeVoiceEnabled = false
-        val source = FlymeMediaSource(target, autoBind = false)
+        val source = FlymeMediaSource(target)
         val voice = FlymeVoiceBridge(target, preferences, source)
         val scope = CoroutineScope(Dispatchers.Main)
         try {
             assertEquals(FlymeVoiceBridge.Phase.Off, voice.status.value.phase)
+            source.setCallbacks(PlaybackMediaSession.Callbacks(play = {}, pause = {}, next = {}, previous = {}, seekTo = {}))
             withContext(Dispatchers.Main) {
                 voice.start(scope) { error("A voice command cannot arrive without the broker") }
                 voice.setEnabled(true)
@@ -91,8 +99,98 @@ class FlymeVoiceBridgeTest {
             assertEquals(FlymeVoiceBridge.Phase.Off, voice.status.value.phase)
             assertFalse(preferences.flymeVoiceEnabled)
         } finally {
-            source.release()
             scope.coroutineContext.job.cancelAndJoin()
+            source.release()
+        }
+    }
+
+    @Test fun voiceUsesResidentRegistrationAndRestoresDeclarationAfterDisconnect() = runBlocking {
+        val target = InstrumentationRegistry.getInstrumentation().targetContext
+        val services = FakeFlymeServices(isolatedContext("voice_reconnect_test"))
+        val preferences = PlaybackPreferences(services).apply { flymeVoiceEnabled = false }
+        val source = services.startSource()
+        val voice = FlymeVoiceBridge(services, preferences, source)
+        val scope = CoroutineScope(Dispatchers.Main)
+        val commands = Channel<FlymeVoiceCommand>(Channel.UNLIMITED)
+        val firstMedia = FakeFlymeMediaCenter(target)
+        val firstBroker = FakeFlymeBroker(firstMedia)
+        try {
+            voice.start(scope) { commands.send(it) }
+            services.nextBinding(FakeFlymeServices.V3_ACTION).connect(services.pool(null))
+            val binding = services.nextBinding(FlymeOpenApiBroker.ACTION)
+            binding.connect(firstBroker)
+            source.awaitState(FlymeMediaSource.RegistrationPath.V4, FlymeMediaSource.ConnectionState.Connected)
+            assertEquals(FlymeVoiceBridge.Phase.Off, voice.status.value.phase)
+            assertEquals(listOf(2, 1, 9, 4, 3), firstBroker.transactions)
+
+            withContext(Dispatchers.Main) { voice.setEnabled(true) }
+            withTimeout(5_000) { voice.status.first { it.phase == FlymeVoiceBridge.Phase.Declared } }
+            val originalCallback = firstBroker.callback
+            assertEquals(0, firstBroker.requestWidgetList())
+            firstBroker.sendPlay()
+            assertEquals(FlymeVoiceCommand.Control.Play, withTimeout(5_000) { commands.receive() })
+            val lastSemantic = voice.status.value.lastSemanticAt
+
+            withContext(Dispatchers.Main) { voice.setEnabled(false) }
+            assertEquals(Unit, firstBroker.cancellations.poll(5, TimeUnit.SECONDS))
+            firstBroker.sendPlay()
+            assertEquals(lastSemantic, voice.status.value.lastSemanticAt)
+            assertTrue(commands.tryReceive().isFailure)
+            assertEquals(listOf(19, 7, 8), firstMedia.operations)
+            assertEquals(listOf("getMainBinder", "registerEx", "declareVrSemanticsCapability", "cancelVrSemanticsCapability"),
+                firstBroker.methods)
+            assertFalse(binding in services.unbound)
+
+            withContext(Dispatchers.Main) { voice.setEnabled(true) }
+            withTimeout(5_000) { voice.status.first { it.phase == FlymeVoiceBridge.Phase.Declared } }
+            assertSame(originalCallback, firstBroker.callback)
+            assertEquals(listOf(19, 7, 8), firstMedia.operations)
+
+            binding.disconnect()
+            withTimeout(5_000) { voice.status.first { it.phase == FlymeVoiceBridge.Phase.Unavailable } }
+            val secondMedia = FakeFlymeMediaCenter(target)
+            val secondBroker = FakeFlymeBroker(secondMedia)
+            binding.connect(secondBroker)
+            withTimeout(5_000) { voice.status.first { it.phase == FlymeVoiceBridge.Phase.Declared } }
+            assertEquals(listOf(19, 7, 8), secondMedia.operations)
+            assertEquals(listOf("getMainBinder", "registerEx", "declareVrSemanticsCapability"), secondBroker.methods)
+            assertSame(originalCallback, secondBroker.callback)
+            secondBroker.sendPlay()
+            assertEquals(FlymeVoiceCommand.Control.Play, withTimeout(5_000) { commands.receive() })
+        } finally {
+            scope.coroutineContext.job.cancelAndJoin()
+            source.release()
+        }
+    }
+
+    @Test fun v3VoiceUsesTheExistingTokenWithoutRegisteringV4Media() = runBlocking {
+        val services = FakeFlymeServices(isolatedContext("v3_voice_test"))
+        val preferences = PlaybackPreferences(services).apply { flymeVoiceEnabled = false }
+        val source = services.startSource()
+        val voice = FlymeVoiceBridge(services, preferences, source)
+        val scope = CoroutineScope(Dispatchers.Main)
+        val media = FakeFlymeMediaCenter(services)
+        val broker = FakeFlymeBroker(media)
+        try {
+            voice.start(scope) { error("No voice command sent") }
+            services.nextBinding(FakeFlymeServices.V3_ACTION).connect(services.pool(media))
+            source.awaitState(FlymeMediaSource.RegistrationPath.V3, FlymeMediaSource.ConnectionState.Connected)
+            assertEquals(listOf(FakeFlymeServices.V3_ACTION), services.bindActions)
+
+            withContext(Dispatchers.Main) { voice.setEnabled(true) }
+            services.nextBinding(FlymeOpenApiBroker.ACTION).connect(broker)
+            withTimeout(5_000) { voice.status.first { it.phase == FlymeVoiceBridge.Phase.Declared } }
+            assertEquals(listOf(19, 7, 8), media.operations)
+            assertEquals(listOf("getMainBinder", "registerEx", "declareVrSemanticsCapability"), broker.methods)
+
+            withContext(Dispatchers.Main) { voice.setEnabled(false) }
+            assertEquals(Unit, broker.cancellations.poll(5, TimeUnit.SECONDS))
+            assertEquals(listOf(19, 7, 8), media.operations)
+            source.awaitState(FlymeMediaSource.RegistrationPath.V3, FlymeMediaSource.ConnectionState.Connected)
+            Unit
+        } finally {
+            scope.coroutineContext.job.cancelAndJoin()
+            source.release()
         }
     }
 }

@@ -50,6 +50,7 @@ import dev.amatv.core.SettingsState
 import dev.amatv.core.SettingsStore
 import dev.amatv.integration.ContentCacheStorage
 import dev.amatv.integration.LogRecorder
+import dev.amatv.integration.FlymeMediaSource.ConnectionState
 import dev.amatv.integration.FlymeVoiceBridge.Phase
 import dev.amatv.integration.LoudnessMode
 import dev.amatv.integration.MusicConnectionState
@@ -348,8 +349,13 @@ internal fun FolioSettingsPage(
                     }
                     val nativeStatus = services.nativeMediaStatus?.collectAsState()?.value
                     if (nativeStatus != null) {
+                        val connection = stringResource(when (nativeStatus.state) {
+                            ConnectionState.Disconnected -> R.string.flyme_media_disconnected
+                            ConnectionState.Connecting -> R.string.flyme_voice_connecting
+                            ConnectionState.Connected -> R.string.flyme_voice_connected
+                        })
                         SettingsRow(title = stringResource(R.string.flyme_media_status)) {
-                            Text(nativeStatus, color = palette.fg2, fontFamily = fontFamily, fontSize = 14.sp)
+                            Text("${nativeStatus.path.name} · $connection", color = palette.fg2, fontFamily = fontFamily, fontSize = 14.sp)
                         }
                     }
                     SettingsRow(title = "Android", showDivider = false) {

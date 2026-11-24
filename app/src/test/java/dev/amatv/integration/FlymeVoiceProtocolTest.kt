@@ -48,6 +48,17 @@ class FlymeVoiceProtocolTest {
         }
     }
 
+    @Test fun cancellationUsesOnlyTheDeclaredChannelIdentity() {
+        val cancel = FlymeVoiceProtocol.channelInfo("dev.test.voice", "1.2.3")
+        val declaration = FlymeVoiceProtocol.declaration("dev.test.voice", "1.2.3")
+        assertEquals(setOf("vrChannelInfo"), cancel.keys().asSequence().toSet())
+        val cancelledChannel = cancel.getJSONObject("vrChannelInfo")
+        val declaredChannel = declaration.getJSONObject("vrChannelInfo")
+        val keys = declaredChannel.keys().asSequence().toSet()
+        assertEquals(keys, cancelledChannel.keys().asSequence().toSet())
+        keys.forEach { key -> assertEquals(declaredChannel.get(key), cancelledChannel.get(key)) }
+    }
+
     @Test fun searchCombinesVendorSlots() {
         assertEquals(FlymeVoiceCommand.Search("晴天 周杰伦"), FlymeVoiceProtocol.parseSemantic(
             """{"semantic":67108872,"titleName":"晴天","artistName":"周杰伦","originInfo":"播放周杰伦的晴天"}""",
