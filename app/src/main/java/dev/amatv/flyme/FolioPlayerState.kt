@@ -7,7 +7,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -1211,16 +1214,17 @@ fun resolvePosterTopScrimColor(
 }
 
 /**
- * Snapshot of the active track-switch "gather & release" choreography driven when the player is
- * open and the playing track changes.
+ * Stable holder for the active track-switch "gather & release" choreography. Animation values are
+ * exposed as [State] objects and read only inside draw / graphicsLayer phases so track transitions
+ * never trigger per-frame recomposition.
  */
-@Immutable
-internal data class FolioTrackSwitchMotion(
-    val coverScale: Float = 1f,
-    val coverAlpha: Float = 1f,
-    val haloScale: Float = 1f,
-    val haloAlpha: Float = 1f,
-    val edgeBrightness: Float = 1f,
+@Stable
+internal class FolioTrackSwitchMotion(
+    val coverScale: State<Float> = mutableFloatStateOf(1f),
+    val coverAlpha: State<Float> = mutableFloatStateOf(1f),
+    val haloScale: State<Float> = mutableFloatStateOf(1f),
+    val haloAlpha: State<Float> = mutableFloatStateOf(1f),
+    val edgeBrightness: State<Float> = mutableFloatStateOf(1f),
 )
 
 @Immutable
@@ -1257,6 +1261,15 @@ internal fun rememberFolioTrackSwitchState(
     val haloScale = remember { Animatable(1f) }
     val haloAlpha = remember { Animatable(1f) }
     val edgeBrightness = remember { Animatable(1f) }
+    val motion = remember {
+        FolioTrackSwitchMotion(
+            coverScale = coverScale.asState(),
+            coverAlpha = coverAlpha.asState(),
+            haloScale = haloScale.asState(),
+            haloAlpha = haloAlpha.asState(),
+            edgeBrightness = edgeBrightness.asState(),
+        )
+    }
 
     LaunchedEffect(open, liveTrack) {
         if (!open || (displayedTrack.id == liveTrack.id && displayedTrack != liveTrack)) {
@@ -1335,13 +1348,7 @@ internal fun rememberFolioTrackSwitchState(
 
     return FolioTrackSwitchState(
         displayedTrack = displayedTrack,
-        motion = FolioTrackSwitchMotion(
-            coverScale = coverScale.value,
-            coverAlpha = coverAlpha.value,
-            haloScale = haloScale.value,
-            haloAlpha = haloAlpha.value,
-            edgeBrightness = edgeBrightness.value,
-        ),
+        motion = motion,
     )
 }
 
@@ -1350,15 +1357,12 @@ internal fun Modifier.folioTrackSwitchCover(
     transformOrigin: TransformOrigin = TransformOrigin.Center,
 ): Modifier {
     val motion = LocalFolioTrackSwitchMotion.current
-    return if (motion.coverScale == 1f && motion.coverAlpha == 1f) {
-        this
-    } else {
-        this.graphicsLayer {
-            scaleX = motion.coverScale
-            scaleY = motion.coverScale
-            alpha = motion.coverAlpha
-            this.transformOrigin = transformOrigin
-        }
+    return this.graphicsLayer {
+        val scale = motion.coverScale.value
+        scaleX = scale
+        scaleY = scale
+        alpha = motion.coverAlpha.value
+        this.transformOrigin = transformOrigin
     }
 }
 
@@ -1367,14 +1371,11 @@ internal fun Modifier.folioTrackSwitchHalo(
     transformOrigin: TransformOrigin = TransformOrigin(0.22f, 0.40f),
 ): Modifier {
     val motion = LocalFolioTrackSwitchMotion.current
-    return if (motion.haloScale == 1f && motion.haloAlpha == 1f) {
-        this
-    } else {
-        this.graphicsLayer {
-            scaleX = motion.haloScale
-            scaleY = motion.haloScale
-            alpha = motion.haloAlpha
-            this.transformOrigin = transformOrigin
-        }
+    return this.graphicsLayer {
+        val scale = motion.haloScale.value
+        scaleX = scale
+        scaleY = scale
+        alpha = motion.haloAlpha.value
+        this.transformOrigin = transformOrigin
     }
 }

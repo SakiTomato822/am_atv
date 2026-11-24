@@ -1,6 +1,5 @@
 package dev.amatv.flyme
 
-import android.os.Build
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -49,7 +48,7 @@ internal fun Modifier.folioMiniPlayerGlass(shape: Shape): Modifier {
             shadow = null,
             onDrawSurface = { drawMiniPlayerSurface(shape, fill, sheen, border) },
         )
-    } else if (backdrop != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+    } else if (backdrop != null && tier == FolioGlassTier.BlurB) {
         val edgeSpec = resolveFolioGlassEdgeSpec(isLight = palette.isLight, albumTint = null, lightBaseBorder = border)
         drawBackdrop(
             backdrop = backdrop,
