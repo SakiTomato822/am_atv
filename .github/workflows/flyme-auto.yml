@@ -148,15 +148,15 @@ jobs:
           PY
           (cd dist && sha256sum AMFolio-arm64.apk > SHA256SUMS.txt)
           cat > dist/release-notes.md <<'EOF'
-          AM Folio 15.0 RC2.3：为车载与便携屏幕而设计的非官方 Apple Music 客户端，ARM64，Android 9+。
+          AM Folio 15.0 RC2.4：为车载与便携屏幕而设计的非官方 Apple Music 客户端，ARM64，Android 9+。
 
-          versionCode 57，包名仍是 dev.amatv.flyme，签名不变，可直接覆盖 14.x / 15.0 Alpha / RC 安装，保留登录与应用数据。
+          versionCode 58，包名仍是 dev.amatv.flyme，签名不变，可直接覆盖 14.x / 15.0 Alpha / RC 安装，保留登录与应用数据。
 
-          相对 15.0 RC2.2 的变化（车机语音点歌）：
+          相对 15.0 RC2.3 的变化：
 
-          - 「播放某位歌手」现在会按 Apple Music 艺人页的热门歌曲排成队列播放，不再只放一首。
-          - 「播放某张专辑」会把整张专辑按顺序放进队列。
-          - 点歌时先找你资料库里的歌，再查 Apple Music 目录；简繁体、全角半角、常见别名和读音相近的名字都能匹配，车机识别错一两个字也更容易找对。
+          - 修复从 RC1 开始，歌曲自然播完切下一首时会停顿约 5 秒的问题，恢复无缝衔接。
+
+          RC2.3 的语音点歌改进（播放歌手、专辑时整队列播放，更准的名字匹配）都包含在本版里。
 
           本版沿用上游 APK 的内置开发者 Token，有效期字段为 2027-04-22，到期前会随新版本更新；不包含签名私钥或任何用户登录凭证。
 
