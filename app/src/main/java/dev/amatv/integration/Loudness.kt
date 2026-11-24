@@ -13,15 +13,26 @@ enum class LoudnessMode(val offsetDb: Float, internal val peakHeadroomDb: Float)
 }
 
 internal const val LOUDNESS_CEILING_DB = -1f
+
+/**
+ * Sound Check tags come from the 30-second preview, usually the loudest chorus, so dense masters
+ * read too loud. Cuts beyond the knee are applied at a third of their depth.
+ */
+internal const val LOUDNESS_CUT_KNEE_DB = -3f
+internal const val LOUDNESS_CUT_RATIO = 1f / 3f
 internal const val LOUDNESS_PREF = "loudness_mode"
 internal const val FLYME_PLAYBACK_PREFS = "am_atv_flyme_playback"
 
 internal data class SoundCheck(val gainDb: Float, val peakDb: Float) {
     private val peakLimitedGainDb: Float get() = LOUDNESS_CEILING_DB - peakDb
 
-    fun gainFor(mode: LoudnessMode): Float =
-        if (mode == LoudnessMode.Off) 0f
-        else minOf(gainDb + mode.offsetDb, peakLimitedGainDb + mode.peakHeadroomDb)
+    fun gainFor(mode: LoudnessMode): Float {
+        if (mode == LoudnessMode.Off) return 0f
+        val gain = minOf(gainDb + mode.offsetDb, peakLimitedGainDb + mode.peakHeadroomDb)
+        return if (gain < LOUDNESS_CUT_KNEE_DB) {
+            LOUDNESS_CUT_KNEE_DB + (gain - LOUDNESS_CUT_KNEE_DB) * LOUDNESS_CUT_RATIO
+        } else gain
+    }
 
     fun targetHeadroomUsedDb(mode: LoudnessMode): Float =
         (gainFor(mode) - peakLimitedGainDb).coerceIn(0f, mode.peakHeadroomDb)
