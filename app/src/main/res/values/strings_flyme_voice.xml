@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="flyme_voice_setting">Car voice requests (experimental)</string>
+    <string name="flyme_voice_status">Voice bridge · %1$s</string>
+    <string name="flyme_voice_off">Off</string>
+    <string name="flyme_voice_connecting">Connecting</string>
+    <string name="flyme_voice_connected">Connected</string>
+    <string name="flyme_voice_declared">Declaration acknowledged</string>
+    <string name="flyme_voice_unavailable">Unavailable</string>
+</resources>

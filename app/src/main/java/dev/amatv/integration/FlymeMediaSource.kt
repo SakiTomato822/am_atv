@@ -32,6 +32,9 @@ internal class FlymeMediaSource(private val context: Context, private val autoBi
     private val main = Handler(context.mainLooper)
     private val mutableStatus = MutableStateFlow("Not connected")
     val status = mutableStatus.asStateFlow()
+    data class Registration(val media: IBinder, val token: IBinder)
+    private val mutableRegistration = MutableStateFlow<Registration?>(null)
+    val registration = mutableRegistration.asStateFlow()
     @Volatile private var callbacks: PlaybackMediaSession.Callbacks? = null
     @Volatile private var snapshot: PlaybackSnapshot? = null
     @Volatile private var released = false
@@ -137,12 +140,16 @@ internal class FlymeMediaSource(private val context: Context, private val autoBi
             worker.post { if (!released) connectMedia(binder) }
         }
         override fun onServiceDisconnected(name: ComponentName) {
-            worker.post { media = null; token = null; metadataKey = null; report("Disconnected") }
+            worker.post {
+                mutableRegistration.value = null
+                media = null; token = null; metadataKey = null; report("Disconnected")
+            }
         }
         override fun onBindingDied(name: ComponentName) {
             worker.post {
                 if (!released) {
                     unbind()
+                    mutableRegistration.value = null
                     media = null
                     token = null
                     bind()
@@ -198,6 +205,7 @@ internal class FlymeMediaSource(private val context: Context, private val autoBi
         callbacks = null
         pendingSnapshot.set(null)
         worker.post {
+            mutableRegistration.value = null
             safely {
                 token?.let { current -> media?.let { remote ->
                     rpc(remote, MEDIA, 4, { writeStrongBinder(current) }, { readInt() })
@@ -236,6 +244,7 @@ internal class FlymeMediaSource(private val context: Context, private val autoBi
             writeStrongBinder(registered); writeIntArray(intArrayOf(ONLINE))
         }, { readInt() != 0 })) { "MediaCenter rejected source type" }
         rpc(remote, MEDIA, 8, { writeStrongBinder(registered); writeInt(ONLINE) }, { Unit })
+        mutableRegistration.value = Registration(remote, registered)
         metadataKey = null
         report("Registered online source (6); source-list visibility needs vehicle verification")
         snapshot?.let(::publishOnWorker)

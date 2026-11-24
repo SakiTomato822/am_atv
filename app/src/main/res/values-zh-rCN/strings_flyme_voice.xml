@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="flyme_voice_setting">车机语音点歌（实验）</string>
+    <string name="flyme_voice_status">语音桥 · %1$s</string>
+    <string name="flyme_voice_off">未开启</string>
+    <string name="flyme_voice_connecting">连接中</string>
+    <string name="flyme_voice_connected">已连接</string>
+    <string name="flyme_voice_declared">已声明</string>
+    <string name="flyme_voice_unavailable">不可用</string>
+</resources>

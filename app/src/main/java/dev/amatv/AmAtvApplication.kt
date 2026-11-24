@@ -53,7 +53,14 @@ class AmAtvApplication : Application() {
             clock = SystemClock::elapsedRealtime,
             diagnostics = musicServices.playbackDiagnostics,
             playHistoryStore = playHistoryStore,
-        ).also { it.attach() }
+        ).also { store ->
+            store.attach()
+            musicServices.startFlymeVoice(
+                applicationScope,
+                searchAndPlay = { store.playVoiceSearch(musicServices, it) },
+                favorite = libraryActions::toggleFavorite,
+            )
+        }
     }
 
     override fun onCreate() {

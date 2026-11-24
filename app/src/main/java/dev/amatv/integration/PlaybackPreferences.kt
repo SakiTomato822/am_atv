@@ -94,6 +94,12 @@ class PlaybackPreferences(context: Context) : QueuePreferences, dev.amatv.core.P
             preferences.edit().putBoolean(KEY_AUTOPLAY_ENABLED, value).apply()
         }
 
+    var flymeVoiceEnabled: Boolean
+        get() = preferences.getBoolean(KEY_FLYME_VOICE_ENABLED, false)
+        set(value) {
+            preferences.edit().putBoolean(KEY_FLYME_VOICE_ENABLED, value).apply()
+        }
+
     /** The user's last explicit lyrics choice; a song without lyrics never changes it. */
     var lyricsPreferred: Boolean
         get() = preferences.getBoolean(KEY_LYRICS_PREFERRED, true)
@@ -185,6 +191,7 @@ class PlaybackPreferences(context: Context) : QueuePreferences, dev.amatv.core.P
         const val KEY_REPEAT_MODE = "pref_playback_repeat_mode"
         const val KEY_SHUFFLE_ENABLED = "pref_playback_shuffle_enabled"
         const val KEY_AUTOPLAY_ENABLED = "pref_playback_autoplay_enabled"
+        const val KEY_FLYME_VOICE_ENABLED = "pref_playback_flyme_voice_enabled"
         const val KEY_AUTOPLAY_SOURCE = "pref_playback_autoplay_source"
         const val KEY_LYRIC_OFFSET_MS = "pref_playback_lyric_offset_ms"
         const val KEY_LYRIC_TRANSLATION_ENABLED = "pref_lyric_translation_enabled"
