@@ -461,6 +461,8 @@ internal fun FolioPlayerAnimatedControlsSlot(
     onPlayPause: () -> Unit,
     onCollapsedPlayPause: () -> Unit,
     onNext: () -> Unit,
+    onCollapsedPrevious: () -> Unit = onPrevious,
+    onCollapsedNext: () -> Unit = onNext,
     onToggleQueue: () -> Unit,
     onOpenAlbum: () -> Unit,
     onOpenArtist: () -> Unit,
@@ -538,12 +540,18 @@ internal fun FolioPlayerAnimatedControlsSlot(
                     buttonOnLeft = tierSpec.tier == FolioTier.Wide,
                     positionState = positionState,
                     durationMs = durationMs,
+                    isLiveStream = isLiveStream,
                     playWhenReady = playWhenReady,
+                    canSkipPrevious = canSkipPrevious,
+                    canSkipNext = canSkipNext,
                     isLight = isLight,
                     fg = fg,
+                    fg2 = fg2,
                     interactive = !controlsExpanded,
                     onExpand = onExpandCapsule,
+                    onPrevious = onCollapsedPrevious,
                     onTogglePlay = onCollapsedPlayPause,
+                    onNext = onCollapsedNext,
                     modifier = animMod.then(
                         if (tierSpec.tier == FolioTier.Wide && collapsedBarWidthDp != Dp.Unspecified) {
                             Modifier.width(collapsedBarWidthDp)
@@ -680,84 +688,141 @@ internal fun FolioHairlineProgressBar(
     }
 }
 
-/** Layout ③ collapsed bottom bar: 64dp circular glass Play/Pause button + thin hairline progress bar. */
+/** Layout ③ collapsed bottom bar (U7): horizontal glass capsule with prev/play/next, hairline progress, and remaining time. */
 @Composable
 internal fun FolioCirclePlayHairlineBar(
     buttonOnLeft: Boolean,
     positionState: State<Long>,
     durationMs: Long,
+    isLiveStream: Boolean,
     playWhenReady: Boolean,
+    canSkipPrevious: Boolean,
+    canSkipNext: Boolean,
     isLight: Boolean,
     fg: Color,
+    fg2: Color,
     interactive: Boolean,
     onExpand: () -> Unit,
+    onPrevious: () -> Unit,
     onTogglePlay: () -> Unit,
+    onNext: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val expandCd = stringResource(R.string.folio_player_controls_expand)
-    val startPad = if (buttonOnLeft) WIDE_CAR_COLLAPSED_BAR_START_DP.dp else 20.dp
+    val prevCd = stringResource(R.string.player_previous_track)
+    val nextCd = stringResource(R.string.player_next_track)
+    val fontFamily = LocalFolioFontFamily.current
+    val isPaletteLight = LocalFolioPalette.current.isLight
+    val accent = LocalFolioControlAccent.current?.value ?: Color.Transparent
+    val playBg = fg
+    val playFg = if (isLight) Color.White else Color(0xFF17151C)
+    val playFill = accent.compositeOver(playBg)
+    val playIcon = if (accent.alpha > 0f) controlAccentForeground(playFill) else playFg
+    val capsuleShape = RoundedCornerShape(FolioRadii.Capsule)
+    val startPad = if (buttonOnLeft) WIDE_CAR_COLLAPSED_BAR_START_DP.dp else 0.dp
+    val remainingText = if (isLiveStream) "" else formatFolioRemainingTime(positionState.value, durationMs)
+
     Row(
-        modifier = modifier.padding(start = startPad),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        if (buttonOnLeft) {
-            FolioCircleGlassPlayButton(
-                size = 64.dp,
-                playWhenReady = playWhenReady,
-                isLight = isLight,
-                fg = fg,
+        modifier = modifier
+            .padding(start = startPad)
+            .folioPlayerGlass(isLight = isLight, shape = capsuleShape)
+            .clickable(
+                interactionSource = null,
+                indication = null,
                 enabled = interactive,
-                onTogglePlay = onTogglePlay,
+                onClick = onExpand,
             )
+            .semantics { contentDescription = expandCd }
+            .padding(start = 10.dp, end = 16.dp, top = 7.dp, bottom = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
             Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .height(64.dp)
-                    .clickable(
-                        interactionSource = null,
-                        indication = null,
-                        enabled = interactive,
-                        onClick = onExpand,
-                    )
-                    .semantics { contentDescription = expandCd },
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .folioPressable(
+                        enabled = interactive && canSkipPrevious,
+                        compact = true,
+                        isLight = isLight,
+                        role = Role.Button,
+                        onClick = onPrevious,
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
-                FolioHairlineProgressBar(
-                    positionState = positionState,
-                    durationMs = durationMs,
-                    fg = fg,
-                    modifier = Modifier.fillMaxWidth(),
+                Icon(
+                    imageVector = Icons.Rounded.SkipPrevious,
+                    contentDescription = prevCd,
+                    tint = fg.copy(alpha = if (canSkipPrevious) fg.alpha else fg.alpha * 0.36f),
+                    modifier = Modifier.size(22.dp),
                 )
             }
-        } else {
+
             Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .height(64.dp)
-                    .clickable(
-                        interactionSource = null,
-                        indication = null,
+                    .size(54.dp)
+                    .clip(CircleShape)
+                    .background(playFill)
+                    .folioPressable(
                         enabled = interactive,
-                        onClick = onExpand,
-                    )
-                    .semantics { contentDescription = expandCd },
+                        compact = true,
+                        isLight = !isPaletteLight,
+                        role = Role.Button,
+                        onClick = onTogglePlay,
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
-                FolioHairlineProgressBar(
-                    positionState = positionState,
-                    durationMs = durationMs,
-                    fg = fg,
-                    modifier = Modifier.fillMaxWidth(),
+                FolioAnimatedPlayPauseIcon(
+                    playWhenReady = playWhenReady,
+                    tint = playIcon,
+                    modifier = Modifier.size(26.dp),
                 )
             }
-            FolioCircleGlassPlayButton(
-                size = 64.dp,
-                playWhenReady = playWhenReady,
-                isLight = isLight,
-                fg = fg,
-                enabled = interactive,
-                onTogglePlay = onTogglePlay,
+
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .folioPressable(
+                        enabled = interactive && canSkipNext,
+                        compact = true,
+                        isLight = isLight,
+                        role = Role.Button,
+                        onClick = onNext,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.SkipNext,
+                    contentDescription = nextCd,
+                    tint = fg.copy(alpha = if (canSkipNext) fg.alpha else fg.alpha * 0.36f),
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+
+        Spacer(Modifier.width(10.dp))
+
+        FolioHairlineProgressBar(
+            positionState = positionState,
+            durationMs = durationMs,
+            fg = fg,
+            modifier = Modifier.weight(1f),
+        )
+
+        if (remainingText.isNotEmpty()) {
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = remainingText,
+                color = fg2,
+                fontFamily = fontFamily,
+                fontSize = 13.sp,
+                style = TextStyle(fontFamily = fontFamily, fontFeatureSettings = "tnum"),
+                maxLines = 1,
+                softWrap = false,
             )
         }
     }

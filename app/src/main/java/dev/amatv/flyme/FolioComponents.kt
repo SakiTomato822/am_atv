@@ -911,7 +911,12 @@ private fun folioKindLabel(kind: CatalogKind): String = stringResource(
 
 internal fun formatFolioDuration(ms: Long): String {
     val totalSeconds = (ms / 1_000L).coerceAtLeast(0L)
-    val minutes = totalSeconds / 60L
+    val hours = totalSeconds / 3_600L
+    val minutes = (totalSeconds % 3_600L) / 60L
     val seconds = totalSeconds % 60L
-    return "$minutes:${seconds.toString().padStart(2, '0')}"
+    return if (hours > 0L) {
+        "$hours:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+    } else {
+        "$minutes:${seconds.toString().padStart(2, '0')}"
+    }
 }

@@ -284,6 +284,8 @@ class FolioPlayerStateTest {
         assertEquals("-0:51", formatFolioRemainingTime(positionMs = 129_000L, durationMs = 180_000L))
         assertEquals("-3:00", formatFolioRemainingTime(positionMs = 0L, durationMs = 180_000L))
         assertEquals("-0:00", formatFolioRemainingTime(positionMs = 200_000L, durationMs = 180_000L))
+        assertEquals("-1:00:00", formatFolioRemainingTime(positionMs = 0L, durationMs = 3_600_000L))
+        assertEquals("-1:02:03", formatFolioRemainingTime(positionMs = 65_000L, durationMs = 3_788_000L))
         assertEquals("", formatFolioRemainingTime(positionMs = 10_000L, durationMs = 0L))
     }
 

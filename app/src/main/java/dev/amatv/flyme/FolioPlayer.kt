@@ -741,7 +741,9 @@ internal fun BoxScope.FolioPlayerLayer(
                                 revealControls()
                                 playbackStore.togglePlayback()
                             },
+                            onCollapsedPrevious = { playbackStore.skip(-1) },
                             onCollapsedPlayPause = playbackStore::togglePlayback,
+                            onCollapsedNext = { playbackStore.skip(1) },
                             onNext = {
                                 revealControls()
                                 playbackStore.skip(1)
@@ -1693,7 +1695,9 @@ private fun ShortPlayerLayout(
             onToggleFavorite = onToggleFavorite,
             onPrevious = onPrevious,
             onPlayPause = onPlayPause,
+            onCollapsedPrevious = { },
             onCollapsedPlayPause = onCollapsedPlayPause,
+            onCollapsedNext = { },
             onNext = onNext,
             onToggleQueue = onToggleQueue,
             onOpenAlbum = onOpenAlbum,
