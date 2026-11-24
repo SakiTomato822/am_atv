@@ -331,6 +331,11 @@ internal fun FolioSettingsPage(
                             checked = voiceStatus.enabled,
                             onCheckedChange = voice::setEnabled,
                         )
+                        SettingsToggleRow(
+                            title = stringResource(R.string.flyme_voice_announcements),
+                            checked = voiceStatus.announcementsEnabled,
+                            onCheckedChange = voice::setAnnouncementsEnabled,
+                        )
                         val phase = stringResource(when (voiceStatus.phase) {
                             Phase.Off -> R.string.flyme_voice_off
                             Phase.Connecting -> R.string.flyme_voice_connecting

@@ -30,6 +30,8 @@ internal val LocalHostWindow = staticCompositionLocalOf<HostWindow?> { null }
 internal object WindowHosts {
     private var current: WeakReference<Activity>? = null
 
+    fun currentActivityClass(): Class<out Activity> = current?.get()?.javaClass ?: MainActivity::class.java
+
     /** Registers [activity] as the live window and closes the previous one. */
     fun claim(activity: Activity) {
         val previous = current?.get()

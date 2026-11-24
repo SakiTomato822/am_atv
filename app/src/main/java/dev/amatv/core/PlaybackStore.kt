@@ -288,7 +288,7 @@ class PlaybackStore(
                 pause = ::pausePlayback,
                 next = { skip(1) },
                 previous = { skip(-1) },
-                seekTo = { position -> seekPlaybackBy(position - currentPositionMs()) },
+                seekTo = ::seekPlaybackTo,
             ),
         )
         player.setPlaybackListener(::applyPlaybackSnapshot)
@@ -805,12 +805,14 @@ class PlaybackStore(
         lyricsStore.retryCurrentLyrics()
     }
 
-    fun seekPlaybackBy(delta: Long) {
+    fun seekPlaybackBy(delta: Long) = seekPlaybackTo(currentPositionMs() + delta)
+
+    fun seekPlaybackTo(positionMs: Long) {
         val snapshot = currentPlaybackSnapshot()
         if (snapshot?.isLiveStream == true || snapshot?.canSeek == false) return
         if (isStationPlayback() && snapshot?.isPrepared != true) return
         val current = _state.value
-        val newAnchor = (currentPositionMs() + delta).coerceIn(0L, current.track.durationMs.coerceAtLeast(0L))
+        val newAnchor = positionMs.coerceIn(0L, current.track.durationMs.coerceAtLeast(0L))
         _state.value = _state.value.copy(
             positionAnchorMs = newAnchor,
             playStartedRealtimeMs = clock(),
@@ -951,6 +953,10 @@ class PlaybackStore(
                 },
             )
             StartupQueueAction.ToggleShuffle -> queueController.setShuffle(!queueController.state.value.shuffle)
+            is StartupQueueAction.SetMode -> {
+                queueController.setRepeat(action.repeat)
+                queueController.setShuffle(action.shuffle)
+            }
             StartupQueueAction.ToggleInfinite -> queueController.setInfinite(!queueController.state.value.infinite)
         }
         return true

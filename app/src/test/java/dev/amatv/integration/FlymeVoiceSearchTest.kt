@@ -15,6 +15,14 @@ class FlymeVoiceSearchTest {
     private val secondSong = item("2", "Second")
     private val logs = mutableListOf<String>()
 
+    @Test fun trackAnnouncementsAndMetadataAnswersUseTheCurrentTrack() {
+        val track = firstSong.copy(artist = "Artist", album = "Album")
+        assertEquals("正在播放 First – Artist", FlymeVoiceFeedback.track(track).text)
+        assertEquals("First", FlymeVoiceFeedback.info(FlymeVoiceCommand.Info.Title, track).text)
+        assertEquals("Artist", FlymeVoiceFeedback.info(FlymeVoiceCommand.Info.Artist, track).text)
+        assertEquals("Album", FlymeVoiceFeedback.info(FlymeVoiceCommand.Info.Album, track).text)
+    }
+
     @Test fun artistUsesExactNormalizedNameAndKeepsTopSongsInOrder() = runTest {
         val artist = item("3", "ＡＢＣ　Ｂａｎｄ", CatalogKind.Artist)
         val otherArtist = item("4", "ABC Band Live", CatalogKind.Artist)
@@ -27,8 +35,8 @@ class FlymeVoiceSearchTest {
             },
         )
 
-        assertEquals(FlymeVoiceQueue(listOf(secondSong, firstSong), artistQueue = true), queue)
-        assertTrue(logs.single().contains("match=exact id=3 name=ＡＢＣ　Ｂａｎｄ queueSize=2"))
+        assertEquals(FlymeVoiceQueue(listOf(secondSong, firstSong), spokenName = "${artist.title} 的歌"), queue)
+        assertTrue(logs.single().contains("path=matched match=exact id=3 name=ＡＢＣ　Ｂａｎｄ queueSize=2"))
     }
 
     @Test fun missingArtistFallsBackToFirstSongInSearchResults() = runTest {
@@ -46,8 +54,8 @@ class FlymeVoiceSearchTest {
             listOf(secondSong)
         })
 
-        assertEquals(FlymeVoiceQueue(listOf(secondSong), artistQueue = true), queue)
-        assertTrue(logs.single().contains("match=fallback-first-result id=3"))
+        assertEquals(FlymeVoiceQueue(listOf(secondSong), spokenName = "${artist.title} 的歌"), queue)
+        assertTrue(logs.single().contains("path=best-match-fallback(selection-protocol-unverified) match=fallback-first-result id=3"))
     }
 
     @Test fun albumMatchesTitleAndOptionalArtistAndKeepsTrackOrder() = runTest {
@@ -65,8 +73,8 @@ class FlymeVoiceSearchTest {
             tracks
         })
 
-        assertEquals(FlymeVoiceQueue(tracks, album), withArtist)
-        assertEquals(FlymeVoiceQueue(tracks, otherAlbum), withoutArtist)
+        assertEquals(FlymeVoiceQueue(tracks, album, "专辑 ${album.title}"), withArtist)
+        assertEquals(FlymeVoiceQueue(tracks, otherAlbum, "专辑 ${otherAlbum.title}"), withoutArtist)
         assertTrue(logs.first().contains("match=exact id=4 name=Ｖｏｌｕｍｅ　１ queueSize=3"))
     }
 
@@ -95,7 +103,7 @@ class FlymeVoiceSearchTest {
                 listOf(firstSong)
             },
         )
-        assertEquals(FlymeVoiceQueue(listOf(firstSong), album = sameArtist), queue)
+        assertEquals(FlymeVoiceQueue(listOf(firstSong), collection = sameArtist, spokenName = "专辑 ${sameArtist.title}"), queue)
         assertTrue(logs.single().contains("match=fallback-first-result id=4"))
     }
 
@@ -115,7 +123,7 @@ class FlymeVoiceSearchTest {
             },
             index = VoiceCatalogIndex(command, NameEncoder(simplify = { it.replace('張', '张') })),
         )
-        assertEquals(FlymeVoiceQueue(listOf(firstSong), artistQueue = true), queue)
+        assertEquals(FlymeVoiceQueue(listOf(firstSong), spokenName = "${library.title} 的歌"), queue)
         assertTrue(logs.single().contains("match=exact id=library"))
     }
 
@@ -132,7 +140,7 @@ class FlymeVoiceSearchTest {
             collectionTracks = { error("Unexpected collection lookup") },
             log = { logs.add(it) },
         )
-        assertEquals(FlymeVoiceQueue(listOf(firstSong, secondSong), artistQueue = true), queue)
+        assertEquals(FlymeVoiceQueue(listOf(firstSong, secondSong), spokenName = "${artist.title} 的歌"), queue)
         assertTrue(logs.single().contains("match=alias id=artist"))
     }
 
@@ -156,7 +164,7 @@ class FlymeVoiceSearchTest {
                 catalog
             },
         )
-        assertEquals(FlymeVoiceQueue(tracks, album = catalog), queue)
+        assertEquals(FlymeVoiceQueue(tracks, collection = catalog, spokenName = "专辑 ${catalog.title}"), queue)
         assertTrue(logs.single().contains("match=exact id=catalog"))
     }
 
@@ -178,7 +186,7 @@ class FlymeVoiceSearchTest {
             log = { logs.add(it) },
             index = VoiceCatalogIndex(command, encoder),
         )
-        assertEquals(FlymeVoiceQueue(listOf(secondSong), artistQueue = true), queue)
+        assertEquals(FlymeVoiceQueue(listOf(secondSong), spokenName = "${artist.title} 的歌"), queue)
         assertTrue(logs.single().contains("match=phonetic id=artist"))
     }
 

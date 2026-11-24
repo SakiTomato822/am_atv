@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONException
+import org.json.JSONObject
 
 internal class FlymeVoiceBridge(
     private val context: Context,
@@ -34,13 +35,15 @@ internal class FlymeVoiceBridge(
         val phase: Phase,
         val lastSemanticAt: Long? = null,
         val lastSemantic: String = "",
+        val announcementsEnabled: Boolean = true,
     )
 
     private data class Request(val enabled: Boolean, val revision: Long = 0)
 
     private val request = MutableStateFlow(Request(preferences.flymeVoiceEnabled))
     private val mutableStatus = MutableStateFlow(
-        Status(request.value.enabled, if (request.value.enabled) Phase.Connecting else Phase.Off),
+        Status(request.value.enabled, if (request.value.enabled) Phase.Connecting else Phase.Off,
+            announcementsEnabled = preferences.flymeVoiceAnnouncements),
     )
     val status = mutableStatus.asStateFlow()
 
@@ -79,7 +82,12 @@ internal class FlymeVoiceBridge(
         mediaSource.setVoiceEnabled(value)
     }
 
-    fun start(scope: CoroutineScope, execute: suspend (FlymeVoiceCommand) -> Unit) {
+    fun setAnnouncementsEnabled(value: Boolean) {
+        preferences.flymeVoiceAnnouncements = value
+        mutableStatus.update { it.copy(announcementsEnabled = value) }
+    }
+
+    fun start(scope: CoroutineScope, execute: suspend (FlymeVoiceCommand) -> FlymeVoiceFeedback?) {
         mediaSource.setVoiceEnabled(request.value.enabled)
         scope.launch {
             request.combine(mediaSource.voiceSession, ::Pair).collectLatest { (active, session) ->
@@ -94,7 +102,7 @@ internal class FlymeVoiceBridge(
     private suspend fun runSession(
         active: Request,
         session: FlymeMediaSource.VoiceSession,
-        execute: suspend (FlymeVoiceCommand) -> Unit,
+        execute: suspend (FlymeVoiceCommand) -> FlymeVoiceFeedback?,
     ) {
         val commands = Channel<FlymeVoiceCommand>(Channel.UNLIMITED)
         val registration = session.registration
@@ -121,9 +129,21 @@ internal class FlymeVoiceBridge(
             commands.receiveAsFlow().collectLatest { command ->
                 if (isCurrent()) {
                     try {
-                        execute(command)
+                        val feedback = execute(command)
+                        if (feedback != null && (feedback.failure || status.value.announcementsEnabled)) {
+                            Log.i(TAG, "tts=${feedback.text}")
+                            val response = withContext(Dispatchers.IO) {
+                                broker.call(FlymeVoiceProtocol.SEND_TTS,
+                                    FlymeVoiceProtocol.ttsResult(feedback.text).toString(), registration.token)
+                            }
+                            Log.i(TAG, "ttsReceipt ${response.describe()}")
+                            check(response.data == "true") { "MediaCenter rejected TTS enqueue" }
+                        }
                     } catch (cancelled: CancellationException) {
                         throw cancelled
+                    } catch (error: DeadObjectException) {
+                        Log.w(TAG, "V4 voice feedback lost the OpenAPI Binder", error)
+                        mediaSource.voiceConnectionDied(session)
                     } catch (error: Exception) {
                         Log.w(TAG, "Command failed: $command", error)
                     }
@@ -177,6 +197,14 @@ internal class FlymeVoiceBridge(
                 Log.i(TAG, "$header data[$start..$end]=${data.substring(start, end)}")
                 start = end
             }
+        }
+        if (type == 4 && method == FlymeVoiceProtocol.TTS_LISTENER && data != null) {
+            try {
+                Log.i(TAG, "ttsPlayback status=${JSONObject(data).getInt("status")}")
+            } catch (error: JSONException) {
+                Log.w(TAG, "Invalid TTS playback receipt", error)
+            }
+            return
         }
         if (type != 2 || method != SEMANTIC_LISTENER || data == null) {
             Log.i(TAG, "command=ignored (callback type, method or data)")

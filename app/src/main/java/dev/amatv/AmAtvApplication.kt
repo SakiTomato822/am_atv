@@ -1,6 +1,7 @@
 package dev.amatv
 
 import android.app.Application
+import android.content.Intent
 import android.os.Build
 import android.os.LocaleList
 import android.os.SystemClock
@@ -22,9 +23,12 @@ import dev.amatv.integration.ContentCache
 import dev.amatv.integration.LogRecorder
 import dev.amatv.integration.MusicServices
 import dev.amatv.integration.PlaybackPreferences
+import dev.amatv.integration.FlymeVoiceDestination
+import dev.amatv.integration.startFlymeVoice
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class AmAtvApplication : Application() {
     lateinit var settingsStore: SettingsStore
@@ -36,6 +40,13 @@ class AmAtvApplication : Application() {
     lateinit var playHistoryStore: PlayHistoryStore
     val musicServices by lazy { MusicServices(this) }
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    internal val voiceDestination = MutableStateFlow<FlymeVoiceDestination?>(null)
+
+    private fun openVoiceDestination(destination: FlymeVoiceDestination) {
+        voiceDestination.value = destination
+        startActivity(Intent(this, WindowHosts.currentActivityClass())
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+    }
 
     /**
      * The player, for as long as the process lives. Created by the first window that opens (never in Gecko's
@@ -57,8 +68,8 @@ class AmAtvApplication : Application() {
             store.attach()
             musicServices.startFlymeVoice(
                 applicationScope,
-                playTrack = { track, queue -> store.playTrack(track, queue) },
-                playAlbum = { album, tracks -> store.playCollection(album, tracks, index = 0, shuffle = false) },
+                store, playHistoryStore, contentStore,
+                navigate = ::openVoiceDestination,
                 // Voice only ever adds; an already-liked song must not raise the "can't remove" notice.
                 favorite = { if (libraryActions.state.value.current.isFavorite != true) libraryActions.toggleFavorite() },
             )

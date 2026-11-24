@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="flyme_voice_announcements">語音播報</string>
     <string name="flyme_voice_setting">車機語音點歌（實驗）\n媒體卡片由 AM Folio 直接接入；此開關只控制語音點歌。</string>
     <string name="flyme_media_disconnected">未連線</string>
     <string name="flyme_voice_status">語音橋 · %1$s</string>

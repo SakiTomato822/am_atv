@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="flyme_voice_announcements">Voice announcements</string>
     <string name="flyme_voice_setting">Car voice requests (experimental)\nAM Folio integrates directly with the car’s media card. This switch only controls voice requests.</string>
     <string name="flyme_media_disconnected">Disconnected</string>
     <string name="flyme_voice_status">Voice bridge · %1$s</string>

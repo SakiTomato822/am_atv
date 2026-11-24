@@ -69,6 +69,8 @@ import dev.amatv.R
 import dev.amatv.core.PlaybackEvent
 import dev.amatv.core.shouldShowWelcome
 import dev.amatv.i18n.AppText
+import dev.amatv.core.LyricBackgroundStyle
+import dev.amatv.integration.FlymeVoiceDestination
 import dev.amatv.integration.MusicConnectionState
 import dev.amatv.integration.MusicKitWebAuthActivity
 import dev.amatv.integration.PlaybackPreferences
@@ -215,6 +217,30 @@ fun FolioApp(
     )
     var titleTransition by remember { mutableStateOf<FolioBrowseTabTransition?>(null) }
     val selectedPage = titleTransition?.to ?: pagerState.currentPage
+
+    LaunchedEffect(app, pagerState) {
+        app.voiceDestination.collect { request ->
+            if (request == null) return@collect
+            when (request) {
+                is FlymeVoiceDestination.NowPlaying -> {
+                    if (request.lyrics) {
+                        FolioPlayerSession.queueOpenState.value = false
+                        settingsStore.setLyricStyle(LyricBackgroundStyle.Flow)
+                    }
+                    playerOrigin = null
+                    playerOpen = true
+                }
+                is FlymeVoiceDestination.Search -> {
+                    playerOpen = false
+                    detailStack = emptyList()
+                    playHistoryOpen = false
+                    pagerState.scrollToPage(FolioRootPage.Search.index)
+                    folioSearchSession.submit(request.query, services::search)
+                }
+            }
+            app.voiceDestination.compareAndSet(request, null)
+        }
+    }
 
     fun openDetail(item: Track) {
         playHistoryOpen = false

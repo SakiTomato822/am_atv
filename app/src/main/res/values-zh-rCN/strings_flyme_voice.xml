@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="flyme_voice_announcements">语音播报</string>
     <string name="flyme_voice_setting">车机语音点歌（实验）\n媒体卡片由 AM Folio 直接接入；此开关只控制语音点歌。</string>
     <string name="flyme_media_disconnected">未连接</string>
     <string name="flyme_voice_status">语音桥 · %1$s</string>

@@ -115,7 +115,10 @@ class FlymeVoiceBridgeTest {
         val firstMedia = FakeFlymeMediaCenter(target)
         val firstBroker = FakeFlymeBroker(firstMedia)
         try {
-            voice.start(scope) { commands.send(it) }
+            voice.start(scope) {
+                commands.send(it)
+                null
+            }
             services.nextBinding(FakeFlymeServices.V3_ACTION).connect(services.pool(null))
             val binding = services.nextBinding(FlymeOpenApiBroker.ACTION)
             binding.connect(firstBroker)
@@ -188,6 +191,41 @@ class FlymeVoiceBridgeTest {
             assertEquals(listOf(19, 7, 8), media.operations)
             source.awaitState(FlymeMediaSource.RegistrationPath.V3, FlymeMediaSource.ConnectionState.Connected)
             Unit
+        } finally {
+            scope.coroutineContext.job.cancelAndJoin()
+            source.release()
+        }
+    }
+
+    @Test fun ttsUsesRegistrationTokenAndOnlySendsFailuresWithAnnouncementsOff() = runBlocking {
+        val services = FakeFlymeServices(isolatedContext("voice_tts_test"))
+        val preferences = PlaybackPreferences(services).apply { flymeVoiceEnabled = false }
+        val source = services.startSource()
+        val voice = FlymeVoiceBridge(services, preferences, source)
+        val scope = CoroutineScope(Dispatchers.Main)
+        val broker = FakeFlymeBroker(FakeFlymeMediaCenter(services))
+        try {
+            voice.start(scope) { command ->
+                if (command == FlymeVoiceCommand.Info.Title) FlymeVoiceFeedback.notFound("当前歌曲")
+                else FlymeVoiceFeedback.playing("测试")
+            }
+            services.nextBinding(FakeFlymeServices.V3_ACTION).connect(services.pool(null))
+            services.nextBinding(FlymeOpenApiBroker.ACTION).connect(broker)
+            source.awaitState(FlymeMediaSource.RegistrationPath.V4, FlymeMediaSource.ConnectionState.Connected)
+            withContext(Dispatchers.Main) {
+                voice.setAnnouncementsEnabled(true)
+                voice.setEnabled(true)
+            }
+            withTimeout(5_000) { voice.status.first { it.phase == FlymeVoiceBridge.Phase.Declared } }
+            broker.sendPlay()
+            assertEquals("正在播放 测试", broker.spokenMessages.poll(5, TimeUnit.SECONDS))
+
+            withContext(Dispatchers.Main) { voice.setAnnouncementsEnabled(false) }
+            assertFalse(preferences.flymeVoiceAnnouncements)
+            broker.sendPlay()
+            assertNull(broker.spokenMessages.poll(300, TimeUnit.MILLISECONDS))
+            broker.sendSemantic(268435457)
+            assertEquals("没找到 当前歌曲", broker.spokenMessages.poll(5, TimeUnit.SECONDS))
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
             source.release()

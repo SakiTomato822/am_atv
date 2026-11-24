@@ -11,8 +11,8 @@ import kotlinx.coroutines.coroutineScope
 
 internal data class FlymeVoiceQueue(
     val tracks: List<Track>,
-    val album: Track? = null,
-    val artistQueue: Boolean = false,
+    val collection: Track? = null,
+    val spokenName: String? = null,
 )
 
 internal suspend fun resolveFlymeVoiceSearch(
@@ -50,14 +50,14 @@ internal suspend fun resolveFlymeVoiceSearch(
         else -> "none"
     }
     val queue = when (selected?.catalogKind) {
-        CatalogKind.Artist -> FlymeVoiceQueue(artistTopSongs(selected), artistQueue = true)
+        CatalogKind.Artist -> FlymeVoiceQueue(artistTopSongs(selected), spokenName = "${selected.title} 的歌")
         CatalogKind.Album -> {
             val album = if (selected.resourceType == LibraryCollection.Albums.resourceType) {
                 catalogAlbum(selected) ?: selected.also {
                     log("kind=${command.kind} fallback=library-album-no-catalog using=library-tracks")
                 }
             } else selected
-            FlymeVoiceQueue(collectionTracks(album), album = album)
+            FlymeVoiceQueue(collectionTracks(album), collection = album, spokenName = "专辑 ${album.title}")
         }
         CatalogKind.Song -> FlymeVoiceQueue(listOf(selected))
         else -> if (command.kind == Kind.Artist) {
@@ -68,8 +68,13 @@ internal suspend fun resolveFlymeVoiceSearch(
             FlymeVoiceQueue(emptyList())
         }
     }
-    val identified = queue.album ?: selected
-    log("kind=${command.kind} match=$matchType id=${identified?.catalogId ?: identified?.resourceId ?: identified?.id} " +
+    val identified = queue.collection ?: selected
+    val path = when {
+        queue.tracks.isEmpty() -> "not-found"
+        matchType == "exact" || matchType == "alias" -> "matched"
+        else -> "best-match-fallback(selection-protocol-unverified)"
+    }
+    log("kind=${command.kind} path=$path match=$matchType id=${identified?.catalogId ?: identified?.resourceId ?: identified?.id} " +
         "name=${selected?.title} queueSize=${queue.tracks.size}")
     return queue
 }

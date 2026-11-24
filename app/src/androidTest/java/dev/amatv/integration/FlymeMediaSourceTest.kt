@@ -260,6 +260,7 @@ internal class FakeFlymeBroker(private val media: FakeFlymeMediaCenter) : Binder
     val methods = CopyOnWriteArrayList<String>()
     val transactions = CopyOnWriteArrayList<Int>()
     val cancellations = LinkedBlockingQueue<Unit>()
+    val spokenMessages = LinkedBlockingQueue<String>()
     @Volatile var callback: IBinder? = null
         private set
 
@@ -291,6 +292,13 @@ internal class FakeFlymeBroker(private val media: FakeFlymeMediaCenter) : Binder
                         assertEquals(media.token, data.readStrongBinder())
                         assertTrue(param.contains("vrChannelInfo"))
                     }
+                    FlymeVoiceProtocol.SEND_TTS -> {
+                        assertEquals(6, code)
+                        assertEquals(media.token, data.readStrongBinder())
+                        val payload = org.json.JSONObject(param)
+                        assertEquals("", payload.getString("hintId"))
+                        spokenMessages.add(payload.getString("msg"))
+                    }
                     else -> fail("Unexpected broker method $method")
                 }
                 reply.writeInt(1)
@@ -300,7 +308,9 @@ internal class FakeFlymeBroker(private val media: FakeFlymeMediaCenter) : Binder
                 reply.writeString("com.ecarx.sdk.openapi.msg.SupportServiceRetMessage")
                 reply.writeInt(200)
                 reply.writeString("")
-                val result = if (method.endsWith("VrSemanticsCapability")) "true" else ""
+                val result = if (method.endsWith("VrSemanticsCapability") || method == FlymeVoiceProtocol.SEND_TTS) {
+                    "true"
+                } else ""
                 reply.writeByteArray(result.toByteArray())
                 reply.writeStrongBinder(if (method == "getMainBinder") media else null)
                 if (method == "cancelVrSemanticsCapability") cancellations.add(Unit)
@@ -311,10 +321,12 @@ internal class FakeFlymeBroker(private val media: FakeFlymeMediaCenter) : Binder
         return true
     }
 
-    fun sendPlay() = FlymeMediaSource.rpc(requireNotNull(callback), FlymeVoiceProtocol.EX_CALLBACK, 1, {
+    fun sendPlay() = sendSemantic(33554433)
+
+    fun sendSemantic(semantic: Int) = FlymeMediaSource.rpc(requireNotNull(callback), FlymeVoiceProtocol.EX_CALLBACK, 1, {
         writeInt(2)
         writeString(FlymeVoiceProtocol.SEMANTIC_LISTENER)
-        writeString("""{"semantic":33554433}""")
+        writeString("""{"semantic":$semantic}""")
         writeStrongBinder(null)
     }, { assertNull(readString()) })
 

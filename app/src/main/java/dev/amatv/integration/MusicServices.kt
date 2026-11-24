@@ -24,7 +24,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.io.IOException
 
 enum class MusicConnectionState {
     Demo,
@@ -283,11 +282,11 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
     override suspend fun prefetchLibraryDetails() {
         if (prefetchCompleted || connectionState != MusicConnectionState.SignedIn) return
         val first = prefetchOrNull { libraryPlaylistsPage() } ?: return
-        val favorites = first.items.firstOrNull { it.title.trim().lowercase() in favoritePlaylistNames }
+        val favorites = first.items.firstOrNull { it.isVoiceFavorites() }
             ?: first.nextPage?.let { next ->
                 delay(750L)
                 prefetchOrNull { libraryPlaylistsPage(next) }?.items
-                    ?.firstOrNull { it.title.trim().lowercase() in favoritePlaylistNames }
+                    ?.firstOrNull { it.isVoiceFavorites() }
             }
         (listOfNotNull(favorites) + first.items.take(3)).distinctBy { it.detailKey() }.take(3)
             .forEach { playlist ->
@@ -422,55 +421,6 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
         flymeMediaSource?.setCallbacks(callbacks)
     }
 
-    internal fun startFlymeVoice(
-        scope: CoroutineScope,
-        playTrack: (Track, List<Track>) -> Unit,
-        playAlbum: (Track, List<Track>) -> Unit,
-        favorite: () -> Unit,
-    ) {
-        flymeVoice?.start(scope) { command ->
-            when (command) {
-                FlymeVoiceCommand.Control.Play -> systemPlaybackCallbacks?.play?.invoke()
-                FlymeVoiceCommand.Control.Pause -> systemPlaybackCallbacks?.pause?.invoke()
-                FlymeVoiceCommand.Control.Previous -> systemPlaybackCallbacks?.previous?.invoke()
-                FlymeVoiceCommand.Control.Next -> systemPlaybackCallbacks?.next?.invoke()
-                FlymeVoiceCommand.Control.Favorite -> favorite()
-                is FlymeVoiceCommand.Search -> {
-                    val result = withContext(Dispatchers.IO) {
-                        api.withAccount {
-                            resolveFlymeVoiceSearch(
-                                command,
-                                search = ::search,
-                                artistTopSongs = { catalogArtistPage(it).topSongs },
-                                collectionTracks = ::collectionTracks,
-                                catalogAlbum = api::catalogAlbumForVoice,
-                                log = { android.util.Log.i(FlymeVoiceBridge.TAG, it) },
-                                librarySearch = { term, collection ->
-                                    try {
-                                        api.searchLibraryForVoice(term, collection)
-                                    } catch (error: CatalogRequestException) {
-                                        android.util.Log.w(FlymeVoiceBridge.TAG,
-                                            "kind=${command.kind} fallback=library-search-${error.reason} using=catalog")
-                                        emptyList()
-                                    } catch (error: IOException) {
-                                        android.util.Log.w(FlymeVoiceBridge.TAG,
-                                            "kind=${command.kind} fallback=library-search-io using=catalog", error)
-                                        emptyList()
-                                    }
-                                },
-                            )
-                        }
-                    }
-                    val first = result.tracks.firstOrNull()
-                    if (first != null) {
-                        if (result.album != null) playAlbum(result.album, result.tracks)
-                        else playTrack(first, if (result.artistQueue) result.tracks else emptyList())
-                    }
-                }
-                is FlymeVoiceCommand.Ignored -> Unit
-            }
-        }
-    }
     override fun publishSystemPlayback(snapshot: PlaybackSnapshot, canSkipNext: Boolean, canSkipPrevious: Boolean) {
         mediaSession.publish(snapshot, canSkipNext, canSkipPrevious)
         flymeMediaSource?.publish(snapshot.copy(canSkipNext = canSkipNext, canSkipPrevious = canSkipPrevious))
@@ -482,5 +432,3 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
 }
 
 private const val DETAIL_REFRESH_MS = 30_000L
-private val favoritePlaylistNames = setOf("favorite songs", "favourite songs", "喜好歌曲",
-    "喜爱歌曲", "喜愛歌曲", "最爱歌曲", "最愛歌曲", "お気に入りの曲")

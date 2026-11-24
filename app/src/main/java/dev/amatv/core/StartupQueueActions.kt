@@ -1,5 +1,7 @@
 package dev.amatv.core
 
+import dev.amatv.integration.PlaybackRepeatMode
+
 /** Stable semantic actions: a bootstrap-tail index must never address the full timeline. */
 sealed interface StartupQueueAction {
     data object Next : StartupQueueAction
@@ -8,6 +10,7 @@ sealed interface StartupQueueAction {
     data object ClearUpcoming : StartupQueueAction
     data object CycleRepeat : StartupQueueAction
     data object ToggleShuffle : StartupQueueAction
+    data class SetMode(val repeat: PlaybackRepeatMode, val shuffle: Boolean) : StartupQueueAction
     data object ToggleInfinite : StartupQueueAction
 
     val changesTimeline: Boolean

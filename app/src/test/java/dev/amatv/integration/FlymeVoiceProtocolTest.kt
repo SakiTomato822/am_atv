@@ -1,8 +1,15 @@
 package dev.amatv.integration
 
 import dev.amatv.integration.FlymeVoiceCommand.Control
+import dev.amatv.integration.FlymeVoiceCommand.Info
+import dev.amatv.integration.FlymeVoiceCommand.ListSource
+import dev.amatv.integration.FlymeVoiceCommand.Mode
+import dev.amatv.integration.FlymeVoiceCommand.Page
 import dev.amatv.integration.FlymeVoiceCommand.Search
 import dev.amatv.integration.FlymeVoiceCommand.Search.Kind
+import dev.amatv.integration.FlymeVoiceCommand.Seek
+import dev.amatv.integration.FlymeVoiceCommand.Style
+import org.json.JSONObject
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -32,10 +39,69 @@ class FlymeVoiceProtocolTest {
         assertEquals(0, channel.getInt("channelDataType"))
         val types = declaration.getJSONArray("semanticsTypes")
         assertEquals(
-            listOf(33554433, 33554434, 33554440, 33554436, 67108866, 67108868, 67108872, 67108880, 67108896, 33554448),
+            listOf(33554433, 33554434, 33554440, 33554436, 67108866, 67108868, 67108872, 67108880, 67108896, 33554448,
+                33555456, 33556480, 33558528, 33562624, 33619968, 33685504, 33816576, 34603008, 35651584, 37748736,
+                67108928, 67108992, 67109120, 67125248, 67141632, 67174400, 67239936, 67633152,
+                69206016, 268435457, 268435458, 268435488),
             List(types.length(), types::getInt),
         )
     }
+
+    @Test fun additionalSemanticIdsMapToCommands() {
+        mapOf(
+            33556480 to Control.Pause,
+            33558528 to Control.Play,
+            33562624 to Control.Play,
+            69206016 to Control.Play,
+            33619968 to Control.Replay,
+            34603008 to Page.Player,
+            35651584 to Page.Lyrics,
+            67108928 to Style("Jazz"),
+            67108992 to ListSource.Chart,
+            67109120 to ListSource.Favorites,
+            67239936 to ListSource.Recommendations,
+            67633152 to ListSource.History,
+            67125248 to Search(Kind.Song, "First", "ABC", searchOnly = true),
+            67141632 to Search(Kind.Artist, "First", "ABC", searchOnly = true),
+            67174400 to Search(Kind.ArtistSong, "First", "ABC", searchOnly = true),
+            268435457 to Info.Title,
+            268435458 to Info.Artist,
+            268435488 to Info.Album,
+        ).forEach { (code, expected) ->
+            assertEquals(expected, parse(code, "search_slot_style" to "Jazz", "titleName" to "First", "artistName" to "ABC"))
+        }
+    }
+
+    @Test fun convertsProgressToSignedPlaybackMilliseconds() {
+        assertEquals(Seek(-10_000, true), parse(33685504, "ctrl_progress" to 10_000))
+        assertEquals(Seek(10_000, true), parse(33816576, "ctrl_progress" to 10_000))
+        assertEquals(Seek(-15_000, true), parse(33685504, "ctrl_progress" to 0))
+        assertEquals(Seek(15_000, true), parse(33816576))
+        assertEquals(Seek(90_000, false), parse(37748736, "ctrl_progress" to 90_000))
+        assertEquals(Seek(0, false), parse(37748736, "ctrl_progress" to 0))
+    }
+
+    @Test fun repeatAndShuffleAreAbsolute() {
+        assertEquals(Mode.ListLoop, parse(33555456, "modeType" to 0))
+        assertEquals(Mode.SingleLoop, parse(33555456, "modeType" to 1))
+        assertEquals(Mode.Shuffle, parse(33555456, "modeType" to 2))
+        assertEquals(PlaybackRepeatMode.All to false, Mode.ListLoop.repeat to Mode.ListLoop.shuffle)
+        assertEquals(PlaybackRepeatMode.One to false, Mode.SingleLoop.repeat to Mode.SingleLoop.shuffle)
+        assertEquals(PlaybackRepeatMode.Off to true, Mode.Shuffle.repeat to Mode.Shuffle.shuffle)
+        assertEquals(FlymeVoiceCommand.Ignored(33555456), parse(33555456))
+    }
+
+    @Test fun ttsUsesMediaCenterKeysAndKeepsMessageText() {
+        val message = FlymeVoiceFeedback.playing("专辑 《叶惠美》")
+        val encoded = FlymeVoiceProtocol.ttsResult(message.text)
+        assertEquals(setOf("msg", "hintId"), encoded.keys().asSequence().toSet())
+        assertEquals("正在播放 专辑 《叶惠美》", encoded.getString("msg"))
+        assertEquals("", encoded.getString("hintId"))
+        assertEquals(FlymeVoiceFeedback("没找到 当前歌曲", failure = true), FlymeVoiceFeedback.info(Info.Title, null))
+    }
+
+    private fun parse(code: Int, vararg slots: Pair<String, Any>): FlymeVoiceCommand =
+        FlymeVoiceProtocol.parseSemantic(JSONObject(mapOf("semantic" to code, *slots)).toString())
 
     // Vendor fields come from GeelyAutoSystemUIPlugin_jadx/sources/com/ecarx/eas/sdk/mediacenter/j.java.
     @Test fun playbackControlsAndFavoriteUseSemanticIds() {
