@@ -53,7 +53,15 @@ class AmAtvApplication : Application() {
             clock = SystemClock::elapsedRealtime,
             diagnostics = musicServices.playbackDiagnostics,
             playHistoryStore = playHistoryStore,
-        ).also { it.attach() }
+        ).also { store ->
+            store.attach()
+            musicServices.startFlymeVoice(
+                applicationScope,
+                searchAndPlay = { store.playVoiceSearch(musicServices, it) },
+                // Voice only ever adds; an already-liked song must not raise the "can't remove" notice.
+                favorite = { if (libraryActions.state.value.current.isFavorite != true) libraryActions.toggleFavorite() },
+            )
+        }
     }
 
     override fun onCreate() {

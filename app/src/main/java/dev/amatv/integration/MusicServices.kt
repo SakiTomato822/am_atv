@@ -59,6 +59,8 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
     private val mediaSession = PlaybackMediaSession(appContext)
     private val flymeMediaSource = if (BuildConfig.FLYME_NATIVE_MEDIA) FlymeMediaSource(appContext) else null
     val nativeMediaStatus get() = flymeMediaSource?.status
+    internal val flymeVoice = flymeMediaSource?.let { FlymeVoiceBridge(appContext, PlaybackPreferences(appContext), it) }
+    private var systemPlaybackCallbacks: PlaybackMediaSession.Callbacks? = null
     private val playbackPreparation = Mutex()
     private val shelfSnapshots = ShelfSnapshots(appContext)
     private val detailSnapshots = DetailSnapshots(java.io.File(appContext.noBackupFilesDir, "detail-snapshots-v1"))
@@ -414,8 +416,30 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
         stationEngine?.setPlaybackListener(listener)
     }
     override fun setSystemPlaybackCallbacks(callbacks: PlaybackMediaSession.Callbacks?) {
+        systemPlaybackCallbacks = callbacks
         mediaSession.setCallbacks(callbacks)
         flymeMediaSource?.setCallbacks(callbacks)
+    }
+
+    internal fun startFlymeVoice(
+        scope: CoroutineScope,
+        searchAndPlay: suspend (String) -> Boolean,
+        favorite: () -> Unit,
+    ) {
+        flymeVoice?.start(scope) { command ->
+            when (command) {
+                FlymeVoiceCommand.Control.Play -> systemPlaybackCallbacks?.play?.invoke()
+                FlymeVoiceCommand.Control.Pause -> systemPlaybackCallbacks?.pause?.invoke()
+                FlymeVoiceCommand.Control.Previous -> systemPlaybackCallbacks?.previous?.invoke()
+                FlymeVoiceCommand.Control.Next -> systemPlaybackCallbacks?.next?.invoke()
+                FlymeVoiceCommand.Control.Favorite -> favorite()
+                is FlymeVoiceCommand.Search -> {
+                    val found = searchAndPlay(command.query)
+                    android.util.Log.i(FlymeVoiceBridge.TAG, "searchAndPlay foundSong=$found")
+                }
+                is FlymeVoiceCommand.Ignored -> Unit
+            }
+        }
     }
     override fun publishSystemPlayback(snapshot: PlaybackSnapshot, canSkipNext: Boolean, canSkipPrevious: Boolean) {
         mediaSession.publish(snapshot, canSkipNext, canSkipPrevious)

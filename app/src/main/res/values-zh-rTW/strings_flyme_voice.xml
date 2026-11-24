@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="flyme_voice_setting">車機語音點歌（實驗）</string>
+    <string name="flyme_voice_status">語音橋 · %1$s</string>
+    <string name="flyme_voice_off">未開啟</string>
+    <string name="flyme_voice_connecting">連線中</string>
+    <string name="flyme_voice_connected">已連線</string>
+    <string name="flyme_voice_declared">已宣告</string>
+    <string name="flyme_voice_unavailable">無法使用</string>
+</resources>

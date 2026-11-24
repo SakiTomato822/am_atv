@@ -50,6 +50,7 @@ import dev.amatv.core.SettingsState
 import dev.amatv.core.SettingsStore
 import dev.amatv.integration.ContentCacheStorage
 import dev.amatv.integration.LogRecorder
+import dev.amatv.integration.FlymeVoiceBridge.Phase
 import dev.amatv.integration.LoudnessMode
 import dev.amatv.integration.MusicConnectionState
 import dev.amatv.integration.MusicServices
@@ -321,6 +322,30 @@ internal fun FolioSettingsPage(
                 }
 
                 FolioSettingsSection.Vehicle -> {
+                    val voice = services.flymeVoice
+                    if (voice != null) {
+                        val voiceStatus by voice.status.collectAsState()
+                        SettingsToggleRow(
+                            title = stringResource(R.string.flyme_voice_setting),
+                            checked = voiceStatus.enabled,
+                            onCheckedChange = voice::setEnabled,
+                        )
+                        val phase = stringResource(when (voiceStatus.phase) {
+                            Phase.Off -> R.string.flyme_voice_off
+                            Phase.Connecting -> R.string.flyme_voice_connecting
+                            Phase.Connected -> R.string.flyme_voice_connected
+                            Phase.Declared -> R.string.flyme_voice_declared
+                            Phase.Unavailable -> R.string.flyme_voice_unavailable
+                        })
+                        val lastSemantic = voiceStatus.lastSemanticAt?.let {
+                            val time = java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it))
+                            "$time · ${voiceStatus.lastSemantic}"
+                        }
+                        SettingsRow(
+                            title = stringResource(R.string.flyme_voice_status, phase),
+                            subtitle = lastSemantic,
+                        ) {}
+                    }
                     val nativeStatus = services.nativeMediaStatus?.collectAsState()?.value
                     if (nativeStatus != null) {
                         SettingsRow(title = stringResource(R.string.flyme_media_status)) {
