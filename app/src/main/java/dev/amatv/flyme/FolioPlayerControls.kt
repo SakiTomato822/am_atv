@@ -711,7 +711,6 @@ internal fun FolioCirclePlayHairlineBar(
     val expandCd = stringResource(R.string.folio_player_controls_expand)
     val prevCd = stringResource(R.string.player_previous_track)
     val nextCd = stringResource(R.string.player_next_track)
-    val fontFamily = LocalFolioFontFamily.current
     val isPaletteLight = LocalFolioPalette.current.isLight
     val accent = LocalFolioControlAccent.current?.value ?: Color.Transparent
     val playBg = fg
@@ -720,7 +719,6 @@ internal fun FolioCirclePlayHairlineBar(
     val playIcon = if (accent.alpha > 0f) controlAccentForeground(playFill) else playFg
     val capsuleShape = RoundedCornerShape(FolioRadii.Capsule)
     val startPad = if (buttonOnLeft) WIDE_CAR_COLLAPSED_BAR_START_DP.dp else 0.dp
-    val remainingText = if (isLiveStream) "" else formatFolioRemainingTime(positionState.value, durationMs)
 
     Row(
         modifier = modifier
@@ -813,19 +811,26 @@ internal fun FolioCirclePlayHairlineBar(
             modifier = Modifier.weight(1f),
         )
 
-        if (remainingText.isNotEmpty()) {
+        if (!isLiveStream) {
             Spacer(Modifier.width(10.dp))
-            Text(
-                text = remainingText,
-                color = fg2,
-                fontFamily = fontFamily,
-                fontSize = 13.sp,
-                style = TextStyle(fontFamily = fontFamily, fontFeatureSettings = "tnum"),
-                maxLines = 1,
-                softWrap = false,
-            )
+            FolioCapsuleRemainingTime(positionState = positionState, durationMs = durationMs, color = fg2)
         }
     }
+}
+
+/** Reads the position on its own so each tick recomposes only this text, not the whole capsule. */
+@Composable
+private fun FolioCapsuleRemainingTime(positionState: State<Long>, durationMs: Long, color: Color) {
+    val fontFamily = LocalFolioFontFamily.current
+    Text(
+        text = formatFolioRemainingTime(positionState.value, durationMs),
+        color = color,
+        fontFamily = fontFamily,
+        fontSize = 13.sp,
+        style = TextStyle(fontFamily = fontFamily, fontFeatureSettings = "tnum"),
+        maxLines = 1,
+        softWrap = false,
+    )
 }
 
 /** Layout ④ under-cover collapsed info on Wide car Scrolling Lyrics (no glass outer capsule). */
