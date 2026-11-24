@@ -16,27 +16,42 @@ internal class NativeTrackLoudness(
 ) {
     private var started = false
     private var rampStartMs: Long? = null
+    private var rampFromGain = 0f
+    private var lastGain = 0f
+    private var effectiveLookup = lookup
+    private var album: AlbumLoudness.Summary? = null
+    private var loggedAlbum: AlbumLoudness.Summary? = null
     private var loggedLookup: LoudnessLookup? = null
     private var loggedGain: Float? = null
 
     @OptIn(ExperimentalCoroutinesApi::class)
     fun gainAt(playing: Boolean, nowMs: Long): Float {
-        started = started || playing
         pending?.takeIf { it.isCompleted }?.let { request ->
             lookup = runCatching { request.getCompleted() }
                 .getOrElse { LoudnessLookup(null, "missing", "lookup-cancelled") }
             pending = null
-            if (started && lookup.tag != null) rampStartMs = nowMs
         }
+        album = AlbumLoudness.forTrack(catalogId).takeUnless { mode == LoudnessMode.Off }
+        val target = album?.tag?.let { LoudnessLookup(it, "album") }
+            ?: lookup.copy(reason = lookup.reason ?: "album-tags-pending".takeIf { album != null })
+        if (started && target.tag != effectiveLookup.tag) {
+            rampStartMs = nowMs
+            rampFromGain = lastGain
+        }
+        started = started || playing
+        effectiveLookup = target
         val progress = rampStartMs?.let { ((nowMs - it) / RAMP_MS.toFloat()).coerceIn(0f, 1f) } ?: 1f
         if (progress == 1f) rampStartMs = null
-        return (lookup.tag?.gainFor(mode) ?: 0f) * progress
+        val targetGain = target.tag?.gainFor(mode) ?: 0f
+        lastGain = if (progress == 1f) targetGain else rampFromGain + (targetGain - rampFromGain) * progress
+        return lastGain
     }
 
     fun apply(effect: GaplessFade, session: Int, fadeDb: Float, playing: Boolean, nowMs: Long): Float {
         val gain = gainAt(playing, nowMs)
+        val lookup = effectiveLookup
         val applied = effect.apply(session, fadeDb, gain, limit = lookup.tag != null)
-        if (lookup != loggedLookup || (rampStartMs == null && applied != loggedGain)) {
+        if (lookup != loggedLookup || album != loggedAlbum || (rampStartMs == null && applied != loggedGain)) {
             val reason = lookup.reason ?: when {
                 applied == gain -> "-"
                 effect.attachment(session) == "attached" -> "apply-failed"
@@ -47,10 +62,12 @@ internal class NativeTrackLoudness(
                 LOUDNESS_LOG,
                 "catalogId=${catalogId ?: "-"} tagDb=${lookup.tag?.gainDb ?: "-"} " +
                     "peakDbFS=${lookup.tag?.peakDb ?: "-"} mode=$mode appliedDb=$applied " +
-                    "source=${lookup.source} reason=$reason " +
+                    "source=${lookup.source} reason=$reason scope=${if (album != null) "album" else "track"} " +
+                    "albumTracksKnown=${album?.tracksKnown ?: 0} " +
                     "targetHeadroomUsed=${targetHeadroomUsedDb > 0f} targetHeadroomUsedDb=$targetHeadroomUsedDb",
             )
             loggedLookup = lookup
+            loggedAlbum = album
             loggedGain = applied
         }
         return applied

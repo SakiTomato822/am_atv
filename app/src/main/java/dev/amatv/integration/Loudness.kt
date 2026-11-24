@@ -38,6 +38,40 @@ internal data class SoundCheck(val gainDb: Float, val peakDb: Float) {
         (gainFor(mode) - peakLimitedGainDb).coerceIn(0f, mode.peakHeadroomDb)
 }
 
+/** Album membership comes from the app queue. The native player still applies one gain per item. */
+internal object AlbumLoudness {
+    data class Summary(val tag: SoundCheck?, val tracksKnown: Int)
+
+    private var tracks = emptySet<String>()
+    private val tags = mutableMapOf<String, SoundCheck>()
+    private var summary = Summary(null, 0)
+
+    @Synchronized
+    fun select(ids: Set<String>): Boolean {
+        if (tracks == ids) return false
+        tracks = ids
+        tags.keys.retainAll(ids)
+        summarize()
+        return true
+    }
+
+    @Synchronized
+    fun record(id: String, tag: SoundCheck) {
+        if (id in tracks && tags.put(id, tag) != tag) summarize()
+    }
+
+    @Synchronized
+    fun forTrack(id: String?): Summary? = summary.takeIf { id in tracks }
+
+    private fun summarize() {
+        val tag = if (tags.isEmpty()) null else SoundCheck(
+            tags.values.map(SoundCheck::gainDb).average().toFloat(),
+            tags.values.maxOf(SoundCheck::peakDb),
+        )
+        summary = Summary(tag, tags.size)
+    }
+}
+
 internal object SoundCheckParser {
     private val fields = Regex("[0-9a-fA-F]{1,8}")
 

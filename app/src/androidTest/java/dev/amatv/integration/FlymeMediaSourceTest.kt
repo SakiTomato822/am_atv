@@ -97,7 +97,7 @@ class FlymeMediaSourceTest {
             val playing = FakeFlymeMediaCenter(context)
             replacement.connect(FakeFlymeBroker(playing))
             source.awaitState(v4, connected)
-            assertEquals(listOf(19, 7, 8, 5, 6), playing.operations.filterNot { it == 10 })
+            assertEquals(listOf(19, 7, 8, 5, 8, 6), playing.operations.filterNot { it == 10 })
             assertEquals(listOf(1 to "Saved song"), playing.publishedMetadata)
 
             playing.dieOnNextPublish = true
@@ -144,7 +144,7 @@ class FlymeMediaSourceTest {
 
             source.playbackRequested()
             assertEquals(0 to "Saved song", media.metadataUpdates.poll(5, TimeUnit.SECONDS))
-            assertEquals(listOf(19, 7, 8, 6, 5, 6), media.operations.filterNot { it == 10 })
+            assertEquals(listOf(19, 7, 8, 6, 5, 8, 6), media.operations.filterNot { it == 10 })
         } finally {
             source.release()
         }

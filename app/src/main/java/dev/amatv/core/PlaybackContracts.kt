@@ -30,6 +30,7 @@ interface PlayerOperations : RecommendationProvider {
     ): Long?
     fun setLookahead(next: Track?, transition: GaplessTransition? = null)
     fun prefetchLoudness(track: Track)
+    fun setLoudnessAlbum(tracks: List<Track>) {}
     fun setFadeEnabled(enabled: Boolean)
     suspend fun stationSongs(stationId: String): List<Track>
     suspend fun prefetchLibraryDetails()

@@ -1,5 +1,6 @@
 package dev.amatv.integration
 
+import android.os.SystemClock
 import android.util.Log
 import dev.amatv.core.ContentStore
 import dev.amatv.core.PlayHistoryStore
@@ -64,7 +65,7 @@ internal fun MusicServices.startFlymeVoice(
     navigate: (FlymeVoiceDestination) -> Unit,
     favorite: () -> Unit,
 ) {
-    flymeVoice?.start(scope) { command ->
+    flymeVoice?.startWithFeedback(scope) { command, announce ->
         val current = playback.state.value
         when (command) {
             Control.Play -> playback.requestPlayback()
@@ -75,14 +76,14 @@ internal fun MusicServices.startFlymeVoice(
             Control.Replay -> if (current.hasCurrentTrack) {
                 playback.seekPlaybackTo(0)
                 playback.requestPlayback()
-            } else return@start FlymeVoiceFeedback.notFound("当前歌曲")
+            } else return@startWithFeedback FlymeVoiceFeedback.notFound("当前歌曲")
             is Seek -> if (current.hasCurrentTrack) {
                 if (command.relative) playback.seekPlaybackBy(command.milliseconds)
                 else playback.seekPlaybackTo(command.milliseconds)
-            } else return@start FlymeVoiceFeedback.notFound("当前歌曲")
+            } else return@startWithFeedback FlymeVoiceFeedback.notFound("当前歌曲")
             is Mode -> playback.dispatchQueueAction(StartupQueueAction.SetMode(command.repeat, command.shuffle))
             is Page -> navigate(FlymeVoiceDestination.NowPlaying(command == Page.Lyrics))
-            is Info -> return@start FlymeVoiceFeedback.info(command, current.track.takeIf { current.hasCurrentTrack })
+            is Info -> return@startWithFeedback FlymeVoiceFeedback.info(command, current.track.takeIf { current.hasCurrentTrack })
             is Search -> {
                 if (command.searchOnly) {
                     Log.i(TAG, "path=search-page query=${command.query} fallback=selection-protocol-unverified")
@@ -90,15 +91,17 @@ internal fun MusicServices.startFlymeVoice(
                 } else {
                     val name = command.targetTitle.ifBlank { command.query }
                     val target = if (command.kind.catalogKind == CatalogKind.Album) "专辑 $name" else name
-                    return@start playVoiceSelection(playback, target) { lookupVoiceSearch(command) }
+                    return@startWithFeedback playVoiceSelection(playback, target, announce) { matched ->
+                        lookupVoiceSearch(command, matched)
+                    }
                 }
             }
-            is ListSource -> return@start playVoiceSelection(playback, command.label) {
+            is ListSource -> return@startWithFeedback playVoiceSelection(playback, command.label, announce) { matched ->
                 when (command) {
                     ListSource.Favorites -> {
                         val playlist = findVoiceFavorites(content)
                         Log.i(TAG, "path=favorites selected=${playlist?.title}")
-                        playlist?.let { voiceCollection(it) }
+                        playlist?.let { voiceCollection(it, matched) }
                     }
                     ListSource.History -> {
                         val tracks = history.entries.value.map { it.toTrack() }.filter { it.catalogId != null }
@@ -111,7 +114,7 @@ internal fun MusicServices.startFlymeVoice(
                             Log.i(TAG, "path=recommendation fallback=fresh-home-shelves selected=${it?.title}")
                         }
                         Log.i(TAG, "path=recommendation selected=${item?.title} kind=${item?.catalogKind}")
-                        item?.let { voiceCollection(it) }
+                        item?.let { voiceCollection(it, matched) }
                     }
                     ListSource.Chart -> {
                         val tracks = charts("songs", browseFallback = false).filter { it.catalogKind == CatalogKind.Song }
@@ -120,16 +123,16 @@ internal fun MusicServices.startFlymeVoice(
                     }
                 }
             }
-            is Style -> return@start playVoiceSelection(playback, command.name.ifBlank { "音乐风格" }) {
-                val playlist = findVoiceStylePlaylist(command)
-                if (playlist != null) {
-                    Log.i(TAG, "path=library-playlist style=${command.name} origin=${command.originInfo} selected=${playlist.title}")
-                    voiceCollection(playlist)
-                } else {
-                    val item = search(command.name).firstOrNull(::isVoiceCollection)
-                    Log.i(TAG, "path=style fallback=library-playlist-not-found style=${command.name} selected=${item?.title} kind=${item?.catalogKind}")
-                    item?.let { voiceCollection(it) }
-                }
+            is Style -> return@startWithFeedback playVoiceSelection(
+                playback, command.name.ifBlank { "音乐风格" }, announce,
+            ) { matched ->
+                val library = findVoiceStylePlaylist(command)
+                val item = library ?: matchVoiceStylePlaylist(command, api.searchVoiceCollections(
+                    command.name.ifBlank { command.originInfo },
+                ))
+                Log.i(TAG, "path=style source=${if (library != null) "library" else "catalog"} " +
+                    "style=${command.name} selected=${item?.title} kind=${item?.catalogKind}")
+                item?.let { voiceCollection(it, matched) }
             }
             is Ignored -> Unit
         }
@@ -137,14 +140,17 @@ internal fun MusicServices.startFlymeVoice(
     }
 }
 
-private suspend fun MusicServices.lookupVoiceSearch(command: Search): FlymeVoiceQueue =
+private suspend fun MusicServices.lookupVoiceSearch(
+    command: Search, onMatch: (FlymeVoiceFeedback) -> Unit,
+): FlymeVoiceQueue =
     resolveFlymeVoiceSearch(
         command,
         search = ::search,
-        artistTopSongs = { catalogArtistPage(it).topSongs },
+        artistTopSongs = api::artistTopSongsForVoice,
         collectionTracks = ::collectionTracks,
         catalogAlbum = api::catalogAlbumForVoice,
         log = { Log.i(TAG, it) },
+        onMatch = onMatch,
         librarySearch = { term, collection ->
             try {
                 api.searchLibraryForVoice(term, collection)
@@ -161,39 +167,65 @@ private suspend fun MusicServices.lookupVoiceSearch(command: Search): FlymeVoice
 private suspend fun MusicServices.playVoiceSelection(
     playback: PlaybackStore,
     target: String,
-    resolve: suspend () -> FlymeVoiceQueue?,
-): FlymeVoiceFeedback {
+    announce: (FlymeVoiceFeedback) -> Unit,
+    resolve: suspend ((FlymeVoiceFeedback) -> Unit) -> FlymeVoiceQueue?,
+): FlymeVoiceFeedback? {
     val missing = FlymeVoiceFeedback.notFound(target)
     if (connectionState != MusicConnectionState.SignedIn) {
         Log.i(TAG, "path=not-signed-in target=$target")
         return missing
     }
+    val receivedAt = SystemClock.elapsedRealtime()
+    var matchedAt: Long? = null
+    val matched: (FlymeVoiceFeedback) -> Unit = { feedback ->
+        val now = SystemClock.elapsedRealtime()
+        matchedAt = now
+        Log.i(TAG, "stage=matched elapsedMs=${now - receivedAt} target=$target")
+        announce(feedback)
+    }
+    val failure = FlymeVoiceFeedback("无法播放 $target", failure = true)
     val result = try {
-        withContext(Dispatchers.IO) { api.withAccount { resolve() } }
+        withContext(Dispatchers.IO) { api.withAccount { resolve(matched) } }
     } catch (error: CatalogRequestException) {
         Log.w(TAG, "path=lookup-failed target=$target reason=${error.reason}")
-        return missing
+        return if (matchedAt == null) missing else failure
     } catch (error: IOException) {
         Log.w(TAG, "path=lookup-failed target=$target", error)
-        return missing
+        return if (matchedAt == null) missing else failure
     }
     val first = result?.tracks?.firstOrNull()
-    if (result == null || first == null) return missing
+    if (result == null || first == null) return if (matchedAt == null) missing else failure
+    if (matchedAt == null) matched(result.spokenName?.let(FlymeVoiceFeedback::playing) ?: FlymeVoiceFeedback.track(first))
+    val firstBatchAt = SystemClock.elapsedRealtime()
+    Log.i(TAG, "stage=first-batch elapsedMs=${firstBatchAt - receivedAt} " +
+        "sinceMatchMs=${firstBatchAt - checkNotNull(matchedAt)} count=${result.tracks.size} target=$target")
+    val oldSession = playback.queueController.state.value.sessionId
     if (result.collection != null) playback.playCollection(result.collection, result.tracks, index = 0, shuffle = false)
     else playback.playTrack(first, if (result.tracks.size > 1) result.tracks else emptyList())
+    val requestedAt = SystemClock.elapsedRealtime()
+    Log.i(TAG, "stage=play-requested elapsedMs=${requestedAt - receivedAt} target=$target")
     val started = withTimeoutOrNull(15_000L) {
         playback.state.first { state ->
-            state.isPlaying && if (first.catalogKind == CatalogKind.Station) {
-                playback.queueController.state.value.context?.id == first.catalogId
-            } else state.track.matchesPlaybackQueueEntry(first)
+            val queue = playback.queueController.state.value
+            queue.sessionId != oldSession && state.isPlaying &&
+                (state.snapshot?.positionMs ?: 0L) > 0L && if (first.catalogKind == CatalogKind.Station) {
+                queue.context?.id == first.catalogId
+            } else {
+                queue.current?.track?.matchesPlaybackQueueEntry(state.track) == true &&
+                    (queue.contextEntries.any { it.track.matchesPlaybackQueueEntry(state.track) } ||
+                        result.tracks.any { state.track.matchesPlaybackQueueEntry(it) })
+            }
         }
     }
     if (started == null) {
         Log.w(TAG, "path=playback-unconfirmed target=$target")
-        return FlymeVoiceFeedback("无法播放 $target", failure = true)
+        return failure
     }
-    Log.i(TAG, "path=playback-confirmed target=$target")
-    return result.spokenName?.let(FlymeVoiceFeedback::playing) ?: FlymeVoiceFeedback.track(first)
+    val confirmedAt = SystemClock.elapsedRealtime()
+    Log.i(TAG, "path=playback-confirmed stage=audible elapsedMs=${confirmedAt - receivedAt} " +
+        "sinceRequestMs=${confirmedAt - requestedAt} id=${started.track.catalogId} target=$target")
+    return started.track.takeIf { result.collection?.catalogKind == CatalogKind.Album }
+        ?.let(FlymeVoiceFeedback::track)
 }
 
 private fun isVoiceCollection(track: Track): Boolean =
@@ -205,9 +237,13 @@ private fun voiceRecommendation(shelves: List<ContentShelf>): Track? =
             .flatMap { it.items.asSequence() })
         .firstOrNull(::isVoiceCollection)
 
-private suspend fun MusicServices.voiceCollection(item: Track): FlymeVoiceQueue =
-    if (item.catalogKind == CatalogKind.Station) FlymeVoiceQueue(listOf(item), spokenName = item.title)
+private suspend fun MusicServices.voiceCollection(
+    item: Track, matched: (FlymeVoiceFeedback) -> Unit,
+): FlymeVoiceQueue {
+    matched(FlymeVoiceFeedback.playing(item.title))
+    return if (item.catalogKind == CatalogKind.Station) FlymeVoiceQueue(listOf(item), spokenName = item.title)
     else FlymeVoiceQueue(collectionTracks(item), collection = item, spokenName = item.title)
+}
 
 private suspend fun MusicServices.findVoiceStylePlaylist(command: Style): Track? {
     if (command.name.isBlank() && command.originInfo.isBlank()) return null
@@ -237,5 +273,6 @@ private suspend fun MusicServices.findVoiceFavorites(content: ContentStore): Tra
 internal fun Track.isVoiceFavorites(): Boolean =
     catalogKind == CatalogKind.Playlist && title.trim().lowercase() in favoritePlaylistNames
 
-private val favoritePlaylistNames = setOf("favorite songs", "favourite songs", "喜好歌曲",
-    "喜爱歌曲", "喜愛歌曲", "喜爱的歌曲", "喜愛的歌曲", "最爱的歌曲", "最愛的歌曲", "お気に入りの曲")
+internal val favoritePlaylistNames = setOf("favorite songs", "favourite songs", "喜好歌曲",
+    "喜爱歌曲", "喜愛歌曲", "喜爱的歌曲", "喜愛的歌曲", "最爱的歌曲", "最愛的歌曲", "お気に入りの曲",
+    "我喜欢的歌", "我喜歡的歌", "收藏的歌")

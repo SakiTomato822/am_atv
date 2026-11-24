@@ -378,6 +378,20 @@ class PlaybackStore(
         if (flymeAuto) {
             coroutineScope.launch {
                 combine(
+                    queueController.state.map { queue ->
+                        queue.contextEntries.takeIf { entries ->
+                            queue.context?.kind == ContextKind.Album &&
+                                entries.any { it.entryId == queue.current?.entryId }
+                        }.orEmpty().map { it.track }
+                    }.distinctUntilChanged(),
+                    settingsStore.state.map { it.loudnessMode }.distinctUntilChanged(),
+                ) { tracks, mode ->
+                    tracks.takeUnless { mode == dev.amatv.integration.LoudnessMode.Off }.orEmpty()
+                }.collect(player::setLoudnessAlbum)
+            }
+
+            coroutineScope.launch {
+                combine(
                     queueController.state.map { it.context?.kind to it.stationFeed }.distinctUntilChanged(),
                     settingsStore.state.map { Triple(it.fadeStations, it.fadeAlbums, it.fadePlaylists) }
                         .distinctUntilChanged(),

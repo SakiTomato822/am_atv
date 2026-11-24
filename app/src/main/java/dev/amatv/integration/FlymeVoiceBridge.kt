@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import org.json.JSONException
 import org.json.JSONObject
@@ -87,7 +88,13 @@ internal class FlymeVoiceBridge(
         mutableStatus.update { it.copy(announcementsEnabled = value) }
     }
 
-    fun start(scope: CoroutineScope, execute: suspend (FlymeVoiceCommand) -> FlymeVoiceFeedback?) {
+    fun start(scope: CoroutineScope, execute: suspend (FlymeVoiceCommand) -> FlymeVoiceFeedback?) =
+        startWithFeedback(scope) { command, _ -> execute(command) }
+
+    fun startWithFeedback(
+        scope: CoroutineScope,
+        execute: suspend (FlymeVoiceCommand, (FlymeVoiceFeedback) -> Unit) -> FlymeVoiceFeedback?,
+    ) {
         mediaSource.setVoiceEnabled(request.value.enabled)
         scope.launch {
             request.combine(mediaSource.voiceSession, ::Pair).collectLatest { (active, session) ->
@@ -102,7 +109,7 @@ internal class FlymeVoiceBridge(
     private suspend fun runSession(
         active: Request,
         session: FlymeMediaSource.VoiceSession,
-        execute: suspend (FlymeVoiceCommand) -> FlymeVoiceFeedback?,
+        execute: suspend (FlymeVoiceCommand, (FlymeVoiceFeedback) -> Unit) -> FlymeVoiceFeedback?,
     ) {
         val commands = Channel<FlymeVoiceCommand>(Channel.UNLIMITED)
         val registration = session.registration
@@ -129,15 +136,35 @@ internal class FlymeVoiceBridge(
             commands.receiveAsFlow().collectLatest { command ->
                 if (isCurrent()) {
                     try {
-                        val feedback = execute(command)
-                        if (feedback != null && (feedback.failure || status.value.announcementsEnabled)) {
-                            Log.i(TAG, "tts=${feedback.text}")
-                            val response = withContext(Dispatchers.IO) {
-                                broker.call(FlymeVoiceProtocol.SEND_TTS,
-                                    FlymeVoiceProtocol.ttsResult(feedback.text).toString(), registration.token)
+                        coroutineScope {
+                            val announcements = Channel<FlymeVoiceFeedback>(Channel.UNLIMITED)
+                            launch {
+                                for (feedback in announcements) {
+                                    if (!feedback.failure && !status.value.announcementsEnabled) continue
+                                    try {
+                                        Log.i(TAG, "tts=${feedback.text}")
+                                        val response = withContext(Dispatchers.IO) {
+                                            broker.call(FlymeVoiceProtocol.SEND_TTS,
+                                                FlymeVoiceProtocol.ttsResult(feedback.text).toString(), registration.token)
+                                        }
+                                        Log.i(TAG, "ttsReceipt ${response.describe()}")
+                                        check(response.data == "true") { "MediaCenter rejected TTS enqueue" }
+                                    } catch (cancelled: CancellationException) {
+                                        throw cancelled
+                                    } catch (error: DeadObjectException) {
+                                        Log.w(TAG, "V4 voice feedback lost the OpenAPI Binder", error)
+                                        mediaSource.voiceConnectionDied(session)
+                                        break
+                                    } catch (error: Exception) {
+                                        Log.w(TAG, "TTS enqueue failed", error)
+                                    }
+                                }
                             }
-                            Log.i(TAG, "ttsReceipt ${response.describe()}")
-                            check(response.data == "true") { "MediaCenter rejected TTS enqueue" }
+                            try {
+                                execute(command) { announcements.trySend(it) }?.let { announcements.send(it) }
+                            } finally {
+                                announcements.close()
+                            }
                         }
                     } catch (cancelled: CancellationException) {
                         throw cancelled

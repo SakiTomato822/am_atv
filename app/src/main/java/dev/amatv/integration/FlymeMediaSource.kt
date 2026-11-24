@@ -382,8 +382,7 @@ internal class FlymeMediaSource(
                 writeStrongBinder(registered); writeIntArray(intArrayOf(ONLINE))
             }, { Unit })
             Log.i(TAG, "$path updateMediaSourceTypeList (7): ONLINE")
-            rpc(remote, MEDIA, 8, { writeStrongBinder(registered); writeInt(ONLINE) }, { Unit })
-            Log.i(TAG, "$path updateCurrentSourceType (8): ONLINE")
+            updateCurrentSourceType(current, "registered")
         } catch (error: DeadObjectException) {
             throw error
         } catch (error: Exception) {
@@ -418,6 +417,8 @@ internal class FlymeMediaSource(
         val accepted = rpc(current.media, MEDIA, 5, { writeStrongBinder(current.token) }, { readInt() != 0 })
         Log.i(TAG, "${current.path} requestPlay (5): accepted=$accepted")
         if (accepted) {
+            // The session forwards the package/source callback only for its focused token.
+            updateCurrentSourceType(current, "focused")
             // MediaCenter only forwards transaction 6 for its focused token.
             // An earlier successful reply can represent metadata it did not forward.
             metadataKey = null
@@ -427,6 +428,11 @@ internal class FlymeMediaSource(
             dispatch { pause() }
         }
         return accepted
+    }
+
+    private fun updateCurrentSourceType(current: Registration, phase: String) {
+        rpc(current.media, MEDIA, 8, { writeStrongBinder(current.token); writeInt(ONLINE) }, { Unit })
+        Log.i(TAG, "${current.path} updateCurrentSourceType (8): ONLINE phase=$phase")
     }
 
     private fun publishOnWorker(value: PlaybackSnapshot) {
@@ -443,7 +449,9 @@ internal class FlymeMediaSource(
         }
         val now = SystemClock.elapsedRealtime()
         if (now - lastProgressTime >= 1000L) {
-            rpc(current.media, MEDIA, 10, { writeStrongBinder(current.token); writeLong(value.positionMs.coerceAtLeast(0L)) }, { Unit })
+            val position = value.positionMs.coerceAtLeast(0L)
+            rpc(current.media, MEDIA, 10, { writeStrongBinder(current.token); writeLong(position) }, { Unit })
+            if (lastProgressTime == 0L) Log.i(TAG, "${current.path} updateCurrentProgress (10): positionMs=$position")
             lastProgressTime = now
         }
     }

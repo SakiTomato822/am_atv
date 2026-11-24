@@ -398,6 +398,11 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
         if (!stationEngineActive) bridge.setLookahead(next, transition)
     }
     override fun prefetchLoudness(track: Track) = bridge.prefetchLoudness(track)
+    override fun setLoudnessAlbum(tracks: List<Track>) {
+        if (AlbumLoudness.select(tracks.mapNotNull(Track::catalogId).toSet())) {
+            tracks.distinctBy(Track::catalogId).forEach(bridge::prefetchLoudness)
+        }
+    }
     override fun setFadeEnabled(enabled: Boolean) { bridge.fadeEnabled = enabled }
     /** A station's next songs, to play it on the native player without Widevine. */
     override suspend fun stationSongs(stationId: String): List<Track> = api.stationNextTracks(stationId)

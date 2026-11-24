@@ -37,4 +37,20 @@ class GroupedSearchTest {
         assertEquals(emptyList<Any>(), api.parseGroupedSearch(JSONObject("""{"results":{}}""")))
         assertEquals(emptyList<Any>(), api.parseGroupedSearch(JSONObject("{}")))
     }
+
+    @Test fun exactAlbumTitleIsPreferredOverAnInexactTopSong() {
+        val root = JSONObject("""
+            {"results":{
+              "topResults":{"data":[{"id":"1","type":"songs"},{"id":"2","type":"albums"}]},
+              "albums":{"data":[{"id":"2","type":"albums"}]}
+            },"resources":{
+              "songs":{"1":{"attributes":{"name":"A.I.N.Y. 爱你 (G.E.M.重生版)"}}},
+              "albums":{"2":{"attributes":{"name":"I AM GLORIA"}}}
+            }}
+        """.trimIndent())
+
+        assertEquals(listOf(CatalogKind.Song, CatalogKind.Album), api.parseGroupedSearch(root).map { it.catalogKind })
+        assertEquals(listOf("I AM GLORIA", "A.I.N.Y. 爱你 (G.E.M.重生版)"),
+            api.parseGroupedSearch(root, "i am gloria").map { it.title })
+    }
 }

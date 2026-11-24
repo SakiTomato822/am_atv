@@ -91,7 +91,7 @@ class FlymeVoiceSearchTest {
         val command = Search(Kind.ArtistSong, "不该", "张惠妹")
         val wrong = item("wrong", "哭不出來", artist = "張惠妹")
         val solo = item("solo", "不該", artist = "周杰倫")
-        val duet = item("duet", "不該", artist = "周杰倫 & 張惠妹")
+        val duet = item("duet", "不該 (with 張惠妹)", artist = "周杰倫")
         val terms = mutableListOf<String>()
         val queue = resolveFlymeVoiceSearch(
             command,

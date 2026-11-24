@@ -128,6 +128,25 @@ class LoudnessTest {
         assertNull(encoded.toSessionTrack().previewUrl)
     }
 
+    @Test fun albumUsesTheAverageAndHighestPeakForEachMember() {
+        AlbumLoudness.select(setOf("101", "102", "103"))
+        try {
+            AlbumLoudness.record("101", SoundCheck(-1f, -4f))
+            assertEquals(AlbumLoudness.Summary(SoundCheck(-1f, -4f), 1), AlbumLoudness.forTrack("102"))
+            AlbumLoudness.record("102", SoundCheck(-9f, -1f))
+            AlbumLoudness.record("104", SoundCheck(10f, 5f))
+            val shared = AlbumLoudness.Summary(SoundCheck(-5f, -1f), 2)
+            assertEquals(shared, AlbumLoudness.forTrack("101"))
+            assertEquals(shared, AlbumLoudness.forTrack("103"))
+            assertNull(AlbumLoudness.forTrack("104"))
+            val loudness = NativeTrackLoudness(1L, "apple:101", 0, "101", LoudnessMode.Standard,
+                LoudnessLookup(SoundCheck(-1f, -4f), "cache"), null)
+            assertEquals(-3f - 2f / 3f, loudness.gainAt(playing = true, nowMs = 0L), 0.001f)
+        } finally {
+            AlbumLoudness.select(emptySet())
+        }
+    }
+
     private fun rawTag(power: String) = " $power 00000000 00000000 00000000 00000000 00003000 00004000 0 0"
 
     private fun freeform(name: String, tag: String): ByteArray = box(

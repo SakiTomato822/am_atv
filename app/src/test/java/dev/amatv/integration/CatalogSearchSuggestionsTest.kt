@@ -53,4 +53,16 @@ class CatalogSearchSuggestionsTest {
             suggestions.topResults.map { it.openAction },
         )
     }
+
+    @Test
+    fun resolvesReferenceOnlySuggestionsFromTheResourceMap() {
+        val api = AppleMusicApi("tw", DeveloperTokenClient("")) { null }
+        val response = JSONObject("""
+            {"results":{"suggestions":[
+              {"kind":"topResults","content":{"id":"1","type":"albums"}}
+            ]},"resources":{"albums":{"1":{"attributes":{"name":"I AM GLORIA"}}}}}
+        """.trimIndent())
+
+        assertEquals("I AM GLORIA", api.parseSearchSuggestions(response).topResults.single().title)
+    }
 }

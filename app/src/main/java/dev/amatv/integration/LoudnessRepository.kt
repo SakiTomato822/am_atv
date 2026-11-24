@@ -71,7 +71,9 @@ internal class LoudnessRepository(
     }
     private val inFlight = mutableMapOf<String, Deferred<LoudnessLookup>>()
 
-    fun cached(catalogId: String?): SoundCheck? = catalogId?.let { cache[it] }
+    fun cached(catalogId: String?): SoundCheck? = catalogId?.let { id ->
+        cache[id]?.also { AlbumLoudness.record(id, it) }
+    }
 
     fun request(track: Track): Deferred<LoudnessLookup>? {
         val id = track.catalogId?.takeIf { it.isNotEmpty() && it.all { digit -> digit in '0'..'9' } }
@@ -92,6 +94,7 @@ internal class LoudnessRepository(
         return try {
             val url = previewUrl ?: catalogPreviewUrl(id) ?: return LoudnessLookup(null, "missing", "no-preview")
             val tag = readSoundCheck(url) ?: return LoudnessLookup(null, "missing", "no-valid-iTunNORM")
+            AlbumLoudness.record(id, tag)
             runCatching { cache.put(id, tag) }
                 .onFailure { Log.w(LOUDNESS_LOG, "Cache write failed: ${it.javaClass.simpleName}") }
             LoudnessLookup(tag, "network")

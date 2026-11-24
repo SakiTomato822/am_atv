@@ -6,6 +6,7 @@ import dev.amatv.integration.voice.NameMatcher
 import dev.amatv.integration.voice.NameRoute
 import dev.amatv.integration.voice.NameTuning
 import dev.amatv.integration.voice.phoneticRecallTerms
+import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
 
 /** The part of the offline voice catalog index that ranks an explicit vendor intent. */
@@ -48,18 +49,19 @@ internal class VoiceCatalogIndex(
 
     fun accepts(track: Track): Boolean {
         if (!request.acceptsVoiceKind(track.catalogKind)) return false
-        return performer == null || matcher.compare(performer, encoder.prepare(track.artist))?.isNamedMatch == true
+        return performer == null ||
+            track.voiceCredits().any { matcher.compare(performer, encoder.prepare(it))?.isNamedMatch == true }
     }
 
     fun exactArtistSong(items: List<Track>): Track? = items.firstOrNull { track ->
-        request.acceptsVoiceKind(track.catalogKind) && encoder.key(track.title) == target.key &&
-            artistCreditSeparator.split(track.artist).any { encoder.key(it) == performer?.key }
+        request.acceptsVoiceKind(track.catalogKind) && encoder.key(track.voiceTitle().first) == target.key &&
+            track.voiceCredits().any { encoder.key(it) == performer?.key }
     }
 
     fun rank(library: List<Track>, catalog: List<Track> = emptyList()): Ranked {
         fun matches(items: List<Track>, inLibrary: Boolean) = items.mapIndexedNotNull { index, track ->
             if (!accepts(track)) return@mapIndexedNotNull null
-            val evidence = matcher.compare(target, encoder.prepare(track.title)) ?: return@mapIndexedNotNull null
+            val evidence = matcher.compare(target, encoder.prepare(track.voiceTitle().first)) ?: return@mapIndexedNotNull null
             // Keep service order for literal matches. Use the old index weights to rank phonetic alternatives.
             val score = evidence.score + if (inLibrary) NameTuning.LIBRARY_WEIGHT else NameTuning.APPLE_WEIGHT / (index + 1)
             Match(track, evidence, score)
@@ -74,7 +76,7 @@ internal class VoiceCatalogIndex(
                     evidence.coverage == 1.0 && evidence.cost <= 0.45
             }
             .sortedByDescending { it.score }
-            .distinctBy { encoder.key(it.track.title) }
+            .distinctBy { encoder.key(it.track.voiceTitle().first) }
             .take(2).toList()
         val first = phonetic.firstOrNull()
         val second = phonetic.getOrNull(1)
@@ -89,4 +91,25 @@ internal class VoiceCatalogIndex(
 internal fun flymeVoiceNameEncoder(aliases: Map<String, String> = emptyMap()) =
     NameEncoder(ChineseText::simplified, ChineseText::pinyin, ChineseText::romaji, aliases, ChineseText::alternatePinyin)
 
-private val artistCreditSeparator = Regex("""[&、,，＆]|\s+(?:feat\.?|with)\s+""", RegexOption.IGNORE_CASE)
+private val artistCreditSeparator = Regex("""[&、,，＆]|\s+(?:feat\.?|with|and)\s+""", RegexOption.IGNORE_CASE)
+private val trailingCredit = Regex("""\s*[(\[（【]([^()\[\]（）【】]+)[)\]）】]\s*$""")
+private val creditPrefix = Regex("""^(?:with|feat\.?|ft\.?)\s+""", RegexOption.IGNORE_CASE)
+private val creditSuffix = Regex("""\s*(?:合唱|合演|對唱|对唱)$""")
+
+private fun Track.voiceTitle(): Pair<String, List<String>> {
+    if (catalogKind != CatalogKind.Song) return title to emptyList()
+    var name = title
+    val credits = mutableListOf<String>()
+    while (true) {
+        val suffix = trailingCredit.find(name) ?: break
+        val inside = suffix.groupValues[1].trim()
+        val credit = inside.replace(creditPrefix, "").replace(creditSuffix, "").trim()
+        if (credit == inside || credit.isEmpty()) break
+        credits += artistCreditSeparator.split(credit)
+        name = name.substring(0, suffix.range.first).trimEnd()
+    }
+    return name to credits
+}
+
+private fun Track.voiceCredits(): List<String> =
+    artistCreditSeparator.split(artist) + voiceTitle().second

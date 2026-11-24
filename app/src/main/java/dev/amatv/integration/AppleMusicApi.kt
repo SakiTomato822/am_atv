@@ -27,6 +27,7 @@ import java.net.URLEncoder
 import java.util.Locale
 
 internal const val SEARCH_LOG_TAG = "AMATV-Search"
+private const val SEARCH_RESOURCE_TYPES = "albums,artists,music-videos,playlists,songs,stations"
 internal const val BROWSE_LOG_TAG = "AMATV-Browse"
 internal const val BROWSE_PERSONAL_RELEASES_ID = "browse-personal-new-releases"
 
@@ -554,13 +555,7 @@ class AppleMusicApi(
      * artist page is not limited to what the user happened to save.
      */
     suspend fun catalogArtistPage(artist: Track): CatalogArtistPage = withAccount {
-        val catalogId = if (artist.resourceType == LibraryCollection.Artists.resourceType) {
-            val libraryId = checkNotNull(artist.resourceId) { "Library artist ID is missing" }
-            require(libraryId.matches(Regex("[A-Za-z0-9._-]+"))) { "Library artist ID is invalid" }
-            val linked = requestRoot("/v1/me/library/artists/$libraryId/catalog", needsUserToken = true)
-            linked.optJSONArray("data")?.optJSONObject(0)?.optString("id")
-        } else artist.catalogId
-        if (catalogId == null || !catalogId.matches(Regex("[0-9]+"))) return@withAccount CatalogArtistPage()
+        val catalogId = catalogArtistId(artist) ?: return@withAccount CatalogArtistPage()
         val storefront = effectiveStorefront()
         val root = requestRoot(
             "/v1/catalog/$storefront/artists/$catalogId?views=${ARTIST_VIEWS.joinToString(",") { it.first }}" +
@@ -568,6 +563,25 @@ class AppleMusicApi(
             needsUserToken = false,
         )
         val page = withContext(parseDispatcher) { parseArtistPage(root, catalogId) }
+        return@withAccount expandArtistTopSongs(root, page)
+    }
+
+    internal suspend fun artistTopSongsForVoice(artist: Track): List<Track> = withAccount {
+        val catalogId = catalogArtistId(artist) ?: return@withAccount emptyList()
+        request("/v1/catalog/${effectiveStorefront()}/artists/$catalogId/view/top-songs?limit=20", false)
+    }
+
+    private suspend fun catalogArtistId(artist: Track): String? {
+        val id = if (artist.resourceType == LibraryCollection.Artists.resourceType) {
+            val libraryId = checkNotNull(artist.resourceId) { "Library artist ID is missing" }
+            require(libraryId.matches(Regex("[A-Za-z0-9._-]+"))) { "Library artist ID is invalid" }
+            val linked = requestRoot("/v1/me/library/artists/$libraryId/catalog", needsUserToken = true)
+            linked.optJSONArray("data")?.optJSONObject(0)?.optString("id")
+        } else artist.catalogId
+        return id?.takeIf { it.matches(Regex("[0-9]+")) }
+    }
+
+    private suspend fun expandArtistTopSongs(root: JSONObject, page: CatalogArtistPage): CatalogArtistPage {
         // Top songs come ten at a time; Apple Music Web lists far more.
         var next = root.optJSONArray("data")?.optJSONObject(0)?.optJSONObject("views")
             ?.optJSONObject("top-songs")?.optString("next")?.takeIf { it.startsWith("/v1/") }
@@ -586,7 +600,7 @@ class AppleMusicApi(
             more += withContext(parseDispatcher) { parseResources(pageRoot) }
             next = pageRoot.optString("next").takeIf { it.startsWith("/v1/") }
         }
-        return@withAccount page.copy(topSongs = (page.topSongs + more).distinctBy { it.id }, complete = complete)
+        return page.copy(topSongs = (page.topSongs + more).distinctBy { it.id }, complete = complete)
     }
 
     /**
@@ -790,11 +804,12 @@ class AppleMusicApi(
         if (BuildConfig.FLYME_AUTO) {
             // The car page groups results like Apple Music: top results, songs, artists, albums...
             val root = requestRoot(
-                "/v1/catalog/$sf/search?term=$encoded&types=songs,artists,albums,playlists,stations" +
-                    "&limit=15&with=topResults",
+                "/v1/catalog/$sf/search?term=$encoded&types=$SEARCH_RESOURCE_TYPES" +
+                    "&limit=21&with=topResults",
                 needsUserToken = false,
             )
-            return@withAccount withContext(parseDispatcher) { parseGroupedSearch(root) }
+            logSearchShape("search", sf, root)
+            return@withAccount withContext(parseDispatcher) { parseGroupedSearch(root, term) }
         }
         return@withAccount request(
             path = "/v1/catalog/$sf/search?term=$encoded&types=songs,albums,playlists,music-videos,stations&limit=15",
@@ -810,6 +825,12 @@ class AppleMusicApi(
             needsUserToken = true,
         )
         withContext(parseDispatcher) { parseResources(root) }
+    }
+
+    internal suspend fun searchVoiceCollections(term: String): List<Track> = withAccount {
+        if (term.isBlank()) return@withAccount emptyList()
+        val encoded = URLEncoder.encode(term.trim(), Charsets.UTF_8.name())
+        request("/v1/catalog/${effectiveStorefront()}/search?term=$encoded&types=playlists,stations&limit=15", false)
     }
 
     internal suspend fun catalogAlbumForVoice(album: Track): Track? = withAccount {
@@ -832,14 +853,20 @@ class AppleMusicApi(
         val encoded = URLEncoder.encode(term, Charsets.UTF_8.name())
         val root = requestRoot(
             path = "/v1/catalog/$sf/search/suggestions?term=$encoded" +
-                "&kinds=terms,topResults&types=songs,albums,artists&limit=8",
+                "&kinds=terms,topResults&types=$SEARCH_RESOURCE_TYPES&limit=10",
             needsUserToken = false,
             suggestionTermLength = termLength,
         )
+        logSearchShape("suggestions", sf, root)
         val suggestions = withContext(parseDispatcher) { parseSearchSuggestions(root) }
         Log.d(SEARCH_LOG_TAG, "suggestions parsed termLength=$termLength " +
             "terms=${suggestions.terms.size} topResults=${suggestions.topResults.size}")
-        return@withAccount suggestions
+        if (!BuildConfig.FLYME_AUTO || suggestions.topResults.isNotEmpty()) return@withAccount suggestions
+        val prefix = searchKey(term)
+        if (prefix.isEmpty()) return@withAccount suggestions
+        val matches = search(term).asSequence().filter { searchKey(it.title).startsWith(prefix) }.take(3).toList()
+        Log.d(SEARCH_LOG_TAG, "suggestions fallback=grouped-search termLength=$termLength count=${matches.size}")
+        suggestions.copy(topResults = matches)
     }
 
     internal fun parseSearchSuggestions(root: JSONObject): CatalogSearchSuggestions {
@@ -858,39 +885,62 @@ class AppleMusicApi(
                 }
                 "topResults" -> if (topResults.size < 3) {
                     val content = suggestion.optJSONObject("content") ?: continue
-                    val type = content.optString("type")
-                    val kind = when (type) {
-                        "songs" -> CatalogKind.Song
-                        "albums" -> CatalogKind.Album
-                        "artists" -> CatalogKind.Artist
-                        else -> continue
-                    }
-                    val id = content.optString("id").takeIf(String::isNotBlank) ?: continue
-                    val attributes = content.optJSONObject("attributes") ?: continue
-                    attributes.toTrack(id, kind, resourceType = type)?.let(topResults::add)
+                    parseSearchResource(root, content)?.let(topResults::add)
                 }
             }
         }
         return CatalogSearchSuggestions(terms, topResults)
     }
 
-    /** Top results first, then each type in Apple Music's order; an item appears once. */
-    internal fun parseGroupedSearch(root: JSONObject): List<Track> {
+    private fun logSearchShape(operation: String, storefront: String, root: JSONObject) {
+        val results = root.optJSONObject("results")
+        fun topTypes(key: String): List<String?> {
+            val data = results?.let { searchResultData(it, key) }
+            return List(data?.length() ?: 0) { data?.optJSONObject(it)?.optString("type") }
+        }
+        val suggestions = results?.optJSONArray("suggestions")
+        val kinds = List(suggestions?.length() ?: 0) { index ->
+            val suggestion = suggestions?.optJSONObject(index)
+            "${suggestion?.optString("kind")}:${suggestion?.optJSONObject("content")?.optString("type")}"
+        }
+        Log.d(SEARCH_LOG_TAG, "$operation storefront=$storefront keys=${results?.keys()?.asSequence()?.toList()} " +
+            "topTypes=${topTypes("top")} topResultsTypes=${topTypes("topResults")} suggestionKinds=$kinds")
+    }
+
+    private fun searchResultData(results: JSONObject, key: String): JSONArray? =
+        results.optJSONObject(key)?.optJSONArray("data") ?: results.optJSONArray(key)
+
+    private fun parseSearchResource(root: JSONObject, item: JSONObject): Track? {
+        val type = item.optString("type")
+        val kind = (if (type == "artists") CatalogKind.Artist else catalogKind(type)) ?: return null
+        val id = item.optString("id").takeIf(String::isNotBlank) ?: return null
+        val attributes = item.optJSONObject("attributes")
+            ?: root.optJSONObject("resources")?.optJSONObject(type)?.optJSONObject(id)?.optJSONObject("attributes")
+            ?: return null
+        return attributes.toTrack(id, kind, resourceType = type)
+    }
+
+    private fun searchKey(value: String): String =
+        java.text.Normalizer.normalize(value.trim(), java.text.Normalizer.Form.NFKC)
+            .lowercase(java.util.Locale.ROOT).replace(Regex("\\s+"), " ")
+
+    /** Keep Apple's order within each section and prefer an exact title for the first result. */
+    internal fun parseGroupedSearch(root: JSONObject, term: String = ""): List<Track> {
         val results = root.optJSONObject("results") ?: return emptyList()
         val output = LinkedHashMap<String, Track>()
-        for (key in listOf("top", "songs", "artists", "albums", "playlists", "stations")) {
-            val data = results.optJSONObject(key)?.optJSONArray("data") ?: continue
+        for (key in listOf("topResults", "top", "songs", "artists", "albums", "playlists", "stations", "music-videos")) {
+            val data = searchResultData(results, key) ?: continue
             for (index in 0 until data.length()) {
                 val item = data.optJSONObject(index) ?: continue
-                val type = item.optString("type")
-                val kind = (if (type == "artists") CatalogKind.Artist else catalogKind(type)) ?: continue
-                val attributes = item.optJSONObject("attributes") ?: continue
-                val id = item.optString("id").takeIf { it.isNotBlank() } ?: continue
-                val track = attributes.toTrack(id, kind, resourceType = type) ?: continue
+                val track = parseSearchResource(root, item) ?: continue
                 output.putIfAbsent(track.id, track)
             }
         }
-        return output.values.toList()
+        val resultsInOrder = output.values.toList()
+        val exact = searchKey(term).takeIf(String::isNotEmpty)?.let { key ->
+            resultsInOrder.firstOrNull { searchKey(it.title) == key }
+        } ?: return resultsInOrder
+        return listOf(exact) + resultsInOrder.filterNot { it.id == exact.id }
     }
 
     /** Search only playable songs for cross-catalog resolution. */
