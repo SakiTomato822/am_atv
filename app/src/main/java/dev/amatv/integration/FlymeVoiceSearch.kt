@@ -30,26 +30,17 @@ internal suspend fun resolveFlymeVoiceSearch(
 ): FlymeVoiceQueue {
     val library = librarySearch(index.libraryTerm, command.kind.libraryCollection)
     if (index.requiresExactArtistSong) {
-        val libraryMatch = index.exactArtistSong(library)
-        val catalog = if (libraryMatch == null) search(command.query) else emptyList()
-        val combinedMatch = libraryMatch ?: index.exactArtistSong(catalog)
-        val titleResults = if (combinedMatch == null) search(command.targetTitle) else emptyList()
-        val exact = combinedMatch ?: index.exactArtistSong(titleResults)
-        val selected = exact ?: (catalog + titleResults).firstOrNull { it.catalogKind == CatalogKind.Song }
-        val match = when {
-            combinedMatch != null -> "exact"
-            exact != null -> "exact-title-retry"
-            selected != null -> "fallback-first-result"
-            else -> "none"
+        // Duets credit the asked singer second, so check title + every credited artist first,
+        // then retry with the title alone before falling back to phonetic ranking.
+        val exact = index.exactArtistSong(library)
+            ?: index.exactArtistSong(search(command.query))
+            ?: index.exactArtistSong(search(command.targetTitle))
+        if (exact != null) {
+            log("kind=${command.kind} path=matched match=exact-credit id=${exact.catalogId ?: exact.id} " +
+                "name=${exact.title} queueSize=1")
+            return FlymeVoiceQueue(listOf(exact))
         }
-        val path = when {
-            exact != null -> "matched"
-            selected != null -> "best-match-fallback(selection-protocol-unverified)"
-            else -> "not-found"
-        }
-        log("kind=${command.kind} path=$path match=$match id=${selected?.catalogId ?: selected?.id} " +
-            "name=${selected?.title} queueSize=${if (selected == null) 0 else 1}")
-        return FlymeVoiceQueue(listOfNotNull(selected))
+        log("kind=${command.kind} exact-credit=none, ranking phonetically")
     }
     var matched = index.rank(library).exact
     var catalog = emptyList<Track>()

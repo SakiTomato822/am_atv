@@ -84,7 +84,7 @@ class FlymeVoiceSearchTest {
         val queue = resolve(Search(Kind.ArtistSong, "First", "abc"), listOf(firstSong, song, anotherMatch))
 
         assertEquals(FlymeVoiceQueue(listOf(song)), queue)
-        assertTrue(logs.single().contains("match=exact id=2"))
+        assertTrue(logs.single().contains("match=exact-credit id=2"))
     }
 
     @Test fun buGaiTitleRetryFindsTheDuetInsteadOfPlayingKuBuChuLai() = runTest {
@@ -107,7 +107,7 @@ class FlymeVoiceSearchTest {
 
         assertEquals(listOf("不该 张惠妹", "不该"), terms)
         assertEquals(FlymeVoiceQueue(listOf(duet)), queue)
-        assertTrue(logs.single().contains("match=exact-title-retry id=duet"))
+        assertTrue(logs.single().contains("match=exact-credit id=duet"))
     }
 
     @Test fun misrecognizedFavoriteSongsMatchesLocalizedLibraryPlaylist() {
