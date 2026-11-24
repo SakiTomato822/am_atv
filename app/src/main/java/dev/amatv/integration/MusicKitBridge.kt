@@ -410,10 +410,14 @@ class MusicKitBridge(
         }
     }
 
-    private fun logLookahead(append: NativeSongQueue.Append, result: String, index: Int?, count: Int?, reason: String) {
+    private fun logLookahead(
+        append: NativeSongQueue.Append, result: String, index: Int?, count: Int?, reason: String,
+        callbackArgs: Array<out Any?>? = null,
+    ) {
+        val callback = callbackArgs?.let { " callbackArgs=${it.contentToString()}" }.orEmpty()
         diagnostics.recordGapless(
             "lookahead=$result generation=${append.generation} entry=${append.timing?.entryId} " +
-                "catalog=${append.catalogId} expectedIndex=${append.index} index=$index count=$count reason=$reason",
+                "catalog=${append.catalogId} expectedIndex=${append.index} index=$index count=$count reason=$reason$callback",
         )
     }
 
@@ -853,15 +857,15 @@ class MusicKitBridge(
                     ) return@synchronized null
                     when (method.name) {
                         "onPlaybackQueueItemsAdded" -> {
-                            // SDK 1.1.1 reports insertion type, item count and media type, with no request ID.
-                            if (args?.getOrNull(1) == INSERTION_TYPE_AT_END) {
-                                nativeSongQueue.pendingAppend?.let { append ->
-                                    val count = args[2] as Int
-                                    if (append.acknowledge(generation, count)) {
-                                        append.timing?.mark(GaplessStage.Added, SystemClock.elapsedRealtime())
-                                    } else {
-                                        logLookahead(append, "rejected", null, count, "unexpected-callback")
-                                    }
+                            // The SDK reports insertion, container and item types. Confirm the count from the queue.
+                            nativeSongQueue.pendingAppend?.let { append ->
+                                val callbackArgs = checkNotNull(args)
+                                if (append.acknowledge(generation, callbackArgs[1] as Int, callbackArgs[2] as Int)) {
+                                    append.timing?.mark(GaplessStage.Added, SystemClock.elapsedRealtime())
+                                } else {
+                                    val index = currentController.callOrNull("getPlaybackQueueIndex") as? Int
+                                    val count = currentController.callOrNull("getPlaybackQueueItemCount") as? Int
+                                    logLookahead(append, "rejected", index, count, "unexpected-callback", callbackArgs)
                                 }
                             }
                             Log.d(TAG, method.name)
@@ -1440,8 +1444,6 @@ class MusicKitBridge(
         const val AFTER_END_WINDOW_MS = 15_000L
         const val FADE_TICK_MS = 50L
         const val LEVEL_EVERY_TICKS = 5
-        // PlaybackQueueInsertionType.INSERTION_TYPE_AT_END in mediaplayback 1.1.1.
-        const val INSERTION_TYPE_AT_END = 2
         const val CONTINUOUS_PLAYBACK_ON = 2
         const val SNAPSHOT_DELAY_MS = 80L
         const val TAG = "AMATV-MusicKit"

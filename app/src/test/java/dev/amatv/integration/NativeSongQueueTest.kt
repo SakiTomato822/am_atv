@@ -31,11 +31,11 @@ class NativeSongQueueTest {
     }
 
     @Test
-    fun appendNeedsBothCallbackAndExactlyOneSuccessorInEitherOrder() {
+    fun appendWithCarCallbackContainerTypeZeroStillNeedsExactlyOneSuccessor() {
         for (callbackFirst in listOf(false, true)) {
             val append = NativeSongQueue.Append(7L, 1, "B", null)
             if (!callbackFirst) assertFalse(append.isVisible(7L, 0, 2, "A"))
-            assertTrue(append.acknowledge(7L, 1))
+            assertTrue(append.acknowledge(7L, insertionType = 2, containerType = 0))
             assertFalse(append.isVisible(7L, 0, 1, "A"))
             assertFalse(append.isVisible(7L, 0, 3, "A"))
             assertTrue(append.isVisible(7L, 0, 2, "A"))
@@ -45,17 +45,19 @@ class NativeSongQueueTest {
     @Test
     fun missingOrObsoleteCallbackCannotConfirmQueue() {
         val append = NativeSongQueue.Append(7L, 1, "B", null)
-        assertFalse(append.acknowledge(6L, 1))
-        assertFalse(append.acknowledge(7L, 2))
+        assertFalse(append.acknowledge(6L, insertionType = 2, containerType = 0))
+        assertFalse(append.acknowledge(7L, insertionType = 3, containerType = 0))
+        assertFalse(append.acknowledge(7L, insertionType = 2, containerType = 1))
         assertFalse(append.isVisible(7L, 0, 2, "A"))
-        assertTrue(append.acknowledge(7L, 1))
+        assertTrue(append.acknowledge(7L, insertionType = 2, containerType = 0))
+        assertFalse(append.acknowledge(7L, insertionType = 2, containerType = 0))
         assertFalse(append.isVisible(8L, 0, 2, "A"))
     }
 
     @Test
     fun queueEditAndRepeatedRecordingDoNotChangeOccurrenceOwningAppend() {
         val append = NativeSongQueue.Append(7L, 1, "B", GaplessTransition(7L, 20L, "test", 0L))
-        assertTrue(append.acknowledge(7L, 1))
+        assertTrue(append.acknowledge(7L, insertionType = 2, containerType = 0))
         assertFalse(append.matchesPlan("C", 30L))
         assertFalse(append.matchesPlan("B", 30L))
         assertTrue(append.matchesPlan("B", 20L))
@@ -82,7 +84,7 @@ class NativeSongQueueTest {
         assertNull(rail.beginAppend(7L, 0, "B", null))
         assertNull(rail.beginAppend(7L, 0, "C", null))
         assertNull(rail.confirmAppend(7L, 0, 2, "A"))
-        assertTrue(first.acknowledge(7L, 1))
+        assertTrue(first.acknowledge(7L, insertionType = 2, containerType = 0))
         assertNull(rail.confirmAppend(7L, 0, 1, "A"))
         assertNull(rail.beginAppend(7L, 0, "C", null))
         assertEquals(first, rail.confirmAppend(7L, 1, 2, "B"))

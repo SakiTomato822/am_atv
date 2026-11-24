@@ -2,6 +2,10 @@ package dev.amatv.integration
 
 import kotlin.math.abs
 
+// PlaybackQueueInsertionType and MediaContainerType in mediaplayback 1.1.1.
+internal const val INSERTION_TYPE_AT_END = 2
+private const val MEDIA_CONTAINER_TYPE_NONE = 0
+
 /** Tracks slots seen on the current controller when MusicKit returns an empty queue list. */
 internal class NativeSongQueue {
     data class Append(
@@ -10,8 +14,10 @@ internal class NativeSongQueue {
         var callbackReceived = false
             private set
 
-        fun acknowledge(generation: Long, count: Int): Boolean {
-            if (this.generation != generation || count != 1 || callbackReceived) return false
+        fun acknowledge(generation: Long, insertionType: Int, containerType: Int): Boolean {
+            if (this.generation != generation || callbackReceived ||
+                insertionType != INSERTION_TYPE_AT_END || containerType != MEDIA_CONTAINER_TYPE_NONE
+            ) return false
             callbackReceived = true
             return true
         }
