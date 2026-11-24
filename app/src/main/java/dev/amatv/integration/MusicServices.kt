@@ -399,7 +399,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
     }
     override fun prefetchLoudness(track: Track) = bridge.prefetchLoudness(track)
     override fun setLoudnessAlbum(tracks: List<Track>) {
-        if (AlbumLoudness.select(tracks.mapNotNull(Track::catalogId).toSet())) {
+        if (AlbumLoudness.select(tracks.filter { it.catalogId != null }.associate { it.catalogId!! to it.durationMs })) {
             tracks.distinctBy(Track::catalogId).forEach(bridge::prefetchLoudness)
         }
     }

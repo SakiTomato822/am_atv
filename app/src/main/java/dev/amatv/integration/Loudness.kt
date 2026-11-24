@@ -2,6 +2,7 @@ package dev.amatv.integration
 
 import java.nio.ByteBuffer
 import kotlin.math.log10
+import kotlin.math.pow
 
 enum class LoudnessMode(val offsetDb: Float, internal val peakHeadroomDb: Float) {
     Off(0f, 0f), Standard(0f, 0f), Loud(4f, 6f), Loudest(7f, 9f);
@@ -38,36 +39,44 @@ internal data class SoundCheck(val gainDb: Float, val peakDb: Float) {
         (gainFor(mode) - peakLimitedGainDb).coerceIn(0f, mode.peakHeadroomDb)
 }
 
-/** Album membership comes from the app queue. The native player still applies one gain per item. */
+/**
+ * Album membership comes from the app queue. The native player still applies one gain per item.
+ * Like ReplayGain album gain, the shared value is the duration-weighted energy mean, so a short
+ * quiet intro cannot pull the whole album up.
+ */
 internal object AlbumLoudness {
     data class Summary(val tag: SoundCheck?, val tracksKnown: Int)
 
-    private var tracks = emptySet<String>()
+    private var tracks = emptyMap<String, Long>()
     private val tags = mutableMapOf<String, SoundCheck>()
     private var summary = Summary(null, 0)
 
     @Synchronized
-    fun select(ids: Set<String>): Boolean {
-        if (tracks == ids) return false
-        tracks = ids
-        tags.keys.retainAll(ids)
+    fun select(durationsMs: Map<String, Long>): Boolean {
+        if (tracks == durationsMs) return false
+        tracks = durationsMs
+        tags.keys.retainAll(durationsMs.keys)
         summarize()
         return true
     }
 
     @Synchronized
     fun record(id: String, tag: SoundCheck) {
-        if (id in tracks && tags.put(id, tag) != tag) summarize()
+        if (id in tracks.keys && tags.put(id, tag) != tag) summarize()
     }
 
     @Synchronized
-    fun forTrack(id: String?): Summary? = summary.takeIf { id in tracks }
+    fun forTrack(id: String?): Summary? = summary.takeIf { id in tracks.keys }
 
     private fun summarize() {
-        val tag = if (tags.isEmpty()) null else SoundCheck(
-            tags.values.map(SoundCheck::gainDb).average().toFloat(),
-            tags.values.maxOf(SoundCheck::peakDb),
-        )
+        val tag = if (tags.isEmpty()) null else {
+            val weights = tags.keys.associateWith { tracks.getValue(it).coerceAtLeast(1L).toDouble() }
+            val energy = tags.entries.sumOf { (id, tag) -> weights.getValue(id) * 10.0.pow(-tag.gainDb / 10.0) }
+            SoundCheck(
+                (-10 * log10(energy / weights.values.sum())).toFloat(),
+                tags.values.maxOf(SoundCheck::peakDb),
+            )
+        }
         summary = Summary(tag, tags.size)
     }
 }

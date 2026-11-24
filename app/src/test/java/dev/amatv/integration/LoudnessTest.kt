@@ -3,6 +3,8 @@ package dev.amatv.integration
 import androidx.compose.ui.graphics.Color
 import dev.amatv.model.Track
 import kotlinx.coroutines.CompletableDeferred
+import kotlin.math.log10
+import kotlin.math.pow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -129,21 +131,36 @@ class LoudnessTest {
     }
 
     @Test fun albumUsesTheAverageAndHighestPeakForEachMember() {
-        AlbumLoudness.select(setOf("101", "102", "103"))
+        AlbumLoudness.select(mapOf("101" to 1000L, "102" to 1000L, "103" to 1000L))
         try {
             AlbumLoudness.record("101", SoundCheck(-1f, -4f))
             assertEquals(AlbumLoudness.Summary(SoundCheck(-1f, -4f), 1), AlbumLoudness.forTrack("102"))
             AlbumLoudness.record("102", SoundCheck(-9f, -1f))
             AlbumLoudness.record("104", SoundCheck(10f, 5f))
-            val shared = AlbumLoudness.Summary(SoundCheck(-5f, -1f), 2)
+            val shared = AlbumLoudness.Summary(SoundCheck((-10 * log10((10.0.pow(0.1) + 10.0.pow(0.9)) / 2)).toFloat(), -1f), 2)
             assertEquals(shared, AlbumLoudness.forTrack("101"))
             assertEquals(shared, AlbumLoudness.forTrack("103"))
             assertNull(AlbumLoudness.forTrack("104"))
             val loudness = NativeTrackLoudness(1L, "apple:101", 0, "101", LoudnessMode.Standard,
                 LoudnessLookup(SoundCheck(-1f, -4f), "cache"), null)
-            assertEquals(-3f - 2f / 3f, loudness.gainAt(playing = true, nowMs = 0L), 0.001f)
+            assertEquals(-3f + (shared.tag!!.gainDb + 3f) / 3f, loudness.gainAt(playing = true, nowMs = 0L), 0.001f)
         } finally {
-            AlbumLoudness.select(emptySet())
+            AlbumLoudness.select(emptyMap())
+        }
+    }
+
+    @Test fun shortQuietIntroDoesNotLiftTheAlbumGain() {
+        // 丁世光《神經誌》: preview tags and durations of all 12 tracks; the 14 s intro reads +11.3 dB.
+        val tags = listOf(11.31f, -5.81f, -3.98f, -4.57f, -5.01f, -1.42f, -2.77f, 3.90f, -5.08f, -2.01f, -4.81f, -2.12f)
+        val seconds = listOf(14L, 247L, 275L, 416L, 248L, 251L, 192L, 110L, 219L, 308L, 301L, 251L)
+        AlbumLoudness.select(tags.indices.associate { "$it" to seconds[it] * 1000 })
+        try {
+            tags.forEachIndexed { i, tag -> AlbumLoudness.record("$i", SoundCheck(tag, -0.4f)) }
+            val album = AlbumLoudness.forTrack("0")!!.tag!!
+            assertEquals(-3.85f, album.gainDb, 0.01f)
+            assertEquals(0.15f, album.gainFor(LoudnessMode.Loud), 0.01f)
+        } finally {
+            AlbumLoudness.select(emptyMap())
         }
     }
 
