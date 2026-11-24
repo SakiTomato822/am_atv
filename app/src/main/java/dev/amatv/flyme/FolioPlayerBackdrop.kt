@@ -56,9 +56,16 @@ internal fun FolioPlayerBackdrop(
                             val tint = lerp(baseColor, artworkPalette.last(), if (isLight) 0.12f else 0.22f)
                             Brush.verticalGradient(listOf(tint, baseColor))
                         }
-                        Box(Modifier.fillMaxSize().background(gradient))
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .folioTrackSwitchHalo()
+                                .background(gradient),
+                        )
                     } else {
-                        CarLyricFlow(track = track, palette = artworkPalette)
+                        Box(Modifier.fillMaxSize().folioTrackSwitchHalo()) {
+                            CarLyricFlow(track = track, palette = artworkPalette)
+                        }
                         val veil = if (isLight) Color(0xFFF6F4F9).copy(alpha = 0.72f) else Color.Black.copy(alpha = 0.24f)
                         Box(Modifier.fillMaxSize().background(veil))
                     }
@@ -78,7 +85,9 @@ internal fun FolioPlayerBackdrop(
                             ) {
                                 MotionArtwork(
                                     track = track,
-                                    modifier = Modifier.fillMaxSize(),
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .folioTrackSwitchCover(),
                                     animate = false,
                                     cornerRadius = 0.dp,
                                 )
@@ -107,7 +116,9 @@ internal fun FolioPlayerBackdrop(
                             ) {
                                 MotionArtwork(
                                     track = track,
-                                    modifier = Modifier.fillMaxSize(),
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .folioTrackSwitchCover(),
                                     animate = false,
                                     cornerRadius = 0.dp,
                                 )
@@ -153,7 +164,11 @@ internal fun FolioPlayerBackdrop(
                                     ),
                                 ),
                         )
-                        if (!lowPerformance) SoakGlow(artworkPalette)
+                        if (!lowPerformance) {
+                            Box(Modifier.fillMaxSize().folioTrackSwitchHalo()) {
+                                SoakGlow(artworkPalette)
+                            }
+                        }
                     }
                 }
             }

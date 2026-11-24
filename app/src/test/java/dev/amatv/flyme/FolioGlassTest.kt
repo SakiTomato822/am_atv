@@ -1,6 +1,8 @@
 package dev.amatv.flyme
 
+import androidx.compose.ui.graphics.Color
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -89,5 +91,47 @@ class FolioGlassTest {
         val centerRightRed = (split[8 * 16 + 8] ushr 16) and 0xFF
         assertTrue(centerLeftRed in 40..140)
         assertTrue(centerRightRed in 115..215)
+    }
+
+    @Test
+    fun directionalEdgeSpecRespectsDarkLightAndAlbumTint() {
+        val albumTint = Color(0xFFB488A0)
+        val darkTinted = resolveFolioGlassEdgeSpec(isLight = false, albumTint = albumTint)
+        val darkNeutral = resolveFolioGlassEdgeSpec(isLight = false, albumTint = null)
+        val lightTinted = resolveFolioGlassEdgeSpec(isLight = true, albumTint = albumTint)
+        val lightNeutral = resolveFolioGlassEdgeSpec(isLight = true, albumTint = null)
+
+        assertEquals(0.72f, darkTinted.strokeStart.alpha, 0.003f)
+        assertEquals(0.55f, darkTinted.strokeEnd.alpha, 0.003f)
+        assertEquals(albumTint.red, darkTinted.strokeEnd.red, 0.003f)
+        assertEquals(Color.White.red, darkNeutral.strokeEnd.red, 0.003f)
+        assertEquals(0.10f, darkNeutral.strokeEnd.alpha, 0.003f)
+        assertEquals(0.22f, darkTinted.bottomLine.alpha, 0.003f)
+
+        assertTrue(lightTinted.strokeStart.alpha > darkTinted.strokeStart.alpha)
+        assertTrue(lightTinted.strokeMid1.alpha > darkTinted.strokeMid1.alpha)
+        assertEquals(0.48f, lightTinted.strokeEnd.alpha, 0.003f)
+        assertEquals(Color.White.red, lightNeutral.strokeEnd.red, 0.003f)
+        assertEquals(0.10f, lightNeutral.strokeEnd.alpha, 0.003f)
+        assertEquals(0.08f, lightTinted.bottomLine.alpha, 0.003f)
+
+        val boosted = resolveFolioGlassEdgeSpec(
+            isLight = false,
+            albumTint = albumTint,
+            edgeBrightness = FolioGatherMotion.TRACK_EDGE_GATHER_MULTIPLIER,
+        )
+        assertEquals(1.0f, boosted.strokeStart.alpha, 0.003f)
+        assertEquals(0.24f * FolioGatherMotion.TRACK_EDGE_GATHER_MULTIPLIER, boosted.strokeMid1.alpha, 0.003f)
+        assertEquals(0.55f * FolioGatherMotion.TRACK_EDGE_GATHER_MULTIPLIER, boosted.strokeEnd.alpha, 0.003f)
+        assertEquals(0.05f, boosted.strokeMid2.alpha, 0.003f)
+        assertEquals(0.22f, boosted.bottomLine.alpha, 0.003f)
+    }
+
+    @Test
+    fun shouldTriggerTrackGatherRequiresOpenAndChangedTrackId() {
+        assertFalse(shouldTriggerTrackGather(open = false, previousOpenTrackId = "a", nextTrackId = "b"))
+        assertFalse(shouldTriggerTrackGather(open = true, previousOpenTrackId = null, nextTrackId = "a"))
+        assertFalse(shouldTriggerTrackGather(open = true, previousOpenTrackId = "a", nextTrackId = "a"))
+        assertTrue(shouldTriggerTrackGather(open = true, previousOpenTrackId = "a", nextTrackId = "b"))
     }
 }

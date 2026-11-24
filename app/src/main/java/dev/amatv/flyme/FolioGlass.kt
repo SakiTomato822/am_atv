@@ -33,11 +33,13 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.inset
 import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInWindow
@@ -144,6 +146,92 @@ fun resolveFolioGlassColors(
     )
 }
 
+@Immutable
+internal data class FolioGlassEdgeSpec(
+    val strokeStart: Color,
+    val strokeMid1: Color,
+    val strokeMid2: Color,
+    val strokeEnd: Color,
+    val innerSheenTop: Color,
+    val bottomLine: Color,
+)
+
+internal fun folioGlassAlbumTint(artworkPalette: List<Color>): Color? {
+    val base = artworkPalette.firstOrNull() ?: return null
+    return lerp(base.copy(alpha = 1f), Color.White, 0.42f)
+}
+
+internal fun resolveFolioGlassEdgeSpec(
+    isLight: Boolean,
+    albumTint: Color?,
+    edgeBrightness: Float = 1f,
+    lightBaseBorder: Color = resolveFolioGlassColors(FolioGlassTier.FallbackC, isLight = true).border,
+): FolioGlassEdgeSpec {
+    val edge = edgeBrightness.coerceAtLeast(0f)
+    return if (!isLight) {
+        FolioGlassEdgeSpec(
+            strokeStart = Color.White.copy(alpha = (0.72f * edge).coerceIn(0f, 1f)),
+            strokeMid1 = Color.White.copy(alpha = (0.24f * edge).coerceIn(0f, 1f)),
+            strokeMid2 = Color.White.copy(alpha = 0.05f),
+            strokeEnd = albumTint?.copy(alpha = (0.55f * edge).coerceIn(0f, 1f)) ?: Color.White.copy(alpha = 0.10f),
+            innerSheenTop = Color.White.copy(alpha = (0.065f * edge).coerceIn(0f, 1f)),
+            bottomLine = Color.Black.copy(alpha = 0.22f),
+        )
+    } else {
+        FolioGlassEdgeSpec(
+            strokeStart = Color.White.copy(alpha = (0.78f * edge).coerceIn(0f, 1f)),
+            strokeMid1 = Color.White.copy(alpha = (0.36f * edge).coerceIn(0f, 1f)),
+            strokeMid2 = lightBaseBorder.copy(alpha = 0.12f),
+            strokeEnd = albumTint?.copy(alpha = (0.48f * edge).coerceIn(0f, 1f)) ?: Color.White.copy(alpha = 0.10f),
+            innerSheenTop = Color.White.copy(alpha = (0.09f * edge).coerceIn(0f, 1f)),
+            bottomLine = Color.Black.copy(alpha = 0.08f),
+        )
+    }
+}
+
+internal fun folioDirectionalRimBrush(spec: FolioGlassEdgeSpec, size: Size): Brush = Brush.linearGradient(
+    0.00f to spec.strokeStart,
+    0.24f to spec.strokeMid1,
+    0.52f to spec.strokeMid2,
+    1.00f to spec.strokeEnd,
+    start = Offset.Zero,
+    end = Offset(size.width.coerceAtLeast(1f), size.height.coerceAtLeast(1f)),
+)
+
+internal fun folioDirectionalSheenBrush(spec: FolioGlassEdgeSpec, size: Size): Brush = Brush.linearGradient(
+    0.00f to spec.innerSheenTop,
+    0.38f to Color.Transparent,
+    start = Offset.Zero,
+    end = Offset(size.width.coerceAtLeast(1f) * 0.34f, size.height.coerceAtLeast(1f) * 0.94f),
+)
+
+internal fun DrawScope.drawDirectionalGlassEdge(
+    outline: Outline,
+    outlinePath: Path,
+    sheenBrush: Brush,
+    rimBrush: Brush,
+    bottomLineColor: Color,
+    strokePx: Float,
+) {
+    clipPath(outlinePath) {
+        drawOutline(outline = outline, brush = sheenBrush)
+        val lineY = (size.height - strokePx * 0.5f).coerceAtLeast(0f)
+        drawLine(
+            color = bottomLineColor,
+            start = Offset(0f, lineY),
+            end = Offset(size.width, lineY),
+            strokeWidth = strokePx,
+        )
+    }
+    drawOutline(outline = outline, brush = rimBrush, style = Stroke(width = strokePx))
+}
+
+internal fun Outline.asPath(): Path = when (this) {
+    is Outline.Generic -> path
+    is Outline.Rectangle -> Path().apply { addRect(rect) }
+    is Outline.Rounded -> Path().apply { addRoundRect(roundRect) }
+}
+
 /** Mutable non-state holder for Tier C layout alignment without triggering Compose recomposition. */
 internal class FolioGlassCoordHolder {
     var rootCoords: LayoutCoordinates? = null
@@ -156,6 +244,8 @@ internal data class FolioGlassEnvironment(
     val layerBackdrop: LayerBackdrop? = null,
     val effectiveStyle: LyricBackgroundStyle = LyricBackgroundStyle.Flow,
     val baseColor: Color = Color(0xFF1F1D26),
+    val albumTint: Color? = null,
+    val edgeBrightness: Float = 1f,
     val blurredCover: ImageBitmap? = null,
     val isVerticalBleed: Boolean = false,
     val showSoakBleed: Boolean = false,
@@ -203,11 +293,14 @@ internal fun ProvideFolioGlassEnvironment(
     effectiveStyle: LyricBackgroundStyle,
     displayState: FolioPlayerDisplayState,
     baseColor: Color,
+    artworkPalette: List<Color> = emptyList(),
+    edgeBrightness: Float = 1f,
     lowPerformance: Boolean,
     content: @Composable (FolioGlassEnvironment) -> Unit,
 ) {
+    val albumTint = remember(artworkPalette) { folioGlassAlbumTint(artworkPalette) }
     val env = if (lowPerformance) {
-        remember { FolioGlassEnvironment() }
+        remember(albumTint) { FolioGlassEnvironment(albumTint = albumTint) }
     } else {
         val glassTier = rememberFolioGlassTier()
         val layerBackdrop = if (glassTier != FolioGlassTier.FallbackC) {
@@ -230,6 +323,8 @@ internal fun ProvideFolioGlassEnvironment(
             layerBackdrop,
             effectiveStyle,
             baseColor,
+            albumTint,
+            edgeBrightness,
             blurredCover,
             isVerticalBleed,
             showSoakBleed,
@@ -240,6 +335,8 @@ internal fun ProvideFolioGlassEnvironment(
                 layerBackdrop = layerBackdrop,
                 effectiveStyle = effectiveStyle,
                 baseColor = baseColor,
+                albumTint = albumTint,
+                edgeBrightness = edgeBrightness,
                 blurredCover = blurredCover,
                 isVerticalBleed = isVerticalBleed,
                 showSoakBleed = showSoakBleed,
@@ -358,53 +455,94 @@ internal fun Modifier.folioPlayerGlass(
                 env.tier == FolioGlassTier.FullA -> FolioBackdropPresets.TierAEffects
                 else -> FolioBackdropPresets.TierBEffects
             }
-            val highlightProvider = remember(env.tier, isLight) {
-                when {
-                    env.tier == FolioGlassTier.FullA && isLight -> FolioBackdropPresets.TierAHighlightLight
-                    env.tier == FolioGlassTier.FullA -> FolioBackdropPresets.TierAHighlightDark
-                    isLight -> FolioBackdropPresets.TierBHighlightLight
-                    else -> FolioBackdropPresets.TierBHighlight
+            if (env.tier == FolioGlassTier.FullA) {
+                val highlightProvider = remember(isLight) {
+                    if (isLight) FolioBackdropPresets.TierAHighlightLight else FolioBackdropPresets.TierAHighlightDark
                 }
-            }
-            val shadowProvider = if (isLight) FolioBackdropPresets.TierLightShadow else null
-            val drawSurface = remember(colors, shape, isLight) {
-                { scope: androidx.compose.ui.graphics.drawscope.DrawScope ->
-                    with(scope) {
-                        val outline = shape.createOutline(size, layoutDirection, this)
-                        drawOutline(outline = outline, color = colors.fill)
-                        drawOutline(
-                            outline = outline,
-                            brush = Brush.verticalGradient(
-                                0f to colors.highlightTop,
-                                0.34f to Color.Transparent,
-                            ),
-                        )
-                        if (isLight) {
-                            inset(1.dp.toPx()) {
-                                val innerOutline = shape.createOutline(size, layoutDirection, this@with)
-                                drawOutline(
-                                    outline = innerOutline,
-                                    color = Color.White.copy(alpha = 0.62f),
-                                    style = Stroke(width = 1.dp.toPx()),
-                                )
+                val shadowProvider = if (isLight) FolioBackdropPresets.TierLightShadow else null
+                val drawSurface = remember(colors, shape, isLight) {
+                    { scope: androidx.compose.ui.graphics.drawscope.DrawScope ->
+                        with(scope) {
+                            val outline = shape.createOutline(size, layoutDirection, this)
+                            drawOutline(outline = outline, color = colors.fill)
+                            drawOutline(
+                                outline = outline,
+                                brush = Brush.verticalGradient(
+                                    0f to colors.highlightTop,
+                                    0.34f to Color.Transparent,
+                                ),
+                            )
+                            if (isLight) {
+                                inset(1.dp.toPx()) {
+                                    val innerOutline = shape.createOutline(size, layoutDirection, this@with)
+                                    drawOutline(
+                                        outline = innerOutline,
+                                        color = Color.White.copy(alpha = 0.62f),
+                                        style = Stroke(width = 1.dp.toPx()),
+                                    )
+                                }
                             }
+                            drawOutline(
+                                outline = outline,
+                                color = colors.border,
+                                style = Stroke(width = 1.dp.toPx()),
+                            )
                         }
-                        drawOutline(
-                            outline = outline,
-                            color = colors.border,
-                            style = Stroke(width = 1.dp.toPx()),
-                        )
                     }
                 }
+                this.drawBackdrop(
+                    backdrop = layerBackdrop,
+                    shape = shapeProvider,
+                    effects = effects,
+                    highlight = highlightProvider,
+                    shadow = shadowProvider,
+                    onDrawSurface = drawSurface,
+                )
+            } else {
+                // BlurB: blur + directional rim light cached per (size, palette/edge) via drawWithCache
+                val edgeSpec = resolveFolioGlassEdgeSpec(
+                    isLight = isLight,
+                    albumTint = env.albumTint,
+                    edgeBrightness = env.edgeBrightness,
+                    lightBaseBorder = colors.border,
+                )
+                val shadowProvider = if (isLight) FolioBackdropPresets.TierLightShadow else null
+                val drawSurface = remember(colors, shape) {
+                    { scope: DrawScope ->
+                        with(scope) {
+                            val outline = shape.createOutline(size, layoutDirection, this)
+                            drawOutline(outline = outline, color = colors.fill)
+                        }
+                    }
+                }
+                this
+                    .drawBackdrop(
+                        backdrop = layerBackdrop,
+                        shape = shapeProvider,
+                        effects = effects,
+                        highlight = { null },
+                        shadow = shadowProvider,
+                        onDrawSurface = drawSurface,
+                    )
+                    .drawWithCache {
+                        val outline = shape.createOutline(size, layoutDirection, this)
+                        val outlinePath = outline.asPath()
+                        val strokePx = 1.dp.toPx()
+                        val sheenBrush = folioDirectionalSheenBrush(edgeSpec, size)
+                        val rimBrush = folioDirectionalRimBrush(edgeSpec, size)
+                        onDrawWithContent {
+                            drawContent()
+                            drawDirectionalGlassEdge(
+                                outline = outline,
+                                outlinePath = outlinePath,
+                                sheenBrush = sheenBrush,
+                                rimBrush = rimBrush,
+                                bottomLineColor = edgeSpec.bottomLine,
+                                strokePx = strokePx,
+                            )
+                        }
+                    }
             }
-            this.drawBackdrop(
-                backdrop = layerBackdrop,
-                shape = shapeProvider,
-                effects = effects,
-                highlight = highlightProvider,
-                shadow = shadowProvider,
-                onDrawSurface = drawSurface,
-            )
         } else {
             val coordHolder = env.coordHolder
             var selfCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
@@ -413,16 +551,21 @@ internal fun Modifier.folioPlayerGlass(
             } else {
                 Modifier
             }
+            val edgeSpec = resolveFolioGlassEdgeSpec(
+                isLight = isLight,
+                albumTint = env.albumTint,
+                edgeBrightness = env.edgeBrightness,
+                lightBaseBorder = colors.border,
+            )
             this
                 .clip(shape)
                 .then(placeModifier)
                 .drawWithCache {
                     val outline = shape.createOutline(size, layoutDirection, this)
-                    val borderStroke = Stroke(width = 1.dp.toPx())
-                    val sheenBrush = Brush.verticalGradient(
-                        0f to colors.highlightTop,
-                        0.34f to Color.Transparent,
-                    )
+                    val outlinePath = outline.asPath()
+                    val strokePx = 1.dp.toPx()
+                    val sheenBrush = folioDirectionalSheenBrush(edgeSpec, size)
+                    val rimBrush = folioDirectionalRimBrush(edgeSpec, size)
                     val clipOutlinePath = if (outline is Outline.Generic) outline.path else null
                     onDrawBehind {
                         val blurred = env.blurredCover
@@ -499,8 +642,14 @@ internal fun Modifier.folioPlayerGlass(
                             }
                         }
                         drawOutline(outline = outline, color = colors.fill)
-                        drawOutline(outline = outline, brush = sheenBrush)
-                        drawOutline(outline = outline, color = colors.border, style = borderStroke)
+                        drawDirectionalGlassEdge(
+                            outline = outline,
+                            outlinePath = outlinePath,
+                            sheenBrush = sheenBrush,
+                            rimBrush = rimBrush,
+                            bottomLineColor = edgeSpec.bottomLine,
+                            strokePx = strokePx,
+                        )
                     }
                 }
         }

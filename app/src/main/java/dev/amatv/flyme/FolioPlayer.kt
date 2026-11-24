@@ -316,12 +316,19 @@ internal fun BoxScope.FolioPlayerLayer(
             )
             isReducedMotionEnabled(scale, ValueAnimator.areAnimatorsEnabled())
         }
-        val artwork = rememberArtworkPaletteResult(track.artworkUrl, track.palette)
+        val trackSwitchState = rememberFolioTrackSwitchState(
+            open = open && playbackState.hasCurrentTrack,
+            liveTrack = track,
+            lowPerformance = settings.lowPerformance,
+            reducedMotion = reducedMotion,
+        )
+        val displayedTrack = trackSwitchState.displayedTrack
+        val artwork = rememberArtworkPaletteResult(displayedTrack.artworkUrl, displayedTrack.palette)
         val artworkPalette = artwork.colors
         val topStripLuminance = if (!settings.lowPerformance ||
             showSoakArtworkStage(tierSpec.tier, effectiveStyle, displayState)
         ) {
-            rememberArtworkTopLuminance(track.artworkUrl, track.palette)
+            rememberArtworkTopLuminance(displayedTrack.artworkUrl, displayedTrack.palette)
         } else null
         val baseColor = remember(artworkPalette, palette.isLight) {
             folioPlayerBaseColor(artworkPalette, palette.isLight)
@@ -342,8 +349,8 @@ internal fun BoxScope.FolioPlayerLayer(
         val fg = if (palette.isLight) Color(0xFF16141B) else Color.White
         val fg2 = if (palette.isLight) Color(0xFF16141B).copy(alpha = 0.72f) else Color.White.copy(alpha = 0.68f)
         val controlAccent = rememberFolioControlAccent(
-            appleColors = track.artworkColors,
-            palette = artwork.extractedColors(track.artworkUrl),
+            appleColors = displayedTrack.artworkColors,
+            palette = artwork.extractedColors(displayedTrack.artworkUrl),
             background = folioControlBackground(
                 effectiveStyle, artworkPalette, baseColor, palette.isLight, settings.lowPerformance,
             ),
@@ -415,11 +422,13 @@ internal fun BoxScope.FolioPlayerLayer(
         }
 
         ProvideFolioGlassEnvironment(
-            track = track,
+            track = displayedTrack,
             tierSpec = tierSpec,
             effectiveStyle = effectiveStyle,
             displayState = displayState,
             baseColor = baseColor,
+            artworkPalette = artworkPalette,
+            edgeBrightness = trackSwitchState.motion.edgeBrightness,
             lowPerformance = settings.lowPerformance,
         ) { glassEnv ->
             val anchorHolder = remember { FolioPlayerAnchorCoordsHolder() }
@@ -443,6 +452,7 @@ internal fun BoxScope.FolioPlayerLayer(
                 LocalFolioReducedMotion provides reducedMotion,
                 LocalFolioLowPerformance provides settings.lowPerformance,
                 LocalFolioPlayerAnchors provides anchorHolder,
+                LocalFolioTrackSwitchMotion provides trackSwitchState.motion,
             ) {
             Box(
                 modifier = Modifier
@@ -454,7 +464,7 @@ internal fun BoxScope.FolioPlayerLayer(
                     .then(pullDown.layer),
             ) {
                 FolioPlayerBackdrop(
-                    track = track,
+                    track = displayedTrack,
                     artworkPalette = artworkPalette,
                     style = effectiveStyle,
                     isLight = palette.isLight,
@@ -518,7 +528,7 @@ internal fun BoxScope.FolioPlayerLayer(
 
             if (tierSpec.tier == FolioTier.Short) {
                 ShortPlayerLayout(
-                    track = track,
+                    track = displayedTrack,
                     tierSpec = tierSpec,
                     style = effectiveStyle,
                     displayState = displayState,
@@ -621,7 +631,7 @@ internal fun BoxScope.FolioPlayerLayer(
                         ),
                 ) {
                     FolioPlayerHeader(
-                        track = track,
+                        track = displayedTrack,
                         tierSpec = tierSpec,
                         headerColors = headerColors,
                         favoriteAccent = accent,
@@ -689,7 +699,7 @@ internal fun BoxScope.FolioPlayerLayer(
                         FolioPlayerAnimatedControlsSlot(
                             controlsExpanded = controlsExpanded,
                             reducedMotion = reducedMotion,
-                            track = track,
+                            track = displayedTrack,
                             tierSpec = tierSpec,
                             displayState = displayState,
                             positionState = positionState,
@@ -780,7 +790,7 @@ internal fun BoxScope.FolioPlayerLayer(
                         when (tierSpec.tier) {
                             FolioTier.Ultrawide -> {
                                 UltrawidePlayerBody(
-                                    track = track,
+                                    track = displayedTrack,
                                     tierSpec = tierSpec,
                                     displayState = displayState,
                                     displayedLines = displayedLines,
@@ -845,7 +855,7 @@ internal fun BoxScope.FolioPlayerLayer(
 
                             FolioTier.Narrow, FolioTier.Medium -> {
                                 VerticalPlayerBody(
-                                    track = track,
+                                    track = displayedTrack,
                                     tierSpec = tierSpec,
                                     style = effectiveStyle,
                                     displayState = displayState,
@@ -885,7 +895,7 @@ internal fun BoxScope.FolioPlayerLayer(
 
                             else -> {
                                 TwoColumnPlayerBody(
-                                    track = track,
+                                    track = displayedTrack,
                                     tierSpec = tierSpec,
                                     style = effectiveStyle,
                                     displayState = displayState,
@@ -1089,6 +1099,7 @@ private fun UltrawidePlayerBody(
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .size(artSide)
+                            .folioTrackSwitchCover()
                             .shadow(22.dp, RoundedCornerShape(16.dp))
                             .then(pullHandle),
                     )
@@ -1300,6 +1311,7 @@ private fun VerticalPlayerBody(
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier
                                     .size(116.dp)
+                                    .folioTrackSwitchCover()
                                     .shadow(16.dp, RoundedCornerShape(14.dp))
                                     .then(pullHandle),
                             )
@@ -1643,6 +1655,7 @@ private fun ShortPlayerLayout(
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier
                         .size(coverLayout.coverSizeDp)
+                        .folioTrackSwitchCover()
                         .shadow(20.dp, RoundedCornerShape(14.dp))
                         .then(pullHandle),
                 )
@@ -1892,6 +1905,7 @@ private fun TwoColumnPlayerBody(
                                                 TransformOrigin(0f, 0f)
                                             }
                                         }
+                                        .folioTrackSwitchCover()
                                         .shadow(24.dp, RoundedCornerShape(14.dp))
                                         .clip(RoundedCornerShape(14.dp))
                                         .folioPressable(
@@ -1943,6 +1957,7 @@ private fun TwoColumnPlayerBody(
                                     modifier = Modifier
                                         .padding(start = 36.dp + extraCenterStart, bottom = bottomReserved)
                                         .size(coverSize)
+                                        .folioTrackSwitchCover()
                                         .shadow(24.dp, RoundedCornerShape(14.dp)),
                                 )
                             }
@@ -1963,6 +1978,7 @@ private fun TwoColumnPlayerBody(
                                 shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier
                                     .size(coverSize)
+                                    .folioTrackSwitchCover()
                                     .shadow(24.dp, RoundedCornerShape(16.dp)),
                             )
                             Column(

@@ -153,6 +153,7 @@ internal fun FolioNoLyricsStateBox(
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .size(coverSide)
+                        .folioTrackSwitchCover()
                         .shadow(20.dp, RoundedCornerShape(16.dp)),
                 )
                 Column(

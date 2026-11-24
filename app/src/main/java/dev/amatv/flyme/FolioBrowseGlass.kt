@@ -1,5 +1,6 @@
 package dev.amatv.flyme
 
+import android.os.Build
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -36,7 +37,8 @@ internal fun Modifier.folioMiniPlayerGlass(shape: Shape): Modifier {
     val sheen = remember(highlight) {
         Brush.verticalGradient(0f to highlight, 0.34f to Color.Transparent)
     }
-    return if (backdrop != null) {
+    val tier = rememberFolioGlassTier()
+    return if (backdrop != null && tier == FolioGlassTier.FullA) {
         drawBackdrop(
             backdrop = backdrop,
             shape = { shape },
@@ -47,14 +49,40 @@ internal fun Modifier.folioMiniPlayerGlass(shape: Shape): Modifier {
             shadow = null,
             onDrawSurface = { drawMiniPlayerSurface(shape, fill, sheen, border) },
         )
+    } else if (backdrop != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val edgeSpec = resolveFolioGlassEdgeSpec(isLight = palette.isLight, albumTint = null, lightBaseBorder = border)
+        drawBackdrop(
+            backdrop = backdrop,
+            shape = { shape },
+            effects = { blur(16.dp.toPx()) },
+            highlight = { null },
+            shadow = null,
+            onDrawSurface = {
+                val outline = shape.createOutline(size, layoutDirection, this)
+                drawOutline(outline, fill)
+            },
+        ).drawWithCache {
+            val outline = shape.createOutline(size, layoutDirection, this)
+            val outlinePath = outline.asPath()
+            val strokePx = 1.dp.toPx()
+            val edgeSheen = folioDirectionalSheenBrush(edgeSpec, size)
+            val rimBrush = folioDirectionalRimBrush(edgeSpec, size)
+            onDrawWithContent {
+                drawContent()
+                drawDirectionalGlassEdge(outline, outlinePath, edgeSheen, rimBrush, edgeSpec.bottomLine, strokePx)
+            }
+        }
     } else {
+        val edgeSpec = resolveFolioGlassEdgeSpec(isLight = palette.isLight, albumTint = null, lightBaseBorder = border)
         clip(shape).drawWithCache {
             val outline = shape.createOutline(size, layoutDirection, this)
-            val stroke = Stroke(1.dp.toPx())
+            val outlinePath = outline.asPath()
+            val strokePx = 1.dp.toPx()
+            val edgeSheen = folioDirectionalSheenBrush(edgeSpec, size)
+            val rimBrush = folioDirectionalRimBrush(edgeSpec, size)
             onDrawBehind {
                 drawOutline(outline, fill)
-                drawOutline(outline, sheen)
-                drawOutline(outline, border, style = stroke)
+                drawDirectionalGlassEdge(outline, outlinePath, edgeSheen, rimBrush, edgeSpec.bottomLine, strokePx)
             }
         }
     }

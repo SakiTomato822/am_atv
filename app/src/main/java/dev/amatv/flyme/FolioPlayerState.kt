@@ -1,11 +1,22 @@
 package dev.amatv.flyme
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -25,6 +36,8 @@ import dev.amatv.model.renderLyricWords
 import dev.amatv.playback.AutoplayStatus
 import dev.amatv.playback.QueueEntry
 import dev.amatv.playback.QueueState
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -1195,4 +1208,173 @@ fun resolvePosterTopScrimColor(
     if (useDarkHeaderInk) lightBaseColor else Color.Transparent
 } else {
     darkBgColor
+}
+
+/**
+ * Snapshot of the active track-switch "gather & release" choreography driven when the player is
+ * open and the playing track changes.
+ */
+@Immutable
+internal data class FolioTrackSwitchMotion(
+    val coverScale: Float = 1f,
+    val coverAlpha: Float = 1f,
+    val haloScale: Float = 1f,
+    val haloAlpha: Float = 1f,
+    val edgeBrightness: Float = 1f,
+)
+
+@Immutable
+internal data class FolioTrackSwitchState(
+    val displayedTrack: Track,
+    val motion: FolioTrackSwitchMotion,
+)
+
+internal val LocalFolioTrackSwitchMotion = staticCompositionLocalOf { FolioTrackSwitchMotion() }
+
+/**
+ * Only triggers the "gather & release" track-switch beat when the player was already open on a
+ * different track ID (skips initial open, closed updates, and same-track metadata refreshes).
+ */
+internal fun shouldTriggerTrackGather(
+    open: Boolean,
+    previousOpenTrackId: String?,
+    nextTrackId: String,
+): Boolean = open && previousOpenTrackId != null && previousOpenTrackId != nextTrackId
+
+@Composable
+internal fun rememberFolioTrackSwitchState(
+    open: Boolean,
+    liveTrack: Track,
+    lowPerformance: Boolean,
+    reducedMotion: Boolean,
+): FolioTrackSwitchState {
+    var displayedTrack by remember { mutableStateOf(liveTrack) }
+    var previousOpenTrackId by remember { mutableStateOf<String?>(null) }
+    val latestTrack by rememberUpdatedState(liveTrack)
+
+    val coverScale = remember { Animatable(1f) }
+    val coverAlpha = remember { Animatable(1f) }
+    val haloScale = remember { Animatable(1f) }
+    val haloAlpha = remember { Animatable(1f) }
+    val edgeBrightness = remember { Animatable(1f) }
+
+    LaunchedEffect(open, liveTrack) {
+        if (!open || (displayedTrack.id == liveTrack.id && displayedTrack != liveTrack)) {
+            displayedTrack = liveTrack
+        }
+    }
+
+    LaunchedEffect(open, liveTrack.id) {
+        if (!open) {
+            previousOpenTrackId = null
+            displayedTrack = latestTrack
+            coverScale.snapTo(1f)
+            coverAlpha.snapTo(1f)
+            haloScale.snapTo(1f)
+            haloAlpha.snapTo(1f)
+            edgeBrightness.snapTo(1f)
+            return@LaunchedEffect
+        }
+
+        val previousId = previousOpenTrackId
+        if (!shouldTriggerTrackGather(open = true, previousOpenTrackId = previousId, nextTrackId = liveTrack.id)) {
+            previousOpenTrackId = liveTrack.id
+            displayedTrack = latestTrack
+            coverScale.snapTo(1f)
+            coverAlpha.snapTo(1f)
+            haloScale.snapTo(1f)
+            haloAlpha.snapTo(1f)
+            edgeBrightness.snapTo(1f)
+            return@LaunchedEffect
+        }
+
+        previousOpenTrackId = liveTrack.id
+        if (lowPerformance || reducedMotion) {
+            coverScale.snapTo(1f)
+            haloScale.snapTo(1f)
+            edgeBrightness.snapTo(1f)
+            val fadeSpec = tween<Float>(durationMillis = FolioGatherMotion.LOW_PERF_FADE_MS)
+            coroutineScope {
+                launch { coverAlpha.animateTo(0f, fadeSpec) }
+                launch { haloAlpha.animateTo(0f, fadeSpec) }
+            }
+            displayedTrack = latestTrack
+            coroutineScope {
+                launch { coverAlpha.animateTo(1f, fadeSpec) }
+                launch { haloAlpha.animateTo(1f, fadeSpec) }
+            }
+            return@LaunchedEffect
+        }
+
+        val gatherSpec = tween<Float>(
+            durationMillis = FolioGatherMotion.TRACK_GATHER_MS,
+            easing = FolioGatherMotion.GatherEasing,
+        )
+        coroutineScope {
+            launch { coverScale.animateTo(FolioGatherMotion.TRACK_COVER_GATHER_SCALE, gatherSpec) }
+            launch { coverAlpha.animateTo(FolioGatherMotion.TRACK_COVER_GATHER_ALPHA, gatherSpec) }
+            launch { haloScale.animateTo(FolioGatherMotion.TRACK_HALO_GATHER_SCALE, gatherSpec) }
+            launch { haloAlpha.animateTo(FolioGatherMotion.TRACK_HALO_GATHER_ALPHA, gatherSpec) }
+            launch { edgeBrightness.animateTo(FolioGatherMotion.TRACK_EDGE_GATHER_MULTIPLIER, gatherSpec) }
+        }
+
+        displayedTrack = latestTrack
+
+        val releaseSpec = tween<Float>(
+            durationMillis = FolioGatherMotion.TRACK_RELEASE_MS,
+            easing = FolioGatherMotion.ReleaseEasing,
+        )
+        coroutineScope {
+            launch { coverScale.animateTo(1f, releaseSpec) }
+            launch { coverAlpha.animateTo(1f, releaseSpec) }
+            launch { haloScale.animateTo(1f, releaseSpec) }
+            launch { haloAlpha.animateTo(1f, releaseSpec) }
+            launch { edgeBrightness.animateTo(1f, releaseSpec) }
+        }
+    }
+
+    return FolioTrackSwitchState(
+        displayedTrack = displayedTrack,
+        motion = FolioTrackSwitchMotion(
+            coverScale = coverScale.value,
+            coverAlpha = coverAlpha.value,
+            haloScale = haloScale.value,
+            haloAlpha = haloAlpha.value,
+            edgeBrightness = edgeBrightness.value,
+        ),
+    )
+}
+
+@Composable
+internal fun Modifier.folioTrackSwitchCover(
+    transformOrigin: TransformOrigin = TransformOrigin.Center,
+): Modifier {
+    val motion = LocalFolioTrackSwitchMotion.current
+    return if (motion.coverScale == 1f && motion.coverAlpha == 1f) {
+        this
+    } else {
+        this.graphicsLayer {
+            scaleX = motion.coverScale
+            scaleY = motion.coverScale
+            alpha = motion.coverAlpha
+            this.transformOrigin = transformOrigin
+        }
+    }
+}
+
+@Composable
+internal fun Modifier.folioTrackSwitchHalo(
+    transformOrigin: TransformOrigin = TransformOrigin(0.22f, 0.40f),
+): Modifier {
+    val motion = LocalFolioTrackSwitchMotion.current
+    return if (motion.haloScale == 1f && motion.haloAlpha == 1f) {
+        this
+    } else {
+        this.graphicsLayer {
+            scaleX = motion.haloScale
+            scaleY = motion.haloScale
+            alpha = motion.haloAlpha
+            this.transformOrigin = transformOrigin
+        }
+    }
 }
