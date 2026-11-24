@@ -58,7 +58,8 @@ class AmAtvApplication : Application() {
             musicServices.startFlymeVoice(
                 applicationScope,
                 searchAndPlay = { store.playVoiceSearch(musicServices, it) },
-                favorite = libraryActions::toggleFavorite,
+                // Voice only ever adds; an already-liked song must not raise the "can't remove" notice.
+                favorite = { if (libraryActions.state.value.current.isFavorite != true) libraryActions.toggleFavorite() },
             )
         }
     }
