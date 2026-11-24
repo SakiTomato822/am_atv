@@ -1,9 +1,60 @@
 package dev.amatv.flyme
 
+import androidx.compose.ui.graphics.Color
 import dev.amatv.core.LowPerformanceMode
 import dev.amatv.core.SettingsState
 import dev.amatv.integration.MusicConnectionState
 import kotlin.math.abs
+
+internal val WELCOME_THEME_GLOW_TOP_RIGHT = Color(0xFF5C2639)
+internal val WELCOME_THEME_GLOW_BOTTOM_LEFT = Color(0xFF1A3D47)
+internal val WELCOME_RIDGE_COLOR = Color(0xFFFFEEF4)
+
+internal enum class WelcomeAuraColorSource {
+    Theme,
+    Album,
+}
+
+internal data class WelcomeAuraTarget(
+    val alpha: Float,
+    val colorSource: WelcomeAuraColorSource,
+    val primaryColor: Color,
+    val secondaryColor: Color,
+)
+
+internal fun resolveWelcomeAuraTarget(
+    pageId: WelcomePageId,
+    showcaseColors: List<Color> = emptyList(),
+): WelcomeAuraTarget {
+    val alpha = when (pageId) {
+        WelcomePageId.Welcome -> 0.45f
+        WelcomePageId.SignIn -> 1.0f
+        else -> 0.90f
+    }
+    val usesTheme = pageId == WelcomePageId.Welcome || pageId == WelcomePageId.SignIn
+    return if (usesTheme) {
+        WelcomeAuraTarget(
+            alpha = alpha,
+            colorSource = WelcomeAuraColorSource.Theme,
+            primaryColor = WELCOME_THEME_GLOW_TOP_RIGHT,
+            secondaryColor = WELCOME_THEME_GLOW_BOTTOM_LEFT,
+        )
+    } else {
+        val c1 = showcaseColors.firstOrNull() ?: WELCOME_THEME_GLOW_TOP_RIGHT
+        val c2 = showcaseColors.getOrNull(1) ?: showcaseColors.firstOrNull() ?: WELCOME_THEME_GLOW_BOTTOM_LEFT
+        WelcomeAuraTarget(
+            alpha = alpha,
+            colorSource = WelcomeAuraColorSource.Album,
+            primaryColor = c1,
+            secondaryColor = c2,
+        )
+    }
+}
+
+internal fun isWelcomeAuraMotionEnabled(
+    animated: Boolean,
+    lowPerformance: Boolean,
+): Boolean = animated && !lowPerformance
 
 internal enum class WelcomePageId {
     Welcome,

@@ -47,6 +47,28 @@ object FolioMotion {
     val PageEasing = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)
 }
 
+/** Shared "gather & release" choreography curves/timings across Welcome (W1 v4) and Player track switch (G2). */
+internal object FolioGatherMotion {
+    val GatherEasing = CubicBezierEasing(0.5f, 0.0f, 0.75f, 0.0f)
+    val ReleaseEasing = CubicBezierEasing(0.2f, 0.7f, 0.2f, 1.0f)
+
+    const val TRACK_GATHER_MS: Int = 240
+    const val TRACK_RELEASE_MS: Int = 460
+    const val TRACK_COVER_GATHER_SCALE: Float = 0.955f
+    const val TRACK_COVER_GATHER_ALPHA: Float = 0.82f
+    const val TRACK_HALO_GATHER_SCALE: Float = 0.86f
+    const val TRACK_HALO_GATHER_ALPHA: Float = 0.30f
+    const val TRACK_EDGE_GATHER_MULTIPLIER: Float = 1.45f
+
+    const val WELCOME_AURA_GATHER_MS: Int = 500
+    const val WELCOME_AURA_RELEASE_MS: Int = 700
+    const val WELCOME_AURA_GATHER_SCALE: Float = 0.80f
+    const val WELCOME_RIDGE_BASE_ALPHA: Float = 0.075f
+    const val WELCOME_RIDGE_GATHER_ALPHA: Float = 0.20f
+
+    const val LOW_PERF_FADE_MS: Int = 180
+}
+
 @Immutable
 data class FolioPalette(
     val isLight: Boolean,

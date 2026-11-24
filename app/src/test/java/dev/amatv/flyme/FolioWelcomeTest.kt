@@ -7,6 +7,7 @@ import dev.amatv.core.SettingsState
 import dev.amatv.core.WelcomePreferences
 import dev.amatv.core.shouldShowWelcome
 import dev.amatv.integration.MusicConnectionState
+import androidx.compose.ui.graphics.Color
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -148,5 +149,40 @@ class FolioWelcomeTest {
         // Leaving Gapless back to Preferences resets gaplessActive = false, activeTrackIndex = 0 -> restores lyrics
         assertTrue(shouldRenderWelcomeLyricsLines(showLyricsDemo = true, gaplessActive = false, activeTrackIndex = 0))
         assertEquals(0.10f, welcomeRightPanelAlpha(showLoudnessBars = true, gaplessActive = false), 0.001f)
+    }
+
+    @Test
+    fun welcomeAuraAlphaAndColorSourceFollowPageAndPerformanceMode() {
+        val albumPalette = listOf(Color(0xFF2D5674), Color(0xFF3A3550))
+
+        // Welcome & SignIn use theme rose/teal with alpha 0.45 and 1.0
+        val p0 = resolveWelcomeAuraTarget(WelcomePageId.Welcome, albumPalette)
+        assertEquals(0.45f, p0.alpha, 0.001f)
+        assertEquals(WelcomeAuraColorSource.Theme, p0.colorSource)
+        assertEquals(WELCOME_THEME_GLOW_TOP_RIGHT, p0.primaryColor)
+        assertEquals(WELCOME_THEME_GLOW_BOTTOM_LEFT, p0.secondaryColor)
+
+        val p1 = resolveWelcomeAuraTarget(WelcomePageId.SignIn, albumPalette)
+        assertEquals(1.0f, p1.alpha, 0.001f)
+        assertEquals(WelcomeAuraColorSource.Theme, p1.colorSource)
+
+        // Demo & Preferences pages switch to album colors at 0.90 alpha
+        for (demoPage in listOf(
+            WelcomePageId.Lyrics,
+            WelcomePageId.Styles,
+            WelcomePageId.Gapless,
+            WelcomePageId.Preferences,
+        )) {
+            val target = resolveWelcomeAuraTarget(demoPage, albumPalette)
+            assertEquals(0.90f, target.alpha, 0.001f)
+            assertEquals(WelcomeAuraColorSource.Album, target.colorSource)
+            assertEquals(albumPalette[0], target.primaryColor)
+            assertEquals(albumPalette[1], target.secondaryColor)
+        }
+
+        // Low performance disables drift/gather motion
+        assertTrue(isWelcomeAuraMotionEnabled(animated = true, lowPerformance = false))
+        assertFalse(isWelcomeAuraMotionEnabled(animated = true, lowPerformance = true))
+        assertFalse(isWelcomeAuraMotionEnabled(animated = false, lowPerformance = false))
     }
 }

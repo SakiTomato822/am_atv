@@ -2,7 +2,6 @@ package dev.amatv.flyme
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
@@ -94,6 +93,7 @@ import dev.amatv.integration.LyricTextSize
 import dev.amatv.integration.MusicConnectionState
 import dev.amatv.integration.MusicServices
 import dev.amatv.model.Track
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -219,14 +219,11 @@ private fun FolioWelcomeScreenContent(
         welcomePageSequence(accountState.connectionState)
     }
     var currentPageId by remember { mutableStateOf(WelcomePageId.Welcome) }
-    LaunchedEffect(accountState.connectionState) {
-        if (currentPageId == WelcomePageId.SignIn && accountState.connectionState == MusicConnectionState.SignedIn) {
-            currentPageId = WelcomePageId.Lyrics
-        } else if (currentPageId !in pages) {
-            currentPageId = WelcomePageId.Welcome
-        }
-    }
-    val currentIndex = pages.indexOf(currentPageId).coerceAtLeast(0)
+    var isClosing by remember { mutableStateOf(false) }
+    val auraGatherScale = remember { Animatable(1f) }
+    val ridgeGatherAlpha = remember { Animatable(FolioGatherMotion.WELCOME_RIDGE_BASE_ALPHA) }
+    val closingStageProgress = remember { Animatable(0f) }
+    val overlayFadeAlpha = remember { Animatable(1f) }
 
     val demoContent = rememberWelcomeDemoContent(
         connectionState = accountState.connectionState,
@@ -334,21 +331,106 @@ private fun FolioWelcomeScreenContent(
         }
     }
 
-    fun finishWelcome() {
+    fun startClosingSequence() {
+        if (isClosing) return
         welcomePrefs.welcomeVersion = CURRENT_WELCOME_VERSION
-        bgm.fadeOutAndRelease { onClose() }
+        isClosing = true
+        bgm.fadeOutAndRelease()
+        scope.launch {
+            if (isWelcomeAuraMotionEnabled(animated, lowPerformance)) {
+                coroutineScope {
+                    launch {
+                        closingStageProgress.animateTo(
+                            1f,
+                            tween(550, easing = FolioGatherMotion.ReleaseEasing),
+                        )
+                    }
+                    launch {
+                        auraGatherScale.animateTo(
+                            FolioGatherMotion.WELCOME_AURA_GATHER_SCALE,
+                            tween(FolioGatherMotion.WELCOME_AURA_GATHER_MS, easing = FolioGatherMotion.GatherEasing),
+                        )
+                        auraGatherScale.animateTo(
+                            1f,
+                            tween(FolioGatherMotion.WELCOME_AURA_RELEASE_MS, easing = FolioGatherMotion.ReleaseEasing),
+                        )
+                    }
+                    launch {
+                        ridgeGatherAlpha.animateTo(
+                            FolioGatherMotion.WELCOME_RIDGE_GATHER_ALPHA,
+                            tween(FolioGatherMotion.WELCOME_AURA_GATHER_MS, easing = FolioGatherMotion.GatherEasing),
+                        )
+                        ridgeGatherAlpha.animateTo(
+                            FolioGatherMotion.WELCOME_RIDGE_BASE_ALPHA,
+                            tween(FolioGatherMotion.WELCOME_AURA_RELEASE_MS, easing = FolioGatherMotion.ReleaseEasing),
+                        )
+                    }
+                    launch {
+                        delay(380L)
+                        overlayFadeAlpha.animateTo(
+                            0f,
+                            tween(550, easing = FolioGatherMotion.ReleaseEasing),
+                        )
+                    }
+                }
+            } else {
+                overlayFadeAlpha.animateTo(0f, tween(FolioGatherMotion.LOW_PERF_FADE_MS))
+            }
+            onClose()
+        }
     }
+
+    LaunchedEffect(accountState.connectionState) {
+        if (currentPageId == WelcomePageId.SignIn && accountState.connectionState == MusicConnectionState.SignedIn) {
+            if (isWelcomeAuraMotionEnabled(animated, lowPerformance)) {
+                coroutineScope {
+                    launch {
+                        auraGatherScale.animateTo(
+                            FolioGatherMotion.WELCOME_AURA_GATHER_SCALE,
+                            tween(FolioGatherMotion.WELCOME_AURA_GATHER_MS, easing = FolioGatherMotion.GatherEasing),
+                        )
+                    }
+                    launch {
+                        ridgeGatherAlpha.animateTo(
+                            FolioGatherMotion.WELCOME_RIDGE_GATHER_ALPHA,
+                            tween(FolioGatherMotion.WELCOME_AURA_GATHER_MS, easing = FolioGatherMotion.GatherEasing),
+                        )
+                    }
+                }
+                navigateTo(WelcomePageId.Lyrics)
+                launch {
+                    auraGatherScale.animateTo(
+                        1f,
+                        tween(FolioGatherMotion.WELCOME_AURA_RELEASE_MS, easing = FolioGatherMotion.ReleaseEasing),
+                    )
+                }
+                launch {
+                    ridgeGatherAlpha.animateTo(
+                        FolioGatherMotion.WELCOME_RIDGE_BASE_ALPHA,
+                        tween(FolioGatherMotion.WELCOME_AURA_RELEASE_MS, easing = FolioGatherMotion.ReleaseEasing),
+                    )
+                }
+            } else {
+                navigateTo(WelcomePageId.Lyrics)
+            }
+        } else if (currentPageId !in pages) {
+            currentPageId = WelcomePageId.Welcome
+        }
+    }
+    val currentIndex = pages.indexOf(currentPageId).coerceAtLeast(0)
+
+    fun finishWelcome() = startClosingSequence()
 
     fun handleSkip() {
         welcomePrefs.welcomeVersion = CURRENT_WELCOME_VERSION
         if (currentPageId == WelcomePageId.Preferences) {
-            bgm.fadeOutAndRelease { onClose() }
+            startClosingSequence()
         } else {
             navigateTo(WelcomePageId.Preferences)
         }
     }
 
-    BackHandler(enabled = true) {
+    BackHandler(enabled = !isClosing) {
         if (currentIndex > 0) {
             navigateTo(pages[currentIndex - 1])
         } else {
@@ -356,17 +438,15 @@ private fun FolioWelcomeScreenContent(
         }
     }
 
-    // Active showcase track ambient tint (returns default color when showcaseTracks is empty)
+    // Active showcase track palette colors for album-derived Aura on demo pages
     val currentShowcaseTrack = demoContent.showcaseTracks.getOrNull(gaplessTrackIdx.coerceAtLeast(0))
     val paletteResult = rememberArtworkPaletteResult(
         url = currentShowcaseTrack?.artworkUrl,
-        fallback = currentShowcaseTrack?.palette ?: listOf(Color(0xFF40304A)),
+        fallback = currentShowcaseTrack?.palette ?: listOf(WELCOME_THEME_GLOW_TOP_RIGHT),
     )
-    val ambientTint by animateColorAsState(
-        targetValue = paletteResult.colors.firstOrNull() ?: Color(0xFF40304A),
-        animationSpec = tween(if (lowPerformance) 150 else 800),
-        label = "welcome-amb-tint",
-    )
+    val auraTarget = remember(currentPageId, paletteResult.colors) {
+        resolveWelcomeAuraTarget(currentPageId, paletteResult.colors)
+    }
 
     // Drag gesture state
     var rawDragX by remember { mutableFloatStateOf(0f) }
@@ -381,12 +461,20 @@ private fun FolioWelcomeScreenContent(
     val latestPages by rememberUpdatedState(pages)
     val latestIndex by rememberUpdatedState(currentIndex)
 
+    val chromeFadeAlpha by animateFloatAsState(
+        targetValue = if (isClosing) 0f else 1f,
+        animationSpec = tween(if (lowPerformance) FolioGatherMotion.LOW_PERF_FADE_MS else 300),
+        label = "welcome-chrome-alpha",
+    )
+
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
+            .graphicsLayer { alpha = overlayFadeAlpha.value }
             .background(Color(0xFF08070A))
             .onGloballyPositioned { rootCoords = it }
-            .pointerInput(Unit) {
+            .pointerInput(isClosing) {
+                if (isClosing) return@pointerInput
                 var velocityTracker = VelocityTracker()
                 detectHorizontalDragGestures(
                     onDragStart = {
@@ -474,32 +562,16 @@ private fun FolioWelcomeScreenContent(
                 ),
         )
 
-        // Ambient glow behind shared screen (visible from Lyrics page onwards)
-        val ambAlpha by animateFloatAsState(
-            targetValue = if (currentPageId in listOf(
-                    WelcomePageId.Lyrics, WelcomePageId.Styles, WelcomePageId.Gapless, WelcomePageId.Preferences,
-                )
-            ) 0.50f else 0f,
-            animationSpec = tween(if (lowPerformance) 150 else 800),
-            label = "amb-glow-alpha",
+        // Dark atmospheric dual-fog + faint ridge aura (above veil, below shared player stage)
+        WelcomeAuraLayer(
+            target = auraTarget,
+            dragOffsetPx = effectiveDragPx,
+            animated = animated,
+            lowPerformance = lowPerformance,
+            gatherScale = auraGatherScale.value,
+            ridgeAlphaOverride = ridgeGatherAlpha.value,
+            modifier = Modifier.zIndex(2f),
         )
-        if (currentShowcaseTrack != null && ambAlpha > 0.01f) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { alpha = ambAlpha }
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(ambientTint, Color.Transparent),
-                            center = androidx.compose.ui.geometry.Offset(
-                                x = with(density) { (maxWidth * 0.72f).toPx() },
-                                y = with(density) { (maxHeight * 0.45f).toPx() },
-                            ),
-                            radius = with(density) { (maxWidth * 0.65f).toPx() },
-                        ),
-                    ),
-            )
-        }
 
         // 2. Top chrome: Brand mark + Sound button + Skip button
         Row(
@@ -510,6 +582,7 @@ private fun FolioWelcomeScreenContent(
                     end = u * (if (isPhonePortrait) 5f else 3.6f),
                     top = statusTop + u * (if (isPhonePortrait) 4.2f else 2.2f),
                 )
+                .graphicsLayer { alpha = chromeFadeAlpha }
                 .zIndex(6f),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
@@ -582,7 +655,17 @@ private fun FolioWelcomeScreenContent(
         )
         val stageBaseWidthDp = u * 52f
 
-        if (demoContent.showcaseTracks.isNotEmpty() && (stageAlpha > 0.005f || stageTarget.alpha > 0f)) {
+        val closeT = closingStageProgress.value
+        val baseX = if (isDragging) stageTarget.xU * uPx else stageX
+        val fullScreenScale = 100f / 52f
+        val fullScreenY = ((with(density) { maxHeight.toPx() } - with(density) { stageBaseWidthDp.toPx() } * fullScreenScale * 9f / 16f) * 0.5f)
+            .coerceAtLeast(0f)
+        val finalStageX = baseX + (0f - baseX) * closeT + effectiveDragPx * (if (lowPerformance) 0f else 0.45f)
+        val finalStageY = stageY + (fullScreenY - stageY) * closeT
+        val finalStageScale = stageScale + (fullScreenScale - stageScale) * closeT
+        val finalStageAlpha = stageAlpha * (1f - closeT)
+
+        if (demoContent.showcaseTracks.isNotEmpty() && (finalStageAlpha > 0.005f || (!isClosing && stageTarget.alpha > 0f))) {
             SharedDemoPlayerStage(
                 tracks = demoContent.showcaseTracks,
                 activeTrackIdx = if (currentPageId == WelcomePageId.Gapless) gaplessTrackIdx else 0,
@@ -608,12 +691,11 @@ private fun FolioWelcomeScreenContent(
                     .zIndex(3f)
                     .graphicsLayer {
                         transformOrigin = TransformOrigin(0f, 0f)
-                        translationX = (if (isDragging) stageTarget.xU * uPx else stageX) +
-                            effectiveDragPx * (if (lowPerformance) 0f else 0.45f)
-                        translationY = stageY
-                        scaleX = stageScale
-                        scaleY = stageScale
-                        alpha = stageAlpha
+                        translationX = finalStageX
+                        translationY = finalStageY
+                        scaleX = finalStageScale
+                        scaleY = finalStageScale
+                        alpha = finalStageAlpha
                     },
             )
         }
@@ -656,6 +738,7 @@ private fun FolioWelcomeScreenContent(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .graphicsLayer { alpha = chromeFadeAlpha }
                 .zIndex(4f),
         ) {
             WelcomePageTextsLayer(
@@ -703,6 +786,7 @@ private fun FolioWelcomeScreenContent(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = navBottom + u * (if (isPhonePortrait) 4.2f else 2.0f))
+                .graphicsLayer { alpha = chromeFadeAlpha }
                 .zIndex(6f),
             horizontalArrangement = Arrangement.spacedBy(u * (if (isPhonePortrait) 1.5f else 0.6f)),
             verticalAlignment = Alignment.CenterVertically,
