@@ -7,7 +7,7 @@
 
     <string name="welcome_p1_sub">在车上好好听 Apple Music。</string>
     <string name="welcome_p1_cta">开始</string>
-    <string name="welcome_p1_fine">一个非官方的 Flyme Auto 客户端，改自 Sam 的开源项目 AM for TV。</string>
+    <string name="welcome_p1_fine">一个非官方的 Flyme Auto Apple Music 客户端。</string>
 
     <string name="welcome_p2_title">先登录 Apple Music</string>
     <string name="welcome_p2_sub">登录之后，接下来的演示就用你自己最近听的歌和真歌词。需要订阅；车停稳了再登录比较好。</string>

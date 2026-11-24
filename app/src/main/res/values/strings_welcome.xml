@@ -8,7 +8,7 @@
 
     <string name="welcome_p1_sub">Apple Music, made for the drive.</string>
     <string name="welcome_p1_cta">Start</string>
-    <string name="welcome_p1_fine">An unofficial Flyme Auto client adapted from Sam’s open-source AM for TV.</string>
+    <string name="welcome_p1_fine">An unofficial Apple Music client for Flyme Auto.</string>
 
     <string name="welcome_p2_title">Sign in to Apple Music first</string>
     <string name="welcome_p2_sub">Sign in so the rest of this walkthrough uses songs you recently played and real lyrics. Requires a subscription; best done while parked.</string>
