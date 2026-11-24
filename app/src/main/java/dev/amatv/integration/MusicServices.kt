@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.io.IOException
 
 enum class MusicConnectionState {
     Demo,
@@ -423,7 +424,8 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
 
     internal fun startFlymeVoice(
         scope: CoroutineScope,
-        searchAndPlay: suspend (String) -> Boolean,
+        playTrack: (Track, List<Track>) -> Unit,
+        playAlbum: (Track, List<Track>) -> Unit,
         favorite: () -> Unit,
     ) {
         flymeVoice?.start(scope) { command ->
@@ -434,8 +436,36 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
                 FlymeVoiceCommand.Control.Next -> systemPlaybackCallbacks?.next?.invoke()
                 FlymeVoiceCommand.Control.Favorite -> favorite()
                 is FlymeVoiceCommand.Search -> {
-                    val found = searchAndPlay(command.query)
-                    android.util.Log.i(FlymeVoiceBridge.TAG, "searchAndPlay foundSong=$found")
+                    val result = withContext(Dispatchers.IO) {
+                        api.withAccount {
+                            resolveFlymeVoiceSearch(
+                                command,
+                                search = ::search,
+                                artistTopSongs = { catalogArtistPage(it).topSongs },
+                                collectionTracks = ::collectionTracks,
+                                catalogAlbum = api::catalogAlbumForVoice,
+                                log = { android.util.Log.i(FlymeVoiceBridge.TAG, it) },
+                                librarySearch = { term, collection ->
+                                    try {
+                                        api.searchLibraryForVoice(term, collection)
+                                    } catch (error: CatalogRequestException) {
+                                        android.util.Log.w(FlymeVoiceBridge.TAG,
+                                            "kind=${command.kind} fallback=library-search-${error.reason} using=catalog")
+                                        emptyList()
+                                    } catch (error: IOException) {
+                                        android.util.Log.w(FlymeVoiceBridge.TAG,
+                                            "kind=${command.kind} fallback=library-search-io using=catalog", error)
+                                        emptyList()
+                                    }
+                                },
+                            )
+                        }
+                    }
+                    val first = result.tracks.firstOrNull()
+                    if (first != null) {
+                        if (result.album != null) playAlbum(result.album, result.tracks)
+                        else playTrack(first, if (result.artistQueue) result.tracks else emptyList())
+                    }
                 }
                 is FlymeVoiceCommand.Ignored -> Unit
             }

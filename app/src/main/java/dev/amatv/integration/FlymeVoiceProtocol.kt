@@ -2,12 +2,34 @@ package dev.amatv.integration
 
 import android.os.IBinder
 import android.os.Parcel
+import dev.amatv.model.CatalogKind
 import org.json.JSONArray
 import org.json.JSONObject
 
 internal sealed interface FlymeVoiceCommand {
     enum class Control : FlymeVoiceCommand { Play, Pause, Previous, Next, Favorite }
-    data class Search(val query: String) : FlymeVoiceCommand
+    data class Search(
+        val kind: Kind,
+        val title: String,
+        val artist: String,
+        val recognitionText: String = "",
+    ) : FlymeVoiceCommand {
+        enum class Kind(val catalogKind: CatalogKind, val libraryCollection: LibraryCollection) {
+            Song(CatalogKind.Song, LibraryCollection.Songs),
+            Artist(CatalogKind.Artist, LibraryCollection.Artists),
+            ArtistSong(CatalogKind.Song, LibraryCollection.Songs),
+            Album(CatalogKind.Album, LibraryCollection.Albums),
+            ArtistAlbum(CatalogKind.Album, LibraryCollection.Albums),
+        }
+
+        val targetTitle: String get() = if (kind == Kind.Artist) artist.ifEmpty { title } else title
+
+        val query: String
+            get() = if (kind == Kind.Artist) targetTitle.ifEmpty { recognitionText }
+                else listOf(title, artist).filter(String::isNotEmpty).joinToString(" ").ifEmpty { recognitionText }
+
+        fun acceptsVoiceKind(candidate: CatalogKind): Boolean = kind.catalogKind == candidate
+    }
     data class Ignored(val semantic: Int) : FlymeVoiceCommand
 }
 
@@ -91,11 +113,21 @@ internal object FlymeVoiceProtocol {
             NEXT -> FlymeVoiceCommand.Control.Next
             FAVORITE -> FlymeVoiceCommand.Control.Favorite
             SONG, ARTIST, ARTIST_SONG, ALBUM, ARTIST_ALBUM -> {
-                val title = if (semantic == ALBUM || semantic == ARTIST_ALBUM) "albumName" else "titleName"
-                val query = listOf(json.slot(title), json.slot("artistName"))
-                    .filter(String::isNotEmpty).joinToString(" ")
-                    .ifBlank { json.slot("asrText").ifBlank { json.slot("originInfo") } }
-                if (query.isEmpty()) FlymeVoiceCommand.Ignored(semantic) else FlymeVoiceCommand.Search(query)
+                val kind = when (semantic) {
+                    SONG -> FlymeVoiceCommand.Search.Kind.Song
+                    ARTIST -> FlymeVoiceCommand.Search.Kind.Artist
+                    ARTIST_SONG -> FlymeVoiceCommand.Search.Kind.ArtistSong
+                    ALBUM -> FlymeVoiceCommand.Search.Kind.Album
+                    else -> FlymeVoiceCommand.Search.Kind.ArtistAlbum
+                }
+                val titleSlot = if (semantic == ALBUM || semantic == ARTIST_ALBUM) "albumName" else "titleName"
+                val search = FlymeVoiceCommand.Search(
+                    kind,
+                    json.slot(titleSlot),
+                    json.slot("artistName"),
+                    json.slot("asrText").ifEmpty { json.slot("originInfo") },
+                )
+                if (search.query.isEmpty()) FlymeVoiceCommand.Ignored(semantic) else search
             }
             else -> FlymeVoiceCommand.Ignored(semantic)
         }

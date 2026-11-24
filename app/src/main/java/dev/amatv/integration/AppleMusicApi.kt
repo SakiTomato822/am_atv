@@ -802,6 +802,29 @@ class AppleMusicApi(
         )
     }
 
+    internal suspend fun searchLibraryForVoice(term: String, collection: LibraryCollection): List<Track> = withAccount {
+        if (useCurrentUserToken { it.isNullOrBlank() }) return@withAccount emptyList()
+        val encoded = URLEncoder.encode(term, Charsets.UTF_8.name())
+        val root = requestRoot(
+            "/v1/me/library/search?term=$encoded&types=${collection.resourceType}&limit=24",
+            needsUserToken = true,
+        )
+        withContext(parseDispatcher) { parseResources(root) }
+    }
+
+    internal suspend fun catalogAlbumForVoice(album: Track): Track? = withAccount {
+        album.catalogId?.let { return@withAccount album.copy(resourceId = it, resourceType = "albums") }
+        val libraryId = checkNotNull(album.resourceId)
+        require(libraryId.matches(Regex("[A-Za-z0-9._-]+")))
+        val linked = try {
+            requestRoot("/v1/me/library/albums/$libraryId/catalog", needsUserToken = true)
+        } catch (error: CatalogRequestException) {
+            if (error.reason != CatalogFailureReason.Unavailable) throw error
+            return@withAccount null
+        }
+        withContext(parseDispatcher) { parseResources(linked).firstOrNull { it.catalogKind == CatalogKind.Album } }
+    }
+
     internal suspend fun searchSuggestions(term: String): CatalogSearchSuggestions = withAccount {
         val termLength = term.length
         Log.d(SEARCH_LOG_TAG, "suggestions request termLength=$termLength")

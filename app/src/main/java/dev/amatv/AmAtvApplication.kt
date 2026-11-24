@@ -57,7 +57,8 @@ class AmAtvApplication : Application() {
             store.attach()
             musicServices.startFlymeVoice(
                 applicationScope,
-                searchAndPlay = { store.playVoiceSearch(musicServices, it) },
+                playTrack = { track, queue -> store.playTrack(track, queue) },
+                playAlbum = { album, tracks -> store.playCollection(album, tracks, index = 0, shuffle = false) },
                 // Voice only ever adds; an already-liked song must not raise the "can't remove" notice.
                 favorite = { if (libraryActions.state.value.current.isFavorite != true) libraryActions.toggleFavorite() },
             )

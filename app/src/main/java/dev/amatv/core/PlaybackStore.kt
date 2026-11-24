@@ -999,13 +999,6 @@ class PlaybackStore(
         _events.tryEmit(PlaybackEvent.ShowNowPlaying)
     }
 
-    internal suspend fun playVoiceSearch(content: ContentOperations, query: String): Boolean {
-        val song = withContext(ioDispatcher) { content.search(query) }
-            .firstOrNull { it.catalogKind == CatalogKind.Song } ?: return false
-        playTrack(song)
-        return true
-    }
-
     fun playTrack(nextTrack: Track, contextQueue: List<Track> = emptyList(), webStation: Boolean = false) {
         val isStation = nextTrack.catalogKind == CatalogKind.Station
         if (nextTrack.openAction != CatalogOpenAction.Play && !isStation) return

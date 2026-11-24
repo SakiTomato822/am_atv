@@ -1,6 +1,8 @@
 package dev.amatv.integration
 
 import dev.amatv.integration.FlymeVoiceCommand.Control
+import dev.amatv.integration.FlymeVoiceCommand.Search
+import dev.amatv.integration.FlymeVoiceCommand.Search.Kind
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -59,24 +61,27 @@ class FlymeVoiceProtocolTest {
         keys.forEach { key -> assertEquals(declaredChannel.get(key), cancelledChannel.get(key)) }
     }
 
-    @Test fun searchCombinesVendorSlots() {
-        assertEquals(FlymeVoiceCommand.Search("晴天 周杰伦"), FlymeVoiceProtocol.parseSemantic(
-            """{"semantic":67108872,"titleName":"晴天","artistName":"周杰伦","originInfo":"播放周杰伦的晴天"}""",
+    @Test fun searchPreservesVendorSlotsAndKind() {
+        assertEquals(Search(Kind.ArtistSong, "晴天", "周杰伦"), FlymeVoiceProtocol.parseSemantic(
+            """{"semantic":67108872,"titleName":"晴天","artistName":"周杰伦"}""",
         ))
-        assertEquals(FlymeVoiceCommand.Search("周杰伦"), FlymeVoiceProtocol.parseSemantic(
+        assertEquals(Search(Kind.Artist, "", "周杰伦"), FlymeVoiceProtocol.parseSemantic(
             """{"semantic":67108868,"artistName":"周杰伦"}""",
         ))
-        assertEquals(FlymeVoiceCommand.Search("叶惠美 周杰伦"), FlymeVoiceProtocol.parseSemantic(
+        assertEquals(Search(Kind.Album, "叶惠美", ""), FlymeVoiceProtocol.parseSemantic(
+            """{"semantic":67108880,"albumName":"叶惠美"}""",
+        ))
+        assertEquals(Search(Kind.ArtistAlbum, "叶惠美", "周杰伦"), FlymeVoiceProtocol.parseSemantic(
             """{"semantic":67108896,"albumName":"叶惠美","artistName":"周杰伦"}""",
         ))
     }
 
     @Test fun searchFallsBackToRecognitionText() {
         // asrText is the experiment's compatibility field. j.java reads originInfo.
-        assertEquals(FlymeVoiceCommand.Search("播放晴天"), FlymeVoiceProtocol.parseSemantic(
+        assertEquals(Search(Kind.Song, "", "", "播放晴天"), FlymeVoiceProtocol.parseSemantic(
             """{"semantic":67108866,"titleName":null,"asrText":"播放晴天"}""",
         ))
-        assertEquals(FlymeVoiceCommand.Search("播放晴天"), FlymeVoiceProtocol.parseSemantic(
+        assertEquals(Search(Kind.Song, "", "", "播放晴天"), FlymeVoiceProtocol.parseSemantic(
             """{"semantic":67108866,"originInfo":"播放晴天"}""",
         ))
     }
