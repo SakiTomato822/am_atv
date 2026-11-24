@@ -85,7 +85,7 @@ object LogRecorder {
     fun export(context: Context): String {
         val name = "AMATV-log-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date()) + ".txt"
         val header = buildString {
-            appendLine("AM for Flyme Auto ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            appendLine("AM Folio ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
             appendLine("Android ${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT} · ${Build.MANUFACTURER} ${Build.MODEL}")
             appendLine("Exported ${Date()}")
             appendLine()

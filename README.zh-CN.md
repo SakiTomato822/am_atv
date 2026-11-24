@@ -1,4 +1,4 @@
-# AM for Flyme Auto
+# AM Folio
 
 **车机上的 Apple Music：为 Flyme Auto（领克 06 等）适配的非官方客户端**
 

@@ -1,4 +1,4 @@
-# AM Folio（余白）
+# AM Folio
 
 **Apple Music in the car: an unofficial client adapted for Flyme Auto (Lynk & Co 06 and others)**
 

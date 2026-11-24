@@ -14,7 +14,7 @@
 
 车机变体：
 
-- 不要求 Leanback；独立包名 `dev.amatv.flyme`，显示名 `AM for Flyme Auto`。
+- 不要求 Leanback；独立包名 `dev.amatv.flyme`，显示名 `AM Folio`。
 - 默认使用 Gecko 登录，独立 `:gecko_auth` 进程；ARM64 包。
 - 横屏、可调整窗口大小；键盘使用 `adjustResize`。
 - 播放控制常显；主按钮至少 56 dp；播放/暂停、上下曲、歌词、歌词设置、队列、队列模式及队列卡片有点击事件。

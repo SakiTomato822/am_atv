@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Media session and notification fallbacks show the app's own name on the car. -->
+    <string name="app_name" translatable="false">AM Folio</string>
+</resources>
