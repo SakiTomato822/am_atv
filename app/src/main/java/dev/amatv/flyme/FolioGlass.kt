@@ -249,6 +249,7 @@ internal data class FolioGlassEnvironment(
     val effectiveStyle: LyricBackgroundStyle = LyricBackgroundStyle.Flow,
     val baseColor: Color = Color(0xFF1F1D26),
     val albumTint: Color? = null,
+    val coverLuminance: Float? = null,
     val edgeBrightness: State<Float> = DefaultEdgeBrightnessState,
     val blurredCover: ImageBitmap? = null,
     val isVerticalBleed: Boolean = false,
@@ -288,7 +289,8 @@ internal fun rememberFolioGlassTier(): FolioGlassTier {
 /**
  * Provides player-scoped glass rendering context:
  * - Tiers A/B allocate a [LayerBackdrop] capturing ONLY [FolioPlayerBackdrop].
- * - Tier C computes a cached ~64px blurred cover [ImageBitmap] off the main thread once per song when Soak is active.
+ * - All non-low-performance modes compute a single shared ~64px blurred cover [ImageBitmap] off the
+ *   main thread once per song for Tier C glass, Flow backdrop, and frosted track-switch transitions.
  */
 @Composable
 internal fun ProvideFolioGlassEnvironment(
@@ -303,9 +305,14 @@ internal fun ProvideFolioGlassEnvironment(
     content: @Composable (FolioGlassEnvironment) -> Unit,
 ) {
     val albumTint = remember(artworkPalette) { folioGlassAlbumTint(artworkPalette) }
+    val coverLuminance = remember(artworkPalette) { folioCoverLuminance(artworkPalette) }
     val env = if (lowPerformance) {
-        remember(albumTint, edgeBrightness) {
-            FolioGlassEnvironment(albumTint = albumTint, edgeBrightness = edgeBrightness)
+        remember(albumTint, coverLuminance, edgeBrightness) {
+            FolioGlassEnvironment(
+                albumTint = albumTint,
+                coverLuminance = coverLuminance,
+                edgeBrightness = edgeBrightness,
+            )
         }
     } else {
         val glassTier = rememberFolioGlassTier()
@@ -314,10 +321,9 @@ internal fun ProvideFolioGlassEnvironment(
         } else {
             null
         }
-        val needBlurredCover = glassTier == FolioGlassTier.FallbackC && effectiveStyle == LyricBackgroundStyle.Soak
         val blurredCover = rememberFolioBlurredCoverBitmap(
             artworkUrl = track.artworkUrl,
-            active = needBlurredCover,
+            active = true,
         )
         val coordHolder = remember(glassTier) {
             if (glassTier == FolioGlassTier.FallbackC) FolioGlassCoordHolder() else null
@@ -330,6 +336,7 @@ internal fun ProvideFolioGlassEnvironment(
             effectiveStyle,
             baseColor,
             albumTint,
+            coverLuminance,
             edgeBrightness,
             blurredCover,
             isVerticalBleed,
@@ -342,6 +349,7 @@ internal fun ProvideFolioGlassEnvironment(
                 effectiveStyle = effectiveStyle,
                 baseColor = baseColor,
                 albumTint = albumTint,
+                coverLuminance = coverLuminance,
                 edgeBrightness = edgeBrightness,
                 blurredCover = blurredCover,
                 isVerticalBleed = isVerticalBleed,

@@ -58,10 +58,18 @@ internal object FolioGatherMotion {
     const val TRACK_GATHER_MS: Int = 240
     const val TRACK_RELEASE_MS: Int = 460
     const val TRACK_COVER_GATHER_SCALE: Float = 0.955f
-    const val TRACK_COVER_GATHER_ALPHA: Float = 0.82f
+    const val TRACK_INNER_COVER_GATHER_SCALE: Float = 1.045f
+    const val TRACK_COVER_GATHER_ALPHA: Float = 0.86f
     const val TRACK_HALO_GATHER_SCALE: Float = 0.86f
     const val TRACK_HALO_GATHER_ALPHA: Float = 0.30f
     const val TRACK_EDGE_GATHER_MULTIPLIER: Float = 1.45f
+    const val TRACK_FROST_MID_ALPHA: Float = 0.12f
+    const val TRACK_FROST_PEAK_ALPHA: Float = 0.46f
+    const val TRACK_FROST_RELEASE_MID_ALPHA: Float = 0.22f
+    const val TRACK_FROST_RELEASE_MS: Int = 280
+    const val TRACK_GLASS_RIM_TAIL_ALPHA: Float = 0.12f
+    const val TRACK_GLASS_SWEEP_MS: Int = 380
+    const val TRACK_GLASS_SWEEP_FADE_MS: Int = 80
 
     const val WELCOME_AURA_GATHER_MS: Int = 500
     const val WELCOME_AURA_RELEASE_MS: Int = 700

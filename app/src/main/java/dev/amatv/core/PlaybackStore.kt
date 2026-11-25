@@ -61,6 +61,24 @@ data class PlaybackState(
     val startupSessionLoaded: Boolean,
 )
 
+/**
+ * True while the current catalog track is actively loading:
+ * - during resolve/prepare/queue-refill (`playWhenReady && !playbackPrepared`), or
+ * - while prepared and the backing player reports buffering for the current track.
+ * Excludes gapless adoption, paused switches, local tracks without a catalogId, errors, and ended items.
+ */
+val PlaybackState.isTrackLoading: Boolean
+    get() {
+        if (!hasCurrentTrack || !playWhenReady || track.catalogId == null) return false
+        if (playbackMessage != null) return false
+        val snap = snapshot
+        val matchesCurrent = snap != null && snap.currentTrack?.catalogId == track.catalogId
+        if (snap?.errorMessage != null && (snap.currentTrack == null || matchesCurrent)) return false
+        if (matchesCurrent && snap.isEnded) return false
+        if (!playbackPrepared) return true
+        return matchesCurrent && snap.isBuffering
+    }
+
 sealed interface PlaybackEvent {
     data class Message(val text: String?) : PlaybackEvent
     data object SignInRequired : PlaybackEvent

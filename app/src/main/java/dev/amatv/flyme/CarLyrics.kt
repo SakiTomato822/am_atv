@@ -81,7 +81,7 @@ internal fun CarLyricFlow(track: Track, palette: List<Color>) {
                 Modifier.fillMaxSize().blur(80.dp, BlurredEdgeTreatment.Unbounded).graphicsLayer { alpha = 0.48f },
                 animate = false, cornerRadius = 0.dp)
         } else {
-            val blurredCover = rememberFolioBlurredCoverBitmap(artworkUrl = track.artworkUrl, active = true)
+            val blurredCover = LocalFolioGlassEnv.current.blurredCover
             if (blurredCover != null) {
                 Image(
                     bitmap = blurredCover,
