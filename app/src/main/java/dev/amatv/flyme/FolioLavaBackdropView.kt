@@ -24,6 +24,7 @@ import kotlin.math.roundToInt
 internal class FolioLavaBackdropView(context: Context) : TextureView(context), TextureView.SurfaceTextureListener {
     private val worker = LavaRenderWorker()
     private var lastColors = FloatArray(0)
+    private var lastVisible = false
     private var lastRunning = false
 
     init {
@@ -33,22 +34,21 @@ internal class FolioLavaBackdropView(context: Context) : TextureView(context), T
         surfaceTextureListener = this
     }
 
-    fun update(colors: FloatArray, running: Boolean, source: () -> AudioSpectrum) {
+    fun update(colors: FloatArray, visible: Boolean, running: Boolean, source: () -> AudioSpectrum) {
         worker.spectrum = source
-        if (!colors.contentEquals(lastColors)) {
+        val newColors = colors.takeUnless { it.contentEquals(lastColors) }
+        if (newColors != null || visible != lastVisible || running != lastRunning) {
             lastColors = colors
-            worker.retargetPalette(colors)
-        }
-        if (running != lastRunning) {
+            lastVisible = visible
             lastRunning = running
-            worker.running(running)
+            worker.update(newColors, visible, running)
         }
     }
 
     private fun bufferSize(width: Int, height: Int): Pair<Int, Int> {
         // Heavy blur needs no full-HD producer texture. Keep the original aspect, and let
         // TextureView's hardware composition enlarge this bounded texture behind the UI.
-        val scale = minOf(1f, 960f / width.coerceAtLeast(1))
+        val scale = minOf(1f, MAX_RENDER_WIDTH.toFloat() / width.coerceAtLeast(1))
         val w = (width * scale).roundToInt().coerceAtLeast(1)
         val h = (height * scale).roundToInt().coerceAtLeast(1)
         return w to h
@@ -69,6 +69,11 @@ internal class FolioLavaBackdropView(context: Context) : TextureView(context), T
     }
 
     fun release() = worker.close()
+
+    companion object {
+        const val MAX_FPS = 30
+        const val MAX_RENDER_WIDTH = 480
+    }
 }
 
 private class LavaRenderWorker {
@@ -81,10 +86,14 @@ private class LavaRenderWorker {
     private var width = 0
     private var height = 0
     private var egl: LavaEglSession? = null
-    private var enabled = false
+    private var visible = false
+    private var running = false
+    private var needsFrame = false
+    private var pausedCrossfade = false
     private var scheduled = false
     private var previousFrame = 0L
-    private var lastRenderNanos = 0L
+    private var nextRenderNanos = 0L
+    private var paletteTime = 0L
     private val motion = BackdropMotion()
     private lateinit var palette: LavaPaletteTransition
     private var activeFrames = 0
@@ -98,20 +107,22 @@ private class LavaRenderWorker {
     private val frame = Choreographer.FrameCallback { timestamp ->
         scheduled = false
         val session = egl
-        if (!closed && enabled && session != null) {
+        if (!closed && wantsFrame() && session != null) {
             try {
-                if (lastRenderNanos != 0L && (timestamp - lastRenderNanos) < 32_000_000L) {
+                if (nextRenderNanos != 0L && timestamp + VSYNC_TOLERANCE < nextRenderNanos) {
                     requestFrame()
                     return@FrameCallback
                 }
-                lastRenderNanos = timestamp
-                val measured = spectrum()
-                if (previousFrame != 0L) {
-                    motion.advance(timestamp - previousFrame, measured)
-                }
+                // Keep the cadence across small vsync variations without replaying missed frames.
+                nextRenderNanos = if (nextRenderNanos == 0L) timestamp + FRAME_INTERVAL else
+                    maxOf(nextRenderNanos + FRAME_INTERVAL, timestamp + FRAME_INTERVAL / 2)
+                val elapsed = if (previousFrame == 0L) 0L else timestamp - previousFrame
                 previousFrame = timestamp
+                val measured = if (running) spectrum() else SILENCE
+                if (running) motion.advance(elapsed, measured)
+                if (running || pausedCrossfade) paletteTime += elapsed
                 val start = System.nanoTime()
-                session.draw(motion, palette.sample(timestamp))
+                session.draw(motion, palette.sample(paletteTime))
                 val duration = System.nanoTime() - start
                 if (activeFrames < 300) {
                     drawNanos += duration
@@ -139,7 +150,9 @@ private class LavaRenderWorker {
                     }
                 }
                 session.swap()
-                requestFrame()
+                needsFrame = false
+                pausedCrossfade = pausedCrossfade && palette.isChanging(paletteTime)
+                if (wantsFrame()) requestFrame() else stopFrames()
             } catch (error: Throwable) {
                 // Keep the last complete texture instead of clearing/retrying every frame.
                 Log.e(TAG, "Native background stopped after a renderer failure", error)
@@ -148,23 +161,32 @@ private class LavaRenderWorker {
         }
     }
 
+    private fun wantsFrame(): Boolean = visible && (running || needsFrame || pausedCrossfade)
+
     private fun requestFrame() {
-        if (!scheduled && !closed && enabled && egl != null) {
+        if (!scheduled && !closed && wantsFrame() && egl != null) {
             scheduled = true
             choreographer.postFrameCallback(frame)
         }
     }
 
-    fun retargetPalette(colors: FloatArray) { handler.post {
-        if (!closed) {
-            if (::palette.isInitialized) palette.retarget(colors, System.nanoTime())
-            else palette = LavaPaletteTransition(colors)
+    fun update(colors: FloatArray?, visible: Boolean, running: Boolean) { handler.post {
+        if (closed) return@post
+        if (this.running != running) {
+            stopFrames()
+            pausedCrossfade = false
         }
-    } }
-
-    fun running(value: Boolean) { handler.post {
-        enabled = value
-        if (enabled) startSession() else stopFrames()
+        this.visible = visible
+        this.running = running
+        if (colors != null) {
+            if (::palette.isInitialized) {
+                palette.retarget(colors, paletteTime)
+                if (!running) pausedCrossfade = palette.isChanging(paletteTime)
+            } else {
+                palette = LavaPaletteTransition(colors)
+            }
+        }
+        if (wantsFrame()) startSession() else stopFrames()
     } }
 
     fun attach(texture: SurfaceTexture, width: Int, height: Int) { handler.post {
@@ -173,7 +195,8 @@ private class LavaRenderWorker {
         surface = texture
         this.width = width
         this.height = height
-        if (enabled) startSession()
+        needsFrame = true
+        if (wantsFrame()) startSession()
     } }
 
     private fun startSession() {
@@ -192,7 +215,8 @@ private class LavaRenderWorker {
         if (closed || surface !== texture) return@post
         this.width = width
         this.height = height
-        if (enabled) startSession()
+        needsFrame = true
+        if (wantsFrame()) startSession()
     } }
 
     fun detach(texture: SurfaceTexture) {
@@ -216,7 +240,7 @@ private class LavaRenderWorker {
         if (scheduled) choreographer.removeFrameCallback(frame)
         scheduled = false
         previousFrame = 0L
-        lastRenderNanos = 0L
+        nextRenderNanos = 0L
     }
 
     private fun destroySession() {
@@ -227,6 +251,8 @@ private class LavaRenderWorker {
 
     private companion object {
         const val TAG = "AMATV-lava"
+        const val FRAME_INTERVAL = 1_000_000_000L / FolioLavaBackdropView.MAX_FPS
+        const val VSYNC_TOLERANCE = 250_000L
         val SILENCE = AudioSpectrum()
     }
 }

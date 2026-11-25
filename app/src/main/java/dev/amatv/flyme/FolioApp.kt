@@ -536,6 +536,7 @@ fun FolioApp(
                         palette = palette,
                         useGl = firstFrameDrawn && !settingsState.lowPerformance,
                         playerOpen = playerOpen,
+                        isPlaying = playbackState.isPlaying,
                         audioSpectrum = services::audioSpectrum,
                         modifier = Modifier.matchParentSize(),
                     )

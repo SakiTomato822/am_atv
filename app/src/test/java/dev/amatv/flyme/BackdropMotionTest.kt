@@ -82,12 +82,12 @@ class BackdropMotionTest {
     }
 
     @Test
-    fun `invalid capture and stale clock callbacks cannot corrupt drawing coordinates`() {
+    fun `late frames keep real orbit time while stale timestamps and invalid capture are ignored`() {
         val motion = BackdropMotion()
         motion.advance(-1L, AudioSpectrum(1f, 1f, 1f, true))
         assertEquals(0L, motion.elapsedNanos)
         motion.advance(5_000_000_000L, AudioSpectrum(Float.NaN, Float.POSITIVE_INFINITY, -2f, true))
-        assertEquals(64_000_000L, motion.elapsedNanos)
+        assertEquals(5_000_000_000L, motion.elapsedNanos)
         assertEquals(0f, motion.bass, 0f)
         assertEquals(0f, motion.mid, 0f)
         assertEquals(0f, motion.treble, 0f)

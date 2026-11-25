@@ -20,11 +20,11 @@ internal class BackdropMotion {
     private var hasBassBaseline = false
 
     fun advance(deltaNanos: Long, spectrum: AudioSpectrum) {
-        // Neither a stale frame callback nor a resumed lifecycle should jump the color field.
-        val delta = deltaNanos.coerceIn(0L, 64_000_000L)
-        if (delta == 0L) return
-        elapsedNanos += delta
-        val seconds = delta / 1_000_000_000f
+        if (deltaNanos <= 0L) return
+        // The worker excludes suspended time. Keep the orbit on wall time when frames are dropped,
+        // while limiting how much a single audio sample can change the envelopes.
+        elapsedNanos += deltaNanos
+        val seconds = deltaNanos.coerceAtMost(64_000_000L) / 1_000_000_000f
         val bassInput = target(spectrum.bass, spectrum.available)
         // The logarithmic FFT level often sits around 0.6–0.8 throughout a song. Scaling
         // that almost-constant level only makes a permanently wider blob. Detect rises

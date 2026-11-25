@@ -22,6 +22,7 @@ internal fun FolioLavaBackdrop(
     palette: FolioPalette,
     useGl: Boolean,
     playerOpen: Boolean,
+    isPlaying: Boolean,
     audioSpectrum: () -> AudioSpectrum,
     modifier: Modifier = Modifier,
 ) {
@@ -43,13 +44,23 @@ internal fun FolioLavaBackdrop(
     Box(modifier.folioAmbientBackground(ambient)) {
         if (useGl) {
             val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
-            val running = lifecycleState.isAtLeast(Lifecycle.State.STARTED) && !playerOpen
+            val visible = isLavaBackdropVisible(lifecycleState, playerOpen)
+            val running = isLavaBackdropRunning(lifecycleState, playerOpen, isPlaying)
             AndroidView(
                 factory = { FolioLavaBackdropView(it) },
-                update = { it.update(lava, running, audioSpectrum) },
+                update = { it.update(lava, visible, running, audioSpectrum) },
                 onRelease = { it.release() },
                 modifier = Modifier.matchParentSize(),
             )
         }
     }
 }
+
+private fun isLavaBackdropVisible(lifecycleState: Lifecycle.State, playerOpen: Boolean): Boolean =
+    lifecycleState.isAtLeast(Lifecycle.State.STARTED) && !playerOpen
+
+internal fun isLavaBackdropRunning(
+    lifecycleState: Lifecycle.State,
+    playerOpen: Boolean,
+    isPlaying: Boolean,
+): Boolean = isPlaying && isLavaBackdropVisible(lifecycleState, playerOpen)
