@@ -154,6 +154,7 @@ internal fun FolioWelcomeOverlay(
             .zIndex(50f),
     ) {
         FolioWelcomeScreenContent(
+            open = open,
             settingsStore = settingsStore,
             settingsState = settingsState,
             accountState = accountState,
@@ -174,6 +175,7 @@ internal fun FolioWelcomeOverlay(
 
 @Composable
 private fun FolioWelcomeScreenContent(
+    open: Boolean,
     settingsStore: SettingsStore,
     settingsState: SettingsState,
     accountState: AccountState,
@@ -442,10 +444,10 @@ private fun FolioWelcomeScreenContent(
     val currentShowcaseTrack = demoContent.showcaseTracks.getOrNull(gaplessTrackIdx.coerceAtLeast(0))
     val paletteResult = rememberArtworkPaletteResult(
         url = currentShowcaseTrack?.artworkUrl,
-        fallback = currentShowcaseTrack?.palette ?: listOf(WELCOME_THEME_GLOW_TOP_RIGHT),
+        fallback = currentShowcaseTrack?.palette.orEmpty(),
     )
-    val auraTarget = remember(currentPageId, paletteResult.colors) {
-        resolveWelcomeAuraTarget(currentPageId, paletteResult.colors)
+    val auraTarget = remember(currentPageId, currentShowcaseTrack, paletteResult.colors) {
+        resolveWelcomeAuraTarget(currentPageId, if (currentShowcaseTrack == null) emptyList() else paletteResult.colors)
     }
 
     // Drag gesture state
@@ -562,14 +564,13 @@ private fun FolioWelcomeScreenContent(
                 ),
         )
 
-        // Dark atmospheric dual-fog + faint ridge aura (above veil, below shared player stage)
-        WelcomeAuraLayer(
+        WelcomeRibbonLayer(
             target = auraTarget,
+            motionEnabled = isWelcomeAuraMotionEnabled(animated, lowPerformance),
+            open = open,
             dragOffsetPx = effectiveDragPx,
-            animated = animated,
-            lowPerformance = lowPerformance,
             gatherScale = auraGatherScale.value,
-            ridgeAlphaOverride = ridgeGatherAlpha.value,
+            ridgeAlpha = ridgeGatherAlpha.value,
             modifier = Modifier.zIndex(2f),
         )
 

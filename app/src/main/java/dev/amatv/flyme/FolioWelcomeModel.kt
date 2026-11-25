@@ -6,9 +6,8 @@ import dev.amatv.core.SettingsState
 import dev.amatv.integration.MusicConnectionState
 import kotlin.math.abs
 
-internal val WELCOME_THEME_GLOW_TOP_RIGHT = Color(0xFF5C2639)
-internal val WELCOME_THEME_GLOW_BOTTOM_LEFT = Color(0xFF1A3D47)
-internal val WELCOME_RIDGE_COLOR = Color(0xFFFFEEF4)
+internal val WELCOME_THEME_GLOW_TOP_RIGHT = Color(0xFF35306D)
+internal val WELCOME_THEME_GLOW_BOTTOM_LEFT = Color(0xFF233A6C)
 
 internal enum class WelcomeAuraColorSource {
     Theme,

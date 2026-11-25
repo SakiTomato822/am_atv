@@ -3,9 +3,7 @@ package dev.amatv.flyme
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
@@ -40,7 +38,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -73,7 +70,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -733,161 +729,4 @@ internal fun FolioHintBubble(
             }
         }
     }
-}
-
-/**
- * Dark atmospheric dual-fog + faint ridge aura behind the welcome stage, matching W1-WELCOME-V4-H5 `.aura`.
- * Each fog/ridge caches its elliptical gradient in [drawWithCache]; motion/breath/parallax mutate only [graphicsLayer].
- */
-@Composable
-internal fun WelcomeAuraLayer(
-    target: WelcomeAuraTarget,
-    dragOffsetPx: Float,
-    animated: Boolean,
-    lowPerformance: Boolean,
-    gatherScale: Float,
-    ridgeAlphaOverride: Float,
-    modifier: Modifier = Modifier,
-) {
-    val motionEnabled = isWelcomeAuraMotionEnabled(animated, lowPerformance)
-    val layerAlpha by animateFloatAsState(
-        targetValue = target.alpha,
-        animationSpec = tween(if (motionEnabled) 1_100 else FolioGatherMotion.LOW_PERF_FADE_MS),
-        label = "aura-layer-alpha",
-    )
-    val colorSpec = tween<Color>(if (motionEnabled) 1_400 else FolioGatherMotion.LOW_PERF_FADE_MS)
-    val colorA by animateColorAsState(target.primaryColor, colorSpec, label = "aura-c1")
-    val colorB by animateColorAsState(target.secondaryColor, colorSpec, label = "aura-c2")
-
-    val driftAProgress: Float
-    val driftBProgress: Float
-    val ridgeBreath: Float
-    if (motionEnabled) {
-        val infinite = rememberInfiniteTransition(label = "welcome-aura-drift")
-        val aProg by infinite.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(15_000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-            label = "aura-fa",
-        )
-        val bProg by infinite.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(18_750, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-            label = "aura-fb",
-        )
-        val rBreath by infinite.animateFloat(
-            initialValue = 1f,
-            targetValue = 0.5f,
-            animationSpec = infiniteRepeatable(tween(3_750, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-            label = "aura-ridge",
-        )
-        driftAProgress = aProg
-        driftBProgress = bProg
-        ridgeBreath = rBreath
-    } else {
-        driftAProgress = 0f
-        driftBProgress = 0f
-        ridgeBreath = 1f
-    }
-
-    val effectiveRidgeAlpha = if (motionEnabled) {
-        (ridgeAlphaOverride * ridgeBreath).coerceIn(0f, 1f)
-    } else {
-        ridgeAlphaOverride
-    }
-
-    BoxWithConstraints(
-        modifier = modifier
-            .fillMaxSize()
-            .graphicsLayer {
-                alpha = layerAlpha
-                translationX = dragOffsetPx * 0.25f
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        // Extend 10% beyond every edge (`inset: -10%`) so drifting and drag parallax never clip
-        val auraW = maxWidth * 1.2f
-        val auraH = maxHeight * 1.2f
-
-        Box(
-            modifier = Modifier
-                .requiredSize(auraW, auraH)
-                .graphicsLayer {
-                    transformOrigin = TransformOrigin(0.62f, 0.42f)
-                    scaleX = gatherScale
-                    scaleY = gatherScale
-                },
-        ) {
-            val faW = auraW * 0.78f
-            val faH = auraH * 0.58f
-            WelcomeAuraEllipticalGlow(
-                color = colorA,
-                modifier = Modifier
-                    .offset(x = auraW * 0.38f, y = auraH * 0.02f)
-                    .size(faW, faH)
-                    .graphicsLayer {
-                        rotationZ = -16f
-                        translationX = -size.width * 0.07f * driftAProgress
-                        translationY = size.height * 0.05f * driftAProgress
-                    },
-            )
-
-            val fbW = auraW * 0.86f
-            val fbH = auraH * 0.62f
-            WelcomeAuraEllipticalGlow(
-                color = colorB,
-                modifier = Modifier
-                    .offset(x = -auraW * 0.06f, y = auraH * 0.44f)
-                    .size(fbW, fbH)
-                    .graphicsLayer {
-                        rotationZ = -16f
-                        translationX = size.width * 0.06f * driftBProgress
-                        translationY = -size.height * 0.04f * driftBProgress
-                    },
-            )
-
-            val ridgeW = auraW * 1.20f
-            val ridgeH = auraH * 0.15f
-            WelcomeAuraEllipticalGlow(
-                color = WELCOME_RIDGE_COLOR,
-                modifier = Modifier
-                    .offset(x = -auraW * 0.10f, y = auraH * 0.41f)
-                    .size(ridgeW, ridgeH)
-                    .graphicsLayer {
-                        rotationZ = -13f
-                        alpha = effectiveRidgeAlpha
-                    },
-            )
-        }
-    }
-}
-
-@Composable
-private fun WelcomeAuraEllipticalGlow(
-    color: Color,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier = modifier.drawWithCache {
-            val w = size.width.coerceAtLeast(1f)
-            val h = size.height.coerceAtLeast(1f)
-            val center = Offset(w * 0.5f, h * 0.5f)
-            val brush = Brush.radialGradient(
-                colors = listOf(color, Color.Transparent),
-                center = center,
-                radius = w * 0.5f,
-            )
-            val scaleY = h / w
-            onDrawBehind {
-                scale(scaleX = 1f, scaleY = scaleY, pivot = center) {
-                    drawCircle(
-                        brush = brush,
-                        radius = w * 0.5f,
-                        center = center,
-                    )
-                }
-            }
-        },
-    )
 }
