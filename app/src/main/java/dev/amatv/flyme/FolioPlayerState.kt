@@ -2,6 +2,7 @@ package dev.amatv.flyme
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
@@ -1225,7 +1226,119 @@ internal class FolioTrackSwitchMotion(
     val haloScale: State<Float> = mutableFloatStateOf(1f),
     val haloAlpha: State<Float> = mutableFloatStateOf(1f),
     val edgeBrightness: State<Float> = mutableFloatStateOf(1f),
+    val frostAlpha: State<Float> = mutableFloatStateOf(0f),
+    val innerCoverScale: State<Float> = mutableFloatStateOf(1f),
+    val glassRimAlpha: State<Float> = mutableFloatStateOf(0f),
+    val glassSweepProgress: State<Float> = mutableFloatStateOf(0f),
+    val glassSweepAlpha: State<Float> = mutableFloatStateOf(0f),
+    val switchSweepActive: State<Boolean> = mutableStateOf(false),
 )
+
+@Immutable
+internal data class FolioTrackSwitchGlassSample(
+    val coverScale: Float = 1f,
+    val innerCoverScale: Float = 1f,
+    val coverAlpha: Float = 1f,
+    val frostAlpha: Float = 0f,
+    val glassRimAlpha: Float = 0f,
+    val glassSweepProgress: Float = 0f,
+    val glassSweepAlpha: Float = 0f,
+    val switchSweepActive: Boolean = false,
+)
+
+private fun lerpFloat(start: Float, stop: Float, fraction: Float): Float =
+    start + (stop - start) * fraction.coerceIn(0f, 1f)
+
+/**
+ * Pure sampler of the 700ms Option 2B frosted-glass track-switch timeline (`240ms` gather +
+ * `460ms` release). In [lowPerformance] or [reducedMotion] mode, every glass & parallax value is
+ * strictly a no-op (only the 180ms pure fade on cover/halo alpha runs in the UI).
+ */
+internal fun sampleTrackSwitchGlass(
+    elapsedMs: Int,
+    lowPerformance: Boolean,
+    reducedMotion: Boolean,
+): FolioTrackSwitchGlassSample {
+    if (lowPerformance || reducedMotion) return FolioTrackSwitchGlassSample()
+    val gatherMs = FolioGatherMotion.TRACK_GATHER_MS
+    val releaseMs = FolioGatherMotion.TRACK_RELEASE_MS
+    val totalMs = gatherMs + releaseMs
+    if (elapsedMs < 0 || elapsedMs >= totalMs) return FolioTrackSwitchGlassSample()
+
+    if (elapsedMs < gatherMs) {
+        val g = FolioGatherMotion.GatherEasing.transform(elapsedMs.toFloat() / gatherMs.toFloat())
+        val halfGather = gatherMs / 2
+        val frost = if (elapsedMs <= halfGather) {
+            val f = FolioGatherMotion.GatherEasing.transform(elapsedMs.toFloat() / halfGather.toFloat())
+            lerpFloat(0f, FolioGatherMotion.TRACK_FROST_MID_ALPHA, f)
+        } else {
+            val f = FolioGatherMotion.GatherEasing.transform((elapsedMs - halfGather).toFloat() / halfGather.toFloat())
+            lerpFloat(FolioGatherMotion.TRACK_FROST_MID_ALPHA, FolioGatherMotion.TRACK_FROST_PEAK_ALPHA, f)
+        }
+        return FolioTrackSwitchGlassSample(
+            coverScale = lerpFloat(1f, FolioGatherMotion.TRACK_COVER_GATHER_SCALE, g),
+            innerCoverScale = lerpFloat(1f, FolioGatherMotion.TRACK_INNER_COVER_GATHER_SCALE, g),
+            coverAlpha = lerpFloat(1f, FolioGatherMotion.TRACK_COVER_GATHER_ALPHA, g),
+            frostAlpha = frost,
+            glassRimAlpha = g,
+            glassSweepProgress = 0f,
+            glassSweepAlpha = 0f,
+            switchSweepActive = true,
+        )
+    }
+
+    val relMs = elapsedMs - gatherMs
+    val r = FolioGatherMotion.ReleaseEasing.transform(relMs.toFloat() / releaseMs.toFloat())
+    val frostReleaseMs = FolioGatherMotion.TRACK_FROST_RELEASE_MS
+    val halfFrostRelease = frostReleaseMs / 2
+    val frost = when {
+        relMs <= halfFrostRelease -> {
+            val f = FolioGatherMotion.ReleaseEasing.transform(relMs.toFloat() / halfFrostRelease.toFloat())
+            lerpFloat(FolioGatherMotion.TRACK_FROST_PEAK_ALPHA, FolioGatherMotion.TRACK_FROST_RELEASE_MID_ALPHA, f)
+        }
+        relMs < frostReleaseMs -> {
+            val f = MotionTokens.KaraokeGradientExitEasing.transform(
+                (relMs - halfFrostRelease).toFloat() / halfFrostRelease.toFloat(),
+            )
+            lerpFloat(FolioGatherMotion.TRACK_FROST_RELEASE_MID_ALPHA, 0f, f)
+        }
+        else -> 0f
+    }
+
+    val sweepMs = FolioGatherMotion.TRACK_GLASS_SWEEP_MS
+    val rim = if (relMs <= sweepMs) {
+        val f = FolioGatherMotion.ReleaseEasing.transform(relMs.toFloat() / sweepMs.toFloat())
+        lerpFloat(1f, FolioGatherMotion.TRACK_GLASS_RIM_TAIL_ALPHA, f)
+    } else {
+        val tailDuration = (releaseMs - sweepMs).coerceAtLeast(1)
+        val f = (relMs - sweepMs).toFloat() / tailDuration.toFloat()
+        lerpFloat(FolioGatherMotion.TRACK_GLASS_RIM_TAIL_ALPHA, 0f, f)
+    }
+
+    val fadeMs = FolioGatherMotion.TRACK_GLASS_SWEEP_FADE_MS
+    val sweepProgress = if (relMs < sweepMs) {
+        FolioGatherMotion.ReleaseEasing.transform(relMs.toFloat() / sweepMs.toFloat())
+    } else {
+        1f
+    }
+    val sweepAlpha = when {
+        relMs < fadeMs -> (relMs.toFloat() / fadeMs.toFloat()).coerceIn(0f, 1f)
+        relMs < sweepMs - fadeMs -> 1f
+        relMs < sweepMs -> ((sweepMs - relMs).toFloat() / fadeMs.toFloat()).coerceIn(0f, 1f)
+        else -> 0f
+    }
+
+    return FolioTrackSwitchGlassSample(
+        coverScale = lerpFloat(FolioGatherMotion.TRACK_COVER_GATHER_SCALE, 1f, r),
+        innerCoverScale = lerpFloat(FolioGatherMotion.TRACK_INNER_COVER_GATHER_SCALE, 1f, r),
+        coverAlpha = lerpFloat(FolioGatherMotion.TRACK_COVER_GATHER_ALPHA, 1f, r),
+        frostAlpha = frost,
+        glassRimAlpha = rim,
+        glassSweepProgress = sweepProgress,
+        glassSweepAlpha = sweepAlpha,
+        switchSweepActive = relMs < sweepMs,
+    )
+}
 
 @Immutable
 internal data class FolioTrackSwitchState(
@@ -1261,6 +1374,12 @@ internal fun rememberFolioTrackSwitchState(
     val haloScale = remember { Animatable(1f) }
     val haloAlpha = remember { Animatable(1f) }
     val edgeBrightness = remember { Animatable(1f) }
+    val frostAlpha = remember { Animatable(0f) }
+    val innerCoverScale = remember { Animatable(1f) }
+    val glassRimAlpha = remember { Animatable(0f) }
+    val glassSweepProgress = remember { Animatable(0f) }
+    val glassSweepAlpha = remember { Animatable(0f) }
+    val switchSweepActive = remember { mutableStateOf(false) }
     val motion = remember {
         FolioTrackSwitchMotion(
             coverScale = coverScale.asState(),
@@ -1268,6 +1387,12 @@ internal fun rememberFolioTrackSwitchState(
             haloScale = haloScale.asState(),
             haloAlpha = haloAlpha.asState(),
             edgeBrightness = edgeBrightness.asState(),
+            frostAlpha = frostAlpha.asState(),
+            innerCoverScale = innerCoverScale.asState(),
+            glassRimAlpha = glassRimAlpha.asState(),
+            glassSweepProgress = glassSweepProgress.asState(),
+            glassSweepAlpha = glassSweepAlpha.asState(),
+            switchSweepActive = switchSweepActive,
         )
     }
 
@@ -1278,6 +1403,15 @@ internal fun rememberFolioTrackSwitchState(
     }
 
     LaunchedEffect(open, liveTrack.id) {
+        suspend fun resetGlassMotion() {
+            frostAlpha.snapTo(0f)
+            innerCoverScale.snapTo(1f)
+            glassRimAlpha.snapTo(0f)
+            glassSweepProgress.snapTo(0f)
+            glassSweepAlpha.snapTo(0f)
+            switchSweepActive.value = false
+        }
+
         if (!open) {
             previousOpenTrackId = null
             displayedTrack = latestTrack
@@ -1286,6 +1420,7 @@ internal fun rememberFolioTrackSwitchState(
             haloScale.snapTo(1f)
             haloAlpha.snapTo(1f)
             edgeBrightness.snapTo(1f)
+            resetGlassMotion()
             return@LaunchedEffect
         }
 
@@ -1298,6 +1433,7 @@ internal fun rememberFolioTrackSwitchState(
             haloScale.snapTo(1f)
             haloAlpha.snapTo(1f)
             edgeBrightness.snapTo(1f)
+            resetGlassMotion()
             return@LaunchedEffect
         }
 
@@ -1306,6 +1442,7 @@ internal fun rememberFolioTrackSwitchState(
             coverScale.snapTo(1f)
             haloScale.snapTo(1f)
             edgeBrightness.snapTo(1f)
+            resetGlassMotion()
             val fadeSpec = tween<Float>(durationMillis = FolioGatherMotion.LOW_PERF_FADE_MS)
             coroutineScope {
                 launch { coverAlpha.animateTo(0f, fadeSpec) }
@@ -1319,30 +1456,84 @@ internal fun rememberFolioTrackSwitchState(
             return@LaunchedEffect
         }
 
+        val gatherMs = FolioGatherMotion.TRACK_GATHER_MS
         val gatherSpec = tween<Float>(
-            durationMillis = FolioGatherMotion.TRACK_GATHER_MS,
+            durationMillis = gatherMs,
             easing = FolioGatherMotion.GatherEasing,
         )
-        coroutineScope {
-            launch { coverScale.animateTo(FolioGatherMotion.TRACK_COVER_GATHER_SCALE, gatherSpec) }
-            launch { coverAlpha.animateTo(FolioGatherMotion.TRACK_COVER_GATHER_ALPHA, gatherSpec) }
-            launch { haloScale.animateTo(FolioGatherMotion.TRACK_HALO_GATHER_SCALE, gatherSpec) }
-            launch { haloAlpha.animateTo(FolioGatherMotion.TRACK_HALO_GATHER_ALPHA, gatherSpec) }
-            launch { edgeBrightness.animateTo(FolioGatherMotion.TRACK_EDGE_GATHER_MULTIPLIER, gatherSpec) }
+        val gatherFrostSpec = keyframes<Float> {
+            durationMillis = gatherMs
+            FolioGatherMotion.TRACK_FROST_MID_ALPHA at (gatherMs / 2) using FolioGatherMotion.GatherEasing
+            FolioGatherMotion.TRACK_FROST_PEAK_ALPHA at gatherMs using FolioGatherMotion.GatherEasing
         }
 
-        displayedTrack = latestTrack
+        switchSweepActive.value = true
+        try {
+            glassSweepProgress.snapTo(0f)
+            glassSweepAlpha.snapTo(0f)
+            coroutineScope {
+                launch { coverScale.animateTo(FolioGatherMotion.TRACK_COVER_GATHER_SCALE, gatherSpec) }
+                launch { innerCoverScale.animateTo(FolioGatherMotion.TRACK_INNER_COVER_GATHER_SCALE, gatherSpec) }
+                launch { coverAlpha.animateTo(FolioGatherMotion.TRACK_COVER_GATHER_ALPHA, gatherSpec) }
+                launch { haloScale.animateTo(FolioGatherMotion.TRACK_HALO_GATHER_SCALE, gatherSpec) }
+                launch { haloAlpha.animateTo(FolioGatherMotion.TRACK_HALO_GATHER_ALPHA, gatherSpec) }
+                launch { edgeBrightness.animateTo(FolioGatherMotion.TRACK_EDGE_GATHER_MULTIPLIER, gatherSpec) }
+                launch { glassRimAlpha.animateTo(1f, gatherSpec) }
+                launch { frostAlpha.animateTo(FolioGatherMotion.TRACK_FROST_PEAK_ALPHA, gatherFrostSpec) }
+            }
 
-        val releaseSpec = tween<Float>(
-            durationMillis = FolioGatherMotion.TRACK_RELEASE_MS,
-            easing = FolioGatherMotion.ReleaseEasing,
-        )
-        coroutineScope {
-            launch { coverScale.animateTo(1f, releaseSpec) }
-            launch { coverAlpha.animateTo(1f, releaseSpec) }
-            launch { haloScale.animateTo(1f, releaseSpec) }
-            launch { haloAlpha.animateTo(1f, releaseSpec) }
-            launch { edgeBrightness.animateTo(1f, releaseSpec) }
+            displayedTrack = latestTrack
+
+            val releaseMs = FolioGatherMotion.TRACK_RELEASE_MS
+            val sweepMs = FolioGatherMotion.TRACK_GLASS_SWEEP_MS
+            val sweepFadeMs = FolioGatherMotion.TRACK_GLASS_SWEEP_FADE_MS
+            val frostReleaseMs = FolioGatherMotion.TRACK_FROST_RELEASE_MS
+            val releaseSpec = tween<Float>(
+                durationMillis = releaseMs,
+                easing = FolioGatherMotion.ReleaseEasing,
+            )
+            val releaseFrostSpec = keyframes<Float> {
+                durationMillis = frostReleaseMs
+                FolioGatherMotion.TRACK_FROST_RELEASE_MID_ALPHA at (frostReleaseMs / 2) using FolioGatherMotion.ReleaseEasing
+                0f at frostReleaseMs using MotionTokens.KaraokeGradientExitEasing
+            }
+            val releaseRimSpec = keyframes<Float> {
+                durationMillis = releaseMs
+                FolioGatherMotion.TRACK_GLASS_RIM_TAIL_ALPHA at sweepMs using FolioGatherMotion.ReleaseEasing
+                0f at releaseMs
+            }
+            val sweepProgressSpec = tween<Float>(
+                durationMillis = sweepMs,
+                easing = FolioGatherMotion.ReleaseEasing,
+            )
+            val sweepAlphaSpec = keyframes<Float> {
+                durationMillis = sweepMs
+                1f at sweepFadeMs
+                1f at (sweepMs - sweepFadeMs)
+                0f at sweepMs
+            }
+
+            coroutineScope {
+                launch { coverScale.animateTo(1f, releaseSpec) }
+                launch { innerCoverScale.animateTo(1f, releaseSpec) }
+                launch { coverAlpha.animateTo(1f, releaseSpec) }
+                launch { haloScale.animateTo(1f, releaseSpec) }
+                launch { haloAlpha.animateTo(1f, releaseSpec) }
+                launch { edgeBrightness.animateTo(1f, releaseSpec) }
+                launch { frostAlpha.animateTo(0f, releaseFrostSpec) }
+                launch { glassRimAlpha.animateTo(0f, releaseRimSpec) }
+                launch {
+                    coroutineScope {
+                        launch { glassSweepProgress.animateTo(1f, sweepProgressSpec) }
+                        launch { glassSweepAlpha.animateTo(0f, sweepAlphaSpec) }
+                    }
+                    glassSweepAlpha.snapTo(0f)
+                    switchSweepActive.value = false
+                }
+            }
+            glassSweepProgress.snapTo(0f)
+        } finally {
+            switchSweepActive.value = false
         }
     }
 

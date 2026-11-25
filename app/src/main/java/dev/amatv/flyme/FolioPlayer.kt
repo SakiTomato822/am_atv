@@ -90,6 +90,7 @@ import dev.amatv.core.LibraryNotice
 import dev.amatv.core.LyricBackgroundStyle
 import dev.amatv.core.PlaybackState
 import dev.amatv.core.StartupQueueAction
+import dev.amatv.core.isTrackLoading
 import dev.amatv.integration.LyricTextSize
 import dev.amatv.integration.LyricsLocalizationRequest
 import dev.amatv.integration.MusicConnectionState
@@ -447,12 +448,19 @@ internal fun BoxScope.FolioPlayerLayer(
                 }
             }
             LaunchedEffect(posterPreferred) { showStyleToggleHint = false }
+            val playerLoadingShimmer = rememberFolioLoadingShimmerMotion(
+                isTrackLoading = open && playbackState.isTrackLoading,
+                switchSweepActive = trackSwitchState.motion.switchSweepActive,
+                lowPerformance = settings.lowPerformance,
+                reducedMotion = reducedMotion,
+            )
             CompositionLocalProvider(
                 LocalFolioControlAccent provides controlAccent,
                 LocalFolioReducedMotion provides reducedMotion,
                 LocalFolioLowPerformance provides settings.lowPerformance,
                 LocalFolioPlayerAnchors provides anchorHolder,
                 LocalFolioTrackSwitchMotion provides trackSwitchState.motion,
+                LocalFolioLoadingShimmer provides playerLoadingShimmer,
             ) {
             Box(
                 modifier = Modifier
@@ -1099,6 +1107,8 @@ private fun UltrawidePlayerBody(
                     FolioArtwork(
                         track = track,
                         shape = RoundedCornerShape(16.dp),
+                        showLoadingShimmer = true,
+                        showTrackSwitchGlass = true,
                         modifier = Modifier
                             .size(artSide)
                             .folioTrackSwitchCover()
@@ -1311,6 +1321,8 @@ private fun VerticalPlayerBody(
                             FolioArtwork(
                                 track = track,
                                 shape = RoundedCornerShape(14.dp),
+                                showLoadingShimmer = true,
+                                showTrackSwitchGlass = true,
                                 modifier = Modifier
                                     .size(116.dp)
                                     .folioTrackSwitchCover()
@@ -1655,6 +1667,8 @@ private fun ShortPlayerLayout(
                 FolioArtwork(
                     track = track,
                     shape = RoundedCornerShape(14.dp),
+                    showLoadingShimmer = true,
+                    showTrackSwitchGlass = true,
                     modifier = Modifier
                         .size(coverLayout.coverSizeDp)
                         .folioTrackSwitchCover()
@@ -1896,6 +1910,8 @@ private fun TwoColumnPlayerBody(
                                 FolioArtwork(
                                     track = track,
                                     shape = RoundedCornerShape(14.dp),
+                                    showLoadingShimmer = true,
+                                    showTrackSwitchGlass = true,
                                     modifier = Modifier
                                         .size(collapsedCoverSize)
                                         .graphicsLayer {
@@ -1956,6 +1972,8 @@ private fun TwoColumnPlayerBody(
                                 FolioArtwork(
                                     track = track,
                                     shape = RoundedCornerShape(14.dp),
+                                    showLoadingShimmer = true,
+                                    showTrackSwitchGlass = true,
                                     modifier = Modifier
                                         .padding(start = 36.dp + extraCenterStart, bottom = bottomReserved)
                                         .size(coverSize)
@@ -1978,6 +1996,8 @@ private fun TwoColumnPlayerBody(
                             FolioArtwork(
                                 track = track,
                                 shape = RoundedCornerShape(16.dp),
+                                showLoadingShimmer = true,
+                                showTrackSwitchGlass = true,
                                 modifier = Modifier
                                     .size(coverSize)
                                     .folioTrackSwitchCover()

@@ -151,6 +151,8 @@ internal fun FolioNoLyricsStateBox(
                 FolioArtwork(
                     track = track,
                     shape = RoundedCornerShape(16.dp),
+                    showLoadingShimmer = true,
+                    showTrackSwitchGlass = true,
                     modifier = Modifier
                         .size(coverSide)
                         .folioTrackSwitchCover()
@@ -404,6 +406,7 @@ internal fun FolioQueuePanel(
                             FolioArtwork(
                                 track = row.track,
                                 shape = RoundedCornerShape(8.dp),
+                                showLoadingShimmer = row.isCurrent,
                                 modifier = Modifier.size(tierSpec.qc),
                             )
                             if (row.isCurrent) {
@@ -538,6 +541,7 @@ internal fun FolioQueuePanel(
                         FolioArtwork(
                             track = row.track,
                             shape = RoundedCornerShape(8.dp),
+                            showLoadingShimmer = row.isCurrent,
                             modifier = Modifier.size(tierSpec.qc),
                         )
                         Column(

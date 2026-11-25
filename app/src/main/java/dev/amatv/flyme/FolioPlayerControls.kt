@@ -297,6 +297,7 @@ internal fun FolioPlayerHeader(
                             FolioArtwork(
                                 track = track,
                                 shape = RoundedCornerShape(8.dp),
+                                showLoadingShimmer = true,
                                 modifier = Modifier
                                     .size(84.dp)
                                     .shadow(16.dp, RoundedCornerShape(8.dp)),
@@ -1165,6 +1166,7 @@ internal fun FolioPlayerCollapsedCapsule(
                     FolioArtwork(
                         track = track,
                         shape = RoundedCornerShape(10.dp),
+                        showLoadingShimmer = true,
                         modifier = Modifier.size(44.dp),
                     )
                 }
@@ -1373,6 +1375,7 @@ internal fun FolioPlayerExpandedControls(
                 FolioArtwork(
                     track = track,
                     shape = RoundedCornerShape(10.dp),
+                    showLoadingShimmer = true,
                     modifier = Modifier.size(48.dp),
                 )
                 Column(

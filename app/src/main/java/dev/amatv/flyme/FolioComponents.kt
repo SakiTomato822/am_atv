@@ -48,6 +48,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -167,11 +168,83 @@ internal fun FolioArtwork(
     modifier: Modifier = Modifier,
     shape: Shape = RoundedCornerShape(FolioRadii.Card),
     animate: Boolean = false,
+    showLoadingShimmer: Boolean = false,
+    showTrackSwitchGlass: Boolean = false,
+    artworkPalette: List<Color>? = null,
 ) {
-    Box(modifier.clip(shape)) {
+    if (!showLoadingShimmer && !showTrackSwitchGlass) {
+        Box(modifier.clip(shape)) {
+            MotionArtwork(
+                track = track,
+                modifier = Modifier.fillMaxSize(),
+                animate = animate,
+                cornerRadius = 0.dp,
+            )
+        }
+        return
+    }
+
+    val lowPerformance = LocalFolioLowPerformance.current || LocalFolioBrowseMotion.current.lowPerformance
+    val reducedMotion = LocalFolioReducedMotion.current || !LocalFolioBrowseMotion.current.animated
+    val env = LocalFolioGlassEnv.current
+    val coverLuminance = when {
+        artworkPalette != null -> folioCoverLuminance(artworkPalette)
+        env.coverLuminance != null -> env.coverLuminance
+        else -> folioCoverLuminance(track.palette)
+    }
+    val albumTint = when {
+        artworkPalette != null -> folioGlassAlbumTint(artworkPalette)
+        env.albumTint != null -> env.albumTint
+        else -> folioGlassAlbumTint(track.palette)
+    }
+    val trackSwitchMotion = LocalFolioTrackSwitchMotion.current
+    val loadingShimmer = LocalFolioLoadingShimmer.current
+    val palette = LocalFolioPalette.current
+
+    var boxModifier = modifier.clip(shape)
+    if (showTrackSwitchGlass) {
+        boxModifier = boxModifier.folioCoverFrostedSwitchOverlay(
+            motion = trackSwitchMotion,
+            shape = shape,
+            isLight = palette.isLight,
+            baseColor = env.baseColor,
+            blurredCover = env.blurredCover,
+            coverLuminance = coverLuminance,
+            albumTint = albumTint,
+            lowPerformance = lowPerformance,
+            reducedMotion = reducedMotion,
+        )
+    }
+    if (showLoadingShimmer) {
+        boxModifier = boxModifier.folioArcGlint(
+            progressState = loadingShimmer.progress,
+            visibilityState = loadingShimmer.visibility,
+            shape = shape,
+            coverLuminance = coverLuminance,
+            albumTint = albumTint,
+            lowPerformance = lowPerformance || reducedMotion,
+            spec = FolioArcGlintSpec.Loading,
+            allowLowPerfBreathing = true,
+            lowPerfBreathState = loadingShimmer.lowPerfBreath,
+        )
+    }
+
+    val innerModifier = if (showTrackSwitchGlass && !lowPerformance && !reducedMotion) {
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                val innerScale = trackSwitchMotion.innerCoverScale.value
+                scaleX = innerScale
+                scaleY = innerScale
+            }
+    } else {
+        Modifier.fillMaxSize()
+    }
+
+    Box(boxModifier) {
         MotionArtwork(
             track = track,
-            modifier = Modifier.fillMaxSize(),
+            modifier = innerModifier,
             animate = animate,
             cornerRadius = 0.dp,
         )
@@ -357,6 +430,7 @@ fun FolioSongRow(
                 track = track,
                 modifier = Modifier.size(44.dp),
                 shape = RoundedCornerShape(FolioRadii.SongCover),
+                showLoadingShimmer = isCurrent,
             )
         } else {
             Box(
@@ -573,6 +647,8 @@ private fun FolioMiniPlayerPill(
                     .size(coverSize)
                     .folioArtworkOrigin(origin),
                 shape = coverShape,
+                showLoadingShimmer = true,
+                artworkPalette = artwork.colors,
             )
             Column(
                 modifier = Modifier
@@ -657,6 +733,7 @@ fun FolioMiniPlayerDot(
             track = track,
             modifier = Modifier.fillMaxSize().folioArtworkOrigin(origin),
             shape = CircleShape,
+            showLoadingShimmer = true,
         )
     }
 }
