@@ -82,6 +82,7 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
         developerTokens = developerTokens,
         userToken = tokenStore::readUserToken,
         storefrontPreferences = appContext.getSharedPreferences("am_atv_storefront", android.content.Context.MODE_PRIVATE),
+        libraryMappingPreferences = appContext.getSharedPreferences("am_atv_library_catalog", android.content.Context.MODE_PRIVATE),
     )
     private val appleLyrics = AppleMusicLyricsClient(
         storefront = BuildConfig.APPLE_MUSIC_STOREFRONT,

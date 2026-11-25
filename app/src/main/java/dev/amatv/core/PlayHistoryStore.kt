@@ -13,6 +13,7 @@ import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -171,13 +172,36 @@ class PlayHistoryStore(
     private val maxEntries: Int = PLAY_HISTORY_MAX_ENTRIES,
 ) {
     private val lock = Any()
-    private val _entries = MutableStateFlow(storage.load().take(maxEntries))
+    private val _entries = MutableStateFlow(
+        if (coroutineScope == null) storage.load().take(maxEntries) else emptyList(),
+    )
+    private val writes = coroutineScope?.let { Channel<Unit>(Channel.CONFLATED) }
+    private var cleared = false
     val entries: StateFlow<List<PlayHistoryEntry>> = _entries.asStateFlow()
 
     private var activeSongKey: String? = null
     private var accumulatedPlayMs: Long = 0L
     private var playingSinceElapsedMs: Long? = null
     private var recordedCurrentPlay: Boolean = false
+
+    init {
+        if (coroutineScope != null && writes != null) {
+            coroutineScope.launch(ioDispatcher) {
+                val saved = storage.load().take(maxEntries)
+                synchronized(lock) {
+                    if (!cleared) {
+                        _entries.value = _entries.value.asReversed().fold(saved) { entries, entry ->
+                            appendPlayHistoryEntry(entries, entry, maxEntries)
+                        }
+                    }
+                }
+                for (write in writes) {
+                    val snapshot = _entries.value
+                    if (snapshot.isEmpty()) storage.clear() else storage.save(snapshot)
+                }
+            }
+        }
+    }
 
     fun onPlaybackProgress(
         track: Track,
@@ -261,24 +285,17 @@ class PlayHistoryStore(
             accumulatedPlayMs = 0L
             playingSinceElapsedMs = null
             recordedCurrentPlay = false
+            cleared = true
             _entries.value = emptyList()
         }
-        if (coroutineScope != null) {
-            coroutineScope.launch(ioDispatcher) { storage.clear() }
-        } else {
-            storage.clear()
-        }
+        if (writes != null) writes.trySend(Unit) else storage.clear()
     }
 
     private fun isTrackRecordable(track: Track): Boolean =
         track.catalogKind == CatalogKind.Song && track.title.isNotBlank()
 
     private fun persist(snapshot: List<PlayHistoryEntry>) {
-        if (coroutineScope != null) {
-            coroutineScope.launch(ioDispatcher) { storage.save(snapshot) }
-        } else {
-            storage.save(snapshot)
-        }
+        if (writes != null) writes.trySend(Unit) else storage.save(snapshot)
     }
 }
 

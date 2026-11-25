@@ -172,7 +172,7 @@ class PlaybackPreferences(context: Context) : QueuePreferences, dev.amatv.core.P
     /** Blocking file read/parse: call on Dispatchers.IO. */
     override fun restoreSession(): PlaybackSession? = sessions.restore()
 
-    /** Bounded cursor/cover metadata only, safe for initial composition. */
+    /** Bounded cursor/cover metadata read on Dispatchers.IO before full hydration. */
     override fun restoreCheckpointSession(): PlaybackSession? = sessions.checkpoint()
 
     /** Station history stays on the head unit. */

@@ -8,6 +8,37 @@ class RecoverableTokenReaderTest {
     private val valid = "synthetic-valid-session-value"
     private val usable: (String) -> Boolean = { it.length > 20 && it.none(Char::isWhitespace) }
 
+    @Test fun repeatedReadsDecryptOnceAndWritesAndClearsReplaceTheCachedValue() {
+        val cache = TokenMemoryCache(usable)
+        var stored: String? = valid
+        var decryptions = 0
+        fun read() = cache.read { ++decryptions; stored }
+
+        repeat(100) { assertEquals(valid, read()) }
+        assertEquals(1, decryptions)
+
+        stored = "updated-synthetic-session-value"
+        cache.update(stored)
+        assertEquals(stored, read())
+        assertEquals(1, decryptions)
+
+        stored = null
+        cache.update(null)
+        assertNull(read())
+        assertEquals(2, decryptions)
+    }
+
+    @Test fun expiredAndInvalidEntriesAreRecheckedWithoutCaching() {
+        var now = 0
+        val cache = TokenMemoryCache<Int> { it > now }
+        var reads = 0
+        assertEquals(10, cache.read { ++reads; 10 })
+        now = 10
+        assertNull(cache.read { ++reads; 7 })
+        assertEquals(20, cache.read { ++reads; 20 })
+        assertEquals(3, reads)
+    }
+
     @Test fun corruptEncryptedCopyRecoversSdkSessionAndRepairsEncryptedStorage() {
         var repaired: String? = null
         val result = readRecoverableToken(

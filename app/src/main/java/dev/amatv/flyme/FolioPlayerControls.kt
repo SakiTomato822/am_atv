@@ -55,6 +55,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
@@ -822,8 +824,11 @@ internal fun FolioCirclePlayHairlineBar(
 @Composable
 private fun FolioCapsuleRemainingTime(positionState: State<Long>, durationMs: Long, color: Color) {
     val fontFamily = LocalFolioFontFamily.current
+    val remainingSecond by remember(positionState, durationMs) {
+        derivedStateOf(structuralEqualityPolicy()) { (durationMs - positionState.value).coerceAtLeast(0L) / 1_000L }
+    }
     Text(
-        text = formatFolioRemainingTime(positionState.value, durationMs),
+        text = if (durationMs > 0L) "-${formatFolioDuration(remainingSecond * 1_000L)}" else "",
         color = color,
         fontFamily = fontFamily,
         fontSize = 13.sp,
@@ -1593,11 +1598,14 @@ private fun SeekSection(
     var dragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableFloatStateOf(0f) }
 
-    val positionMs = positionState.value
     val safeDuration = durationMs.coerceAtLeast(1L)
-    val liveFraction = if (durationMs > 0L) (positionMs.toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f) else 0f
-    val shownFraction = if (dragging) dragFraction else liveFraction
-    val shownPositionMs = if (dragging) (dragFraction * safeDuration).roundToLong() else positionMs.coerceAtLeast(0L)
+    val shownSeconds by remember(positionState, durationMs) {
+        derivedStateOf(structuralEqualityPolicy()) {
+            val position = if (dragging) (dragFraction * safeDuration).roundToLong()
+                else positionState.value.coerceAtLeast(0L)
+            position / 1_000L to ((durationMs - position).coerceAtLeast(0L) / 1_000L)
+        }
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Box(
@@ -1653,6 +1661,11 @@ private fun SeekSection(
                     size = Size(size.width, trackH),
                     cornerRadius = radius,
                 )
+                val shownFraction = when {
+                    dragging -> dragFraction
+                    durationMs > 0L -> (positionState.value.toFloat() / safeDuration).coerceIn(0f, 1f)
+                    else -> 0f
+                }
                 val fillW = (size.width * shownFraction).coerceAtLeast(0f)
                 drawRoundRect(
                     color = controlAccent?.value?.compositeOver(fg.copy(alpha = 0.88f))
@@ -1677,13 +1690,13 @@ private fun SeekSection(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
-                text = if (isLiveStream) stringResource(R.string.player_live_stream) else formatFolioDuration(shownPositionMs),
+                text = if (isLiveStream) stringResource(R.string.player_live_stream) else formatFolioDuration(shownSeconds.first * 1_000L),
                 color = fg2,
                 fontFamily = fontFamily,
                 fontSize = 11.sp,
             )
             Text(
-                text = if (!isLiveStream) formatFolioRemainingTime(shownPositionMs, durationMs) else "",
+                text = if (!isLiveStream && durationMs > 0L) "-${formatFolioDuration(shownSeconds.second * 1_000L)}" else "",
                 color = fg2,
                 fontFamily = fontFamily,
                 fontSize = 11.sp,

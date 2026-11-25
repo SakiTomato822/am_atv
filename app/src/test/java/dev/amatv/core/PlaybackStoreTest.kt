@@ -976,12 +976,13 @@ class PlaybackStoreTest {
             ioDispatcherOverride = Dispatchers.IO,
         )
         try {
-            assertEquals(s1.id, h.store.state.value.track.id)
-            assertEquals(4_000L, h.store.state.value.positionAnchorMs)
+            assertFalse(h.store.state.value.hasCurrentTrack)
             assertFalse(h.store.state.value.startupSessionLoaded)
 
             h.store.attach()
             asyncSessions.enteredRestore.await()
+            assertEquals(s1.id, h.store.state.value.track.id)
+            assertEquals(4_000L, h.store.state.value.positionAnchorMs)
 
             // Buffer Next and Play before full hydration completes
             assertTrue(h.store.dispatchQueueAction(StartupQueueAction.Next))

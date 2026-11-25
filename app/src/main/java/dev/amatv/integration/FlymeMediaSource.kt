@@ -65,6 +65,7 @@ internal class FlymeMediaSource(
     private var wantsPlay = false
     private var metadataKey: String? = null
     private var lastProgressTime = 0L
+    private var lastProgressPosition = 0L
     private val pendingSnapshot = AtomicReference<PlaybackSnapshot?>()
     private val publishQueued = AtomicBoolean(false)
 
@@ -355,6 +356,7 @@ internal class FlymeMediaSource(
         registration = null
         metadataKey = null
         lastProgressTime = 0L
+        lastProgressPosition = 0L
         mutableVoiceSession.value = null
         updateStatus(ConnectionState.Disconnected)
     }
@@ -423,6 +425,7 @@ internal class FlymeMediaSource(
             // An earlier successful reply can represent metadata it did not forward.
             metadataKey = null
             lastProgressTime = 0L
+            lastProgressPosition = 0L
         } else {
             Log.w(TAG, "MediaCenter denied playback focus")
             dispatch { pause() }
@@ -448,11 +451,14 @@ internal class FlymeMediaSource(
                 "hasArtwork=${!track?.artworkUrl.isNullOrBlank()} durationMs=${value.durationMs}")
         }
         val now = SystemClock.elapsedRealtime()
-        if (now - lastProgressTime >= 1000L) {
-            val position = value.positionMs.coerceAtLeast(0L)
+        val position = value.positionMs.coerceAtLeast(0L)
+        if ((value.isPlaying && now - lastProgressTime >= 1_000L) ||
+            (!value.isPlaying && position != lastProgressPosition)
+        ) {
             rpc(current.media, MEDIA, 10, { writeStrongBinder(current.token); writeLong(position) }, { Unit })
             if (lastProgressTime == 0L) Log.i(TAG, "${current.path} updateCurrentProgress (10): positionMs=$position")
             lastProgressTime = now
+            lastProgressPosition = position
         }
     }
 

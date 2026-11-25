@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -253,7 +254,7 @@ internal fun nearestScrubTabIndex(pointerX: Float, tabCentersPx: List<Float>): I
 @Composable
 internal fun FolioPivotBar(
     titles: List<String>,
-    pageProgress: Float,
+    pageProgress: () -> Float,
     selectedPage: Int,
     onSelectPage: (Int) -> Unit,
     modifier: Modifier = Modifier,
@@ -270,10 +271,6 @@ internal fun FolioPivotBar(
     val scope = rememberCoroutineScope()
 
     val maxIndex = (titles.size - 1).coerceAtLeast(0)
-    val progress = pageProgress.coerceIn(0f, maxIndex.toFloat())
-    val lower = floor(progress).toInt().coerceIn(0, maxIndex)
-    val upper = ceil(progress).toInt().coerceIn(0, maxIndex)
-    val fraction = progress - lower
 
     var isScrubbing by remember { mutableStateOf(false) }
     var scrubHighlightedPage by remember { mutableStateOf<Int?>(null) }
@@ -299,7 +296,7 @@ internal fun FolioPivotBar(
 
     val tapBounce = rememberFolioTapBounce()
 
-    val peekStrength = remember { floatArrayOf(0f) }
+    var peekStrength by remember { mutableFloatStateOf(0f) }
     val cancelMarginPx = with(density) { 48.dp.toPx() }
 
     Box(
@@ -376,7 +373,7 @@ internal fun FolioPivotBar(
             .clipToBounds()
             .drawWithContent {
                 drawContent()
-                val maskAlpha = peekStrength[0] * (1f - scrubProgress)
+                val maskAlpha = peekStrength * (1f - scrubProgress)
                 if (maskAlpha > 0.01f && size.width > 0f) {
                     val fadePx = 18.dp.toPx()
                     val stop = (fadePx / size.width).coerceIn(0.01f, 0.25f)
@@ -452,11 +449,15 @@ internal fun FolioPivotBar(
             val gapPx = tierSpec.pvg.toPx()
             val pivotWidthPx = constraints.maxWidth.toFloat()
 
+            val progress = pageProgress().coerceIn(0f, maxIndex.toFloat())
+            val lower = floor(progress).toInt()
+            val upper = ceil(progress).toInt()
+            val fraction = progress - lower
             val lowPlacement = computePivotPlacementForPage(lower, widths, pxPx, gapPx, pivotWidthPx)
             val highPlacement = computePivotPlacementForPage(upper, widths, pxPx, gapPx, pivotWidthPx)
             val normalStartX = lowPlacement.translationX +
                 (highPlacement.translationX - lowPlacement.translationX) * fraction
-            peekStrength[0] = (if (lowPlacement.isPeekingLeft) 1f - fraction else 0f) +
+            peekStrength = (if (lowPlacement.isPeekingLeft) 1f - fraction else 0f) +
                 (if (highPlacement.isPeekingLeft) fraction else 0f)
 
             val normalXs = FloatArray(widths.size)

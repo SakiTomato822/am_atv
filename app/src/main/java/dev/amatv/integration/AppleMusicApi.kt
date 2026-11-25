@@ -4,6 +4,7 @@ import dev.amatv.R
 import dev.amatv.i18n.AppText
 
 import android.util.Log
+import android.os.SystemClock
 import dev.amatv.BuildConfig
 import dev.amatv.model.AppleArtworkColors
 import dev.amatv.model.CatalogKind
@@ -115,6 +116,7 @@ class AppleMusicApi(
     private val developerTokens: DeveloperTokenClient,
     /** Keeps the account storefront across launches, so cold-start catalog requests need not wait for it. */
     private val storefrontPreferences: android.content.SharedPreferences? = null,
+    private val libraryMappingPreferences: android.content.SharedPreferences? = null,
     private val userToken: () -> String?,
 ) : dev.amatv.core.LibraryActionsApi {
     private class Account(val token: String?, val revision: Long) :
@@ -130,7 +132,7 @@ class AppleMusicApi(
     }
 
     private fun requireCurrent(account: Account) {
-        if (account.revision != accountRevision.get() || account.token != userToken()?.takeIf(String::isNotBlank)) {
+        if (account.revision != accountRevision.get()) {
             throw kotlinx.coroutines.CancellationException("Apple Music account changed")
         }
     }
@@ -170,12 +172,24 @@ class AppleMusicApi(
     private val parseDispatcher = Dispatchers.Default.limitedParallelism(2)
     private val userStorefrontMutex = Mutex()
     private val catalogSongResolver = CatalogSongResolver(
-        accountToken = userToken,
+        account = {
+            val account = currentAccount()
+            CatalogSongResolver.AccountSnapshot(account.token) { account.revision == accountRevision.get() }
+        },
         storefront = ::userStorefront,
         libraryCatalogId = ::libraryCatalogSongId,
         equivalentCatalogId = ::equivalentSongId,
         authorizationMessage = { AppText.text(R.string.services_sign_in_apple_music) },
+        readLibraryMapping = { token, storefront, id ->
+            libraryMappingPreferences?.getString(libraryMappingKey(token, storefront, id), null)
+        },
+        saveLibraryMapping = { token, storefront, id, catalogId ->
+            libraryMappingPreferences?.edit()?.putString(libraryMappingKey(token, storefront, id), catalogId)?.apply()
+        },
     )
+
+    private fun libraryMappingKey(token: String, storefront: String, id: String): String =
+        "${storefrontTokenDigest(token)}:$storefront:$id"
 
     @Volatile
     private var userStorefrontCache: UserStorefrontCache? = null
@@ -228,12 +242,27 @@ class AppleMusicApi(
         needsUserToken = true,
     )
 
-    private suspend fun recommendationRoot(): JSONObject = requestRoot(
-        // The web home shows about twenty groups; ten cut off genres, stations and artists.
-        path = "/v1/me/recommendations?limit=${if (BuildConfig.FLYME_AUTO) 20 else 10}" +
-            "&extend=editorialArtwork,editorialVideo",
-        needsUserToken = true,
-    )
+    private data class RecommendationSnapshot(val revision: Long, val loadedAtMs: Long, val root: JSONObject)
+    private val recommendationMutex = Mutex()
+    private var recommendationSnapshot: RecommendationSnapshot? = null
+
+    private suspend fun recommendationRoot(): JSONObject = withAccount {
+        val account = currentAccount()
+        recommendationMutex.withLock {
+            requireCurrent(account)
+            recommendationSnapshot?.takeIf {
+                it.revision == account.revision && SystemClock.elapsedRealtime() - it.loadedAtMs < 120_000L
+            }?.root ?: requestRoot(
+                // The web home shows about twenty groups; ten cut off genres, stations and artists.
+                path = "/v1/me/recommendations?limit=${if (BuildConfig.FLYME_AUTO) 20 else 10}" +
+                    "&extend=editorialArtwork,editorialVideo",
+                needsUserToken = true,
+            ).also { root ->
+                requireCurrent(account)
+                recommendationSnapshot = RecommendationSnapshot(account.revision, SystemClock.elapsedRealtime(), root)
+            }
+        }
+    }
 
     suspend fun recommendationShelves(): List<ContentShelf> {
         val root = recommendationRoot()
@@ -734,7 +763,9 @@ class AppleMusicApi(
         }
     }
 
-    suspend fun resolveCatalogSongId(id: String): String = withAccount { catalogSongResolver.resolve(id) }
+    suspend fun resolveCatalogSongId(id: String): String = withContext(Dispatchers.IO) {
+        withAccount { catalogSongResolver.resolve(id) }
+    }
 
     internal suspend fun songPreviewUrl(catalogId: String): String? =
         withAccount {

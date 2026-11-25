@@ -21,6 +21,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -175,14 +176,14 @@ class ContentStoreTest {
 
             homeGate.complete(Unit)
             assertEquals(listOf(home), store.state.value.shelvesFor(Destination.Home))
-            assertEquals(7, ops.libraryRequestCount)
+            assertEquals(6, ops.libraryRequestCount)
             assertEquals(listOf(latest), store.state.value.shelvesFor(Destination.Library)
                 .single { it.id == "lib-albums" }.items)
             assertFalse(store.state.value.isLoading(Destination.Library))
 
             store.startSignedInContent(MusicConnectionState.SignedIn, "en-US")
             store.loadDestination(Destination.Library, MusicConnectionState.SignedIn, 0, "en-US")
-            assertEquals(7, ops.libraryRequestCount)
+            assertEquals(6, ops.libraryRequestCount)
         } finally {
             scope.cancel()
         }
@@ -213,17 +214,17 @@ class ContentStoreTest {
 
             homeGate.complete(Unit)
             assertTrue(store.state.value.isLoading(Destination.Library))
-            assertEquals(7, ops.libraryRequestCount)
+            assertEquals(6, ops.libraryRequestCount)
 
             open(Destination.Browse)
             open(Destination.Library)
             assertTrue(store.state.value.isLoading(Destination.Library))
-            assertEquals(7, ops.libraryRequestCount)
+            assertEquals(6, ops.libraryRequestCount)
 
             libraryGate.complete(Unit)
             assertFalse(store.state.value.isLoading(Destination.Library))
             assertTrue(store.state.value.shelvesFor(Destination.Library).any { it.id == "lib-albums" })
-            assertEquals(7, ops.libraryRequestCount)
+            assertEquals(6, ops.libraryRequestCount)
         } finally {
             scope.cancel()
         }
@@ -377,31 +378,25 @@ class ContentStoreTest {
     }
 
     @Test
-    fun browsePublishesWebEditorialBeforePendingChartsFinish() = runBlocking {
+    fun browseSkipsSpeculationWhenEditorialReturnsBeforeDeadline() = runBlocking {
         val scope = testScope()
         try {
             val editorialGate = CompletableDeferred<Unit>()
-            val chartGate = CompletableDeferred<Unit>()
             val editorial = ContentShelf("editorial", "Editorial", listOf(testTrack("new")))
             val ops = FakeContentOperations().apply {
                 editorialBrowseShelvesHandler = {
                     editorialGate.await()
                     listOf(editorial)
                 }
-                chartsHandler = { type ->
-                    chartGate.await()
-                    listOf(testTrack(type))
-                }
             }
             val store = testStore(ops, scope)
             store.loadDestination(Destination.Browse, MusicConnectionState.SignedIn, 0, "zh-TW")
-            assertEquals(3, ops.chartsCallCount)
+            assertEquals(0, ops.chartsCallCount)
 
             editorialGate.complete(Unit)
             assertEquals(listOf(editorial), store.state.value.shelvesFor(Destination.Browse))
             assertFalse(store.state.value.isLoading(Destination.Browse))
-            chartGate.complete(Unit)
-            assertEquals(listOf(editorial), store.state.value.shelvesFor(Destination.Browse))
+            assertEquals(0, ops.chartsCallCount)
         } finally {
             scope.cancel()
         }
@@ -423,8 +418,12 @@ class ContentStoreTest {
             val store = testStore(ops, scope)
             store.loadDestination(Destination.Browse, MusicConnectionState.SignedIn, 0, "zh-TW")
 
+            assertEquals(0, ops.chartsCallCount)
+            val interim = kotlinx.coroutines.withTimeout(3_000L) {
+                store.state.first { it.shelvesFor(Destination.Browse).isNotEmpty() }
+            }
             assertEquals(listOf("browse-songs", "browse-albums", "browse-playlists"),
-                store.state.value.shelvesFor(Destination.Browse).map { it.id })
+                interim.shelvesFor(Destination.Browse).map { it.id })
             assertTrue(ops.savedSnapshotCalls.isEmpty())
 
             editorialGate.complete(Unit)

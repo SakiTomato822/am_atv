@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,7 +27,10 @@ internal fun LazyListScope.folioDetailSongs(
     onPlay: (Int) -> Unit,
 ) {
     val ranges = folioDetailColumnRanges(songs.size, columns)
-    items(ranges.first().count()) { row ->
+    val rowKeys = stableLazyKeys((0 until ranges.first().count()).map { row ->
+        ranges.mapNotNull { range -> (range.first + row).takeIf { it in range }?.let { songs[it].id } }.toString()
+    })
+    items(rowKeys.size, key = { rowKeys[it] }) { row ->
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
             for (range in ranges) {
                 val index = range.first + row
@@ -59,7 +61,10 @@ internal fun LazyListScope.folioDetailCards(
     grid: Boolean,
     onOpenItem: (Track, List<Track>) -> Unit,
 ) {
-    items(cards.chunked(columns)) { row ->
+    val rows = cards.chunked(columns)
+    val rowKeys = stableLazyKeys(rows.map { row -> row.map(Track::id).toString() })
+    items(rows.size, key = { rowKeys[it] }) { index ->
+        val row = rows[index]
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
             for (card in row) {
                 val open = { onOpenItem(card, cards) }
@@ -71,6 +76,15 @@ internal fun LazyListScope.folioDetailCards(
             }
             repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
         }
+    }
+}
+
+internal fun stableLazyKeys(ids: List<String>): List<String> {
+    val occurrences = mutableMapOf<String, Int>()
+    return ids.map { id ->
+        val occurrence = occurrences.getOrDefault(id, 0)
+        occurrences[id] = occurrence + 1
+        "$occurrence:$id"
     }
 }
 

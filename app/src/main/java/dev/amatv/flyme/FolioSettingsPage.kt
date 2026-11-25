@@ -545,7 +545,9 @@ internal fun FolioSettingsPage(
                         Text(stringResource(R.string.diagnostics_gapless_empty), color = palette.fg2, fontFamily = fontFamily)
                     }
                 }
-                items(gaplessEntries) { entry ->
+                val keys = stableLazyKeys(gaplessEntries.map { "gapless:${it.timeMs}:${it.text}" })
+                items(gaplessEntries.size, key = { keys[it] }) { index ->
+                    val entry = gaplessEntries[index]
                     Text(
                         text = "${entry.clock}  ${entry.text}",
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),

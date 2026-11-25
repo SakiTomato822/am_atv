@@ -17,7 +17,17 @@ class CatalogSongResolverTest {
         library: suspend (String) -> String = { error("A catalog recording must not use the library endpoint") },
         maxEntries: Int = 64,
         equivalent: suspend (String, String) -> String,
-    ) = CatalogSongResolver(account, storefront, library, equivalent, { "Sign in" }, maxEntries)
+    ) = CatalogSongResolver(
+        account = {
+            val token = account()
+            CatalogSongResolver.AccountSnapshot(token) { account() == token }
+        },
+        storefront = storefront,
+        libraryCatalogId = library,
+        equivalentCatalogId = equivalent,
+        authorizationMessage = { "Sign in" },
+        maxEntries = maxEntries,
+    )
 
     @Test fun ordinaryRetiredCatalogSongsUseValidatedEquivalenceAndCacheCanonicalAliases() = runBlocking {
         val requests = mutableListOf<Pair<String, String>>()
@@ -61,6 +71,27 @@ class CatalogSongResolverTest {
         account = "second-account"
         assertEquals("second-account-cn", resolver.resolve("old"))
         assertEquals(3, calls)
+    }
+
+    @Test fun savedLibraryMappingsSurviveANewResolverAndStayScopedToAccountAndStorefront() = runBlocking {
+        val persisted = mutableMapOf<Triple<String, String, String>, String>()
+        var requests = 0
+        fun resolver(account: String, storefront: String) = CatalogSongResolver(
+            account = { CatalogSongResolver.AccountSnapshot(account) { true } },
+            storefront = { storefront },
+            libraryCatalogId = { requests++; "catalog-$account" },
+            equivalentCatalogId = { region, id -> "$id-$region" },
+            authorizationMessage = { "Sign in" },
+            readLibraryMapping = { token, region, id -> persisted[Triple(token, region, id)] },
+            saveLibraryMapping = { token, region, id, playable -> persisted[Triple(token, region, id)] = playable },
+        )
+
+        assertEquals("catalog-first-tw", resolver("first", "tw").resolve("i.song"))
+        assertEquals("catalog-first-tw", resolver("first", "tw").resolve("i.song"))
+        assertEquals(1, requests)
+        assertEquals("catalog-first-cn", resolver("first", "cn").resolve("i.song"))
+        assertEquals("catalog-second-tw", resolver("second", "tw").resolve("i.song"))
+        assertEquals(3, requests)
     }
 
     @Test fun parallelLyricsAndPlaybackCallersCoalesceTheirProviderLookup() = runBlocking {

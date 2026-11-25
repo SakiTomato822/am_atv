@@ -150,6 +150,25 @@ fun FolioApp(
     }
 
     val currentView = LocalView.current
+    var firstFrameDrawn by remember(currentView) { mutableStateOf(false) }
+    DisposableEffect(currentView) {
+        val observer = currentView.viewTreeObserver
+        val listener = object : android.view.ViewTreeObserver.OnDrawListener {
+            val complete = Runnable {
+                if (observer.isAlive) observer.removeOnDrawListener(this)
+                firstFrameDrawn = true
+            }
+
+            override fun onDraw() {
+                currentView.post(complete)
+            }
+        }
+        observer.addOnDrawListener(listener)
+        onDispose {
+            if (observer.isAlive) observer.removeOnDrawListener(listener)
+            currentView.removeCallbacks(listener.complete)
+        }
+    }
     val keepScreenOn = !BuildConfig.FLYME_AUTO && (playbackState.isPlaying || playbackState.playWhenReady)
     DisposableEffect(keepScreenOn) {
         currentView.keepScreenOn = keepScreenOn
@@ -523,9 +542,10 @@ fun FolioApp(
                             // Metro Pivot header anchored directly below status bar (aligns with top-right MiniPlayer on Wide/Ultrawide)
                             FolioPivotBar(
                                 titles = pageTitles,
-                                pageProgress = titleTransition?.let {
-                                    it.from + (it.to - it.from) * it.progress.value
-                                } ?: (pagerState.currentPage + pagerState.currentPageOffsetFraction),
+                                pageProgress = {
+                                    titleTransition?.let { it.from + (it.to - it.from) * it.progress.value }
+                                        ?: (pagerState.currentPage + pagerState.currentPageOffsetFraction)
+                                },
                                 selectedPage = selectedPage,
                                 onSelectPage = ::selectTab,
                                 onScrollCurrentPageToTop = {
@@ -542,7 +562,9 @@ fun FolioApp(
                             // Horizontal Pager for Settings / Home / Browse / Library / Search
                             HorizontalPager(
                                 state = pagerState,
-                                beyondViewportPageCount = maxOf(1, titleTransition?.distance ?: 0),
+                                beyondViewportPageCount = if (firstFrameDrawn) {
+                                    maxOf(1, titleTransition?.distance ?: 0)
+                                } else 0,
                                 userScrollEnabled = titleTransition == null,
                                 modifier = Modifier
                                     .weight(1f)
@@ -675,6 +697,7 @@ fun FolioApp(
                                 FolioTopMiniPlayerCapsule(
                                     track = displayTrack,
                                     isPlaying = playbackState.playWhenReady,
+                                    progressActive = !playerOpen,
                                     onTogglePlayback = playbackStore::togglePlayback,
                                     onOpenPlayer = openPlayer,
                                     capsuleWidthDp = topMiniLayout.widthDp.dp,
@@ -702,6 +725,7 @@ fun FolioApp(
                                 FolioMiniPlayerCapsule(
                                     track = displayTrack,
                                     isPlaying = playbackState.playWhenReady,
+                                    progressActive = !playerOpen,
                                     onTogglePlayback = playbackStore::togglePlayback,
                                     onOpenPlayer = openPlayer,
                                 )

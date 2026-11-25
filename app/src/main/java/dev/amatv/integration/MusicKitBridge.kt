@@ -152,12 +152,41 @@ class MusicKitBridge(
     private var fadeTicks = 0
     /** The song a gapless change moved into, faded in over its first seconds. */
     @Volatile private var fadeInCatalogId: String? = null
+    @Volatile private var pollAfterCommandUntilMs = 0L
+
+    private fun shouldPollPlayback(): Boolean {
+        if (controller == null || pendingPlaybackError != null) return false
+        if (preparing || SystemClock.elapsedRealtime() < pollAfterCommandUntilMs) return true
+        val snapshot = latestSnapshot
+        return desiredPlaying && !(snapshot?.requestGeneration == prepareGeneration.get() && snapshot.isEnded)
+    }
+
+    private fun restartPlaybackPolls(afterCommand: Boolean = false) {
+        // A paused seek can settle asynchronously without a playback-state callback.
+        if (afterCommand) pollAfterCommandUntilMs = SystemClock.elapsedRealtime() + 1_000L
+        playbackHandler?.let { handler ->
+            handler.removeCallbacks(fadeTick)
+            handler.post(fadeTick)
+        }
+        mainHandler.removeCallbacks(snapshotPoll)
+        if (playbackListener != null) mainHandler.post(snapshotPoll)
+    }
+
+    private fun stopPlaybackPolls() {
+        pollAfterCommandUntilMs = 0L
+        playbackHandler?.removeCallbacks(fadeTick)
+        mainHandler.removeCallbacks(snapshotPoll)
+    }
+
     private val fadeTick = object : Runnable {
         override fun run() {
             val handler = playbackHandler ?: return
-            if (Looper.myLooper() !== handler.looper) return
+            if (Looper.myLooper() !== handler.looper || !shouldPollPlayback()) return
             tickFade()
-            if (handler === playbackHandler) handler.postDelayed(this, FADE_TICK_MS)
+            if (handler === playbackHandler && shouldPollPlayback()) {
+                handler.removeCallbacks(this)
+                handler.postDelayed(this, FADE_TICK_MS)
+            }
         }
     }
     @Volatile private var pendingSound: PendingSound? = null
@@ -165,8 +194,9 @@ class MusicKitBridge(
     private var reportedEndGeneration = 0L
     private val snapshotPoll = object : Runnable {
         override fun run() {
-            if (playbackListener == null) return
-            if (controller != null) dispatchSnapshot()
+            if (playbackListener == null || !shouldPollPlayback()) return
+            dispatchSnapshot()
+            mainHandler.removeCallbacks(this)
             mainHandler.postDelayed(this, 250L)
         }
     }
@@ -254,17 +284,10 @@ class MusicKitBridge(
             .also { controller = it }
         if (rebuilding) transition?.mark(GaplessStage.Rebuilt, SystemClock.elapsedRealtime())
         fadeInCatalogId = null
-        playbackHandler?.let { handler ->
-            handler.removeCallbacks(fadeTick)
-            handler.post(fadeTick)
-        }
         val storeId = checkNotNull(track.catalogId) { AppText.text(R.string.services_catalog_id_missing) }
         val requestedPosition = if (track.catalogKind == CatalogKind.Station) 0L else positionMs
         playingTrace = transition?.let { TransitionPlayback(generation, storeId, it, requestedPosition) }
-        if (playbackListener != null) {
-            mainHandler.removeCallbacks(snapshotPoll)
-            mainHandler.post(snapshotPoll)
-        }
+        restartPlaybackPolls()
         postPlaybackAction("prepare") {
             if (generation != prepareGeneration.get()) return@postPlaybackAction
             activeGeneration = generation
@@ -300,11 +323,13 @@ class MusicKitBridge(
         playbackHandler?.post {
             if (generation != prepareGeneration.get()) return@post
             playbackIntent.requestPlaying(true)
+            restartPlaybackPolls(afterCommand = true)
             dispatchSnapshot()
         }
     }
     fun pause() {
         desiredPlaying = false
+        if (!preparing) stopPlaybackPolls()
         val generation = prepareGeneration.get()
         playbackHandler?.post {
             if (generation != prepareGeneration.get()) return@post
@@ -320,6 +345,7 @@ class MusicKitBridge(
             playbackIntent.requestSeek()
             endedCatalogId = null
             value.javaClass.getMethod("seekToPosition", Long::class.javaPrimitiveType).invoke(value, positionMs)
+            restartPlaybackPolls(afterCommand = true)
         }
     }
     /**
@@ -682,6 +708,7 @@ class MusicKitBridge(
             is NativeSongQueue.Command.ById -> current.javaClass.getMethod(method, Long::class.javaPrimitiveType)
                 .invoke(current, command.queueId)
         }
+        restartPlaybackPolls(afterCommand = true)
         dispatchSnapshot()
         return newGeneration
     }
@@ -704,7 +731,7 @@ class MusicKitBridge(
     fun setPlaybackListener(listener: ((PlaybackSnapshot) -> Unit)?) {
         playbackListener = listener
         mainHandler.removeCallbacks(snapshotPoll)
-        if (listener != null) mainHandler.post(snapshotPoll)
+        if (listener != null && shouldPollPlayback()) mainHandler.post(snapshotPoll)
         val currentController = controller
         if (listener != null && currentController != null && controllerListener == null) {
             val generation = prepareGeneration.get()
@@ -727,7 +754,7 @@ class MusicKitBridge(
     @Synchronized
     fun release() {
         prepareGeneration.incrementAndGet()
-        mainHandler.removeCallbacks(snapshotPoll)
+        stopPlaybackPolls()
         snapshotScheduled = false
         playingTrace = null
         lookaheadTrace = null
@@ -739,7 +766,6 @@ class MusicKitBridge(
         val oldThread = playbackThread
         val oldFade = fade
         val oldLevel = sessionLevel
-        oldHandler?.removeCallbacks(fadeTick)
         fade = GaplessFade()
         sessionLevel = SessionLevel()
         val cleanup = {
@@ -1014,7 +1040,9 @@ class MusicKitBridge(
                 if (generation != prepareGeneration.get() || generation != activeGeneration) return@readAndDeliver
                 controller?.let { readSnapshot(it, generation) }
             } ?: return@readAndDeliver
+            val resumed = snapshot.isPlaying && latestSnapshot?.isPlaying != true
             latestSnapshot = snapshot
+            if (resumed) restartPlaybackPolls()
             mainHandler.post {
                 if (generation == prepareGeneration.get()) playbackListener?.invoke(snapshot)
             }
@@ -1356,6 +1384,7 @@ class MusicKitBridge(
             } ?: error(AppText.text(R.string.services_controller_command_unavailable, name))
             Log.i(TAG, "Controller command: $name")
             method.invoke(value, *args)
+            if (name.startsWith("skipTo")) restartPlaybackPolls(afterCommand = true)
         }
     }
 

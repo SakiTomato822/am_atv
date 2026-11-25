@@ -1,6 +1,8 @@
 package dev.amatv.flyme
 
 import android.content.Context
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import android.content.res.Resources
 import android.graphics.Typeface
 import android.graphics.fonts.Font
@@ -13,6 +15,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
@@ -206,7 +209,8 @@ fun FolioTheme(
     )
 
     val resources = LocalContext.current.resources
-    val fontFamily = remember(resources) { FolioFonts.family(resources) }
+    val prewarmed = FolioFonts.prewarmed.collectAsState().value
+    val fontFamily = remember(resources, prewarmed) { FolioFonts.family(resources, prewarmed) }
     val baseTypography = MaterialTheme.typography
     val typography = remember(baseTypography, fontFamily) {
         Typography(
@@ -286,31 +290,27 @@ internal fun Modifier.folioAmbientBackground(palette: FolioPalette): Modifier = 
 
 /** Bundles Inter (Latin) + Noto Sans SC (Han) with weight 300..900 so H5 light headings match CSS weight 300. */
 internal object FolioFonts {
-    @Volatile private var cached: FontFamily? = null
-    @Volatile private var cachedBase: Typeface? = null
-    private val weighted = mutableMapOf<Int, Typeface>()
+    private val weights = listOf(300, 400, 500, 600, 700, 800, 900)
+    private val ready = MutableStateFlow<FontFamily?>(null)
+    val prewarmed = ready.asStateFlow()
+    private var initialFamily: FontFamily? = null
 
-    @Synchronized fun family(resources: Resources): FontFamily {
-        cached?.let { return it }
-        typeface(resources, 400)
-        return FontFamily(listOf(300, 400, 500, 600, 700, 800, 900).map { w ->
-            FolioWeightFont(FontWeight(w))
-        }).also { cached = it }
+    fun prewarm(resources: Resources) {
+        ready.value = buildFamily(resources, weights)
     }
 
-    @Synchronized fun typeface(resources: Resources, weight: Int): Typeface {
-        if (weight != 400) return weighted.getOrPut(weight) {
-            Typeface.create(typeface(resources, 400), weight, false)
-        }
-        cachedBase?.let { return it }
-        val built = if (Build.VERSION.SDK_INT >= 29) {
+    fun family(resources: Resources, prewarmed: FontFamily? = ready.value): FontFamily =
+        prewarmed ?: initialFamily ?: buildFamily(resources, listOf(400, 600)).also { initialFamily = it }
+
+    private fun buildFamily(resources: Resources, nativeWeights: List<Int>): FontFamily {
+        val base = if (Build.VERSION.SDK_INT >= 29) {
             fun nativeFamily(resource: Int, inter: Boolean): android.graphics.fonts.FontFamily {
                 fun font(w: Int): Font = Font.Builder(resources, resource)
                     .setWeight(w)
                     .setFontVariationSettings(if (inter) "'wght' $w, 'opsz' 18" else "'wght' $w")
                     .build()
-                return android.graphics.fonts.FontFamily.Builder(font(300)).apply {
-                    listOf(400, 500, 600, 700, 800, 900).forEach { addFont(font(it)) }
+                return android.graphics.fonts.FontFamily.Builder(font(nativeWeights.first())).apply {
+                    nativeWeights.drop(1).forEach { addFont(font(it)) }
                 }.build()
             }
             Typeface.CustomFallbackBuilder(nativeFamily(R.font.inter_variable, true))
@@ -321,18 +321,21 @@ internal object FolioFonts {
         } else {
             resources.getFont(R.font.inter_variable)
         }
-        return built.also { cachedBase = it }
+        return FontFamily(weights.map { weight -> FolioWeightFont(FontWeight(weight), base) })
     }
 
-    private class FolioWeightFont(override val weight: FontWeight) : AndroidFont(
+    private class FolioWeightFont(override val weight: FontWeight, val base: Typeface) : AndroidFont(
         FontLoadingStrategy.Blocking, Loader, FontVariation.Settings(),
     ) {
         override val style = androidx.compose.ui.text.font.FontStyle.Normal
     }
 
     private object Loader : AndroidFont.TypefaceLoader {
-        override fun loadBlocking(context: Context, font: AndroidFont): Typeface =
-            typeface(context.resources, font.weight.weight)
+        override fun loadBlocking(context: Context, font: AndroidFont): Typeface {
+            val weighted = font as FolioWeightFont
+            return if (weighted.weight.weight == 400) weighted.base
+            else Typeface.create(weighted.base, weighted.weight.weight, false)
+        }
         override suspend fun awaitLoad(context: Context, font: AndroidFont): Typeface =
             loadBlocking(context, font)
     }

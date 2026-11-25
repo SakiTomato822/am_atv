@@ -11,6 +11,10 @@ import dev.amatv.BuildConfig
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
+import java.io.IOException
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -29,11 +33,31 @@ object LogRecorder {
 
     @Volatile private var started = false
     private lateinit var directory: File
+    private val outputLock = Any()
+    private val flushTimer = ScheduledThreadPoolExecutor(1) { work ->
+        Thread(work, "AMATV-log-flush").apply {
+            isDaemon = true
+            priority = Thread.MIN_PRIORITY
+        }
+    }.apply { removeOnCancelPolicy = true }
+    private var output: OutputStream? = null
+    private var flushTask: ScheduledFuture<*>? = null
+    private var pendingLines = 0
 
     fun start(context: Context) {
         if (started) return
         started = true
         directory = File(context.applicationContext.filesDir, "logs").apply { mkdirs() }
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            try {
+                synchronized(outputLock) { flushPending() }
+            } catch (failure: IOException) {
+                Log.w(TAG, "Crash log flush failed", failure)
+            } finally {
+                previousHandler?.uncaughtException(thread, error)
+            }
+        }
         Thread({ record() }, "AMATV-log-recorder").apply {
             isDaemon = true
             priority = Thread.MIN_PRIORITY
@@ -51,38 +75,72 @@ object LogRecorder {
             runCatching {
                 val process = ProcessBuilder("logcat", "-v", "threadtime", "--pid=${Process.myPid()}")
                     .redirectErrorStream(true).start()
-                var output = openCurrent()
+                synchronized(outputLock) { output = openCurrent() }
                 var written = current().length()
-                process.inputStream.bufferedReader().useLines { lines ->
-                    lines.forEach { raw ->
-                        val bytes = (redact(raw) + "\n").toByteArray(Charsets.UTF_8)
-                        if (written + bytes.size > MAX_FILE_BYTES) {
-                            output.close()
-                            previous().delete()
-                            current().renameTo(previous())
-                            output = openCurrent()
-                            written = 0L
+                try {
+                    process.inputStream.bufferedReader().useLines { lines ->
+                        lines.forEach { raw ->
+                            val bytes = (redact(raw) + "\n").toByteArray(Charsets.UTF_8)
+                            synchronized(outputLock) {
+                                if (written + bytes.size > MAX_FILE_BYTES) {
+                                    closeOutput()
+                                    previous().delete()
+                                    current().renameTo(previous())
+                                    output = openCurrent()
+                                    written = 0L
+                                }
+                                checkNotNull(output).write(bytes)
+                                written += bytes.size
+                                if (++pendingLines == 64) flushPending()
+                                else if (pendingLines == 1) scheduleFlush()
+                            }
                         }
-                        output.write(bytes)
-                        output.flush()
-                        written += bytes.size
                     }
+                } finally {
+                    synchronized(outputLock) { closeOutput() }
+                    process.destroy()
                 }
-                output.close()
             }.onFailure { Log.w(TAG, "Log capture stopped: ${it.javaClass.simpleName}") }
             Thread.sleep(5_000L)
         }
     }
 
+    private fun scheduleFlush() {
+        flushTask = flushTimer.schedule({
+            synchronized(outputLock) {
+                try {
+                    flushPending()
+                } catch (failure: IOException) {
+                    Log.w(TAG, "Periodic log flush failed", failure)
+                }
+            }
+        }, 1L, TimeUnit.SECONDS)
+    }
+
+    private fun flushPending() {
+        flushTask?.cancel(false)
+        flushTask = null
+        pendingLines = 0
+        output?.flush()
+    }
+
+    private fun closeOutput() {
+        val stream = output
+        output = null
+        flushPending()
+        stream?.close()
+    }
+
     private fun current() = File(directory, "current.log")
     private fun previous() = File(directory, "previous.log")
-    private fun openCurrent(): OutputStream = FileOutputStream(current(), true)
+    private fun openCurrent(): OutputStream = FileOutputStream(current(), true).buffered(64 * 1024)
 
     /**
      * Writes the recorded log to the shared Download folder (Android 10+), or to the app's
      * external files folder on older systems. Returns where it went, for the Settings page.
      */
     fun export(context: Context): String {
+        synchronized(outputLock) { flushPending() }
         val name = "AMATV-log-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date()) + ".txt"
         val header = buildString {
             appendLine("AM Folio ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")

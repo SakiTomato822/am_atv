@@ -17,6 +17,10 @@ import javax.crypto.spec.GCMParameterSpec
 
 /** Stores MusicKit tokens encrypted with a non-exportable Android Keystore key. */
 class SecureTokenStore(context: Context) {
+    private val userCache = TokenMemoryCache(::isValidUserToken)
+    private val developerCache = TokenMemoryCache<DeveloperToken> { it.isCurrent() }
+    private var cachedKey: SecretKey? = null
+
     private val preferences = context.getSharedPreferences("music_session", Context.MODE_PRIVATE)
     private val sdkAuthPreferences = context.getSharedPreferences(
         "com.apple.android.music.auth_preferences",
@@ -28,29 +32,35 @@ class SecureTokenStore(context: Context) {
     }
 
     fun readUserToken(): String? = synchronized(tokenLock) {
-        readRecoverableToken(
-            readEncrypted = { readEncrypted(KEY_USER_TOKEN_CIPHERTEXT) },
-            readSdkFallback = { sdkAuthPreferences.getString("user-token", null) },
-            normalize = ::normalizeMusicUserToken,
-            isValid = { it.length > 20 && it.none(Char::isWhitespace) },
-            repairEncrypted = ::writeUserToken,
-        )
+        userCache.read {
+            readRecoverableToken(
+                readEncrypted = { readEncrypted(KEY_USER_TOKEN_CIPHERTEXT) },
+                readSdkFallback = { sdkAuthPreferences.getString("user-token", null) },
+                normalize = ::normalizeMusicUserToken,
+                isValid = ::isValidUserToken,
+                repairEncrypted = ::writeUserToken,
+            )
+        }
     }
 
     fun writeUserToken(token: String) = synchronized(tokenLock) {
         val normalized = normalizeMusicUserToken(token)
         writeEncrypted(KEY_USER_TOKEN_CIPHERTEXT, normalized)
         sdkAuthPreferences.edit().putString("user-token", normalized).apply()
+        userCache.update(normalized)
+        developerCache.update(null)
     }
 
     fun readDeveloperToken(): String? = synchronized(tokenLock) {
-        readRecoverableToken(
-            readEncrypted = { readEncrypted(KEY_DEV_TOKEN_CIPHERTEXT) },
-            readSdkFallback = { sdkAuthPreferences.getString("developer-token", null) },
-            normalize = String::trim,
-            isValid = ::isValidNonExpiredJwt,
-            repairEncrypted = ::writeDeveloperToken,
-        )
+        developerCache.read {
+            readRecoverableToken(
+                readEncrypted = { readEncrypted(KEY_DEV_TOKEN_CIPHERTEXT) },
+                readSdkFallback = { sdkAuthPreferences.getString("developer-token", null) },
+                normalize = String::trim,
+                isValid = { developerToken(it)?.isCurrent() == true },
+                repairEncrypted = ::writeDeveloperToken,
+            )?.let(::developerToken)
+        }?.value
     }
 
     fun writeDeveloperToken(token: String) = synchronized(tokenLock) {
@@ -58,16 +68,20 @@ class SecureTokenStore(context: Context) {
         require(trimmed.count { it == '.' } == 2) { AppText.text(R.string.services_developer_token_invalid) }
         writeEncrypted(KEY_DEV_TOKEN_CIPHERTEXT, trimmed)
         sdkAuthPreferences.edit().putString("developer-token", trimmed).apply()
+        developerCache.update(developerToken(trimmed))
     }
 
     fun clearDeveloperToken() = synchronized(tokenLock) {
         preferences.edit().remove(KEY_DEV_TOKEN_CIPHERTEXT).apply()
         sdkAuthPreferences.edit().remove("developer-token").apply()
+        developerCache.update(null)
     }
 
     fun clear() = synchronized(tokenLock) {
         preferences.edit().remove(KEY_USER_TOKEN_CIPHERTEXT).apply()
         sdkAuthPreferences.edit().remove("user-token").apply()
+        userCache.update(null)
+        developerCache.update(null)
     }
 
     private fun readEncrypted(key: String): String? {
@@ -92,19 +106,25 @@ class SecureTokenStore(context: Context) {
             .apply()
     }
 
-    private fun isValidNonExpiredJwt(token: String): Boolean {
+    private data class DeveloperToken(val value: String, val expiresAt: Long) {
+        fun isCurrent() = expiresAt > Instant.now().epochSecond + EXPIRY_SAFETY_SECONDS
+    }
+
+    private fun developerToken(token: String): DeveloperToken? {
         val parts = token.split('.')
-        if (parts.size != 3) return false
+        if (parts.size != 3) return null
         return runCatching {
             val payloadBytes = Base64.decode(
                 parts[1],
                 Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING,
             )
             val exp = JSONObject(String(payloadBytes, Charsets.UTF_8)).optLong("exp", 0L)
-            val now = Instant.now().epochSecond
-            exp > now + EXPIRY_SAFETY_SECONDS
-        }.getOrDefault(false)
+            DeveloperToken(token, exp)
+        }.getOrNull()
     }
+
+    private fun isValidUserToken(token: String): Boolean =
+        token.length > 20 && token.none(Char::isWhitespace)
 
     /**
      * A same-window MusicKit Web callback wraps the real Music User Token in a
@@ -119,21 +139,24 @@ class SecureTokenStore(context: Context) {
     }.getOrDefault(value)
 
     private fun encryptionKey(): SecretKey {
+        cachedKey?.let { return it }
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
-        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").run {
-            init(
-                KeyGenParameterSpec.Builder(
-                    KEY_ALIAS,
-                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+        val key = (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)
+            ?: KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").run {
+                init(
+                    KeyGenParameterSpec.Builder(
+                        KEY_ALIAS,
+                        KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+                    )
+                        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                        .setRandomizedEncryptionRequired(true)
+                        .build(),
                 )
-                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                    .setRandomizedEncryptionRequired(true)
-                    .build(),
-            )
-            generateKey()
-        }
+                generateKey()
+            }
+        cachedKey = key
+        return key
     }
 
     private companion object {

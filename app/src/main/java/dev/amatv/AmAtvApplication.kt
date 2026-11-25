@@ -18,6 +18,7 @@ import dev.amatv.core.SharedPreferencesSettingsStorage
 import dev.amatv.core.SharedPreferencesWelcomePreferences
 import dev.amatv.core.WelcomePreferences
 import dev.amatv.core.detectLowPerformanceHardware
+import dev.amatv.flyme.FolioFonts
 import dev.amatv.i18n.AppText
 import dev.amatv.integration.ContentCache
 import dev.amatv.integration.LogRecorder
@@ -29,6 +30,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 
 class AmAtvApplication : Application() {
     lateinit var settingsStore: SettingsStore
@@ -81,6 +83,9 @@ class AmAtvApplication : Application() {
         AppText.initialize(this)
         val contentCache = ContentCache.get(this)
         val isMainProcess = getProcessName() == packageName
+        if (isMainProcess && BuildConfig.FLYME_AUTO) {
+            applicationScope.launch(Dispatchers.Default) { FolioFonts.prewarm(resources) }
+        }
         settingsStore = SettingsStore(
             storage = SharedPreferencesSettingsStorage(this),
             onCacheDiskChanged = { contentCache.setEnabled(it) },

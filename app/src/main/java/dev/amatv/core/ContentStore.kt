@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 
 private const val LIBRARY_REFRESH_INTERVAL_MS = 10 * 60 * 1000L
@@ -301,8 +302,9 @@ class ContentStore(
         startupRefreshScheduled = true
         val inputs = LoadInputs(connectionState, _state.value.reloadGeneration, contentLanguageTag)
         prepareShelfLoads(inputs)
-        loadShelvesFor(Destination.Home, inputs)
-        loadShelvesFor(Destination.Library, inputs, after = shelfJobs[Destination.Home])
+        val recentTracks = StartupRecentTracks()
+        loadShelvesFor(Destination.Home, inputs, startupRecentTracks = recentTracks)
+        loadShelvesFor(Destination.Library, inputs, after = shelfJobs[Destination.Home], startupRecentTracks = recentTracks)
     }
 
     fun loadDestination(
@@ -358,7 +360,19 @@ class ContentStore(
         }
     }
 
-    private fun loadShelvesFor(target: Destination, inputs: LoadInputs, after: Job? = null) {
+    private inner class StartupRecentTracks {
+        private var result: Result<List<Track>>? = null
+
+        suspend fun load(): Result<List<Track>> =
+            result ?: cancellableResult { operations.recentlyPlayedTracks() }.also { result = it }
+    }
+
+    private fun loadShelvesFor(
+        target: Destination,
+        inputs: LoadInputs,
+        after: Job? = null,
+        startupRecentTracks: StartupRecentTracks? = null,
+    ) {
         if (!operations.isCatalogConfigured) return
         if (shelfJobs[target]?.isActive == true) return
         val (connectionState, _, contentLanguageTag) = inputs
@@ -419,6 +433,9 @@ class ContentStore(
                     )
                 }
             }
+            suspend fun recentTracks(): Result<List<Track>> =
+                startupRecentTracks?.load() ?: cancellableResult { operations.recentlyPlayedTracks() }
+
             val libraryFirstPages = mutableMapOf<String, LibraryPage>()
             val libraryFailures = mutableSetOf<String>()
             val loadShelves: suspend () -> Pair<List<ContentShelf>, List<Throwable>> = {
@@ -433,7 +450,7 @@ class ContentStore(
                             }
                             val recentPlayedTracks = async(ioDispatcher) {
                                 if (connectionState == MusicConnectionState.SignedIn) {
-                                    cancellableResult { operations.recentlyPlayedTracks() }
+                                    recentTracks()
                                 } else Result.success(emptyList())
                             }
                             val recentContainers = async(ioDispatcher) {
@@ -518,7 +535,7 @@ class ContentStore(
                             val albums = async(ioDispatcher) { cancellableResult { operations.libraryAlbumsPage() } }
                             val playlists = async(ioDispatcher) { cancellableResult { loadLibraryPlaylistsPage() } }
                             val songs = async(ioDispatcher) { cancellableResult { operations.librarySongsPage() } }
-                            val recentPlayed = async(ioDispatcher) { cancellableResult { operations.recentlyPlayedTracks() } }
+                            val recentPlayed = async(ioDispatcher) { recentTracks() }
 
                             val recentItems = recentlyAdded.await().getOrElse { error ->
                                 errors += error
@@ -670,12 +687,15 @@ class ContentStore(
         val editorial = async(start = CoroutineStart.UNDISPATCHED) {
             withContext(ioDispatcher) { cancellableResult { operations.editorialBrowseShelves(languageTag) } }
         }
-        val charts = if (!editorial.isCompleted && _state.value.shelvesFor(Destination.Browse).isEmpty()) async {
+        val earlyEditorial = if (_state.value.shelvesFor(Destination.Browse).isEmpty()) {
+            withTimeoutOrNull(800L) { editorial.await() }
+        } else editorial.await()
+        val charts = if (earlyEditorial == null) async {
             val chartErrors = mutableListOf<Throwable>()
             loadBrowseCharts(chartErrors).also(::showBrowseCharts) to chartErrors
         } else null
 
-        val result = editorial.await()
+        val result = earlyEditorial ?: editorial.await()
         val shelves = result.getOrDefault(emptyList())
         if (shelves.isNotEmpty()) {
             charts?.cancel()

@@ -140,9 +140,10 @@ internal fun CarLyricRows(
     }
     val panel = clipped.then(edgeFade)
     if (!timed) {
+        val lineKeys = remember(sourceLines) { stableLazyKeys(sourceLines.map { it.hashCode().toString() }) }
         LazyColumn(panel, contentPadding = PaddingValues(top = 35.dp, bottom = 48.dp),
             verticalArrangement = Arrangement.spacedBy(LyricGap)) {
-            itemsIndexed(sourceLines) { _, line -> FlymeKaraokeLine(line, false, position, fontScale, static = true) }
+            itemsIndexed(sourceLines, key = { index, _ -> lineKeys[index] }) { _, line -> FlymeKaraokeLine(line, false, position, fontScale, static = true) }
         }
         return
     }

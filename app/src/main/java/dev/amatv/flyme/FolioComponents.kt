@@ -453,6 +453,7 @@ fun FolioMiniPlayerCapsule(
     onTogglePlayback: () -> Unit,
     onOpenPlayer: () -> Unit,
     modifier: Modifier = Modifier,
+    progressActive: Boolean = true,
 ) {
     val pillShape = RoundedCornerShape(FolioRadii.Capsule)
     val coverShape = RoundedCornerShape(FolioRadii.CapsuleCover)
@@ -461,6 +462,7 @@ fun FolioMiniPlayerCapsule(
         isPlaying = isPlaying,
         onTogglePlayback = onTogglePlayback,
         onOpenPlayer = onOpenPlayer,
+        progressActive = progressActive,
         pillShape = pillShape,
         coverShape = coverShape,
         coverSize = 48.dp,
@@ -490,12 +492,14 @@ fun FolioTopMiniPlayerCapsule(
     onOpenPlayer: () -> Unit,
     capsuleWidthDp: Dp,
     modifier: Modifier = Modifier,
+    progressActive: Boolean = true,
 ) {
     FolioMiniPlayerPill(
         track = track,
         isPlaying = isPlaying,
         onTogglePlayback = onTogglePlayback,
         onOpenPlayer = onOpenPlayer,
+        progressActive = progressActive,
         pillShape = CircleShape,
         coverShape = CircleShape,
         coverSize = 40.dp,
@@ -528,6 +532,7 @@ private fun FolioMiniPlayerPill(
     startPad: Dp,
     endPad: Dp,
     progressVerticalPad: Dp,
+    progressActive: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val palette = LocalFolioPalette.current
@@ -536,7 +541,7 @@ private fun FolioMiniPlayerPill(
 
     val app = LocalContext.current.applicationContext as AmAtvApplication
     val playbackState by app.playbackStore.state.collectAsState()
-    val position = rememberFolioPlaybackPositionMs(playbackState, active = true)
+    val position = rememberFolioPlaybackPositionMs(playbackState, active = progressActive)
     val durationMs = playbackState.snapshot?.durationMs ?: track.durationMs
     val motion = LocalFolioBrowseMotion.current
     val surface = palette.capsuleBg.copy(alpha = 1f)

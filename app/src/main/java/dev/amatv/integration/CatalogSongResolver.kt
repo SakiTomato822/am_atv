@@ -10,13 +10,17 @@ import kotlinx.coroutines.sync.withLock
 
 /** One account/storefront cache for library links and ordinary catalog recordings. */
 internal class CatalogSongResolver(
-    private val accountToken: () -> String?,
+    private val account: suspend () -> AccountSnapshot,
     private val storefront: suspend () -> String,
     private val libraryCatalogId: suspend (String) -> String,
     private val equivalentCatalogId: suspend (String, String) -> String,
     private val authorizationMessage: () -> String,
     private val maxEntries: Int = 64,
+    private val readLibraryMapping: (String, String, String) -> String? = { _, _, _ -> null },
+    private val saveLibraryMapping: (String, String, String, String) -> Unit = { _, _, _, _ -> },
 ) {
+    data class AccountSnapshot(val token: String?, val isCurrent: () -> Boolean)
+
     private data class Scope(val accountToken: String, val storefront: String)
 
     private class Flight {
@@ -38,37 +42,46 @@ internal class CatalogSongResolver(
     }
 
     suspend fun resolve(id: String): String {
-        val account = accountToken()?.takeIf(String::isNotBlank)
+        val (token, isCurrent) = account()
+        val accountToken = token?.takeIf(String::isNotBlank)
             ?: throw CatalogRequestException(CatalogFailureReason.Authorization, authorizationMessage())
-        val currentScope = Scope(account, storefront())
-        ensureCurrentAccount(account)
+        val currentScope = Scope(accountToken, storefront())
+        ensureCurrentAccount(isCurrent)
         synchronized(lock) {
             if (scope != currentScope) {
                 resolvedIds.clear()
                 scope = currentScope
             }
         }
-        return resolve(currentScope, id)
+        return resolve(currentScope, id, isCurrent)
     }
 
-    private suspend fun resolve(currentScope: Scope, id: String): String {
+    private suspend fun resolve(currentScope: Scope, id: String, isCurrent: () -> Boolean): String {
         val key = currentScope to id
         val flight = synchronized(lock) {
             flights.getOrPut(key, ::Flight).also { it.users++ }
         }
         try {
             return flight.mutex.withLock {
-                ensureCurrentAccount(currentScope.accountToken)
+                ensureCurrentAccount(isCurrent)
                 synchronized(lock) {
                     checkScope(currentScope)
                     resolvedIds[id]?.let { return@withLock it }
                 }
-                val catalogId = if (id.startsWith("i.")) libraryCatalogId(id) else id
-                val playable = if (catalogId == id) equivalentCatalogId(currentScope.storefront, id)
-                    else resolve(currentScope, catalogId)
-                ensureCurrentAccount(currentScope.accountToken)
+                val librarySong = id.startsWith("i.")
+                val saved = if (librarySong) readLibraryMapping(currentScope.accountToken, currentScope.storefront, id)
+                    else null
+                val playable = when {
+                    saved != null -> saved
+                    librarySong -> resolve(currentScope, libraryCatalogId(id), isCurrent)
+                    else -> equivalentCatalogId(currentScope.storefront, id)
+                }
+                ensureCurrentAccount(isCurrent)
                 synchronized(lock) {
                     checkScope(currentScope)
+                    if (librarySong && saved == null) {
+                        saveLibraryMapping(currentScope.accountToken, currentScope.storefront, id, playable)
+                    }
                     resolvedIds[id] = playable
                     resolvedIds[playable] = playable
                     while (resolvedIds.size > maxEntries) resolvedIds.remove(resolvedIds.keys.first())
@@ -86,9 +99,9 @@ internal class CatalogSongResolver(
         if (scope != expected) throw CancellationException("Catalog storefront changed during song resolution")
     }
 
-    private suspend fun ensureCurrentAccount(expected: String) {
+    private suspend fun ensureCurrentAccount(isCurrent: () -> Boolean) {
         currentCoroutineContext().ensureActive()
-        if (accountToken() != expected) {
+        if (!isCurrent()) {
             throw CancellationException("Catalog account changed during song resolution")
         }
     }

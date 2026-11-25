@@ -50,7 +50,7 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import coil3.SingletonImageLoader
+import dev.amatv.artwork.ArtworkImages
 import coil3.request.ImageRequest
 import coil3.request.allowHardware
 import coil3.toBitmap
@@ -706,7 +706,7 @@ internal fun rememberFolioBlurredCoverBitmap(
     LaunchedEffect(artworkUrl) {
         if (cachedUrl == artworkUrl && cachedBitmap != null) return@LaunchedEffect
         val blurred = withContext(Dispatchers.IO) {
-            val loader = SingletonImageLoader.get(context)
+            val loader = ArtworkImages.loader(context)
             val request = ImageRequest.Builder(context)
                 .data(artworkUrl)
                 .size(64)

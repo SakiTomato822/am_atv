@@ -94,34 +94,27 @@ class PlaybackStore(
     private val diagnostics: PlaybackDiagnostics? = null,
     private val playHistoryStore: PlayHistoryStore? = null,
 ) {
-    private val startupCheckpoint: PlaybackSession? =
-        sessions.restoreCheckpointSession()?.copy(wasPlaying = false)
-
-    private var currentDestination: Destination =
-        startupCheckpoint?.destination ?: sessions.activeTab
-    private var previousDestination: Destination =
-        startupCheckpoint?.previousDestination ?: sessions.activeTab
+    private var currentDestination: Destination = sessions.activeTab
+    private var previousDestination: Destination = currentDestination
+    private var navigationEdited = false
     private val navigationFlow = MutableStateFlow(currentDestination to previousDestination)
 
     /** The page shown and the one before it; a window that opens starts on these. */
     val navigation: StateFlow<Pair<Destination, Destination>> = navigationFlow.asStateFlow()
 
-    private val initialTrack: Track =
-        startupCheckpoint?.queue?.getOrNull(startupCheckpoint.currentIndex)
-            ?: MockCatalog.tracks.first()
+    private val initialTrack: Track = MockCatalog.tracks.first()
 
     private val _state = MutableStateFlow(
         PlaybackState(
             track = initialTrack,
-            hasCurrentTrack = startupCheckpoint != null || !player.isCatalogConfigured,
-            positionAnchorMs = startupCheckpoint?.positionMs
-                ?: if (initialTrack.catalogId == null) 7_500L else 0L,
+            hasCurrentTrack = !player.isCatalogConfigured,
+            positionAnchorMs = if (initialTrack.catalogId == null) 7_500L else 0L,
             playStartedRealtimeMs = clock(),
             isPlaying = false,
             playWhenReady = false,
             playbackPrepared = false,
             playbackMessage = null,
-            stationHistory = sessions.loadStationHistory(),
+            stationHistory = emptyList(),
             snapshot = null,
             startupSessionLoaded = false,
         ),
@@ -151,8 +144,7 @@ class PlaybackStore(
     private var manualNextLookahead: GaplessLookahead? = null
     private var completedOccurrence: NativeOccurrence? = null
     private var activeNativeItem: Pair<NativeOccurrence, Long>? = null
-    private var pendingRestore: PlaybackSession? =
-        startupCheckpoint?.takeIf { initialTrack.catalogId != null }
+    private var pendingRestore: PlaybackSession? = null
     private var playbackRequestJob: Job? = null
     private var requestTiming: GaplessTransition? = null
     private var selectionGeneration = 0L
@@ -274,6 +266,7 @@ class PlaybackStore(
     }
 
     fun setNavigation(destination: Destination, previous: Destination) {
+        navigationEdited = true
         currentDestination = destination
         previousDestination = previous
         navigationFlow.value = destination to previous
@@ -295,7 +288,26 @@ class PlaybackStore(
 
         // Load the full session on IO and replay any buffered user actions once.
         coroutineScope.launch {
-            startupCheckpoint?.let(queueController::restoreFromSession)
+            val checkpoint = withContext(ioDispatcher) { sessions.restoreCheckpointSession() }
+                ?.copy(wasPlaying = false)
+            if (checkpoint != null && selectionGeneration == 0L) {
+                val track = checkpoint.queue[checkpoint.currentIndex]
+                if (!navigationEdited) {
+                    currentDestination = checkpoint.destination
+                    previousDestination = checkpoint.previousDestination
+                    navigationFlow.value = currentDestination to previousDestination
+                }
+                queueController.restoreFromSession(checkpoint)
+                _state.value = _state.value.copy(
+                    track = track,
+                    hasCurrentTrack = true,
+                    positionAnchorMs = if (startupCursorEdited && _state.value.track.catalogId == track.catalogId) {
+                        _state.value.positionAnchorMs
+                    } else checkpoint.positionMs,
+                )
+                pendingRestore = checkpoint.copy(wasPlaying = _state.value.playWhenReady)
+                    .takeIf { track.catalogId != null }
+            }
             val fullSession = cancellableResult {
                 withContext(ioDispatcher) { sessions.restoreSession() }
             }.getOrNull()?.copy(wasPlaying = false)
@@ -448,7 +460,7 @@ class PlaybackStore(
                         lookaheadTiming = timing
                         val continued = _state.value.snapshot?.gaplessAdvanceCatalogId
                         if (continued == null || continued != current.catalogId) delayFn(1_500L)
-                        val resolved = cancellableResult { player.resolvePlayableTrack(next.second) }
+                        val resolved = cancellableResult { withContext(ioDispatcher) { player.resolvePlayableTrack(next.second) } }
                             .getOrNull() ?: return@collectLatest
                         timing?.mark(GaplessStage.Resolved, clock())
                         if (resolved.catalogId != next.second.catalogId) {
@@ -485,7 +497,7 @@ class PlaybackStore(
                     for (track in neighbors) {
                         launch {
                             // The shared account/storefront resolver caches this for playback.
-                            val resolved = cancellableResult { player.resolvePlayableTrack(track) }.getOrNull()
+                            val resolved = cancellableResult { withContext(ioDispatcher) { player.resolvePlayableTrack(track) } }.getOrNull()
                             if (resolved != null) player.prefetchLoudness(resolved)
                         }
                     }
@@ -663,8 +675,13 @@ class PlaybackStore(
 
         // Station history (Flyme): the songs a station played, kept across launches, like Apple Music's
         // played list. The queue view shows them before the current song while a station plays.
+        val stationHistoryLoad = coroutineScope.launch {
+            val history = withContext(ioDispatcher) { sessions.loadStationHistory() }
+            _state.value = _state.value.copy(stationHistory = history)
+        }
         if (flymeAuto) {
             coroutineScope.launch {
+                stationHistoryLoad.join()
                 combine(
                     _state.map { it.track.catalogId }.distinctUntilChanged(),
                     queueController.state.map { it.current?.track?.catalogKind == CatalogKind.Station }
@@ -727,7 +744,7 @@ class PlaybackStore(
                     else -> null
                 }
                 if (nativeGeneration == null) {
-                    val resolved = player.resolvePlayableTrack(nextTrack)
+                    val resolved = withContext(ioDispatcher) { player.resolvePlayableTrack(nextTrack) }
                     if (selection != selectionGeneration) return@launch
                     timing?.mark(GaplessStage.Resolved, clock())
                     val playableTrack = acceptResolvedTrack(nextTrack, resolved)
