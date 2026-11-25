@@ -12,24 +12,35 @@ import android.os.Process
 import android.view.Choreographer
 import android.view.Surface
 import android.view.TextureView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.roundToInt
 
 /** RC29's TextureView and worker-thread EGL pipeline, with a single welcome shader pass. */
-internal class FolioRibbonBackdropView(context: Context) : TextureView(context), TextureView.SurfaceTextureListener {
+internal class FolioRibbonBackdropView(context: Context, private val lifecycle: Lifecycle) :
+    TextureView(context), TextureView.SurfaceTextureListener {
     private val worker = RibbonRenderWorker()
     private var lastFrame: WelcomeRibbonFrame? = null
     private var lastRunning = false
+    private var open = false
+    // Stop on ON_STOP even when the window can no longer run a Compose frame.
+    private val lifecycleObserver = LifecycleEventObserver { _, _ ->
+        lastFrame?.let { update(it, open) }
+    }
 
     init {
         isOpaque = false
         isFocusable = false
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         surfaceTextureListener = this
+        lifecycle.addObserver(lifecycleObserver)
     }
 
-    fun update(frame: WelcomeRibbonFrame, running: Boolean) {
+    fun update(frame: WelcomeRibbonFrame, open: Boolean) {
+        this.open = open
+        val running = open && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
         if (frame == lastFrame && running == lastRunning) return
         lastFrame = frame
         lastRunning = running
@@ -59,7 +70,10 @@ internal class FolioRibbonBackdropView(context: Context) : TextureView(context),
         return false
     }
 
-    fun release() = worker.close()
+    fun release() {
+        lifecycle.removeObserver(lifecycleObserver)
+        worker.close()
+    }
 }
 
 private class RibbonRenderWorker {

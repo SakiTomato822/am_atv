@@ -193,7 +193,7 @@ private fun FolioWelcomeScreenContent(
 ) {
     val motion = LocalFolioBrowseMotion.current
     val lowPerformance = motion.lowPerformance || settingsState.lowPerformance
-    val animated = motion.animated
+    val animated = rememberWelcomeAnimationsEnabled()
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 

@@ -1,24 +1,52 @@
 package dev.amatv.flyme
 
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.compose.currentStateAsState
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
+
+@Composable
+internal fun rememberWelcomeAnimationsEnabled(): Boolean {
+    val resolver = LocalContext.current.contentResolver
+    val setting = Settings.Global.ANIMATOR_DURATION_SCALE
+    var animated by remember(resolver) { mutableStateOf(Settings.Global.getFloat(resolver, setting, 1f) > 0f) }
+    DisposableEffect(resolver) {
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                // The window manager may deliver ValueAnimator's cached scale on a later callback.
+                animated = Settings.Global.getFloat(resolver, setting, 1f) > 0f
+            }
+        }
+        resolver.registerContentObserver(Settings.Global.getUriFor(setting), false, observer)
+        observer.onChange(false)
+        onDispose { resolver.unregisterContentObserver(observer) }
+    }
+    return animated
+}
 
 @Composable
 internal fun WelcomeRibbonLayer(
@@ -38,28 +66,32 @@ internal fun WelcomeRibbonLayer(
     val secondary = lerp(target.secondaryColor, tint, if (light) 0.64f else 0.35f)
 
     if (motionEnabled) {
-        val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+        val lifecycle = LocalLifecycleOwner.current.lifecycle
         val colorA by animateColorAsState(primary, tween(1_400), label = "ribbon-primary")
         val colorB by animateColorAsState(secondary, tween(1_400), label = "ribbon-secondary")
         val opacity by animateFloatAsState(target.alpha, tween(1_100), label = "ribbon-opacity")
-        AndroidView(
-            factory = ::FolioRibbonBackdropView,
-            modifier = modifier.fillMaxSize(),
-            onRelease = FolioRibbonBackdropView::release,
-            update = { view ->
-                view.update(
-                    WelcomeRibbonFrame(base, colorA, colorB, opacity, gatherScale, ridgeAlpha, dragOffsetPx),
-                    running = open && lifecycleState.isAtLeast(Lifecycle.State.STARTED),
-                )
-            },
-        )
+        key(lifecycle) {
+            AndroidView(
+                factory = { FolioRibbonBackdropView(it, lifecycle) },
+                modifier = modifier.fillMaxSize(),
+                onRelease = FolioRibbonBackdropView::release,
+                update = { view ->
+                    view.update(
+                        WelcomeRibbonFrame(base, colorA, colorB, opacity, gatherScale, ridgeAlpha, dragOffsetPx),
+                        open,
+                    )
+                },
+            )
+        }
     } else {
         Box(modifier.fillMaxSize().drawWithCache {
             val bands = welcomeRibbons.flatMap { ribbon ->
                 val color = lerp(primary, secondary, ribbon.colorMix)
                 // Nested translucent paths approximate the shader's distance falloff in a cached still.
-                (0..7).map { band ->
-                    val radius = 1.30f - band * 0.15f
+                (0 until STATIC_FEATHER_STEPS).map { band ->
+                    val progress = band / STATIC_FEATHER_STEPS.toFloat()
+                    val innerProgress = (band + 1) / STATIC_FEATHER_STEPS.toFloat()
+                    val radius = 1f + 0.4f * ribbon.feather - (progress + innerProgress) * 0.7f * ribbon.feather
                     val path = Path().apply {
                         for (i in 0..64) {
                             val x = i / 64f
@@ -75,8 +107,10 @@ internal fun WelcomeRibbonLayer(
                     }
                     val stops = (0..8).map { i ->
                         val x = i / 8f
-                        val alpha = ribbon.opacity * ribbon.lightAt(x) * ribbonStrength(target.alpha) *
-                            if (band == 7) 0.19f else 0.13f
+                        val strength = ribbon.opacity * ribbon.lightAt(x) * ribbonStrength(target.alpha)
+                        val outer = strength * smoothstep(progress)
+                        val inner = strength * smoothstep(innerProgress)
+                        val alpha = (inner - outer) / (1f - outer)
                         x to color.copy(alpha = alpha)
                     }.toTypedArray()
                     path to Brush.horizontalGradient(*stops, endX = size.width)
@@ -100,8 +134,11 @@ internal data class WelcomeRibbonFrame(
     val dragOffsetPx: Float,
 )
 
-internal const val RIBBON_BASE_ALPHA = 0.56f
+internal const val RIBBON_BASE_ALPHA = 0.86f
+private const val STATIC_FEATHER_STEPS = 16
 internal fun ribbonStrength(alpha: Float) = 0.61f + 0.39f * alpha
+
+private fun smoothstep(t: Float) = t * t * (3f - 2f * t)
 
 internal data class WelcomeRibbon(
     val height: Float,
@@ -114,11 +151,11 @@ internal data class WelcomeRibbon(
     val colorMix: Float,
 ) {
     fun center(x: Float): Float = height + slope * (x - 0.5f) +
-        0.098f * sin(5.4f * x + phase) + 0.031f * sin(10.0f * x - phase)
+        0.098f * sin(5.4f * x + phase) + 0.031f * sin(10f * x - phase) + 0.024f * sin(phase)
 
     fun lightAt(x: Float): Float {
-        val side = ((kotlin.math.abs(x - 0.5f) - 0.10f) / 0.35f).coerceIn(0f, 1f)
-        return (0.64f + 0.36f * cos(5.3f * x + phase)) * (0.46f + 0.54f * side * side * (3f - 2f * side))
+        val side = ((abs(x - 0.5f) - 0.10f) / 0.35f).coerceIn(0f, 1f)
+        return (0.64f + 0.36f * cos(5.3f * x + phase)) * (0.46f + 0.54f * smoothstep(side))
     }
 }
 
