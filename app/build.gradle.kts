@@ -218,6 +218,7 @@ dependencies {
     implementation("io.github.kyant0:backdrop:1.0.6")
 
     testImplementation("junit:junit:4.13.2")
+    implementation("com.google.protobuf:protobuf-java:3.25.5")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
     testImplementation("org.json:json:20250517")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")

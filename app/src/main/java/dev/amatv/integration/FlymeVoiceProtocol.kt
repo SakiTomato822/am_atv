@@ -96,15 +96,25 @@ internal object FlymeVoiceProtocol {
         parameter: String,
         writeString: (String) -> Unit,
         writeByteArray: (ByteArray) -> Unit,
+    ) = writeMessage(MODULE, method, parameter.toByteArray(Charsets.UTF_8), writeString, writeByteArray)
+
+    fun writeMessage(
+        module: String,
+        method: String,
+        parameter: ByteArray,
+        writeString: (String) -> Unit,
+        writeByteArray: (ByteArray) -> Unit,
     ) {
         writeString(SERVICE)
-        writeString(MODULE)
+        writeString(module)
         writeString(method)
-        writeByteArray(parameter.toByteArray(Charsets.UTF_8))
+        writeByteArray(parameter)
         writeByteArray(byteArrayOf())
     }
 
-    fun readReply(parcel: Parcel): Reply? = with(parcel) {
+    fun readReply(parcel: Parcel): Reply<String>? = readReply(parcel) { it.toString(Charsets.UTF_8) }
+
+    fun <T> readReply(parcel: Parcel, decode: (ByteArray) -> T): Reply<T>? = with(parcel) {
         if (readInt() == 0) return null
         val brokerCode = readInt()
         val brokerMessage = readString()
@@ -113,15 +123,15 @@ internal object FlymeVoiceProtocol {
         if (className == null) return Reply(brokerCode, brokerMessage)
         check(className == SUPPORT_REPLY) { "Unexpected EAS reply class: $className" }
         Reply(brokerCode, brokerMessage, readInt(), readString(),
-            createByteArray()?.toString(Charsets.UTF_8), readStrongBinder())
+            createByteArray()?.let(decode), readStrongBinder())
     }
 
-    data class Reply(
+    data class Reply<T>(
         val brokerCode: Int,
         val brokerMessage: String?,
         val serviceCode: Int? = null,
         val serviceMessage: String? = null,
-        val data: String? = null,
+        val data: T? = null,
         val binder: IBinder? = null,
     ) {
         val accepted get() = brokerCode == 200 && serviceCode == 200

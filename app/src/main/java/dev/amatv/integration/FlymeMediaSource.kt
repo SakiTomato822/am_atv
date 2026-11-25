@@ -40,6 +40,7 @@ internal class FlymeMediaSource(
 ) {
     private val thread = HandlerThread("AM-FlymeMedia").apply { start() }
     private val worker = Handler(thread.looper)
+    private val appSourceWhitelist = FlymeAppSourceWhitelist(context, worker)
     private val workerDispatcher = worker.asCoroutineDispatcher()
     private val scope = CoroutineScope(workerDispatcher)
     private val main = Handler(context.mainLooper)
@@ -176,7 +177,12 @@ internal class FlymeMediaSource(
         context, worker, FlymeOpenApiBroker.ACTION, RegistrationPath.V4,
         onConnected = ::connectV4,
         onDisconnected = ::disconnectV4,
-        onUnavailable = ::disconnectV4,
+        onUnavailable = {
+            if (status.value.path == RegistrationPath.V4) {
+                appSourceWhitelist.unavailable("V4 MediaCenter Binder unavailable")
+            }
+            disconnectV4()
+        },
     )
 
     fun setCallbacks(value: PlaybackMediaSession.Callbacks?) {
@@ -238,6 +244,7 @@ internal class FlymeMediaSource(
         callbacks = null
         pendingSnapshot.set(null)
         worker.post {
+            appSourceWhitelist.release()
             registration?.let(::unregister)
             scope.cancel()
             v3Binding.unbind()
@@ -326,6 +333,9 @@ internal class FlymeMediaSource(
                 v4Binding.disconnected("DeadObjectException")
             } catch (error: Exception) {
                 Log.w(TAG, "V4 MediaCenter setup failed", error)
+                if (status.value.path == RegistrationPath.V4) {
+                    appSourceWhitelist.unavailable("V4 MediaCenter Binder unavailable")
+                }
                 disconnectV4()
             }
         }
@@ -335,6 +345,9 @@ internal class FlymeMediaSource(
         try {
             registerMedia(media, RegistrationPath.V4, reconnecting)
             updateVoiceSession()
+            if (registration?.path == RegistrationPath.V4) {
+                appSourceWhitelist.start(checkNotNull(broker))
+            }
         } catch (error: DeadObjectException) {
             Log.w(TAG, "V4 connection lost during MediaCenter registration", error)
             v4Binding.disconnected("DeadObjectException")
@@ -345,6 +358,7 @@ internal class FlymeMediaSource(
     }
 
     private fun disconnectV4() {
+        appSourceWhitelist.disconnect()
         brokerJob?.cancel()
         broker = null
         brokerMedia = null
@@ -419,6 +433,7 @@ internal class FlymeMediaSource(
         val accepted = rpc(current.media, MEDIA, 5, { writeStrongBinder(current.token) }, { readInt() != 0 })
         Log.i(TAG, "${current.path} requestPlay (5): accepted=$accepted")
         if (accepted) {
+            appSourceWhitelist.onFocus()
             // The session forwards the package/source callback only for its focused token.
             updateCurrentSourceType(current, "focused")
             // MediaCenter only forwards transaction 6 for its focused token.

@@ -132,7 +132,7 @@ internal class FlymeOpenApiBroker(private val remote: IBinder) {
         }
     }
 
-    fun call(method: String, param: String, binder: IBinder? = null): FlymeVoiceProtocol.Reply {
+    fun call(method: String, param: String, binder: IBinder? = null): FlymeVoiceProtocol.Reply<String> {
         val response = rpc(remote, BROKER, if (binder == null) 4 else 6, {
             writeInt(1)
             FlymeVoiceProtocol.writeMessage(method, param, ::writeString, ::writeByteArray)
@@ -141,6 +141,23 @@ internal class FlymeOpenApiBroker(private val remote: IBinder) {
         Log.i(TAG, "V4 $method: ${response?.describe() ?: "no reply"}")
         check(response?.accepted == true) { "EAS rejected $method" }
         return response
+    }
+
+    fun callSessionController(
+        method: String,
+        parameter: ByteArray = byteArrayOf(),
+        callback: IBinder? = null,
+    ): ByteArray? {
+        val response = rpc(remote, BROKER, if (callback == null) 4 else 6, {
+            writeInt(1)
+            FlymeVoiceProtocol.writeMessage("media_session_controller", method, parameter,
+                ::writeString, ::writeByteArray)
+            if (callback != null) writeStrongBinder(callback)
+        }, { FlymeVoiceProtocol.readReply(this) { it } })
+        check(response?.accepted == true) {
+            "$method rejected (broker=${response?.brokerCode}, service=${response?.serviceCode})"
+        }
+        return response.data
     }
 
     private class ConnectCallback(private val ready: CompletableDeferred<Unit>) : Binder() {
