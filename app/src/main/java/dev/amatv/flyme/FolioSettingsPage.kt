@@ -486,11 +486,7 @@ internal fun FolioSettingsPage(
     Row(
         modifier = Modifier
             .fillMaxSize()
-            .padding(
-                start = tierSpec.px,
-                end = tierSpec.pr,
-                top = 4.dp,
-            ),
+            .padding(tierSpec.rootContentPadding(bottom = 0.dp)),
         horizontalArrangement = Arrangement.spacedBy(28.dp),
     ) {
         if (tierSpec.showsSettingsSidebar) {

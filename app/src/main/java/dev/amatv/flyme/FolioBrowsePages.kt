@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -56,6 +55,7 @@ internal fun FolioHomePage(
     val homeShelves = contentState.shelvesFor(Destination.Home)
     val shelves = remember(homeShelves) { homeShelfOrder(homeShelves) }
     val loading = contentState.isLoading(Destination.Home)
+    val showSignInBanner = shouldShowUnsignedHomeBanner(connectionState)
 
     if (shelves.isEmpty()) {
         FolioEmptyOrLoadingState(
@@ -81,21 +81,16 @@ internal fun FolioHomePage(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = tierSpec.px,
-                end = tierSpec.pr,
-                top = 4.dp,
-                bottom = bottomPadding,
-            ),
+            contentPadding = tierSpec.rootContentPadding(bottomPadding),
         ) {
-            if (shouldShowUnsignedHomeBanner(connectionState)) {
+            if (showSignInBanner) {
                 item(key = "home-signin-banner", contentType = "signin-banner") {
                     UnsignedHomeSignInBanner(onSignIn = onSignIn)
                 }
             }
             shelves.forEachIndexed { shelfIdx, shelf ->
                 item(key = "home-sec-${shelf.id}", contentType = "section-title") {
-                    FolioSectionTitle(shelf.title)
+                    FolioSectionTitle(shelf.title, topPadding = if (shelfIdx == 0 && !showSignInBanner) 0.dp else 8.dp)
                 }
                 val rows = shelfRows[shelfIdx]
                 itemsIndexed(
@@ -140,7 +135,7 @@ private fun UnsignedHomeSignInBanner(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 6.dp, bottom = 14.dp),
+            .padding(bottom = 14.dp),
     ) {
         Row(
             modifier = Modifier
@@ -182,6 +177,7 @@ internal fun FolioBrowsePage(
     val listState = rememberFolioScrollToTopState(onRegisterScrollToTop)
     val shelves = contentState.shelvesFor(Destination.Browse)
     val loading = contentState.isLoading(Destination.Browse)
+    val showSignInBanner = shouldShowUnsignedHomeBanner(connectionState)
 
     if (shelves.isEmpty()) {
         FolioEmptyOrLoadingState(
@@ -202,14 +198,9 @@ internal fun FolioBrowsePage(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = tierSpec.px,
-                end = tierSpec.pr,
-                top = 4.dp,
-                bottom = bottomPadding,
-            ),
+            contentPadding = tierSpec.rootContentPadding(bottomPadding),
         ) {
-            if (shouldShowUnsignedHomeBanner(connectionState)) {
+            if (showSignInBanner) {
                 item(key = "home-signin-banner", contentType = "signin-banner") {
                     UnsignedHomeSignInBanner(onSignIn = onSignIn)
                 }
@@ -217,7 +208,7 @@ internal fun FolioBrowsePage(
             shelves.forEachIndexed { shelfIdx, shelf ->
                 if (shelf.title.isNotBlank()) {
                     item(key = "browse-sec-${shelf.id}", contentType = "section-title") {
-                        FolioSectionTitle(shelf.title)
+                        FolioSectionTitle(shelf.title, topPadding = if (shelfIdx == 0 && !showSignInBanner) 0.dp else 8.dp)
                     }
                 }
                 val rows = shelfRows[shelfIdx]

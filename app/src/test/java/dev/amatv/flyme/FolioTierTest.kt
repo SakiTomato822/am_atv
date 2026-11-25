@@ -7,6 +7,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FolioTierTest {
+    @Test
+    fun rootContentUsesLibrarysPivotGapAtEveryTier() {
+        for (tier in FolioTier.entries) {
+            val spec = specForTier(tier)
+            assertEquals(8.dp, spec.rootContentPadding(bottom = 40.dp).calculateTopPadding())
+        }
+    }
 
     @Test
     fun classifiesAllReferenceDevicesFromH5Prototype() {

@@ -250,6 +250,21 @@ internal fun nearestScrubTabIndex(pointerX: Float, tabCentersPx: List<Float>): I
     return bestIndex
 }
 
+internal class FolioPivotScrub(private val startPage: Int, private val onPage: (Int) -> Unit) {
+    private var targetPage = startPage
+
+    fun highlight(page: Int?) {
+        if (page != null && page != targetPage) {
+            targetPage = page
+            onPage(page)
+        }
+    }
+
+    fun finish(cancelled: Boolean) {
+        if (cancelled) highlight(startPage)
+    }
+}
+
 /** Metro pivot title strip supporting multi-title trailing alignment, hold-to-scrub switching, and tap-to-scroll-top. */
 @Composable
 internal fun FolioPivotBar(
@@ -257,6 +272,7 @@ internal fun FolioPivotBar(
     pageProgress: () -> Float,
     selectedPage: Int,
     onSelectPage: (Int) -> Unit,
+    onScrubPage: (Int) -> Unit,
     modifier: Modifier = Modifier,
     onScrollCurrentPageToTop: () -> Unit = {},
     onRightEdgePxChanged: (Int) -> Unit = {},
@@ -268,17 +284,19 @@ internal fun FolioPivotBar(
     val density = LocalDensity.current
     val viewConfiguration = LocalViewConfiguration.current
     val haptic = LocalHapticFeedback.current
-    val scope = rememberCoroutineScope()
 
     val maxIndex = (titles.size - 1).coerceAtLeast(0)
 
     var isScrubbing by remember { mutableStateOf(false) }
+    var scrubStartProgress by remember { mutableFloatStateOf(0f) }
     var scrubHighlightedPage by remember { mutableStateOf<Int?>(null) }
     val scrubCentersRef = remember { mutableListOf<Float>() }
     var barHeightPx by remember { mutableIntStateOf(0) }
 
     val latestSelectedPage by rememberUpdatedState(selectedPage)
+    val latestPageProgress by rememberUpdatedState(pageProgress)
     val latestOnSelectPage by rememberUpdatedState(onSelectPage)
+    val latestOnScrubPage by rememberUpdatedState(onScrubPage)
     val latestOnScrollToTop by rememberUpdatedState(onScrollCurrentPageToTop)
 
     val scrubProgress by animateFloatAsState(
@@ -330,33 +348,37 @@ internal fun FolioPivotBar(
 
                     if (abortedBeforeHold || timedOut != null) return@awaitEachGesture
 
+                    val scrub = FolioPivotScrub(latestSelectedPage) { latestOnScrubPage(it) }
+                    fun highlight(pos: Offset) {
+                        scrubHighlightedPage = if (pos.y < -cancelMarginPx || pos.y > barHeightPx + cancelMarginPx) {
+                            null
+                        } else {
+                            nearestScrubTabIndex(pos.x, scrubCentersRef)
+                        }
+                        scrub.highlight(scrubHighlightedPage)
+                    }
+
+                    scrubStartProgress = latestPageProgress()
                     isScrubbing = true
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    var cancelled = lastPos.y < -cancelMarginPx || lastPos.y > barHeightPx + cancelMarginPx
-                    scrubHighlightedPage = if (cancelled) null else nearestScrubTabIndex(lastPos.x, scrubCentersRef)
-
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        val change = event.changes.firstOrNull { it.id == down.id } ?: event.changes.firstOrNull()
-                        if (change == null) {
-                            isScrubbing = false
-                            scrubHighlightedPage = null
-                            break
-                        }
-                        change.consume()
-                        val pos = change.position
-                        cancelled = pos.y < -cancelMarginPx || pos.y > barHeightPx + cancelMarginPx
-                        scrubHighlightedPage = if (cancelled) null else nearestScrubTabIndex(pos.x, scrubCentersRef)
-
-                        if (!change.pressed) {
-                            val target = scrubHighlightedPage
-                            isScrubbing = false
-                            scrubHighlightedPage = null
-                            if (!cancelled && target != null && target != latestSelectedPage) {
-                                latestOnSelectPage(target)
+                    var cancelled = true
+                    try {
+                        highlight(lastPos)
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (change.isConsumed) break
+                            change.consume()
+                            highlight(change.position)
+                            if (!change.pressed) {
+                                cancelled = scrubHighlightedPage == null
+                                break
                             }
-                            break
                         }
+                    } finally {
+                        scrub.finish(cancelled)
+                        isScrubbing = false
+                        scrubHighlightedPage = null
                     }
                 }
             }
@@ -449,7 +471,8 @@ internal fun FolioPivotBar(
             val gapPx = tierSpec.pvg.toPx()
             val pivotWidthPx = constraints.maxWidth.toFloat()
 
-            val progress = pageProgress().coerceIn(0f, maxIndex.toFloat())
+            val progress = (if (isScrubbing) scrubStartProgress else pageProgress())
+                .coerceIn(0f, maxIndex.toFloat())
             val lower = floor(progress).toInt()
             val upper = ceil(progress).toInt()
             val fraction = progress - lower

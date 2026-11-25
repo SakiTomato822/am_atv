@@ -182,6 +182,7 @@ internal fun FolioArtwork(
 fun FolioSectionTitle(
     text: String,
     modifier: Modifier = Modifier,
+    topPadding: Dp = 8.dp,
 ) {
     val palette = LocalFolioPalette.current
     val tierSpec = LocalFolioTierSpec.current
@@ -194,7 +195,7 @@ fun FolioSectionTitle(
         fontSize = tierSpec.secf,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
-        modifier = modifier.padding(top = 8.dp, bottom = 10.dp),
+        modifier = modifier.padding(top = topPadding, bottom = 10.dp),
     )
 }
 

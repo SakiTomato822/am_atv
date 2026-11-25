@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -132,19 +131,14 @@ internal fun FolioSearchPage(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = tierSpec.px,
-                end = tierSpec.pr,
-                top = 4.dp,
-                bottom = bottomPadding,
-            ),
+            contentPadding = tierSpec.rootContentPadding(bottomPadding),
         ) {
             item(key = "search-bar", contentType = "search-bar") {
                 val shape = RoundedCornerShape(24.dp)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 4.dp, bottom = 16.dp)
+                        .padding(bottom = 16.dp)
                         .height(48.dp)
                         .clip(shape)
                         .background(palette.rb)

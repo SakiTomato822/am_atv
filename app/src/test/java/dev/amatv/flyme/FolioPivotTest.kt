@@ -6,6 +6,27 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FolioPivotTest {
+    @Test
+    fun scrubSendsOnlyChangedHighlightsAndKeepsTheLastPageOnRelease() {
+        val pages = mutableListOf<Int>()
+        val scrub = FolioPivotScrub(1) { pages.add(it) }
+
+        listOf(1, 2, 2, 4, null, 3).forEach(scrub::highlight)
+        scrub.finish(cancelled = false)
+
+        assertEquals(listOf(2, 4, 3), pages)
+    }
+
+    @Test
+    fun cancellingScrubSendsThePageFromBeforeTheHold() {
+        val pages = mutableListOf<Int>()
+        val scrub = FolioPivotScrub(2) { pages.add(it) }
+
+        listOf(2, 0, 1, null).forEach(scrub::highlight)
+        scrub.finish(cancelled = true)
+
+        assertEquals(listOf(0, 1, 2), pages)
+    }
 
     @Test
     fun firstPageAlignsAtLeftInsetWithoutPeeking() {

@@ -1,11 +1,23 @@
 package dev.amatv.flyme
 
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
+internal object FolioSpacing {
+    val PivotToContent = 8.dp
+}
+
+internal fun FolioTierSpec.rootContentPadding(bottom: Dp) = PaddingValues(
+    start = px,
+    end = pr,
+    top = FolioSpacing.PivotToContent,
+    bottom = bottom,
+)
 
 /** Five responsive layout tiers matching H5 prototype `flyme15-app.html`. */
 enum class FolioTier(val code: Char) {

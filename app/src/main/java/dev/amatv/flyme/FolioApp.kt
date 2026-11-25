@@ -79,6 +79,7 @@ import dev.amatv.model.Track
 import dev.amatv.model.openAction
 import dev.amatv.artwork.ArtworkImages
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -235,6 +236,15 @@ fun FolioApp(
     )
     var titleTransition by remember { mutableStateOf<FolioBrowseTabTransition?>(null) }
     val selectedPage = titleTransition?.to ?: pagerState.currentPage
+    var scrubScrollJob by remember { mutableStateOf<Job?>(null) }
+
+    fun scrollToScrubPage(index: Int) {
+        scrubScrollJob?.cancel()
+        scrubScrollJob = scope.launch {
+            if (settingsState.lowPerformance) pagerState.scrollToPage(index)
+            else pagerState.animateScrollToPage(index)
+        }
+    }
 
     LaunchedEffect(app, pagerState) {
         app.voiceDestination.collect { request ->
@@ -300,7 +310,7 @@ fun FolioApp(
         var sawUserDrag = false
         snapshotFlow { pagerState.isScrollInProgress to pagerState.currentPage }
             .collect { (scrolling, curPage) ->
-                if (scrolling && titleTransition == null && !welcomeOpen) {
+                if (scrolling && titleTransition == null && !welcomeOpen && scrubScrollJob?.isActive != true) {
                     sawUserDrag = true
                 } else if (!scrolling) {
                     if (sawUserDrag && curPage != settledPage) {
@@ -521,12 +531,19 @@ fun FolioApp(
                 var pivotRightEdgePx by remember { mutableIntStateOf(0) }
 
                 Box(Modifier.fillMaxSize()) {
+                    FolioLavaBackdrop(
+                        track = playbackState.track.takeIf { playbackState.hasCurrentTrack },
+                        palette = palette,
+                        useGl = firstFrameDrawn && !settingsState.lowPerformance,
+                        playerOpen = playerOpen,
+                        audioSpectrum = services::audioSpectrum,
+                        modifier = Modifier.matchParentSize(),
+                    )
                     FolioDetailLayer(
                         stack = detailStack,
                         navigation = browseNavigation,
                         modifier = Modifier.matchParentSize()
-                            .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)
-                            .folioAmbientBackground(palette),
+                            .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier),
                         homeShelves = contentState.shelvesFor(Destination.Home),
                         statusTop = statusTop,
                         navBottom = navBottom,
@@ -548,6 +565,7 @@ fun FolioApp(
                                 },
                                 selectedPage = selectedPage,
                                 onSelectPage = ::selectTab,
+                                onScrubPage = ::scrollToScrubPage,
                                 onScrollCurrentPageToTop = {
                                     scrollToTopHandlers[pagerState.currentPage]?.let { fn ->
                                         scope.launch { fn() }

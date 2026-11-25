@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -139,16 +138,11 @@ internal fun FolioLibraryPage(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = tierSpec.px,
-                end = tierSpec.pr,
-                top = 4.dp,
-                bottom = bottomPadding,
-            ),
+            contentPadding = tierSpec.rootContentPadding(bottomPadding),
         ) {
             item(key = "lib-chips", contentType = "category-chips") {
                 FlowRow(
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 14.dp),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
