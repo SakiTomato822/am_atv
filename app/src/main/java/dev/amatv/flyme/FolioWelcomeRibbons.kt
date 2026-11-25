@@ -1,52 +1,24 @@
 package dev.amatv.flyme
 
-import android.database.ContentObserver
-import android.os.Handler
-import android.os.Looper
-import android.provider.Settings
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
-
-@Composable
-internal fun rememberWelcomeAnimationsEnabled(): Boolean {
-    val resolver = LocalContext.current.contentResolver
-    val setting = Settings.Global.ANIMATOR_DURATION_SCALE
-    var animated by remember(resolver) { mutableStateOf(Settings.Global.getFloat(resolver, setting, 1f) > 0f) }
-    DisposableEffect(resolver) {
-        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-            override fun onChange(selfChange: Boolean) {
-                // The window manager may deliver ValueAnimator's cached scale on a later callback.
-                animated = Settings.Global.getFloat(resolver, setting, 1f) > 0f
-            }
-        }
-        resolver.registerContentObserver(Settings.Global.getUriFor(setting), false, observer)
-        observer.onChange(false)
-        onDispose { resolver.unregisterContentObserver(observer) }
-    }
-    return animated
-}
 
 @Composable
 internal fun WelcomeRibbonLayer(
@@ -77,54 +49,61 @@ internal fun WelcomeRibbonLayer(
                 onRelease = FolioRibbonBackdropView::release,
                 update = { view ->
                     view.update(
-                        WelcomeRibbonFrame(base, colorA, colorB, opacity, gatherScale, ridgeAlpha, dragOffsetPx),
+                        RibbonFrame(base, colorA, colorB, opacity, gatherScale, ridgeAlpha, dragOffsetPx),
                         open,
                     )
                 },
             )
         }
     } else {
-        Box(modifier.fillMaxSize().drawWithCache {
-            val bands = welcomeRibbons.flatMap { ribbon ->
-                val color = lerp(primary, secondary, ribbon.colorMix)
-                // Nested translucent paths approximate the shader's distance falloff in a cached still.
-                (0 until STATIC_FEATHER_STEPS).map { band ->
-                    val progress = band / STATIC_FEATHER_STEPS.toFloat()
-                    val innerProgress = (band + 1) / STATIC_FEATHER_STEPS.toFloat()
-                    val radius = 1f + 0.4f * ribbon.feather - (progress + innerProgress) * 0.7f * ribbon.feather
-                    val path = Path().apply {
-                        for (i in 0..64) {
-                            val x = i / 64f
-                            val y = ribbon.center(x) - ribbon.width * radius
-                            if (i == 0) moveTo(0f, y * size.height) else lineTo(x * size.width, y * size.height)
-                        }
-                        for (i in 64 downTo 0) {
-                            val x = i / 64f
-                            val y = ribbon.center(x) + ribbon.width * radius
-                            lineTo(x * size.width, y * size.height)
-                        }
-                        close()
-                    }
-                    val stops = (0..8).map { i ->
-                        val x = i / 8f
-                        val strength = ribbon.opacity * ribbon.lightAt(x) * ribbonStrength(target.alpha)
-                        val outer = strength * smoothstep(progress)
-                        val inner = strength * smoothstep(innerProgress)
-                        val alpha = (inner - outer) / (1f - outer)
-                        x to color.copy(alpha = alpha)
-                    }.toTypedArray()
-                    path to Brush.horizontalGradient(*stops, endX = size.width)
-                }
-            }
-            onDrawBehind {
-                drawRect(base.copy(alpha = RIBBON_BASE_ALPHA))
-                for ((path, brush) in bands) drawPath(path, brush)
-            }
-        })
+        StaticRibbonBackdrop(
+            RibbonFrame(base, primary, secondary, target.alpha, gatherScale, ridgeAlpha, dragOffsetPx),
+            modifier.fillMaxSize(),
+        )
     }
 }
 
-internal data class WelcomeRibbonFrame(
+@Composable
+internal fun StaticRibbonBackdrop(frame: RibbonFrame, modifier: Modifier) {
+    Box(modifier.drawWithCache {
+        val bands = welcomeRibbons.flatMap { ribbon ->
+            val color = lerp(frame.primary, frame.secondary, ribbon.colorMix)
+            // Nested translucent paths approximate the shader's distance falloff in a cached still.
+            (0..7).map { band ->
+                val feather = ribbon.feather * frame.preset.featherScale
+                val radius = 1f + 0.4f * feather - (band + 0.5f) / 8f * 1.4f * feather
+                val path = Path().apply {
+                    for (i in 0..64) {
+                        val x = i / 64f
+                        val y = ribbon.center(x) - ribbon.width * radius
+                        if (i == 0) moveTo(0f, y * size.height) else lineTo(x * size.width, y * size.height)
+                    }
+                    for (i in 64 downTo 0) {
+                        val x = i / 64f
+                        val y = ribbon.center(x) + ribbon.width * radius
+                        lineTo(x * size.width, y * size.height)
+                    }
+                    close()
+                }
+                val stops = (0..8).map { i ->
+                    val x = i / 8f
+                    val strength = ribbon.opacity * ribbon.lightAt(x) * frame.bandStrength
+                    val outer = strength * smoothstep(band / 8f)
+                    val inner = strength * smoothstep((band + 1) / 8f)
+                    val alpha = (inner - outer) / (1f - outer)
+                    x to color.copy(alpha = alpha)
+                }.toTypedArray()
+                path to Brush.horizontalGradient(*stops, endX = size.width)
+            }
+        }
+        onDrawBehind {
+            drawRect(frame.base.copy(alpha = frame.preset.baseAlpha))
+            for ((path, brush) in bands) drawPath(path, brush)
+        }
+    })
+}
+
+internal data class RibbonFrame(
     val base: Color,
     val primary: Color,
     val secondary: Color,
@@ -132,11 +111,23 @@ internal data class WelcomeRibbonFrame(
     val gatherScale: Float,
     val ridgeAlpha: Float,
     val dragOffsetPx: Float,
-)
+    val preset: RibbonPreset = RibbonPreset.Welcome,
+    val themeStrength: Float = 1f,
+) {
+    val bandStrength: Float
+        get() = (0.61f + 0.39f * opacity) * preset.brightness * themeStrength
+}
 
-internal const val RIBBON_BASE_ALPHA = 0.86f
-private const val STATIC_FEATHER_STEPS = 16
-internal fun ribbonStrength(alpha: Float) = 0.61f + 0.39f * alpha
+internal enum class RibbonPreset(
+    val brightness: Float,
+    val crestStrength: Float,
+    val featherScale: Float,
+    val periodScale: Float,
+    val baseAlpha: Float,
+) {
+    Welcome(1f, 1f, 1f, 1f, 0.86f),
+    Home(0.60f, 0.60f, 1.45f, 1.5f, 1f),
+}
 
 private fun smoothstep(t: Float) = t * t * (3f - 2f * t)
 

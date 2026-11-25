@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import dev.amatv.BuildConfig
 import dev.amatv.R
 import dev.amatv.core.AppearanceMode
+import dev.amatv.core.HomeBackgroundStyle
 import dev.amatv.core.AutoLowPerformanceReason
 import dev.amatv.core.LowPerformanceMode
 import dev.amatv.core.SettingsState
@@ -227,6 +228,16 @@ internal fun FolioSettingsPage(
                             label = stringResource(R.string.appearance_light_until, formatClockMinute(settings.lightUntilMinute)),
                             onDecrease = { settingsStore.setLightSchedule(settings.lightFromMinute, stepMinute(settings.lightUntilMinute, -30)) },
                             onIncrease = { settingsStore.setLightSchedule(settings.lightFromMinute, stepMinute(settings.lightUntilMinute, 30)) },
+                        )
+                    }
+                    SettingsRow(title = stringResource(R.string.home_background_style)) {
+                        FolioSegmentedPills(
+                            options = listOf(
+                                HomeBackgroundStyle.Lava to stringResource(R.string.home_background_lava),
+                                HomeBackgroundStyle.Ribbon to stringResource(R.string.home_background_ribbon),
+                            ),
+                            selected = settings.homeBackgroundStyle,
+                            onSelect = settingsStore::setHomeBackgroundStyle,
                         )
                     }
                     val performanceReason = when (settings.autoLowPerformanceReason) {

@@ -540,9 +540,10 @@ fun FolioApp(
                 var pivotRightEdgePx by remember { mutableIntStateOf(0) }
 
                 Box(Modifier.fillMaxSize()) {
-                    FolioLavaBackdrop(
+                    FolioHomeBackdrop(
                         track = playbackState.track.takeIf { playbackState.hasCurrentTrack },
                         palette = palette,
+                        style = settingsState.homeBackgroundStyle,
                         useGl = firstFrameDrawn && !settingsState.lowPerformance,
                         playerOpen = playerOpen,
                         isPlaying = playbackState.isPlaying,

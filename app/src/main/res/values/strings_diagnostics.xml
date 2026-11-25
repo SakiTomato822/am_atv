@@ -36,6 +36,9 @@
     <string name="playback_fade_playlists">Playlists</string>
     <string name="playback_station_mode_title">How stations play</string>
     <string name="playback_station_mode_summary">Some devices have no Widevine; song by song plays a station on the native player without it. Live radio always needs Widevine.</string>
+    <string name="home_background_style">Background style</string>
+    <string name="home_background_lava">Lava</string>
+    <string name="home_background_ribbon">Ribbon</string>
     <string name="appearance_title">Appearance</string>
     <string name="appearance_light">Light</string>
     <string name="appearance_dark">Dark</string>

@@ -22,10 +22,10 @@ import kotlin.math.roundToInt
 internal class FolioRibbonBackdropView(context: Context, private val lifecycle: Lifecycle) :
     TextureView(context), TextureView.SurfaceTextureListener {
     private val worker = RibbonRenderWorker()
-    private var lastFrame: WelcomeRibbonFrame? = null
+    private var lastFrame: RibbonFrame? = null
     private var lastRunning = false
     private var open = false
-    // Stop on ON_STOP even when the window can no longer run a Compose frame.
+    // Stop the worker on ON_STOP even when the window can no longer run a Compose frame.
     private val lifecycleObserver = LifecycleEventObserver { _, _ ->
         lastFrame?.let { update(it, open) }
     }
@@ -38,7 +38,7 @@ internal class FolioRibbonBackdropView(context: Context, private val lifecycle: 
         lifecycle.addObserver(lifecycleObserver)
     }
 
-    fun update(frame: WelcomeRibbonFrame, open: Boolean) {
+    fun update(frame: RibbonFrame, open: Boolean) {
         this.open = open
         val running = open && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
         if (frame == lastFrame && running == lastRunning) return
@@ -86,7 +86,7 @@ private class RibbonRenderWorker {
     private var height = 0
     private var viewWidth = 1
     private var egl: RibbonEglSession? = null
-    private lateinit var parameters: WelcomeRibbonFrame
+    private lateinit var parameters: RibbonFrame
     private var running = false
     private var scheduled = false
     private var previousFrame = 0L
@@ -117,7 +117,7 @@ private class RibbonRenderWorker {
         }
     }
 
-    fun update(parameters: WelcomeRibbonFrame, running: Boolean) = handler.post {
+    fun update(parameters: RibbonFrame, running: Boolean) = handler.post {
         if (closed) return@post
         this.parameters = parameters
         this.running = running
@@ -236,7 +236,7 @@ private class RibbonEglSession(private val texture: SurfaceTexture, width: Int, 
         bufferHeight = height
     }
 
-    fun draw(parameters: WelcomeRibbonFrame, elapsedSeconds: Float, viewWidth: Int) {
+    fun draw(parameters: RibbonFrame, elapsedSeconds: Float, viewWidth: Int) {
         check(EGL14.eglQuerySurface(display, surface, EGL14.EGL_WIDTH, surfaceSize, 0))
         check(EGL14.eglQuerySurface(display, surface, EGL14.EGL_HEIGHT, surfaceSize, 1))
         renderer.draw(surfaceSize[0], surfaceSize[1], parameters, elapsedSeconds, viewWidth)
@@ -258,7 +258,7 @@ private class RibbonEglSession(private val texture: SurfaceTexture, width: Int, 
     }
 }
 
-private class RibbonGlRenderer {
+internal class RibbonGlRenderer {
     private val vertices = ByteBuffer.allocateDirect(8 * Float.SIZE_BYTES).order(ByteOrder.nativeOrder())
         .asFloatBuffer().apply {
             put(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f))
@@ -270,22 +270,25 @@ private class RibbonGlRenderer {
     private val primary = GLES20.glGetUniformLocation(program, "primary")
     private val secondary = GLES20.glGetUniformLocation(program, "secondary")
     private val motion = GLES20.glGetUniformLocation(program, "motion")
+    private val appearance = GLES20.glGetUniformLocation(program, "appearance")
 
     init {
         GLES20.glDisable(GLES20.GL_DITHER)
-        GLES20.glUseProgram(program)
         GLES20.glEnableVertexAttribArray(0)
-        GLES20.glVertexAttribPointer(0, 2, GLES20.GL_FLOAT, false, 0, vertices)
     }
 
-    fun draw(width: Int, height: Int, frame: WelcomeRibbonFrame, seconds: Float, viewWidth: Int) {
+    fun draw(width: Int, height: Int, frame: RibbonFrame, seconds: Float, viewWidth: Int) {
+        GLES20.glUseProgram(program)
+        GLES20.glVertexAttribPointer(0, 2, GLES20.GL_FLOAT, false, 0, vertices)
         GLES20.glViewport(0, 0, width, height)
         GLES20.glUniform1f(time, seconds)
         GLES20.glUniform3f(base, frame.base.red, frame.base.green, frame.base.blue)
         GLES20.glUniform3f(primary, frame.primary.red, frame.primary.green, frame.primary.blue)
         GLES20.glUniform3f(secondary, frame.secondary.red, frame.secondary.green, frame.secondary.blue)
-        GLES20.glUniform4f(motion, frame.gatherScale, frame.ridgeAlpha, ribbonStrength(frame.opacity),
+        GLES20.glUniform4f(motion, frame.gatherScale, frame.ridgeAlpha, frame.bandStrength,
             frame.dragOffsetPx * 0.25f / viewWidth)
+        val preset = frame.preset
+        GLES20.glUniform4f(appearance, preset.crestStrength, preset.featherScale, preset.periodScale, preset.baseAlpha)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
     }
 
@@ -324,11 +327,12 @@ private class RibbonGlRenderer {
             varying vec2 uv;
             uniform float seconds;
             uniform vec3 base, primary, secondary;
-            uniform vec4 motion;
+            uniform vec4 motion, appearance;
 
             vec4 ribbon(vec2 p, float height, float phase, float slope, float width,
                         float feather, float opacity, float period, float colorMix) {
-                float t = 6.2831853 * seconds / period;
+                float t = 6.2831853 * seconds / (period * appearance.z);
+                feather *= appearance.y;
                 float wave = height + slope * (p.x - .5)
                     + .098 * sin(5.4 * p.x + phase + t)
                     + .031 * sin(10. * p.x - phase - t)
@@ -340,14 +344,14 @@ private class RibbonGlRenderer {
                     * mix(.46, 1., smoothstep(.10, .45, abs(p.x - .5)));
                 float alpha = body * light * opacity * motion.z;
                 vec3 color = mix(primary, secondary, colorMix) * (.76 + .24 * light);
-                color = mix(color, vec3(.84, .87, .98), crest * (.14 + .22 * light + motion.y));
+                color = mix(color, vec3(.84, .87, .98), crest * appearance.x * (.14 + .22 * light + motion.y));
                 return vec4(color * alpha, alpha);
             }
 
             void main() {
                 vec2 origin = vec2(.62, .42);
                 vec2 p = origin + (vec2(uv.x - motion.w, 1. - uv.y) - origin) / motion.x;
-                vec4 result = vec4(base * $RIBBON_BASE_ALPHA, $RIBBON_BASE_ALPHA);
+                vec4 result = vec4(base * appearance.w, appearance.w);
                 vec4 band;
                 ${welcomeRibbons.joinToString("\n") {
                     "band = ribbon(p, ${it.height}, ${it.phase}, ${it.slope}, ${it.width}, ${it.feather}, " +

@@ -369,6 +369,7 @@ class PlaybackStoreTest {
         override fun saveLyricPronunciationEnabled(enabled: Boolean) = Unit
         override fun saveLyricTranslationLanguageTag(tag: String) = Unit
         override fun saveLyricPronunciationLanguageTag(tag: String) = Unit
+        override fun saveHomeBackgroundStyle(style: HomeBackgroundStyle) = Unit
         override fun saveLyricStyle(style: LyricBackgroundStyle) = Unit
         override fun saveAppearance(appearance: AppearanceMode) = Unit
         override fun saveLightSchedule(fromMinute: Int, untilMinute: Int) = Unit

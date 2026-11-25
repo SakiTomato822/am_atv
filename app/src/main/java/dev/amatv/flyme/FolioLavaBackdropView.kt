@@ -15,15 +15,26 @@ import android.util.Log
 import android.view.Choreographer
 import android.view.Surface
 import android.view.TextureView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import dev.amatv.core.HomeBackgroundStyle
 import dev.amatv.integration.AudioSpectrum
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.roundToInt
 
 /** TextureView participates in the same composition as lyrics/focus; no separate surface hole. */
-internal class FolioLavaBackdropView(context: Context) : TextureView(context), TextureView.SurfaceTextureListener {
+internal class FolioLavaBackdropView(context: Context, private val lifecycle: Lifecycle) :
+    TextureView(context), TextureView.SurfaceTextureListener {
     private val worker = LavaRenderWorker()
     private var lastColors = FloatArray(0)
+    private var lastStyle = HomeBackgroundStyle.Lava
+    private var lastLight = false
+    private var playerOpen = false
+    private var isPlaying = false
+    private val lifecycleObserver = LifecycleEventObserver { _, _ ->
+        if (lastColors.isNotEmpty()) updateWorker(null)
+    }
     private var lastVisible = false
     private var lastRunning = false
 
@@ -32,16 +43,35 @@ internal class FolioLavaBackdropView(context: Context) : TextureView(context), T
         isFocusable = false
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         surfaceTextureListener = this
+        lifecycle.addObserver(lifecycleObserver)
     }
 
-    fun update(colors: FloatArray, visible: Boolean, running: Boolean, source: () -> AudioSpectrum) {
+    fun update(
+        colors: FloatArray,
+        style: HomeBackgroundStyle,
+        isLight: Boolean,
+        playerOpen: Boolean,
+        isPlaying: Boolean,
+        source: () -> AudioSpectrum,
+    ) {
         worker.spectrum = source
+        this.playerOpen = playerOpen
+        this.isPlaying = isPlaying
+        val styleChanged = style != lastStyle || isLight != lastLight
+        lastStyle = style
+        lastLight = isLight
         val newColors = colors.takeUnless { it.contentEquals(lastColors) }
-        if (newColors != null || visible != lastVisible || running != lastRunning) {
-            lastColors = colors
+        lastColors = colors
+        updateWorker(newColors, styleChanged)
+    }
+
+    private fun updateWorker(colors: FloatArray?, styleChanged: Boolean = false) {
+        val visible = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) && !playerOpen
+        val running = visible && isPlaying
+        if (colors != null || styleChanged || visible != lastVisible || running != lastRunning) {
             lastVisible = visible
             lastRunning = running
-            worker.update(newColors, visible, running)
+            worker.update(colors, lastStyle, lastLight, visible, running)
         }
     }
 
@@ -68,7 +98,10 @@ internal class FolioLavaBackdropView(context: Context) : TextureView(context), T
         return false
     }
 
-    fun release() = worker.close()
+    fun release() {
+        lifecycle.removeObserver(lifecycleObserver)
+        worker.close()
+    }
 
     companion object {
         const val MAX_FPS = 30
@@ -86,6 +119,9 @@ private class LavaRenderWorker {
     private var width = 0
     private var height = 0
     private var egl: LavaEglSession? = null
+    private var style = HomeBackgroundStyle.Lava
+    private var isLight = false
+    private var ribbonElapsedNanos = 0L
     private var visible = false
     private var running = false
     private var needsFrame = false
@@ -118,13 +154,23 @@ private class LavaRenderWorker {
                     maxOf(nextRenderNanos + FRAME_INTERVAL, timestamp + FRAME_INTERVAL / 2)
                 val elapsed = if (previousFrame == 0L) 0L else timestamp - previousFrame
                 previousFrame = timestamp
-                val measured = if (running) spectrum() else SILENCE
-                if (running) motion.advance(elapsed, measured)
+                val lava = style == HomeBackgroundStyle.Lava
+                val measured = if (running && lava) spectrum() else SILENCE
+                if (running) {
+                    if (lava) motion.advance(elapsed, measured) else ribbonElapsedNanos += elapsed
+                }
                 if (running || pausedCrossfade) paletteTime += elapsed
                 val start = System.nanoTime()
-                session.draw(motion, palette.sample(paletteTime))
+                val colors = palette.sample(paletteTime)
+                if (lava) {
+                    session.drawLava(motion, colors)
+                } else {
+                    // 7560 s is a common multiple of the home ribbon periods (30, 27, 24, 21 s).
+                    val seconds = (ribbonElapsedNanos % 7_560_000_000_000L) / 1_000_000_000f
+                    session.drawRibbon(homeRibbonFrame(colors, isLight), seconds)
+                }
                 val duration = System.nanoTime() - start
-                if (activeFrames < 300) {
+                if (lava && activeFrames < 300) {
                     drawNanos += duration
                     maximumDrawNanos = maxOf(maximumDrawNanos, duration)
                     bandMaximum[0] = maxOf(bandMaximum[0], motion.bass)
@@ -170,12 +216,21 @@ private class LavaRenderWorker {
         }
     }
 
-    fun update(colors: FloatArray?, visible: Boolean, running: Boolean) { handler.post {
+    fun update(
+        colors: FloatArray?,
+        style: HomeBackgroundStyle,
+        isLight: Boolean,
+        visible: Boolean,
+        running: Boolean,
+    ) { handler.post {
         if (closed) return@post
         if (this.running != running) {
             stopFrames()
             pausedCrossfade = false
         }
+        if (this.style != style || this.isLight != isLight) needsFrame = true
+        this.style = style
+        this.isLight = isLight
         this.visible = visible
         this.running = running
         if (colors != null) {
@@ -266,7 +321,8 @@ private class LavaEglSession(private val texture: SurfaceTexture, width: Int, he
     private var configuration: EGLConfig? = null
     private val surfaceSize = IntArray(2)
     private val window = Surface(texture)
-    private var renderer: LavaGlRenderer? = null
+    private var lavaRenderer: LavaGlRenderer? = null
+    private var ribbonRenderer: RibbonGlRenderer? = null
 
     init {
         try {
@@ -298,7 +354,6 @@ private class LavaEglSession(private val texture: SurfaceTexture, width: Int, he
             check(context != EGL14.EGL_NO_CONTEXT)
             configuration = checkNotNull(config)
             createWindowSurface(width, height)
-            renderer = LavaGlRenderer(surfaceSize[0], surfaceSize[1])
         } catch (error: Throwable) {
             release()
             throw error
@@ -322,7 +377,7 @@ private class LavaEglSession(private val texture: SurfaceTexture, width: Int, he
         check(EGL14.eglQuerySurface(display, eglSurface, EGL14.EGL_WIDTH, surfaceSize, 0))
         check(EGL14.eglQuerySurface(display, eglSurface, EGL14.EGL_HEIGHT, surfaceSize, 1))
         check(surfaceSize[0] > 0 && surfaceSize[1] > 0)
-        renderer?.resize(surfaceSize[0], surfaceSize[1])
+        lavaRenderer?.resize(surfaceSize[0], surfaceSize[1])
     }
 
     fun resize(width: Int, height: Int) {
@@ -338,15 +393,22 @@ private class LavaEglSession(private val texture: SurfaceTexture, width: Int, he
         bufferHeight = height
     }
 
-    fun draw(motion: BackdropMotion, colors: FloatArray) {
+    fun drawLava(motion: BackdropMotion, colors: FloatArray) {
         synchronizeViewport()
-        renderer?.draw(motion, colors)
+        val renderer = lavaRenderer ?: LavaGlRenderer(surfaceSize[0], surfaceSize[1]).also { lavaRenderer = it }
+        renderer.draw(motion, colors)
+    }
+
+    fun drawRibbon(frame: RibbonFrame, seconds: Float) {
+        synchronizeViewport()
+        val renderer = ribbonRenderer ?: RibbonGlRenderer().also { ribbonRenderer = it }
+        renderer.draw(surfaceSize[0], surfaceSize[1], frame, seconds, surfaceSize[0])
     }
     fun swap() { check(EGL14.eglSwapBuffers(display, eglSurface)) { "EGL swap failed: ${EGL14.eglGetError()}" } }
     fun release() {
         if (display != EGL14.EGL_NO_DISPLAY) {
-            renderer?.release()
-            renderer = null
+            lavaRenderer?.release()
+            ribbonRenderer?.release()
             EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
             if (eglSurface != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(display, eglSurface)
             if (context != EGL14.EGL_NO_CONTEXT) EGL14.eglDestroyContext(display, context)
@@ -401,7 +463,6 @@ private class LavaGlRenderer(private var width: Int, private var height: Int) {
         }
         halfFloatFormat = if (es3) 0x881A else GLES20.GL_RGBA // GL_RGBA16F on ES3
         GLES20.glEnableVertexAttribArray(0)
-        GLES20.glVertexAttribPointer(0, 2, GLES20.GL_FLOAT, false, 0, vertices)
         Log.i("AMATV-lava", "Native ${GLES20.glGetString(GLES20.GL_VERSION)} ${GLES20.glGetString(GLES20.GL_RENDERER)}; half-float candidate=${halfFloatType != 0}")
     }
 
@@ -419,6 +480,7 @@ private class LavaGlRenderer(private var width: Int, private var height: Int) {
     }
 
     fun draw(motion: BackdropMotion, palette: FloatArray) {
+        GLES20.glVertexAttribPointer(0, 2, GLES20.GL_FLOAT, false, 0, vertices)
         val aspect = width.toFloat() / height.coerceAtLeast(1)
         val lowHeight = 128
         val lowWidth = (lowHeight * aspect).roundToInt().coerceIn(64, 512)

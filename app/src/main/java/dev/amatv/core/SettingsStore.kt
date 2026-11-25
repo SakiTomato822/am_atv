@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 enum class AppearanceMode { Light, Dark, System, Time }
+enum class HomeBackgroundStyle { Lava, Ribbon }
+
 enum class LyricBackgroundStyle { Flow, Soak }
 
 data class SettingsState(
@@ -35,6 +37,7 @@ data class SettingsState(
     val lyricPronunciationLanguageTag: String = "en-US",
 
     // 车机外观与播放选项 (am_atv_flyme_playback)
+    val homeBackgroundStyle: HomeBackgroundStyle = HomeBackgroundStyle.Lava,
     val lyricStyle: LyricBackgroundStyle = LyricBackgroundStyle.Flow,
     val appearance: AppearanceMode = AppearanceMode.System,
     val lightFromMinute: Int = 7 * 60,
@@ -93,6 +96,7 @@ interface SettingsStorage {
     fun saveLyricTranslationLanguageTag(tag: String)
     fun saveLyricPronunciationLanguageTag(tag: String)
 
+    fun saveHomeBackgroundStyle(style: HomeBackgroundStyle)
     fun saveLyricStyle(style: LyricBackgroundStyle)
     fun saveAppearance(appearance: AppearanceMode)
     fun saveLightSchedule(fromMinute: Int, untilMinute: Int)
@@ -140,6 +144,11 @@ class SharedPreferencesSettingsStorage(context: Context) : SettingsStorage {
             lyricTranslationLanguageTag = playbackPrefs.getString(KEY_LYRIC_TRANSLATION_LANGUAGE, "").orEmpty(),
             lyricPronunciationLanguageTag = playbackPrefs.getString(KEY_LYRIC_PRONUNCIATION_LANGUAGE, "en-US")
                 .orEmpty().ifBlank { "en-US" },
+            homeBackgroundStyle = if (flymePrefs.getBoolean(KEY_HOME_RIBBON, false)) {
+                HomeBackgroundStyle.Ribbon
+            } else {
+                HomeBackgroundStyle.Lava
+            },
             lyricStyle = lyricStyle,
             appearance = appearance,
             lightFromMinute = flymePrefs.getInt(KEY_LIGHT_FROM, 7 * 60),
@@ -204,6 +213,10 @@ class SharedPreferencesSettingsStorage(context: Context) : SettingsStorage {
         playbackPrefs.edit().putString(KEY_LYRIC_PRONUNCIATION_LANGUAGE, tag).apply()
     }
 
+    override fun saveHomeBackgroundStyle(style: HomeBackgroundStyle) {
+        flymePrefs.edit().putBoolean(KEY_HOME_RIBBON, style == HomeBackgroundStyle.Ribbon).apply()
+    }
+
     override fun saveLyricStyle(style: LyricBackgroundStyle) {
         flymePrefs.edit().putBoolean(KEY_LYRIC_SOAK, style == LyricBackgroundStyle.Soak).apply()
     }
@@ -266,6 +279,7 @@ class SharedPreferencesSettingsStorage(context: Context) : SettingsStorage {
         const val KEY_FADE_STATIONS = "fade_stations"
         const val KEY_FADE_PLAYLISTS = "fade_playlists"
         const val KEY_STATIONS_AS_SONGS = "stations_as_songs"
+        const val KEY_HOME_RIBBON = "home_background_ribbon"
         const val KEY_LYRIC_SOAK = "lyric_style_soak"
 
         const val KEY_CACHE_ENABLED = "enabled"
@@ -353,6 +367,11 @@ class SettingsStore(
     fun setLyricPronunciationLanguageTag(tag: String) {
         mutableState.value = mutableState.value.copy(lyricPronunciationLanguageTag = tag)
         storage.saveLyricPronunciationLanguageTag(tag)
+    }
+
+    fun setHomeBackgroundStyle(style: HomeBackgroundStyle) {
+        mutableState.value = mutableState.value.copy(homeBackgroundStyle = style)
+        storage.saveHomeBackgroundStyle(style)
     }
 
     fun setLyricStyle(style: LyricBackgroundStyle) {

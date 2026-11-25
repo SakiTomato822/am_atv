@@ -26,6 +26,7 @@ class SettingsStoreTest {
         var savedLyricPronunciationEnabled: Boolean? = null
         var savedLyricTranslationLanguageTag: String? = null
         var savedLyricPronunciationLanguageTag: String? = null
+        var savedHomeBackgroundStyle: HomeBackgroundStyle? = null
         var savedLyricStyle: LyricBackgroundStyle? = null
         var savedAppearance: AppearanceMode? = null
         var savedLightFrom: Int? = null
@@ -38,6 +39,7 @@ class SettingsStoreTest {
         var savedCachePrefetchNextTwo: Boolean? = null
 
         override fun loadInitialState(): SettingsState = initial.copy(
+            homeBackgroundStyle = savedHomeBackgroundStyle ?: initial.homeBackgroundStyle,
             lowPerformanceMode = savedLowPerformanceMode ?: initial.lowPerformanceMode,
             playbackJankDetected = savedPlaybackJankDetected,
         )
@@ -57,6 +59,7 @@ class SettingsStoreTest {
         override fun saveLyricPronunciationEnabled(enabled: Boolean) { savedLyricPronunciationEnabled = enabled }
         override fun saveLyricTranslationLanguageTag(tag: String) { savedLyricTranslationLanguageTag = tag }
         override fun saveLyricPronunciationLanguageTag(tag: String) { savedLyricPronunciationLanguageTag = tag }
+        override fun saveHomeBackgroundStyle(style: HomeBackgroundStyle) { savedHomeBackgroundStyle = style }
         override fun saveLyricStyle(style: LyricBackgroundStyle) { savedLyricStyle = style }
         override fun saveAppearance(appearance: AppearanceMode) { savedAppearance = appearance }
         override fun saveLightSchedule(fromMinute: Int, untilMinute: Int) {
@@ -87,10 +90,24 @@ class SettingsStoreTest {
         assertEquals(0L, state.lyricOffsetMs)
         assertFalse(state.lyricTranslationEnabled)
         assertFalse(state.lyricPronunciationEnabled)
+        assertEquals(HomeBackgroundStyle.Lava, state.homeBackgroundStyle)
         assertEquals(LyricBackgroundStyle.Flow, state.lyricStyle)
         assertEquals(AppearanceMode.System, state.appearance)
         assertTrue(state.cacheDiskEnabled)
         assertTrue(state.cachePrefetchNextTwo)
+    }
+
+    @Test
+    fun persistsHomeBackgroundStyleAndPublishesItImmediately() {
+        val storage = FakeSettingsStorage()
+        val store = SettingsStore(storage)
+
+        store.setHomeBackgroundStyle(HomeBackgroundStyle.Ribbon)
+        assertEquals(HomeBackgroundStyle.Ribbon, store.state.value.homeBackgroundStyle)
+        assertEquals(HomeBackgroundStyle.Ribbon, SettingsStore(storage).state.value.homeBackgroundStyle)
+
+        store.setHomeBackgroundStyle(HomeBackgroundStyle.Lava)
+        assertEquals(HomeBackgroundStyle.Lava, SettingsStore(storage).state.value.homeBackgroundStyle)
     }
 
     @Test
