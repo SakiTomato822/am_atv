@@ -64,11 +64,11 @@ internal data class FolioArcGlintSpec(
 ) {
     companion object {
         val Loading = FolioArcGlintSpec(
-            bandWidthRatio = 0.28f,
-            arcRadiusRatio = 1.75f,
-            darkCoreAlpha = 0.20f,
-            lightCoreAlpha = 0.30f,
-            edgeTintFactor = 0.40f,
+            bandWidthRatio = 0.36f,
+            arcRadiusRatio = 1.70f,
+            darkCoreAlpha = 0.42f,
+            lightCoreAlpha = 0.56f,
+            edgeTintFactor = 0.52f,
             dispersionFringe = false,
             sweepMs = FolioLoadingShimmerTiming.SWEEP_DURATION_MS,
             pauseMs = FolioLoadingShimmerTiming.SWEEP_PAUSE_MS,
@@ -96,8 +96,8 @@ internal object FolioLoadingShimmerTiming {
     const val FADE_IN_MS: Int = 100
     const val SWEEP_DURATION_MS: Int = 1300
     const val SWEEP_PAUSE_MS: Int = 240
-    const val LOW_PERF_BREATH_ALPHA: Float = 0.10f
-    const val LOW_PERF_BREATH_MIN_FACTOR: Float = 0.35f
+    const val LOW_PERF_BREATH_ALPHA: Float = 0.20f
+    const val LOW_PERF_BREATH_MIN_FACTOR: Float = 0.30f
     const val LOW_PERF_BREATH_HALF_MS: Int = 800
 }
 
@@ -452,17 +452,20 @@ internal fun Modifier.folioArcGlint(
     if (isLightCover) {
         val core = Color.White.copy(alpha = spec.lightCoreAlpha)
         val trailTint = (albumTint ?: Color.White).copy(alpha = spec.lightCoreAlpha * spec.edgeTintFactor)
-        val leadingRim = Color.Black.copy(alpha = 0.06f)
-        val sTrail = sStart + (sMid - sStart) * 0.52f
-        val sLeadRim = sMid + (1f - sMid) * 0.72f
+        val leadingRim = Color.Black.copy(alpha = 0.14f)
+        val sTrail = sStart + (sMid - sStart) * 0.38f
+        val sCoreTrail = sStart + (sMid - sStart) * 0.76f
+        val sCoreLead = sMid + (1f - sMid) * 0.16f
+        val sLeadRim = sMid + (1f - sMid) * 0.64f
         colors = intArrayOf(
             Color.Transparent.toArgb(),
             trailTint.toArgb(),
             core.toArgb(),
+            core.toArgb(),
             leadingRim.toArgb(),
             Color.Transparent.toArgb(),
         )
-        stops = floatArrayOf(sStart, sTrail, sMid, sLeadRim, 1f)
+        stops = floatArrayOf(sStart, sTrail, sCoreTrail, sCoreLead, sLeadRim, 1f)
     } else {
         val core = Color.White.copy(alpha = spec.darkCoreAlpha)
         val baseTint = albumTint ?: Color.White
@@ -476,16 +479,19 @@ internal fun Modifier.folioArcGlint(
         } else {
             baseTint.copy(alpha = spec.darkCoreAlpha * spec.edgeTintFactor)
         }
-        val sTrail = sStart + (sMid - sStart) * 0.55f
-        val sLead = sMid + (1f - sMid) * 0.45f
+        val sTrail = sStart + (sMid - sStart) * 0.38f
+        val sCoreTrail = sStart + (sMid - sStart) * 0.78f
+        val sCoreLead = sMid + (1f - sMid) * 0.22f
+        val sLead = sMid + (1f - sMid) * 0.62f
         colors = intArrayOf(
             Color.Transparent.toArgb(),
             trailTint.toArgb(),
             core.toArgb(),
+            core.toArgb(),
             leadTint.toArgb(),
             Color.Transparent.toArgb(),
         )
-        stops = floatArrayOf(sStart, sTrail, sMid, sLead, 1f)
+        stops = floatArrayOf(sStart, sTrail, sCoreTrail, sCoreLead, sLead, 1f)
     }
 
     val shader = RadialGradient(

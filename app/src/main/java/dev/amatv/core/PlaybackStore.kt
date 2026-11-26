@@ -63,9 +63,11 @@ data class PlaybackState(
 
 /**
  * True while the current catalog track is actively loading:
- * - during resolve/prepare/queue-refill (`playWhenReady && !playbackPrepared`), or
- * - while prepared and the backing player reports buffering for the current track.
- * Excludes gapless adoption, paused switches, local tracks without a catalogId, errors, and ended items.
+ * - during resolve/prepare/queue-refill (`playWhenReady && !playbackPrepared`),
+ * - while prepared and the backing player reports buffering for the current track, or
+ * - while prepared at 0ms before audio actually begins (`!snap.isPlaying && !isPlaying && snap.positionMs == 0L`).
+ * Excludes gapless adoption, paused switches, mid-song focus pauses, local tracks without a catalogId,
+ * errors, and ended items.
  */
 val PlaybackState.isTrackLoading: Boolean
     get() {
@@ -76,7 +78,7 @@ val PlaybackState.isTrackLoading: Boolean
         if (snap?.errorMessage != null && (snap.currentTrack == null || matchesCurrent)) return false
         if (matchesCurrent && snap.isEnded) return false
         if (!playbackPrepared) return true
-        return matchesCurrent && snap.isBuffering
+        return matchesCurrent && (snap.isBuffering || (!snap.isPlaying && !isPlaying && snap.positionMs == 0L))
     }
 
 sealed interface PlaybackEvent {
