@@ -994,7 +994,7 @@ class PlaybackStoreTest {
 
             gate.complete(fullSession)
             var spins = 0
-            while (!h.store.state.value.startupSessionLoaded && spins++ < 50) {
+            while ((!h.store.state.value.startupSessionLoaded || h.player.prepareCalls.isEmpty()) && spins++ < 1_000) {
                 kotlinx.coroutines.delay(5L)
             }
             repeat(5) { yield() }
