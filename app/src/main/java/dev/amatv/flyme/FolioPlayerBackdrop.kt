@@ -16,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onPlaced
@@ -48,6 +49,23 @@ internal fun FolioPlayerBackdrop(
         val containerWidth = maxWidth
         val containerHeight = maxHeight
         val coordHolder = LocalFolioGlassEnv.current.coordHolder
+        // Poster mode has no foreground cover, so the loading sweep runs across the background cover.
+        val loadingShimmer = LocalFolioLoadingShimmer.current
+        val posterGlint = if (displayState == FolioPlayerDisplayState.Poster) {
+            Modifier.folioArcGlint(
+                progressState = loadingShimmer.progress,
+                visibilityState = loadingShimmer.visibility,
+                shape = RectangleShape,
+                coverLuminance = folioCoverLuminance(artworkPalette),
+                albumTint = folioGlassAlbumTint(artworkPalette),
+                lowPerformance = lowPerformance || reducedMotion,
+                spec = FolioArcGlintSpec.PosterBackdrop,
+                allowLowPerfBreathing = true,
+                lowPerfBreathState = loadingShimmer.lowPerfBreath,
+            )
+        } else {
+            Modifier
+        }
         val background: @Composable (LyricBackgroundStyle) -> Unit = { activeStyle ->
             Box(Modifier.fillMaxSize()) {
                 if (activeStyle == LyricBackgroundStyle.Flow) {
@@ -87,7 +105,8 @@ internal fun FolioPlayerBackdrop(
                                     track = track,
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .folioTrackSwitchCover(),
+                                        .folioTrackSwitchCover()
+                                        .then(posterGlint),
                                     animate = false,
                                     cornerRadius = 0.dp,
                                 )
@@ -118,7 +137,8 @@ internal fun FolioPlayerBackdrop(
                                     track = track,
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .folioTrackSwitchCover(),
+                                        .folioTrackSwitchCover()
+                                        .then(posterGlint),
                                     animate = false,
                                     cornerRadius = 0.dp,
                                 )

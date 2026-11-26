@@ -75,6 +75,14 @@ internal data class FolioArcGlintSpec(
             sweepEasing = CubicBezierEasing(0.32f, 0.0f, 0.22f, 1.0f),
         )
 
+        /** Poster mode: the loading sweep across the full-bleed background cover, with a wider band. */
+        val PosterBackdrop = Loading.copy(
+            bandWidthRatio = 0.55f,
+            arcRadiusRatio = 2.0f,
+            darkCoreAlpha = 0.34f,
+            lightCoreAlpha = 0.46f,
+        )
+
         val TrackSwitch = FolioArcGlintSpec(
             bandWidthRatio = 0.22f,
             arcRadiusRatio = 1.55f,

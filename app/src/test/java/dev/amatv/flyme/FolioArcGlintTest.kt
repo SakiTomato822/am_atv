@@ -410,4 +410,14 @@ class FolioArcGlintTest {
         assertTrue(folioCoverLuminance(listOf(Color(0xFFF4F1EC))) > FOLIO_COVER_LIGHT_LUMINANCE_THRESHOLD)
         assertEquals(0.25f, folioCoverLuminance(emptyList()), 0.001f)
     }
+
+    @Test
+    fun posterBackdropGlintIsWiderThanTheCoverGlintAndKeepsItsTiming() {
+        val poster = FolioArcGlintSpec.PosterBackdrop
+        val cover = FolioArcGlintSpec.Loading
+        assertTrue(poster.bandWidthRatio > cover.bandWidthRatio)
+        assertTrue(poster.lightCoreAlpha < cover.lightCoreAlpha)
+        assertEquals(cover.sweepMs, poster.sweepMs)
+        assertEquals(cover.pauseMs, poster.pauseMs)
+    }
 }
