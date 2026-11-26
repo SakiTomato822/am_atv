@@ -17,12 +17,21 @@ internal object LavaPalette {
         return FloatArray(15).also { result ->
             ordered.forEachIndexed { index, color ->
                 val rgb = channels(color)
-                if (isLight && homeRibbon) {
-                    // Keep the cover's hue, lift muted covers to a visible saturation and use a
-                    // lightness that reads on white. Index 0 is the near-white base tinted by that hue.
-                    val band = ribbonBand(rgb, lightness = if (index == 1) .58f else .66f)
+                if (homeRibbon) {
+                    // Keep the cover's hue and lift muted covers to a visible saturation. Light: bands
+                    // at mid lightness on a near-white base tinted by the hue. Dark: brighter bands on
+                    // a deep base of the same hue.
+                    val band = if (isLight) {
+                        ribbonBand(rgb, lightness = if (index == 1) .58f else .66f)
+                    } else {
+                        ribbonBand(rgb, lightness = if (index == 1) .46f else .40f)
+                    }
                     for (channel in 0..2) {
-                        result[index * 3 + channel] = if (index == 0) .90f + band[channel] * .10f else band[channel]
+                        result[index * 3 + channel] = when {
+                            index != 0 -> band[channel]
+                            isLight -> .90f + band[channel] * .10f
+                            else -> band[channel] * .30f
+                        }
                     }
                     return@forEachIndexed
                 }

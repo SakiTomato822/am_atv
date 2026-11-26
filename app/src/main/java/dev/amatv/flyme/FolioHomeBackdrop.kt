@@ -51,8 +51,8 @@ internal fun FolioHomeBackdrop(
         LavaPalette.from(colors.map { it.toArgb() }.toIntArray(), palette.isLight)
     }
     val backdropColors = remember(colors, lava, style, palette.isLight) {
-        if (style == HomeBackgroundStyle.Ribbon && palette.isLight) {
-            LavaPalette.from(colors.map { it.toArgb() }.toIntArray(), isLight = true, homeRibbon = true)
+        if (style == HomeBackgroundStyle.Ribbon) {
+            LavaPalette.from(colors.map { it.toArgb() }.toIntArray(), palette.isLight, homeRibbon = true)
         } else lava
     }
     val ambient = palette.copy(

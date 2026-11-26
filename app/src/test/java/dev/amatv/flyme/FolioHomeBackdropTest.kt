@@ -54,4 +54,15 @@ class FolioHomeBackdropTest {
         val grayPrimary = homeRibbonFrame(gray, isLight = true).primary
         assertEquals(grayPrimary.red, grayPrimary.blue, 0.01f)
     }
+
+    @Test
+    fun darkHomeRibbonKeepsMutedCoverHueVisible() {
+        val colors = LavaPalette.from(intArrayOf(0xff6b5f55.toInt()), isLight = false, homeRibbon = true)
+        val frame = homeRibbonFrame(colors, isLight = false)
+        val primary = frame.primary
+        assertTrue(maxOf(primary.red, primary.green, primary.blue) - minOf(primary.red, primary.green, primary.blue) > 0.25f)
+        assertTrue(primary.red > primary.blue)
+        assertTrue(maxOf(frame.base.red, frame.base.green, frame.base.blue) < 0.25f)
+        assertTrue(frame.base.red > frame.base.blue)
+    }
 }
