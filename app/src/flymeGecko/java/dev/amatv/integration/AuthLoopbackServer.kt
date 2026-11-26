@@ -15,7 +15,11 @@ import kotlin.concurrent.thread
  * origin for MusicKit's window.opener/postMessage protocol without weakening TLS.
  * No account input or token is posted here; Apple login remains on HTTPS pages.
  */
-internal class AuthLoopbackServer(page: (GeckoAuthOrigin) -> String) : Closeable {
+internal class AuthLoopbackServer(
+    host: String = "127.0.0.1",
+    private val iconPng: ByteArray? = null,
+    page: (GeckoAuthOrigin) -> String,
+) : Closeable {
     private val socket = ServerSocket().apply {
         bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 8)
     }
@@ -24,6 +28,7 @@ internal class AuthLoopbackServer(page: (GeckoAuthOrigin) -> String) : Closeable
         Base64.getUrlEncoder().withoutPadding().encodeToString(
             ByteArray(24).also { SecureRandom().nextBytes(it) },
         ),
+        host,
     )
     private val document = page(origin).toByteArray(Charsets.UTF_8)
     @Volatile private var closed = false
@@ -56,11 +61,15 @@ internal class AuthLoopbackServer(page: (GeckoAuthOrigin) -> String) : Closeable
             if (line.isEmpty()) break
             if (line.startsWith("Host:", ignoreCase = true)) host = line.substringAfter(':').trim()
         }
-        val accepted = parts[0] == "GET" && parts[1] == origin.path && host == origin.authority
-        val body = if (accepted) document else "Not found".toByteArray(Charsets.UTF_8)
-        val status = if (accepted) "200 OK" else "404 Not Found"
+        val (status, contentType, body) = when {
+            parts[0] == "GET" && host == origin.authority && parts[1] == origin.path ->
+                Triple("200 OK", "text/html; charset=utf-8", document)
+            parts[0] == "GET" && host == origin.authority && parts[1] == origin.iconPath && iconPng != null ->
+                Triple("200 OK", "image/png", iconPng)
+            else -> Triple("404 Not Found", "text/html; charset=utf-8", "Not found".toByteArray(Charsets.UTF_8))
+        }
         val headers = "HTTP/1.1 $status\r\n" +
-            "Content-Type: text/html; charset=utf-8\r\n" +
+            "Content-Type: $contentType\r\n" +
             "Content-Length: ${body.size}\r\n" +
             "Cache-Control: no-store\r\n" +
             "X-Content-Type-Options: nosniff\r\n" +

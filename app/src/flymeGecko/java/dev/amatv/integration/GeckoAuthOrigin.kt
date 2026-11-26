@@ -5,14 +5,16 @@ import java.net.URI
 import java.util.Base64
 
 /** An unguessable, one-attempt bootstrap with a real, non-opaque loopback origin. */
-internal data class GeckoAuthOrigin(val port: Int, val nonce: String) {
+internal data class GeckoAuthOrigin(val port: Int, val nonce: String, val host: String = "127.0.0.1") {
     val path: String = "/auth/$nonce/"
-    val authority: String = "127.0.0.1:$port"
+    val authority: String = "$host:$port"
     val url: String = "http://$authority$path"
+    val iconPath: String = "${path}icon.png"
+    val iconUrl: String = "http://$authority$iconPath"
 
     fun ownsUrl(value: String, allowFragment: Boolean = false): Boolean = runCatching {
         val uri = URI(value)
-        uri.scheme == "http" && uri.host == "127.0.0.1" && uri.port == port &&
+        uri.scheme == "http" && uri.host == host && uri.port == port &&
             uri.rawUserInfo == null && uri.rawPath == path && uri.rawQuery == null &&
             (allowFragment || uri.rawFragment == null)
     }.getOrDefault(false)

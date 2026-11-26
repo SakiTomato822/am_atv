@@ -104,8 +104,10 @@ class GeckoMusicKitAuthActivity : Activity() {
                 extension = engine.webExtensionController
                     .setAllowedInPrivateBrowsing(bridge, true).awaitResult()
                 val server = withContext(Dispatchers.IO) {
-                    AuthLoopbackServer { origin ->
-                        musicKitAuthorizationPage(this@GeckoMusicKitAuthActivity, developerToken, bridgeShim(origin))
+                    AuthLoopbackServer(host = "amfolio.localhost", iconPng = musicKitAuthorizationIcon()) { origin ->
+                        musicKitAuthorizationPage(
+                            this@GeckoMusicKitAuthActivity, developerToken, origin.iconUrl, bridgeShim(origin),
+                        )
                     }.also { createdServer = it }
                 }
                 loopback = server

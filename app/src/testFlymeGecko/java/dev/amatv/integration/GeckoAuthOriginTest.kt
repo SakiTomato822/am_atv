@@ -7,14 +7,16 @@ import org.junit.Test
 import java.util.Base64
 
 class GeckoAuthOriginTest {
-    private val origin = GeckoAuthOrigin(43210, "one-use-random-nonce")
+    private val origin = GeckoAuthOrigin(43210, "one-use-random-nonce", "amfolio.localhost")
 
     @Test fun tokenBridgeAcceptsOnlyTheExactAttemptOriginAndPath() {
         assertTrue(origin.ownsUrl(origin.url))
-        assertFalse(origin.ownsUrl("http://127.0.0.1:43211${origin.path}"))
-        assertFalse(origin.ownsUrl("http://127.0.0.1:43210/auth/old-attempt/"))
-        assertFalse(origin.ownsUrl("http://127.0.0.1.evil.example:43210${origin.path}"))
-        assertFalse(origin.ownsUrl("http://attacker@127.0.0.1:43210${origin.path}"))
+        assertFalse(origin.ownsUrl("http://127.0.0.1:43210${origin.path}"))
+        assertFalse(origin.ownsUrl("http://amfolio.localhost:43211${origin.path}"))
+        assertFalse(origin.ownsUrl("http://amfolio.localhost:43210/auth/old-attempt/"))
+        assertFalse(origin.ownsUrl("http://amfolio.localhost.evil.example:43210${origin.path}"))
+        assertFalse(origin.ownsUrl("http://attacker@amfolio.localhost:43210${origin.path}"))
+        assertFalse(origin.ownsUrl(origin.iconUrl))
         assertFalse(origin.ownsUrl(origin.url + "?token=untrusted"))
         assertFalse(origin.ownsUrl(origin.url + "#untrusted"))
         assertTrue(origin.ownsUrl(origin.url + "#callback", allowFragment = true))

@@ -1,21 +1,33 @@
 package dev.amatv.integration
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.text.TextUtils
+import androidx.core.graphics.drawable.toBitmap
 import dev.amatv.BuildConfig
 import dev.amatv.R
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 
 internal const val MUSIC_AUTH_JS_BRIDGE = "AndroidMusicAuth"
 
-/** Shared MusicKit page; each browser supplies only its native-message transport. */
+private const val MUSIC_AUTH_ICON_SIZE = 120
+
+internal fun Context.musicKitAuthorizationIcon(): ByteArray {
+    val icon = getDrawable(R.drawable.ic_launcher)!!.toBitmap(MUSIC_AUTH_ICON_SIZE, MUSIC_AUTH_ICON_SIZE)
+    return ByteArrayOutputStream().apply { icon.compress(Bitmap.CompressFormat.PNG, 100, this) }.toByteArray()
+}
+
+/** Shared MusicKit page for both browser transports. */
 internal fun musicKitAuthorizationPage(
     context: Context,
     developerToken: String,
+    iconUrl: String,
     bridgeSetupScript: String = "",
 ): String {
     val tokenLiteral = JSONObject.quote(developerToken)
     val buildLiteral = JSONObject.quote(BuildConfig.VERSION_NAME)
+    val iconLiteral = JSONObject.quote(iconUrl)
     val labels = JSONObject()
         .put("continue", context.getString(R.string.services_auth_continue))
         .put("componentFailed", context.getString(R.string.services_auth_component_failed))
@@ -28,6 +40,8 @@ internal fun musicKitAuthorizationPage(
           <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width,initial-scale=1">
+            <title>AM Folio</title>
+            <link rel="apple-music-app-icon" sizes="${MUSIC_AUTH_ICON_SIZE}x$MUSIC_AUTH_ICON_SIZE" href="${TextUtils.htmlEncode(iconUrl)}">
             <style>
               * { box-sizing: border-box; }
               body { margin: 0; min-height: 100vh; display: grid; place-items: center;
@@ -77,7 +91,7 @@ internal fun musicKitAuthorizationPage(
                 try {
                   var configuration = MusicKit.configure({
                     developerToken: $tokenLiteral,
-                    app: { name: 'AM for TV', build: $buildLiteral }
+                    app: { name: 'AM Folio', build: $buildLiteral, icon: $iconLiteral }
                   });
                   Promise.resolve(configuration).then(function() {
                     console.info('MusicKit ready');

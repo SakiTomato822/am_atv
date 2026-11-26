@@ -86,7 +86,7 @@ internal class GaplessFade {
         const val CHANNELS = 2
 
         fun limiter(enabled: Boolean) = DynamicsProcessing.Limiter(
-            true, enabled, 0, 1f, 60f, 100f, LOUDNESS_CEILING_DB, 0f,
+            true, enabled, 0, 0.5f, 80f, 20f, LOUDNESS_CEILING_DB, 0f,
         )
     }
 }

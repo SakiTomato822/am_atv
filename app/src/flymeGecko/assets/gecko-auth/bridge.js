@@ -25,7 +25,7 @@
 
   // The native side additionally checks the exact random origin/path, top-level
   // root session and per-attempt nonce. Apple frames never carry token messages.
-  if (window === window.top && location.protocol === "http:" && location.hostname === "127.0.0.1") {
+  if (window === window.top && location.protocol === "http:" && location.hostname === "amfolio.localhost") {
     send({ kind: "bootstrap-ready", secureContext: window.isSecureContext === true });
     window.addEventListener("message", function (event) {
       if (event.source !== window || event.origin !== location.origin) return;

@@ -43,7 +43,8 @@ internal class NativeTrackLoudness(
         val progress = rampStartMs?.let { ((nowMs - it) / RAMP_MS.toFloat()).coerceIn(0f, 1f) } ?: 1f
         if (progress == 1f) rampStartMs = null
         val targetGain = target.tag?.gainFor(mode) ?: 0f
-        lastGain = if (progress == 1f) targetGain else rampFromGain + (targetGain - rampFromGain) * progress
+        val rampGain = if (progress == 1f) targetGain else rampFromGain + (targetGain - rampFromGain) * progress
+        lastGain = minOf(rampGain, target.tag?.maxBoostDb ?: 0f)
         return lastGain
     }
 
@@ -57,14 +58,12 @@ internal class NativeTrackLoudness(
                 effect.attachment(session) == "attached" -> "apply-failed"
                 else -> effect.attachment(session)
             }
-            val targetHeadroomUsedDb = lookup.tag?.targetHeadroomUsedDb(mode) ?: 0f
             Log.i(
                 LOUDNESS_LOG,
                 "catalogId=${catalogId ?: "-"} tagDb=${lookup.tag?.gainDb ?: "-"} " +
                     "peakDbFS=${lookup.tag?.peakDb ?: "-"} mode=$mode appliedDb=$applied " +
                     "source=${lookup.source} reason=$reason scope=${if (album != null) "album" else "track"} " +
-                    "albumTracksKnown=${album?.tracksKnown ?: 0} " +
-                    "targetHeadroomUsed=${targetHeadroomUsedDb > 0f} targetHeadroomUsedDb=$targetHeadroomUsedDb",
+                    "albumTracksKnown=${album?.tracksKnown ?: 0}",
             )
             loggedLookup = lookup
             loggedAlbum = album

@@ -4,8 +4,8 @@ import java.nio.ByteBuffer
 import kotlin.math.log10
 import kotlin.math.pow
 
-enum class LoudnessMode(val offsetDb: Float, internal val peakHeadroomDb: Float) {
-    Off(0f, 0f), Standard(0f, 0f), Loud(4f, 6f), Loudest(7f, 9f);
+enum class LoudnessMode(val offsetDb: Float, internal val cutPeakDb: Float) {
+    Off(0f, -1f), Standard(0f, -1f), Loud(4f, 5f), Loudest(7f, 8f);
 
     companion object {
         internal fun fromPreference(value: String?): LoudnessMode =
@@ -14,6 +14,7 @@ enum class LoudnessMode(val offsetDb: Float, internal val peakHeadroomDb: Float)
 }
 
 internal const val LOUDNESS_CEILING_DB = -1f
+internal const val LOUDNESS_BOOST_CEILING_DB = LOUDNESS_CEILING_DB - 2f
 
 /**
  * Sound Check tags come from the 30-second preview, usually the loudest chorus, so dense masters
@@ -25,18 +26,19 @@ internal const val LOUDNESS_PREF = "loudness_mode"
 internal const val FLYME_PLAYBACK_PREFS = "am_atv_flyme_playback"
 
 internal data class SoundCheck(val gainDb: Float, val peakDb: Float) {
-    private val peakLimitedGainDb: Float get() = LOUDNESS_CEILING_DB - peakDb
+    // Reserve 2 dB for peaks the 30-second preview may underestimate.
+    val maxBoostDb: Float get() = (LOUDNESS_BOOST_CEILING_DB - peakDb).coerceAtLeast(0f)
 
     fun gainFor(mode: LoudnessMode): Float {
         if (mode == LoudnessMode.Off) return 0f
-        val gain = minOf(gainDb + mode.offsetDb, peakLimitedGainDb + mode.peakHeadroomDb)
+        val requested = gainDb + mode.offsetDb
+        // Retain the previous attenuation even for tags above a mode's old peak cap.
+        val cut = minOf(requested, mode.cutPeakDb - peakDb, 0f)
+        val gain = if (cut < 0f) cut else minOf(requested, maxBoostDb)
         return if (gain < LOUDNESS_CUT_KNEE_DB) {
             LOUDNESS_CUT_KNEE_DB + (gain - LOUDNESS_CUT_KNEE_DB) * LOUDNESS_CUT_RATIO
         } else gain
     }
-
-    fun targetHeadroomUsedDb(mode: LoudnessMode): Float =
-        (gainFor(mode) - peakLimitedGainDb).coerceIn(0f, mode.peakHeadroomDb)
 }
 
 /**

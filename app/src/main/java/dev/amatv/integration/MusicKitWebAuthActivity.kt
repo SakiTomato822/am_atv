@@ -230,6 +230,13 @@ class MusicKitWebAuthActivity : Activity() {
                 }
             }
             webViewClient = object : WebViewClient() {
+                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                    if (request.isForMainFrame || request.method != "GET" || request.url.toString() != AUTH_ICON_URL) {
+                        return null
+                    }
+                    return WebResourceResponse("image/png", null, authIconPng.inputStream())
+                }
+
                 override fun shouldOverrideUrlLoading(
                     view: WebView?,
                     request: WebResourceRequest?,
@@ -415,8 +422,10 @@ class MusicKitWebAuthActivity : Activity() {
         "${uri.host.orEmpty()}${uri.path.orEmpty()}"
     }.getOrDefault("unknown")
 
+    private val authIconPng by lazy { musicKitAuthorizationIcon() }
+
     private fun authorizationPage(developerToken: String): String =
-        musicKitAuthorizationPage(this, developerToken)
+        musicKitAuthorizationPage(this, developerToken, AUTH_ICON_URL)
 
     private fun showStatus(message: String, onRetry: (() -> Unit)? = null) = runOnUiThread {
         status.text = message
@@ -493,6 +502,7 @@ class MusicKitWebAuthActivity : Activity() {
         const val EXTRA_ERROR = "dev.amatv.extra.AUTH_ERROR"
         private const val JS_BRIDGE = "AndroidMusicAuth"
         private const val AUTH_ORIGIN = "https://am-atv.local/"
+        private const val AUTH_ICON_URL = "${AUTH_ORIGIN}icon.png"
         private const val TAG = "MusicKitWebAuth"
         private const val POPUP_INITIAL_PROBE_DELAY_MS = 1_200L
         private const val POPUP_PROBE_INTERVAL_MS = 500L
