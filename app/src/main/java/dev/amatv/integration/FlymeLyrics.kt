@@ -28,6 +28,10 @@ internal class FlymeLyrics private constructor(private val lines: List<Line>, va
                 appendLine("[ti:${singleLine(track.title)}]")
                 appendLine("[ar:${singleLine(track.artist)}]")
                 append("[al:${singleLine(track.album)}]")
+                // The panel highlights its first row until playback reaches the next one.
+                if (lines.first().startMs > 0) {
+                    append("\n[00:00.00]${singleLine(track.title)} - ${singleLine(track.artist)}")
+                }
                 for (line in lines) {
                     append('\n')
                     append(timestamp(line.startMs))

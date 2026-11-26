@@ -25,7 +25,7 @@ class FlymeLyricsTest {
 
         assertEquals(3, lyrics.lineCount)
         assertEquals(
-            "[ti:Title]\n[ar:Artist]\n[al:Album]\n[00:01.23]line one\n[10:00.00]line two\n[01:40:01.98]line three",
+            "[ti:Title]\n[ar:Artist]\n[al:Album]\n[00:00.00]Title - Artist\n[00:01.23]line one\n[10:00.00]line two\n[01:40:01.98]line three",
             lyrics.lrc,
         )
         assertEquals("", lyrics.sentence(lyrics.indexAt(1_238)))
