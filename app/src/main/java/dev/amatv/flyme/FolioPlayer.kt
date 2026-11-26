@@ -93,7 +93,6 @@ import dev.amatv.core.StartupQueueAction
 import dev.amatv.core.isTrackLoading
 import dev.amatv.integration.LyricTextSize
 import dev.amatv.integration.LyricsLocalizationRequest
-import dev.amatv.integration.MusicConnectionState
 import dev.amatv.model.CatalogKind
 import dev.amatv.model.Track
 import dev.amatv.model.forDisplay
@@ -121,36 +120,37 @@ internal fun BoxScope.FolioPlayerLayer(
 ) {
     val app = LocalContext.current.applicationContext as AmAtvApplication
     val settingsStore = app.settingsStore
-    val accountStore = app.accountStore
     val lyricsStore = app.lyricsStore
     val libraryActions = app.libraryActions
     val playbackStore = app.playbackStore
     val musicServices = app.musicServices
 
     val settings by settingsStore.state.collectAsState()
-    val accountState by accountStore.state.collectAsState()
+    val accountState by app.accountStore.state.collectAsState()
     val lyricsState by lyricsStore.state.collectAsState()
     val libraryState by libraryActions.state.collectAsState()
     val playbackState by playbackStore.state.collectAsState()
     val queueState by playbackStore.queueController.state.collectAsState()
 
     val track = playbackState.track
-    val signedIn = accountState.connectionState == MusicConnectionState.SignedIn
+    val signedIn = accountState.isSignedIn
     val currentIdentity = remember(track) { track.lyricsIdentity() }
 
-    LaunchedEffect(
-        currentIdentity,
-        playbackState.hasCurrentTrack,
-        signedIn,
-        settings.lyricTranslationEnabled,
-        settings.lyricPronunciationEnabled,
-        settings.lyricTranslationLanguageTag,
-        settings.lyricPronunciationLanguageTag,
-    ) {
-        lyricsStore.setCurrentTrack(
-            track = if (playbackState.hasCurrentTrack) track else null,
-            isSignedIn = signedIn,
-        )
+    if (!BuildConfig.FLYME_NATIVE_MEDIA) {
+        LaunchedEffect(
+            currentIdentity,
+            playbackState.hasCurrentTrack,
+            signedIn,
+            settings.lyricTranslationEnabled,
+            settings.lyricPronunciationEnabled,
+            settings.lyricTranslationLanguageTag,
+            settings.lyricPronunciationLanguageTag,
+        ) {
+            lyricsStore.setCurrentTrack(
+                track = if (playbackState.hasCurrentTrack) track else null,
+                isSignedIn = signedIn,
+            )
+        }
     }
 
     AnimatedVisibility(

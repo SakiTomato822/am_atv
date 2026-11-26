@@ -50,6 +50,11 @@ internal fun FolioHomeBackdrop(
     val lava = remember(colors, palette.isLight) {
         LavaPalette.from(colors.map { it.toArgb() }.toIntArray(), palette.isLight)
     }
+    val backdropColors = remember(colors, lava, style, palette.isLight) {
+        if (style == HomeBackgroundStyle.Ribbon && palette.isLight) {
+            LavaPalette.from(colors.map { it.toArgb() }.toIntArray(), isLight = true, homeRibbon = true)
+        } else lava
+    }
     val ambient = palette.copy(
         glowTopRight = Color(lava[3], lava[4], lava[5], alpha = 0.80f),
         glowBottomLeft = Color(lava[6], lava[7], lava[8], alpha = 0.80f),
@@ -58,14 +63,14 @@ internal fun FolioHomeBackdrop(
     when (mode) {
         HomeBackdropMode.Ambient -> Box(modifier.folioAmbientBackground(palette))
         HomeBackdropMode.StaticLava -> Box(modifier.folioAmbientBackground(ambient))
-        HomeBackdropMode.StaticRibbon -> StaticRibbonBackdrop(homeRibbonFrame(lava, palette.isLight), modifier)
+        HomeBackdropMode.StaticRibbon -> StaticRibbonBackdrop(homeRibbonFrame(backdropColors, palette.isLight), modifier)
         HomeBackdropMode.Animated -> {
             val lifecycle = LocalLifecycleOwner.current.lifecycle
             Box(modifier.folioAmbientBackground(ambient)) {
                 key(lifecycle) {
                     AndroidView(
                         factory = { FolioLavaBackdropView(it, lifecycle) },
-                        update = { it.update(lava, style, palette.isLight, playerOpen, isPlaying, audioSpectrum) },
+                        update = { it.update(backdropColors, style, palette.isLight, playerOpen, isPlaying, audioSpectrum) },
                         onRelease = FolioLavaBackdropView::release,
                         modifier = Modifier.matchParentSize(),
                     )
@@ -83,6 +88,5 @@ internal fun homeRibbonFrame(colors: FloatArray, isLight: Boolean): RibbonFrame 
     gatherScale = 1f,
     ridgeAlpha = 0f,
     dragOffsetPx = 0f,
-    preset = RibbonPreset.Home,
-    themeStrength = if (isLight) 0.55f else 1f,
+    preset = if (isLight) RibbonPreset.HomeLight else RibbonPreset.Home,
 )

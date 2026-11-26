@@ -10,14 +10,21 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 @Composable
@@ -66,39 +73,65 @@ internal fun WelcomeRibbonLayer(
 @Composable
 internal fun StaticRibbonBackdrop(frame: RibbonFrame, modifier: Modifier) {
     Box(modifier.drawWithCache {
+        val home = frame.preset != RibbonPreset.Welcome
+        val bandCount = if (home) 32 else 8
+        val drawSize = if (home) {
+            val scale = (480f / size.width).coerceAtMost(1f)
+            Size(
+                (size.width * scale).roundToInt().coerceAtLeast(1).toFloat(),
+                (size.height * scale).roundToInt().coerceAtLeast(1).toFloat(),
+            )
+        } else size
         val bands = welcomeRibbons.flatMap { ribbon ->
             val color = lerp(frame.primary, frame.secondary, ribbon.colorMix)
             // Nested translucent paths approximate the shader's distance falloff in a cached still.
-            (0..7).map { band ->
+            (0 until bandCount).map { band ->
                 val feather = ribbon.feather * frame.preset.featherScale
-                val radius = 1f + 0.4f * feather - (band + 0.5f) / 8f * 1.4f * feather
+                val radius = 1f + 0.4f * feather - (band + 0.5f) / bandCount * 1.4f * feather
                 val path = Path().apply {
                     for (i in 0..64) {
                         val x = i / 64f
                         val y = ribbon.center(x) - ribbon.width * radius
-                        if (i == 0) moveTo(0f, y * size.height) else lineTo(x * size.width, y * size.height)
+                        if (i == 0) moveTo(0f, y * drawSize.height) else lineTo(x * drawSize.width, y * drawSize.height)
                     }
                     for (i in 64 downTo 0) {
                         val x = i / 64f
                         val y = ribbon.center(x) + ribbon.width * radius
-                        lineTo(x * size.width, y * size.height)
+                        lineTo(x * drawSize.width, y * drawSize.height)
                     }
                     close()
                 }
                 val stops = (0..8).map { i ->
                     val x = i / 8f
-                    val strength = ribbon.opacity * ribbon.lightAt(x) * frame.bandStrength
-                    val outer = strength * smoothstep(band / 8f)
-                    val inner = strength * smoothstep((band + 1) / 8f)
+                    val light = ribbon.lightAt(x)
+                    val strength = ribbon.opacity * light * frame.bandStrength
+                    val outer = strength * smoothstep(band.toFloat() / bandCount)
+                    val inner = strength * smoothstep((band + 1f) / bandCount)
                     val alpha = (inner - outer) / (1f - outer)
-                    x to color.copy(alpha = alpha)
+                    val bandColor = if (!home) {
+                        color.copy(alpha = alpha)
+                    } else {
+                        val shade = 0.76f + 0.24f * light
+                        Color(color.red * shade, color.green * shade, color.blue * shade, alpha)
+                    }
+                    x to bandColor
                 }.toTypedArray()
-                path to Brush.horizontalGradient(*stops, endX = size.width)
+                path to Brush.horizontalGradient(*stops, endX = drawSize.width)
             }
         }
-        onDrawBehind {
+        val drawBands: DrawScope.() -> Unit = {
             drawRect(frame.base.copy(alpha = frame.preset.baseAlpha))
             for ((path, brush) in bands) drawPath(path, brush)
+        }
+        if (home) {
+            // Rasterize the finer feathering once. The low-performance path draws just this image.
+            val image = ImageBitmap(drawSize.width.toInt(), drawSize.height.toInt())
+            CanvasDrawScope().draw(this, layoutDirection, Canvas(image), drawSize, block = drawBands)
+            onDrawBehind {
+                drawImage(image, dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()))
+            }
+        } else {
+            onDrawBehind(drawBands)
         }
     })
 }
@@ -112,10 +145,9 @@ internal data class RibbonFrame(
     val ridgeAlpha: Float,
     val dragOffsetPx: Float,
     val preset: RibbonPreset = RibbonPreset.Welcome,
-    val themeStrength: Float = 1f,
 ) {
     val bandStrength: Float
-        get() = (0.61f + 0.39f * opacity) * preset.brightness * themeStrength
+        get() = (0.61f + 0.39f * opacity) * preset.brightness
 }
 
 internal enum class RibbonPreset(
@@ -126,7 +158,8 @@ internal enum class RibbonPreset(
     val baseAlpha: Float,
 ) {
     Welcome(1f, 1f, 1f, 1f, 0.86f),
-    Home(0.60f, 0.60f, 1.45f, 1.5f, 1f),
+    Home(0.85f, 0.80f, 1.45f, 1.5f, 1f),
+    HomeLight(0.66f, 0.35f, 1.45f, 1.5f, 1f),
 }
 
 private fun smoothstep(t: Float) = t * t * (3f - 2f * t)

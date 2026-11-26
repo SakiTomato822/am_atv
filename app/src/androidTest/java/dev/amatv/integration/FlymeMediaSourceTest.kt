@@ -12,7 +12,10 @@ import android.os.Parcel
 import android.os.Process
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import dev.amatv.model.LyricLine
+import dev.amatv.model.LyricWord
 import dev.amatv.model.Track
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -176,6 +179,75 @@ class FlymeMediaSourceTest {
 
     private fun <T> call(binder: IBinder, descriptor: String, code: Int, read: Parcel.() -> T): T =
         FlymeMediaSource.rpc(binder, descriptor, code, {}, read)
+
+    @Test fun lyricTransactionsAndLateMetadataRefresh() = runBlocking {
+        val services = FakeFlymeServices(context)
+        val source = services.startSource()
+        val media = FakeFlymeMediaCenter(context)
+        val bare = testFlymeSnapshot(isPlaying = false)
+        val track = requireNotNull(bare.currentTrack)
+        val ready = bare.copy(currentTrack = track.copy(lyrics = listOf(
+            LyricLine(listOf(LyricWord("line one", 1_000, 2_000))),
+            LyricLine(listOf(LyricWord("line two", 3_000, 4_000))),
+        )))
+        fun nextInfo() = checkNotNull(media.playbackInfo.poll(5, TimeUnit.SECONDS))
+        fun readLyric(info: IBinder, code: Int) = call(info, FlymeMediaSource.INFO, code) { readString() }
+        try {
+            source.publish(bare)
+            services.nextBinding(FakeFlymeServices.V3_ACTION).connect(services.pool(media))
+            source.awaitState(FlymeMediaSource.RegistrationPath.V3, FlymeMediaSource.ConnectionState.Connected)
+            val initial = nextInfo()
+            assertEquals("", readLyric(initial, 12))
+            assertEquals("", readLyric(initial, 14))
+
+            source.publish(ready)
+            val refreshed = nextInfo()
+            assertEquals("[ti:Saved song]\n[ar:Artist]\n[al:Album]\n[00:01.00]line one\n[00:03.00]line two",
+                readLyric(refreshed, 12))
+            assertEquals("line one", readLyric(refreshed, 14))
+            assertEquals("line one", readLyric(source.infoBinder, 14))
+            assertTrue(media.lyricUpdates.isEmpty())
+
+            source.publish(ready.copy(isPlaying = true))
+            nextInfo()
+            assertEquals("line one", media.lyricUpdates.poll(5, TimeUnit.SECONDS))
+            source.publish(ready.copy(isPlaying = true, positionMs = 3_500))
+            assertEquals("line two", media.lyricUpdates.poll(5, TimeUnit.SECONDS))
+            assertEquals("line two", readLyric(refreshed, 14))
+            assertTrue(media.playbackInfo.isEmpty())
+
+            source.publish(bare.copy(currentTrack = track.copy(
+                lyrics = listOf(LyricLine(listOf(LyricWord("static", 0, 0)), isStatic = true)),
+            )))
+            assertEquals("", media.lyricUpdates.poll(5, TimeUnit.SECONDS))
+            assertEquals("", readLyric(nextInfo(), 12))
+            assertEquals("", readLyric(refreshed, 14))
+        } finally {
+            source.release()
+        }
+    }
+
+    @Test fun buildsTimedLyricsWithoutMediaCenter() = runBlocking {
+        val source = FlymeMediaSource(context)
+        val snapshot = testFlymeSnapshot(isPlaying = true)
+        val track = requireNotNull(snapshot.currentTrack)
+        try {
+            source.setCallbacks(PlaybackMediaSession.Callbacks(
+                play = {}, pause = {}, next = {}, previous = {}, seekTo = {},
+            ))
+            source.publish(snapshot.copy(currentTrack = track.copy(
+                lyrics = listOf(LyricLine(listOf(LyricWord("line one", 1_000, 2_000)))),
+            )))
+            withTimeout(5_000) {
+                while (call(source.infoBinder, FlymeMediaSource.INFO, 12) { readString() }.isNullOrEmpty()) {
+                    delay(10)
+                }
+            }
+            assertEquals("line one", call(source.infoBinder, FlymeMediaSource.INFO, 14) { readString() })
+        } finally {
+            source.release()
+        }
+    }
 }
 
 internal class FakeFlymeServices(context: Context) : ContextWrapper(context) {
@@ -240,6 +312,8 @@ internal class FakeFlymeMediaCenter(private val context: Context) : Binder() {
     val operations = CopyOnWriteArrayList<Int>()
     val publishedMetadata = CopyOnWriteArrayList<Pair<Int, String?>>()
     val metadataUpdates = LinkedBlockingQueue<Pair<Int, String?>>()
+    val playbackInfo = LinkedBlockingQueue<IBinder>()
+    val lyricUpdates = LinkedBlockingQueue<String>()
     @Volatile var dieOnNextPublish = false
 
     init { attachInterface(null, FlymeMediaSource.MEDIA) }
@@ -263,12 +337,14 @@ internal class FakeFlymeMediaCenter(private val context: Context) : Binder() {
                     val state = FlymeMediaSource.rpc(info, FlymeMediaSource.INFO, 11, {}, { readInt() })
                     val title = FlymeMediaSource.rpc(info, FlymeMediaSource.INFO, 2, {}, { readString() })
                     publishedMetadata += state to title
+                    playbackInfo.add(info)
                     metadataUpdates.add(state to title)
                     reply.writeInt(1)
                 }
                 7 -> assertArrayEquals(intArrayOf(6), data.createIntArray())
                 8 -> assertEquals(6, data.readInt())
                 10 -> data.readLong()
+                14 -> lyricUpdates.add(requireNotNull(data.readString()))
                 else -> fail("Unexpected transaction: $code")
             }
         }

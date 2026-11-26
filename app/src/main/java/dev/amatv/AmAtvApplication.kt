@@ -18,6 +18,7 @@ import dev.amatv.core.SharedPreferencesSettingsStorage
 import dev.amatv.core.SharedPreferencesWelcomePreferences
 import dev.amatv.core.WelcomePreferences
 import dev.amatv.core.detectLowPerformanceHardware
+import dev.amatv.core.lyricsLocalization
 import dev.amatv.flyme.FolioFonts
 import dev.amatv.i18n.AppText
 import dev.amatv.integration.ContentCache
@@ -30,6 +31,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 class AmAtvApplication : Application() {
@@ -68,6 +73,19 @@ class AmAtvApplication : Application() {
             playHistoryStore = playHistoryStore,
         ).also { store ->
             store.attach()
+            if (BuildConfig.FLYME_NATIVE_MEDIA) {
+                applicationScope.launch {
+                    combine(
+                        store.state.map { if (it.hasCurrentTrack) it.track else null }
+                            .distinctUntilChangedBy { it?.lyricsIdentity() },
+                        accountStore.state.map { it.isSignedIn }.distinctUntilChanged(),
+                        settingsStore.state.map {
+                            lyricsLocalization(it, resources.configuration.locales[0].toLanguageTag())
+                        }.distinctUntilChanged(),
+                    ) { track, signedIn, _ -> track to signedIn }
+                        .collect { (track, signedIn) -> lyricsStore.setCurrentTrack(track, signedIn) }
+                }
+            }
             musicServices.startFlymeVoice(
                 applicationScope,
                 store, playHistoryStore, contentStore,

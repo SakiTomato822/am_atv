@@ -4,7 +4,7 @@ import dev.amatv.artwork.ArtworkPalette
 
 /** Keeps artwork hues, including neutral covers, while reserving dark space behind the text. */
 internal object LavaPalette {
-    fun from(colors: IntArray, isLight: Boolean = false): FloatArray {
+    fun from(colors: IntArray, isLight: Boolean = false, homeRibbon: Boolean = false): FloatArray {
         val source = colors.toList().ifEmpty { listOf(0xFF33333B.toInt()) }
         fun channels(c: Int) = floatArrayOf((c shr 16 and 255) / 255f, (c shr 8 and 255) / 255f, (c and 255) / 255f)
         fun chroma(c: Int): Float = channels(c).let { it.max() - it.min() }
@@ -21,7 +21,11 @@ internal object LavaPalette {
                     val gray = rgb[0] * .2126f + rgb[1] * .7152f + rgb[2] * .0722f
                     val lightness = (if (index == 0) .94f else .90f) + gray * .035f
                     for (channel in 0..2) {
-                        result[index * 3 + channel] = lightness + (rgb[channel] - gray) * .055f
+                        result[index * 3 + channel] = when {
+                            !homeRibbon -> lightness + (rgb[channel] - gray) * .055f
+                            index == 0 -> .92f + rgb[channel] * .07f
+                            else -> (.55f + (rgb[channel] - gray) * .72f).coerceIn(0f, 1f)
+                        }
                     }
                     return@forEachIndexed
                 }

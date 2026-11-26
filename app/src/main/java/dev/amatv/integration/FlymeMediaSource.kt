@@ -15,6 +15,7 @@ import android.os.Process
 import android.os.SystemClock
 import android.util.Log
 import dev.amatv.R
+import dev.amatv.model.Track
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -65,6 +66,9 @@ internal class FlymeMediaSource(
     private var voiceRequested = false
     private var wantsPlay = false
     private var metadataKey: String? = null
+    private var publishedLrc = ""
+    private val lyricPush = FlymeLyricPush()
+    @Volatile private var lyricFrame: LyricFrame? = null
     private var lastProgressTime = 0L
     private var lastProgressPosition = 0L
     private val pendingSnapshot = AtomicReference<PlaybackSnapshot?>()
@@ -77,9 +81,19 @@ internal class FlymeMediaSource(
         }
     }
 
-    internal val infoBinder: Binder = playbackInfoBinder { snapshot }
+    private data class LyricTrack(val identity: String, val generation: Long, val queueId: Long?)
+    private data class LyricFrame(val key: LyricTrack, val track: Track, val lyrics: FlymeLyrics?)
 
-    private fun playbackInfoBinder(readSnapshot: () -> PlaybackSnapshot?): Binder = object : Binder() {
+    private fun PlaybackSnapshot.lyricTrack() = currentTrack?.let {
+        LyricTrack(it.lyricsIdentity(), requestGeneration, it.playbackQueueId)
+    }
+
+    internal val infoBinder: Binder = playbackInfoBinder({ snapshot }) { lyricFrame }
+
+    private fun playbackInfoBinder(
+        readSnapshot: () -> PlaybackSnapshot?,
+        readLyrics: () -> LyricFrame?,
+    ): Binder = object : Binder() {
         init { attachInterface(null, INFO) }
         override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
             if (code == INTERFACE_TRANSACTION) {
@@ -96,7 +110,8 @@ internal class FlymeMediaSource(
                 2 -> reply.writeString(track?.title.orEmpty())
                 3 -> reply.writeString(track?.artist.orEmpty())
                 4 -> reply.writeString(track?.album.orEmpty())
-                5, 6, 12, 14, 30 -> reply.writeString("")
+                5, 6, 30 -> reply.writeString("")
+                12 -> reply.writeString(readLyrics()?.takeIf { it.key == state?.lyricTrack() }?.lyrics?.lrc.orEmpty())
                 7 -> reply.writeLong((state?.durationMs?.takeIf { it > 0L } ?: track?.durationMs ?: 0L).coerceAtLeast(0L))
                 8, 19, 21, 23, 34 -> reply.writeInt(0)
                 9 -> reply.writeInt(ONLINE)
@@ -106,6 +121,17 @@ internal class FlymeMediaSource(
                     state?.isPlaying == true -> 1
                     else -> 0 // vendor PAUSED, distinct from Android PlaybackState
                 })
+                14 -> {
+                    val frame = lyricFrame
+                    val latest = snapshot
+                    val lyrics = frame?.lyrics
+                    val sentence = if (lyrics != null && frame.key == latest?.lyricTrack() &&
+                        frame.key == state?.lyricTrack()
+                    ) {
+                        lyrics.sentence(lyrics.indexAt(latest.positionMs))
+                    } else ""
+                    reply.writeString(sentence)
+                }
                 16 -> reply.optionalParcelable(track?.artworkUrl?.let(Uri::parse))
                 18 -> reply.writeInt(0)
                 20, 22, 28 -> reply.writeInt(0) // unsupported collect/download/loop
@@ -232,6 +258,7 @@ internal class FlymeMediaSource(
             wantsPlay = false
             metadataKey = null
             safely {
+                updateLyrics(null)
                 registration?.let { current ->
                     sendPlaybackInfo(current, null)
                 }
@@ -369,6 +396,7 @@ internal class FlymeMediaSource(
     private fun forgetRegistration() {
         registration = null
         metadataKey = null
+        lyricPush.reset()
         lastProgressTime = 0L
         lastProgressPosition = 0L
         mutableVoiceSession.value = null
@@ -455,18 +483,26 @@ internal class FlymeMediaSource(
 
     private fun publishOnWorker(value: PlaybackSnapshot) {
         if (value.isEnded || value.errorMessage != null) wantsPlay = false
+        updateLyrics(value)
         val current = registration ?: return
         val track = value.currentTrack
-        val key = "${track?.id}|${track?.title}|${track?.artist}|${track?.album}|${track?.artworkUrl}|${value.durationMs}|${value.isPlaying}|${value.isBuffering}|${value.errorMessage}"
-        if (key != metadataKey) {
+        val lyrics = lyricFrame?.lyrics
+        val lrc = lyrics?.lrc.orEmpty()
+        val key = "${value.lyricTrack()}|${track?.id}|${track?.title}|${track?.artist}|${track?.album}|${track?.artworkUrl}|${value.durationMs}|${value.isPlaying}|${value.isBuffering}|${value.errorMessage}"
+        if (key != metadataKey || lrc != publishedLrc) {
             sendPlaybackInfo(current, value)
             metadataKey = key
+            publishedLrc = lrc
             Log.i(TAG, "${current.path} updateMusicPlaybackState (6): published " +
                 "id=${track?.catalogId ?: track?.id} playing=${value.isPlaying} buffering=${value.isBuffering} " +
                 "hasArtwork=${!track?.artworkUrl.isNullOrBlank()} durationMs=${value.durationMs}")
         }
         val now = SystemClock.elapsedRealtime()
         val position = value.positionMs.coerceAtLeast(0L)
+        val lyricIndex = lyrics?.indexAt(position) ?: -1
+        lyricPush.update(lyricIndex, value.isPlaying && !value.isBuffering)?.let { index ->
+            sendLyric(current, index, lyrics?.sentence(index).orEmpty())
+        }
         if ((value.isPlaying && now - lastProgressTime >= 1_000L) ||
             (!value.isPlaying && position != lastProgressPosition)
         ) {
@@ -477,10 +513,37 @@ internal class FlymeMediaSource(
         }
     }
 
+    private fun updateLyrics(value: PlaybackSnapshot?) {
+        val previous = lyricFrame
+        val track = value?.currentTrack
+        val key = value?.lyricTrack()
+        if (key == previous?.key && track == previous?.track) return
+
+        val lyrics = track?.let(FlymeLyrics::from)
+        lyricFrame = if (key != null && track != null) LyricFrame(key, track, lyrics) else null
+        val changed = previous?.lyrics?.lrc != lyrics?.lrc
+        if (key != previous?.key || changed) {
+            Log.i(TAG, lyrics?.let { "lyrics: lrc lines=${it.lineCount}" } ?: "lyrics: none")
+            lyricPush.reset()
+        }
+        if (previous != null && (key != previous.key || (changed && lyrics == null))) {
+            registration?.let { sendLyric(it, -1, "") }
+        }
+    }
+
+    private fun sendLyric(current: Registration, index: Int, sentence: String) {
+        rpc(current.media, MEDIA, 14, {
+            writeStrongBinder(current.token)
+            writeString(sentence)
+        }, { Unit })
+        Log.i(TAG, "lyrics: push index=$index")
+    }
+
     private fun sendPlaybackInfo(current: Registration, value: PlaybackSnapshot?) {
         // The vendor reads PlaybackInfo and PlaybackState separately from the same binder.
         // Keep both reads on the same snapshot so their item IDs agree across a track change.
-        val info = playbackInfoBinder { value }
+        val frame = lyricFrame
+        val info = playbackInfoBinder({ value }) { frame }
         check(rpc(current.media, MEDIA, 6, {
             writeStrongBinder(current.token); writeStrongBinder(info)
         }, { readInt() != 0 })) { "MediaCenter rejected playback metadata" }
