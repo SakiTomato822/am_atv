@@ -406,7 +406,6 @@ internal fun FolioQueuePanel(
                             FolioArtwork(
                                 track = row.track,
                                 shape = RoundedCornerShape(8.dp),
-                                showLoadingShimmer = row.isCurrent,
                                 modifier = Modifier.size(tierSpec.qc),
                             )
                             if (row.isCurrent) {
@@ -541,7 +540,6 @@ internal fun FolioQueuePanel(
                         FolioArtwork(
                             track = row.track,
                             shape = RoundedCornerShape(8.dp),
-                            showLoadingShimmer = row.isCurrent,
                             modifier = Modifier.size(tierSpec.qc),
                         )
                         Column(

@@ -432,7 +432,6 @@ fun FolioSongRow(
                 track = track,
                 modifier = Modifier.size(44.dp),
                 shape = RoundedCornerShape(FolioRadii.SongCover),
-                showLoadingShimmer = isCurrent,
             )
         } else {
             Box(
@@ -649,7 +648,6 @@ private fun FolioMiniPlayerPill(
                     .size(coverSize)
                     .folioArtworkOrigin(origin),
                 shape = coverShape,
-                showLoadingShimmer = true,
                 artworkPalette = artwork.colors,
             )
             Column(
@@ -735,7 +733,6 @@ fun FolioMiniPlayerDot(
             track = track,
             modifier = Modifier.fillMaxSize().folioArtworkOrigin(origin),
             shape = CircleShape,
-            showLoadingShimmer = true,
         )
     }
 }

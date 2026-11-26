@@ -67,7 +67,6 @@ import dev.amatv.AmAtvApplication
 import dev.amatv.BuildConfig
 import dev.amatv.R
 import dev.amatv.core.PlaybackEvent
-import dev.amatv.core.isTrackLoading
 import dev.amatv.core.shouldShowWelcome
 import dev.amatv.i18n.AppText
 import dev.amatv.integration.FlymeVoiceDestination
@@ -506,18 +505,11 @@ fun FolioApp(
         val tier = tierOf(layoutWidthDp, layoutHeightDp)
         val tierSpec = specForTier(tier)
 
-        val browseLoadingShimmer = rememberFolioLoadingShimmerMotion(
-            isTrackLoading = playbackState.isTrackLoading && !playerOpen,
-            lowPerformance = settingsState.lowPerformance,
-            reducedMotion = !browseMotion.animated,
-        )
-
         CompositionLocalProvider(
             LocalDensity provides Density(renderDensity, systemDensity.fontScale),
             LocalFolioBrowseMotion provides browseMotion,
             LocalFolioBrowseNavigation provides browseNavigation,
             LocalFolioLowPerformance provides settingsState.lowPerformance,
-            LocalFolioLoadingShimmer provides browseLoadingShimmer,
         ) {
             val statusTop = maxOf(
                 WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
