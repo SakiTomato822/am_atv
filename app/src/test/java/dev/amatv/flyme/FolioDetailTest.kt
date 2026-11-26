@@ -166,4 +166,53 @@ class FolioDetailTest {
             assertEquals(listOf(FolioDetailData("memory")), states)
         }
     }
+
+    @Test
+    fun albumDiscGroupingFollowsMultiDiscRulesAndPreservesOriginalOrder() {
+        val base = MockCatalog.tracks.first()
+        fun albumTrack(id: String, disc: Int?, number: Int?) =
+            base.copy(id = id, catalogId = id, discNumber = disc, trackNumber = number)
+
+        // Single-disc album is not grouped
+        val singleDisc = listOf(
+            albumTrack("s1", disc = 1, number = 1),
+            albumTrack("s2", disc = 1, number = 2),
+        )
+        assertNull(groupAlbumTracksByDisc(singleDisc, isAlbum = true))
+
+        // Multi-disc album groups in ascending disc order, keeps API order within each disc,
+        // and preserves original queue indices
+        val twoDiscs = listOf(
+            albumTrack("d2a", disc = 2, number = 1),
+            albumTrack("d1a", disc = 1, number = 1),
+            albumTrack("d1b", disc = 1, number = 2),
+            albumTrack("d2b", disc = 2, number = 2),
+        )
+        val grouped = groupAlbumTracksByDisc(twoDiscs, isAlbum = true)
+        assertEquals(listOf(1, 2), grouped?.map { it.discNumber })
+        assertEquals(listOf("d1a", "d1b"), grouped!![0].tracks.map { it.track.id })
+        assertEquals(listOf(1, 2), grouped[0].tracks.map { it.originalIndex })
+        assertEquals(listOf("d2a", "d2b"), grouped[1].tracks.map { it.track.id })
+        assertEquals(listOf(0, 3), grouped[1].tracks.map { it.originalIndex })
+
+        // Any missing discNumber suppresses grouping
+        val withNullDisc = listOf(
+            albumTrack("n1", disc = 1, number = 1),
+            albumTrack("n2", disc = null, number = 2),
+            albumTrack("n3", disc = 2, number = 1),
+        )
+        assertNull(groupAlbumTracksByDisc(withNullDisc, isAlbum = true))
+
+        // Playlists are never grouped even when songs have distinct disc numbers
+        assertNull(groupAlbumTracksByDisc(twoDiscs, isAlbum = false))
+    }
+
+    @Test
+    fun discRowNumberUsesTrackNumberAndFallsBackToOneBasedPositionInDisc() {
+        val base = MockCatalog.tracks.first()
+        assertEquals(7, folioDiscRowNumber(base.copy(trackNumber = 7), indexInDisc = 0))
+        assertEquals(1, folioDiscRowNumber(base.copy(trackNumber = null), indexInDisc = 0))
+        assertEquals(3, folioDiscRowNumber(base.copy(trackNumber = null), indexInDisc = 2))
+        assertEquals(2, folioDiscRowNumber(base.copy(trackNumber = 0), indexInDisc = 1))
+    }
 }

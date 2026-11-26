@@ -22,4 +22,5 @@
     <string name="folio_detail_view_more">See More</string>
     <string name="folio_detail_artist_error">Could not load this artist.</string>
     <string name="folio_detail_artist_empty">No music available for this artist.</string>
+    <string name="folio_detail_disc">Disc %1$d</string>
 </resources>

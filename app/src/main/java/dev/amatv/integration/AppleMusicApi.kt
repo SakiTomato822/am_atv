@@ -1341,6 +1341,12 @@ class AppleMusicApi(
             motionArtworkUrl = motion?.videoUrl,
             motionPreviewUrl = motion?.previewUrl,
             previewUrl = if (kind == CatalogKind.Song) catalogAttrs?.songPreviewUrl() ?: songPreviewUrl() else null,
+            discNumber = if (kind == CatalogKind.Song) {
+                optPositiveInt("discNumber") ?: catalogAttrs?.optPositiveInt("discNumber")
+            } else null,
+            trackNumber = if (kind == CatalogKind.Song) {
+                optPositiveInt("trackNumber") ?: catalogAttrs?.optPositiveInt("trackNumber")
+            } else null,
             resourceId = id,
             resourceType = resourceType,
             dateAddedMs = optString("dateAdded").takeIf { it.isNotBlank() }
@@ -1349,6 +1355,9 @@ class AppleMusicApi(
                 catalogAttrs?.optString("contentRating") == "explicit",
         )
     }
+
+    private fun JSONObject.optPositiveInt(key: String): Int? =
+        optInt(key, 0).takeIf { it > 0 }
 
     private fun JSONObject.songPreviewUrl(): String? =
         optJSONArray("previews")?.optJSONObject(0)?.optString("url")?.takeIf { it.startsWith("https://") }

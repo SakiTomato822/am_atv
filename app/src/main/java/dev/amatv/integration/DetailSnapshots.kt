@@ -94,6 +94,19 @@ internal fun decodeDetailArtist(root: JSONObject) = CatalogArtistPage(
     shelves = decodeShelves(root.getJSONArray("shelves")),
 )
 
-private fun trackArray(items: List<Track>) = JSONArray().apply { items.forEach { put(it.toContentSnapshot()) } }
+private fun trackArray(items: List<Track>) = JSONArray().apply {
+    items.forEach { track ->
+        val json = track.toContentSnapshot()
+        if (track.discNumber != null) json.put("discNumber", track.discNumber)
+        if (track.trackNumber != null) json.put("trackNumber", track.trackNumber)
+        put(json)
+    }
+}
 
-private fun JSONArray.detailTracks(): List<Track> = List(length()) { getJSONObject(it).toContentTrack() }
+private fun JSONArray.detailTracks(): List<Track> = List(length()) { index ->
+    val json = getJSONObject(index)
+    json.toContentTrack().copy(
+        discNumber = json.optInt("discNumber", 0).takeIf { it > 0 },
+        trackNumber = json.optInt("trackNumber", 0).takeIf { it > 0 },
+    )
+}

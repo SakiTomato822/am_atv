@@ -52,6 +52,8 @@ data class Track(
     val pickReason: String? = null,
     val artworkColors: AppleArtworkColors? = null,
     val previewUrl: String? = null,
+    val discNumber: Int? = null,
+    val trackNumber: Int? = null,
 ) {
     /** Catalog identity survives MusicKit's different browse and now-playing wrapper ids. */
     fun lyricsIdentity(): String = catalogId?.takeIf(String::isNotBlank) ?: id

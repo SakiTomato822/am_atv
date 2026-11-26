@@ -53,6 +53,7 @@ internal fun FolioCollectionDetail(
         ) { services.collectionTracks(playbackCollection) }
     }
     val songs = data.value.orEmpty()
+    val discGroups = remember(songs, album) { groupAlbumTracksByDisc(songs, isAlbum = album) }
     val related = if (album && collection.catalogId != null) {
         rememberFolioDetailData(
             cached = { null },
@@ -127,8 +128,34 @@ internal fun FolioCollectionDetail(
                     }
                 }
             }
-            folioDetailSongs(songs, layout.collectionColumns, 40.dp, playback, false, !album) { index ->
-                onPlayCollection(playbackCollection, songs, index, false)
+            if (discGroups != null) {
+                val rowKeyOccurrences = mutableMapOf<String, Int>()
+                discGroups.forEachIndexed { groupIndex, group ->
+                    item(key = "disc-${group.discNumber}") {
+                        FolioDetailLabel(
+                            text = stringResource(R.string.folio_detail_disc, group.discNumber),
+                            modifier = Modifier.padding(
+                                start = 8.dp,
+                                top = if (groupIndex == 0) 0.dp else FolioSpacing.PivotToContent * 2,
+                                bottom = FolioSpacing.PivotToContent,
+                            ),
+                        )
+                    }
+                    folioDetailIndexedSongs(
+                        entries = group.tracks,
+                        columns = layout.collectionColumns,
+                        gap = 40.dp,
+                        playback = playback,
+                        showCover = false,
+                        showArtist = false,
+                        keyOccurrences = rowKeyOccurrences,
+                        onPlay = { index -> onPlayCollection(playbackCollection, songs, index, false) },
+                    )
+                }
+            } else {
+                folioDetailSongs(songs, layout.collectionColumns, 40.dp, playback, false, !album) { index ->
+                    onPlayCollection(playbackCollection, songs, index, false)
+                }
             }
             if (collection.canShowFullAlbum && songs.isNotEmpty()) {
                 item(key = "full-album") {
@@ -166,6 +193,47 @@ internal fun FolioCollectionDetail(
             }
         }
     }
+}
+
+internal data class FolioAlbumDiscGroup(
+    val discNumber: Int,
+    val tracks: List<FolioIndexedTrack>,
+)
+
+internal fun folioDiscRowNumber(track: Track, indexInDisc: Int): Int =
+    track.trackNumber?.takeIf { it > 0 } ?: (indexInDisc + 1)
+
+/**
+ * Groups an album's tracks by ascending [Track.discNumber] only when it is an album, every track
+ * carries a non-null disc number, and at least two distinct discs exist. Preserves API order inside
+ * each disc and keeps each track's original queue index.
+ */
+internal fun groupAlbumTracksByDisc(
+    tracks: List<Track>,
+    isAlbum: Boolean,
+): List<FolioAlbumDiscGroup>? {
+    if (!isAlbum || tracks.isEmpty()) return null
+    if (tracks.any { it.discNumber == null }) return null
+    val byDisc = linkedMapOf<Int, MutableList<Pair<Int, Track>>>()
+    tracks.forEachIndexed { originalIndex, track ->
+        val disc = track.discNumber!!
+        byDisc.getOrPut(disc) { mutableListOf() }.add(originalIndex to track)
+    }
+    if (byDisc.size < 2) return null
+    return byDisc.entries
+        .sortedBy { it.key }
+        .map { (discNumber, entries) ->
+            FolioAlbumDiscGroup(
+                discNumber = discNumber,
+                tracks = entries.mapIndexed { indexInDisc, (originalIndex, track) ->
+                    FolioIndexedTrack(
+                        originalIndex = originalIndex,
+                        track = track,
+                        displayNumber = folioDiscRowNumber(track, indexInDisc),
+                    )
+                },
+            )
+        }
 }
 
 internal fun folioPlaylistRecommendations(homeShelves: List<ContentShelf>): List<Track> =

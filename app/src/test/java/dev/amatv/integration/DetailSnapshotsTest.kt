@@ -55,4 +55,29 @@ class DetailSnapshotsTest {
         assertEquals("42", decoded.topSongs.single().catalogId)
         assertEquals(shelf.moreHref, decoded.shelves.single().moreHref)
     }
+
+    @Test fun discAndTrackNumbersRoundTripAndLegacySnapshotsDecodeNull() {
+        val discTrack = track.copy(id = "apple:43", catalogId = "43", discNumber = 2, trackNumber = 5)
+        val plainTrack = track.copy(id = "apple:44", catalogId = "44", discNumber = null, trackNumber = null)
+        val encoded = encodeDetailTracks(listOf(discTrack, plainTrack))
+        val decoded = decodeDetailTracks(encoded)
+        assertEquals(listOf(2, null), decoded.map { it.discNumber })
+        assertEquals(listOf(5, null), decoded.map { it.trackNumber })
+
+        // Simulate an older cached snapshot that predates discNumber/trackNumber
+        val legacyJson = encodeDetailTracks(listOf(discTrack))
+        legacyJson.getJSONArray("tracks").getJSONObject(0).apply {
+            remove("discNumber")
+            remove("trackNumber")
+        }
+        val legacyDecoded = decodeDetailTracks(legacyJson).single()
+        assertNull(legacyDecoded.discNumber)
+        assertNull(legacyDecoded.trackNumber)
+        assertEquals("43", legacyDecoded.catalogId)
+
+        // PlaybackSessionCodec must not serialize discNumber or trackNumber
+        val sessionJson = discTrack.toSessionJson()
+        assertFalse(sessionJson.has("discNumber"))
+        assertFalse(sessionJson.has("trackNumber"))
+    }
 }

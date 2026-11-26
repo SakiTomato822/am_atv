@@ -130,4 +130,32 @@ class CollectionTracksTest {
             fail("Repeated page must not be accepted")
         } catch (_: IllegalStateException) { assertEquals(2, calls) }
     }
+
+    @Test fun parsesDiscAndTrackNumbersFromCatalogAndLibrarySongs() = runBlocking {
+        val catalogAlbum = collection(CatalogKind.Album).copy(id = "apple:alb.1", catalogId = "alb.1")
+        val catalogTracks = api.collectionTracks(catalogAlbum) { _, _ ->
+            JSONObject(
+                """{"data":[
+                    {"id":"101","type":"songs","attributes":{"name":"Intro","artistName":"A","durationInMillis":120000,"discNumber":1,"trackNumber":1}},
+                    {"id":"102","type":"songs","attributes":{"name":"Bonus","artistName":"A","durationInMillis":150000,"discNumber":2,"trackNumber":1}}
+                ]}""",
+            )
+        }
+        assertEquals(listOf(1, 2), catalogTracks.map { it.discNumber })
+        assertEquals(listOf(1, 1), catalogTracks.map { it.trackNumber })
+
+        val libraryAlbum = catalogAlbum.copy(resourceId = "l.alb", resourceType = "library-albums")
+        val libraryTracks = api.collectionTracks(libraryAlbum) { _, _ ->
+            JSONObject(
+                """{"data":[
+                    {"id":"i.1","type":"library-songs","attributes":{"name":"Owned Direct","artistName":"A","discNumber":1,"trackNumber":3,"playParams":{"catalogId":"201"}}},
+                    {"id":"i.2","type":"library-songs","attributes":{"name":"Owned Linked","artistName":"A","playParams":{"catalogId":"202"}},
+                      "relationships":{"catalog":{"data":[{"id":"202","type":"songs","attributes":{"name":"Owned Linked","artistName":"A","discNumber":2,"trackNumber":4}}]}}},
+                    {"id":"i.3","type":"library-songs","attributes":{"name":"Uploaded Raw","artistName":"A"}}
+                ]}""",
+            )
+        }
+        assertEquals(listOf(1, 2, null), libraryTracks.map { it.discNumber })
+        assertEquals(listOf(3, 4, null), libraryTracks.map { it.trackNumber })
+    }
 }
