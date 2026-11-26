@@ -33,6 +33,7 @@ class FolioArcGlintTest {
 
     private fun testSnapshot(
         currentTrack: Track? = testTrack(),
+        positionMs: Long = 0L,
         isPlaying: Boolean = false,
         isBuffering: Boolean = false,
         errorMessage: String? = null,
@@ -43,7 +44,7 @@ class FolioArcGlintTest {
         currentTrack = currentTrack,
         hasPlayerCurrentTrack = currentTrack != null,
         queue = listOfNotNull(currentTrack),
-        positionMs = 0L,
+        positionMs = positionMs,
         durationMs = 210_000L,
         isPlaying = isPlaying,
         isBuffering = isBuffering,
@@ -116,6 +117,28 @@ class FolioArcGlintTest {
                 playWhenReady = true,
                 playbackPrepared = false,
                 snapshot = testSnapshot(currentTrack = trackA, isEnded = true, errorMessage = "old error"),
+            ).isTrackLoading,
+        )
+
+        // Stage 4: prepared at 0ms before audio playback actually begins (NativePlaybackIntent Phase.Ready gap)
+        assertTrue(
+            testPlaybackState(
+                track = trackA,
+                isPlaying = false,
+                playWhenReady = true,
+                playbackPrepared = true,
+                snapshot = testSnapshot(currentTrack = trackA, positionMs = 0L, isPlaying = false, isBuffering = false),
+            ).isTrackLoading,
+        )
+
+        // Exclusion: mid-song external pause (e.g. audio focus loss after audio already started)
+        assertFalse(
+            testPlaybackState(
+                track = trackA,
+                isPlaying = false,
+                playWhenReady = true,
+                playbackPrepared = true,
+                snapshot = testSnapshot(currentTrack = trackA, positionMs = 15_000L, isPlaying = false, isBuffering = false),
             ).isTrackLoading,
         )
 
@@ -365,13 +388,16 @@ class FolioArcGlintTest {
 
     @Test
     fun arcGlintSpecsAndCoverLuminanceMatchDesignParameters() {
-        assertEquals(0.28f, FolioArcGlintSpec.Loading.bandWidthRatio, 0.001f)
-        assertEquals(1.75f, FolioArcGlintSpec.Loading.arcRadiusRatio, 0.001f)
-        assertEquals(0.20f, FolioArcGlintSpec.Loading.darkCoreAlpha, 0.001f)
-        assertEquals(0.30f, FolioArcGlintSpec.Loading.lightCoreAlpha, 0.001f)
+        assertEquals(0.36f, FolioArcGlintSpec.Loading.bandWidthRatio, 0.001f)
+        assertEquals(1.70f, FolioArcGlintSpec.Loading.arcRadiusRatio, 0.001f)
+        assertEquals(0.42f, FolioArcGlintSpec.Loading.darkCoreAlpha, 0.001f)
+        assertEquals(0.56f, FolioArcGlintSpec.Loading.lightCoreAlpha, 0.001f)
+        assertEquals(0.52f, FolioArcGlintSpec.Loading.edgeTintFactor, 0.001f)
         assertEquals(1300, FolioArcGlintSpec.Loading.sweepMs)
         assertEquals(240, FolioArcGlintSpec.Loading.pauseMs)
         assertFalse(FolioArcGlintSpec.Loading.dispersionFringe)
+        assertEquals(0.20f, FolioLoadingShimmerTiming.LOW_PERF_BREATH_ALPHA, 0.001f)
+        assertEquals(0.30f, FolioLoadingShimmerTiming.LOW_PERF_BREATH_MIN_FACTOR, 0.001f)
 
         assertEquals(0.22f, FolioArcGlintSpec.TrackSwitch.bandWidthRatio, 0.001f)
         assertEquals(1.55f, FolioArcGlintSpec.TrackSwitch.arcRadiusRatio, 0.001f)
