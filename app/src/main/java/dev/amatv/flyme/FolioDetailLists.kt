@@ -17,6 +17,12 @@ import dev.amatv.core.PlaybackState
 import dev.amatv.model.Track
 import dev.amatv.model.matchesPlaybackQueueEntry
 
+internal data class FolioIndexedTrack(
+    val originalIndex: Int,
+    val track: Track,
+    val displayNumber: Int,
+)
+
 internal fun LazyListScope.folioDetailSongs(
     songs: List<Track>,
     columns: Int,
@@ -26,24 +32,55 @@ internal fun LazyListScope.folioDetailSongs(
     showArtist: Boolean,
     onPlay: (Int) -> Unit,
 ) {
-    val ranges = folioDetailColumnRanges(songs.size, columns)
-    val rowKeys = stableLazyKeys((0 until ranges.first().count()).map { row ->
-        ranges.mapNotNull { range -> (range.first + row).takeIf { it in range }?.let { songs[it].id } }.toString()
-    })
+    val entries = songs.mapIndexed { index, track ->
+        FolioIndexedTrack(originalIndex = index, track = track, displayNumber = index + 1)
+    }
+    folioDetailIndexedSongs(
+        entries = entries,
+        columns = columns,
+        gap = gap,
+        playback = playback,
+        showCover = showCover,
+        showArtist = showArtist,
+        onPlay = onPlay,
+    )
+}
+
+internal fun LazyListScope.folioDetailIndexedSongs(
+    entries: List<FolioIndexedTrack>,
+    columns: Int,
+    gap: Dp,
+    playback: PlaybackState,
+    showCover: Boolean,
+    showArtist: Boolean,
+    keyOccurrences: MutableMap<String, Int> = mutableMapOf(),
+    onPlay: (Int) -> Unit,
+) {
+    val ranges = folioDetailColumnRanges(entries.size, columns)
+    val rowKeys = stableLazyKeys(
+        ids = (0 until ranges.first().count()).map { row ->
+            ranges.mapNotNull { range ->
+                (range.first + row).takeIf { it in range }?.let { entries[it].track.id }
+            }.toString()
+        },
+        occurrences = keyOccurrences,
+    )
     items(rowKeys.size, key = { rowKeys[it] }) { row ->
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
             for (range in ranges) {
-                val index = range.first + row
-                if (index in range) {
-                    val track = songs[index]
+                val pos = range.first + row
+                if (pos in range) {
+                    val entry = entries[pos]
+                    val track = entry.track
                     FolioSongRow(
                         track = track,
-                        index = index,
+                        index = entry.originalIndex,
+                        displayNumber = entry.displayNumber,
                         showCover = showCover,
                         showArtist = showArtist,
                         isCurrent = playback.hasCurrentTrack && track.matchesPlaybackQueueEntry(playback.track),
                         isPlaying = playback.isPlaying,
-                        onClick = { onPlay(index) },
+                        onClick = { onPlay(entry.originalIndex) },
                         modifier = Modifier.weight(1f),
                     )
                 } else {
@@ -79,13 +116,13 @@ internal fun LazyListScope.folioDetailCards(
     }
 }
 
-internal fun stableLazyKeys(ids: List<String>): List<String> {
-    val occurrences = mutableMapOf<String, Int>()
-    return ids.map { id ->
-        val occurrence = occurrences.getOrDefault(id, 0)
-        occurrences[id] = occurrence + 1
-        "$occurrence:$id"
-    }
+internal fun stableLazyKeys(
+    ids: List<String>,
+    occurrences: MutableMap<String, Int> = mutableMapOf(),
+): List<String> = ids.map { id ->
+    val occurrence = occurrences.getOrDefault(id, 0)
+    occurrences[id] = occurrence + 1
+    "$occurrence:$id"
 }
 
 @Composable

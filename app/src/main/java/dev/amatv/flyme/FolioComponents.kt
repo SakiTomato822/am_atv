@@ -410,6 +410,7 @@ fun FolioSongRow(
     isPlaying: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    displayNumber: Int = index + 1,
 ) {
     val palette = LocalFolioPalette.current
     val tierSpec = LocalFolioTierSpec.current
@@ -442,7 +443,7 @@ fun FolioSongRow(
                     FolioEqualizerBars(active = isPlaying, color = palette.accent)
                 } else {
                     Text(
-                        text = (index + 1).toString(),
+                        text = displayNumber.toString(),
                         color = palette.fg3,
                         fontSize = 14.sp,
                         textAlign = TextAlign.Center,

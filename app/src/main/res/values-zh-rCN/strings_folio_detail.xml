@@ -10,4 +10,5 @@
     <string name="folio_detail_view_more">查看更多</string>
     <string name="folio_detail_artist_error">无法加载歌手详情。</string>
     <string name="folio_detail_artist_empty">这位歌手暂无可显示的音乐。</string>
+    <string name="folio_detail_disc">碟 %1$d</string>
 </resources>
