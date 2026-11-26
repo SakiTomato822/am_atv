@@ -41,4 +41,17 @@ class FolioHomeBackdropTest {
         assertTrue(frame.primary.green < frame.base.green)
         assertTrue(welcomeRibbons.maxOf { it.opacity } * frame.bandStrength in 0.35f..0.51f)
     }
+
+    @Test
+    fun lightHomeRibbonKeepsMutedCoverHueVisible() {
+        // A muted brown cover: the bands must still read as a color, not as gray.
+        val colors = LavaPalette.from(intArrayOf(0xff6b5f55.toInt()), isLight = true, homeRibbon = true)
+        val primary = homeRibbonFrame(colors, isLight = true).primary
+        assertTrue(maxOf(primary.red, primary.green, primary.blue) - minOf(primary.red, primary.green, primary.blue) > 0.25f)
+        assertTrue(primary.red > primary.blue)
+
+        val gray = LavaPalette.from(intArrayOf(0xff777777.toInt()), isLight = true, homeRibbon = true)
+        val grayPrimary = homeRibbonFrame(gray, isLight = true).primary
+        assertEquals(grayPrimary.red, grayPrimary.blue, 0.01f)
+    }
 }

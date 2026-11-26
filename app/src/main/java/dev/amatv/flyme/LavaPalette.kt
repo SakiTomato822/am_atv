@@ -17,16 +17,19 @@ internal object LavaPalette {
         return FloatArray(15).also { result ->
             ordered.forEachIndexed { index, color ->
                 val rgb = channels(color)
+                if (isLight && homeRibbon) {
+                    // Keep the cover's hue, lift muted covers to a visible saturation and use a
+                    // lightness that reads on white. Index 0 is the near-white base tinted by that hue.
+                    val band = ribbonBand(rgb, lightness = if (index == 1) .58f else .66f)
+                    for (channel in 0..2) {
+                        result[index * 3 + channel] = if (index == 0) .90f + band[channel] * .10f else band[channel]
+                    }
+                    return@forEachIndexed
+                }
                 if (isLight) {
                     val gray = rgb[0] * .2126f + rgb[1] * .7152f + rgb[2] * .0722f
                     val lightness = (if (index == 0) .94f else .90f) + gray * .035f
-                    for (channel in 0..2) {
-                        result[index * 3 + channel] = when {
-                            !homeRibbon -> lightness + (rgb[channel] - gray) * .055f
-                            index == 0 -> .92f + rgb[channel] * .07f
-                            else -> (.55f + (rgb[channel] - gray) * .72f).coerceIn(0f, 1f)
-                        }
-                    }
+                    for (channel in 0..2) result[index * 3 + channel] = lightness + (rgb[channel] - gray) * .055f
                     return@forEachIndexed
                 }
                 val high = rgb.max().coerceAtLeast(.001f)
@@ -35,6 +38,34 @@ internal object LavaPalette {
                 for (channel in 0..2) result[index * 3 + channel] = (rgb[channel] * scale).coerceIn(0f, 1f)
             }
         }
+    }
+
+    /** HSL with the hue kept; near-gray covers stay neutral, any other cover gets at least 45 % saturation. */
+    private fun ribbonBand(rgb: FloatArray, lightness: Float): FloatArray {
+        val max = rgb.max()
+        val min = rgb.min()
+        val l = (max + min) / 2f
+        val d = max - min
+        val s = if (d == 0f) 0f else d / (1f - kotlin.math.abs(2f * l - 1f))
+        val h = when {
+            d == 0f -> 0f
+            max == rgb[0] -> ((rgb[1] - rgb[2]) / d).mod(6f)
+            max == rgb[1] -> (rgb[2] - rgb[0]) / d + 2f
+            else -> (rgb[0] - rgb[1]) / d + 4f
+        }
+        val sat = if (s < .05f) s else (s * 1.3f).coerceIn(.45f, .80f)
+        val c = (1f - kotlin.math.abs(2f * lightness - 1f)) * sat
+        val x = c * (1f - kotlin.math.abs(h.mod(2f) - 1f))
+        val m = lightness - c / 2f
+        val (r, g, b) = when (h.toInt()) {
+            0 -> Triple(c, x, 0f)
+            1 -> Triple(x, c, 0f)
+            2 -> Triple(0f, c, x)
+            3 -> Triple(0f, x, c)
+            4 -> Triple(x, 0f, c)
+            else -> Triple(c, 0f, x)
+        }
+        return floatArrayOf(r + m, g + m, b + m)
     }
 }
 
