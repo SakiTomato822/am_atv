@@ -1,6 +1,6 @@
 # Welcome BGM generator
 
-`render.py` renders `app/src/main/res/raw/folio_welcome_bgm.ogg`. It is an original 30 s seamless loop at 64 BPM in E minor, composed by Gemini 4 and chosen by ear over a second version on 2026-11-27. `NOTES.md` describes the score, the mix and the measurements:
+`app/src/main/res/raw/folio_welcome_bgm.ogg` is Gemini's 90 s preview render (`welcome_bgm_gemini_preview.wav`) with a 2 s fade-in and a 5 s fade-out (ffmpeg `afade`, `qsin` curve), encoded at `-q:a 0.2`; about −18.4 LUFS, −5.2 dBFS true peak. `render.py` renders the original 30 s seamless loop at 64 BPM in E minor, composed by Gemini 4 and chosen by ear over a second version on 2026-11-27. `NOTES.md` describes the score, the mix and the measurements:
 - −18.6 LUFS integrated;
 - −7.0 dBFS true peak;
 - LRA 2.9 LU.
