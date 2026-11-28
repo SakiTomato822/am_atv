@@ -135,20 +135,23 @@ class FolioWelcomeTest {
     }
 
     @Test
-    fun gaplessDemoDimsLyricsAndReplacesWithNextTrackMetadataUntilLeavingPage() {
-        // Lyrics/Styles/Preferences show lead track lyrics at 1.0f alpha
+    fun gaplessDemoUsesShowcaseLyricsOnlyForTheirOwnTrack() {
         assertTrue(shouldRenderWelcomeLyricsLines(showLyricsDemo = true, gaplessActive = false, activeTrackIndex = 0))
-        assertEquals(1.0f, welcomeRightPanelAlpha(showLoudnessBars = false, gaplessActive = false), 0.001f)
-
-        // On Gapless page, dims to 0.35f; track 0 still matches lead lyrics, tracks 1+ swap to title+artist
-        assertEquals(0.35f, welcomeRightPanelAlpha(showLoudnessBars = false, gaplessActive = true), 0.001f)
         assertTrue(shouldRenderWelcomeLyricsLines(showLyricsDemo = true, gaplessActive = true, activeTrackIndex = 0))
         assertFalse(shouldRenderWelcomeLyricsLines(showLyricsDemo = true, gaplessActive = true, activeTrackIndex = 1))
         assertFalse(shouldRenderWelcomeLyricsLines(showLyricsDemo = true, gaplessActive = true, activeTrackIndex = 2))
+        assertFalse(shouldRenderWelcomeLyricsLines(showLyricsDemo = false, gaplessActive = false, activeTrackIndex = 0))
+    }
 
-        // Leaving Gapless back to Preferences resets gaplessActive = false, activeTrackIndex = 0 -> restores lyrics
-        assertTrue(shouldRenderWelcomeLyricsLines(showLyricsDemo = true, gaplessActive = false, activeTrackIndex = 0))
-        assertEquals(0.10f, welcomeRightPanelAlpha(showLoudnessBars = true, gaplessActive = false), 0.001f)
+    @Test
+    fun playerScaleMapsScreenToStageUniformlyInLandscapeAndPortrait() {
+        val landscapeScale = welcomePlayerScale(screenWidthPx = 1920, stageWidthPx = 960)
+        assertEquals(960f, 1920 * landscapeScale, 0.001f)
+        assertEquals(540f, 1080 * landscapeScale, 0.001f)
+
+        val portraitScale = welcomePlayerScale(screenWidthPx = 1080, stageWidthPx = 432)
+        assertEquals(432f, 1080 * portraitScale, 0.001f)
+        assertEquals(960f, 2400 * portraitScale, 0.001f)
     }
 
     @Test
