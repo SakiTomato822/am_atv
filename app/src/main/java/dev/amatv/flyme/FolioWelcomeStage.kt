@@ -33,12 +33,15 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -52,6 +55,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -87,8 +92,9 @@ internal fun WelcomeCoverWall(
     dragOffsetPx: Float,
     animated: Boolean,
     lowPerformance: Boolean,
-    modifier: Modifier = Modifier,
+    frostCapture: WelcomeFrostCapture?,
 ) {
+    val pauseMarquee = frostCapture != null
     val tileSize = if (isPhonePortrait) 27f else 11f
     val gap = if (isPhonePortrait) 2.6f else 1.2f
     val density = LocalDensity.current
@@ -110,7 +116,7 @@ internal fun WelcomeCoverWall(
     val wallAlpha by animateFloatAsState(targetWallAlpha, animSpec, label = "wall-alpha")
     val wallScale by animateFloatAsState(targetWallScale, animSpec, label = "wall-scale")
 
-    val marqueeActive = animated && !lowPerformance && wallAlpha > 0.01f
+    val marqueeActive = animated && !lowPerformance && !pauseMarquee && wallAlpha > 0.01f
     val transition = rememberInfiniteTransition(label = "welcome-wall-marquee")
     val forwardFraction by if (marqueeActive) {
         transition.animateFloat(
@@ -120,7 +126,7 @@ internal fun WelcomeCoverWall(
             label = "wall-fwd",
         )
     } else {
-        remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+        remember { mutableFloatStateOf(0f) }
     }
     val reverseFraction by if (marqueeActive) {
         transition.animateFloat(
@@ -130,11 +136,12 @@ internal fun WelcomeCoverWall(
             label = "wall-rev",
         )
     } else {
-        remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+        // Hold opposing rows at the phase they will start moving from.
+        remember(pauseMarquee) { mutableFloatStateOf(if (pauseMarquee) 1f else 0f) }
     }
 
     BoxWithConstraints(
-        modifier = modifier
+        modifier = (frostCapture?.wallModifier ?: Modifier)
             .fillMaxSize()
             .graphicsLayer {
                 alpha = wallAlpha
@@ -163,7 +170,10 @@ internal fun WelcomeCoverWall(
                     val progress = if (rowIdx % 2 == 1) reverseFraction else forwardFraction
                     val rowShiftPx = -halfSpanPx * progress
                     Row(
+                        // Measure both copies at full size: a reverse row starts shifted onto the
+                        // second copy, which a width-bounded Row would squeeze to zero.
                         modifier = Modifier
+                            .wrapContentWidth(Alignment.Start, unbounded = true)
                             .graphicsLayer { translationX = rowShiftPx },
                         horizontalArrangement = Arrangement.spacedBy(gapDp),
                     ) {
@@ -171,10 +181,24 @@ internal fun WelcomeCoverWall(
                             rowTracks.forEachIndexed { colIdx, track ->
                                 val tileKey = "$rowIdx-$copyIdx-$colIdx"
                                 key(tileKey) {
+                                    val tile = if (frostCapture != null) {
+                                        remember(frostCapture, track.motionPreviewUrl ?: track.artworkUrl) {
+                                            WelcomeWallTile()
+                                        }
+                                    } else null
+                                    val visibility = if (frostCapture != null && tile != null) {
+                                        DisposableEffect(frostCapture, tile) {
+                                            onDispose { frostCapture.setTileVisible(tile, false) }
+                                        }
+                                        Modifier.onGloballyPositioned { coordinates ->
+                                            frostCapture.setTileVisible(tile, !coordinates.boundsInWindow().isEmpty)
+                                        }
+                                    } else Modifier
                                     FolioArtwork(
                                         track = track,
                                         shape = RoundedCornerShape(cornerDp),
-                                        modifier = Modifier.size(tileDp),
+                                        modifier = Modifier.size(tileDp).then(visibility),
+                                        onArtworkLoaded = tile?.let { { it.loaded = true } },
                                     )
                                 }
                             }

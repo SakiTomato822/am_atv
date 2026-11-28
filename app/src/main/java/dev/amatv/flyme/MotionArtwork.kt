@@ -44,6 +44,7 @@ internal fun MotionArtwork(
     modifier: Modifier = Modifier,
     animate: Boolean = true,
     cornerRadius: androidx.compose.ui.unit.Dp = 22.dp,
+    onArtworkLoaded: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val imageLoader = remember(context) { ArtworkImages.loader(context) }
@@ -66,6 +67,7 @@ internal fun MotionArtwork(
             placeholder = placeholder,
             error = placeholder,
             fallback = placeholder,
+            onSuccess = onArtworkLoaded?.let { loaded -> { _ -> loaded() } },
         )
         Box(
             Modifier.fillMaxSize().background(

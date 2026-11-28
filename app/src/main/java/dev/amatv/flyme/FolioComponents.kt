@@ -171,6 +171,7 @@ internal fun FolioArtwork(
     showLoadingShimmer: Boolean = false,
     showTrackSwitchGlass: Boolean = false,
     artworkPalette: List<Color>? = null,
+    onArtworkLoaded: (() -> Unit)? = null,
 ) {
     if (!showLoadingShimmer && !showTrackSwitchGlass) {
         Box(modifier.clip(shape)) {
@@ -179,6 +180,7 @@ internal fun FolioArtwork(
                 modifier = Modifier.fillMaxSize(),
                 animate = animate,
                 cornerRadius = 0.dp,
+                onArtworkLoaded = onArtworkLoaded,
             )
         }
         return
@@ -247,6 +249,7 @@ internal fun FolioArtwork(
             modifier = innerModifier,
             animate = animate,
             cornerRadius = 0.dp,
+            onArtworkLoaded = onArtworkLoaded,
         )
     }
 }
