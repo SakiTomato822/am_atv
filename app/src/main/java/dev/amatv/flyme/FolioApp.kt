@@ -536,7 +536,7 @@ fun FolioApp(
                         track = playbackState.track.takeIf { playbackState.hasCurrentTrack },
                         palette = palette,
                         style = settingsState.homeBackgroundStyle,
-                        useGl = firstFrameDrawn && !settingsState.lowPerformance,
+                        useGl = firstFrameDrawn && !settingsState.lowPerformance && !welcomeOpen,
                         playerOpen = playerOpen,
                         isPlaying = playbackState.isPlaying,
                         audioSpectrum = services::audioSpectrum,
@@ -758,7 +758,7 @@ fun FolioApp(
                         FolioPlaybackFrameMonitor(settingsStore)
                     }
                     FolioBrowsePlayerEntrance(
-                        open = playerOpen,
+                        open = playerOpen && !welcomeOpen,
                         hasCurrentTrack = playbackState.hasCurrentTrack,
                         origin = playerOrigin?.boundsIn(browseNavigation, selectedPage),
                         windowWidth = windowWidth,

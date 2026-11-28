@@ -4,6 +4,8 @@ import androidx.compose.ui.graphics.Color
 import dev.amatv.core.LowPerformanceMode
 import dev.amatv.core.SettingsState
 import dev.amatv.integration.MusicConnectionState
+import dev.amatv.model.Track
+import dev.amatv.playback.AutoplayStatus
 import kotlin.math.abs
 
 internal val WELCOME_THEME_GLOW_TOP_RIGHT = Color(0xFF35306D)
@@ -149,11 +151,27 @@ internal fun shouldRenderWelcomeLyricsLines(
     activeTrackIndex: Int,
 ): Boolean = showLyricsDemo && (!gaplessActive || activeTrackIndex == 0)
 
-internal fun welcomeRightPanelAlpha(
-    showLoudnessBars: Boolean,
-    gaplessActive: Boolean,
-): Float = when {
-    showLoudnessBars -> 0.1f
-    gaplessActive -> 0.35f
-    else -> 1f
-}
+internal fun welcomePlayerScale(screenWidthPx: Int, stageWidthPx: Int): Float =
+    stageWidthPx.toFloat() / screenWidthPx
+
+internal fun welcomeDemoQueue(tracks: List<Track>, currentIndex: Int) = FolioQueueSnapshot(
+    rows = tracks.mapIndexed { index, track ->
+        FolioQueueRow(
+            key = "welcome-$index",
+            track = track,
+            section = when {
+                index < currentIndex -> FolioQueueSectionKind.Played
+                index == currentIndex -> FolioQueueSectionKind.NowPlaying
+                else -> FolioQueueSectionKind.UpNext
+            },
+            timelineIndex = index,
+            isCurrent = index == currentIndex,
+        )
+    },
+    playedCount = currentIndex,
+    upNextCount = tracks.lastIndex - currentIndex,
+    autoplayCount = 0,
+    isStation = false,
+    autoplayEnabled = false,
+    autoplayStatus = AutoplayStatus.Idle,
+)

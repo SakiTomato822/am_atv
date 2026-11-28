@@ -51,7 +51,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -59,7 +58,6 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
-import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
@@ -70,6 +68,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -110,10 +109,10 @@ private fun stageTargetFor(pageId: WelcomePageId, isPhonePortrait: Boolean): Wel
         when (pageId) {
             WelcomePageId.Welcome -> WelcomeStageTarget(24f, 80f, 0.40f, 0f)
             WelcomePageId.SignIn -> WelcomeStageTarget(7f, 58f, 1.66f, 0f)
-            WelcomePageId.Lyrics -> WelcomeStageTarget(7f, 58f, 1.66f, 1f)
-            WelcomePageId.Styles -> WelcomeStageTarget(7f, 52f, 1.66f, 1f)
-            WelcomePageId.Gapless -> WelcomeStageTarget(7f, 58f, 1.66f, 1f)
-            WelcomePageId.Preferences -> WelcomeStageTarget(7f, 30f, 1.66f, 1f)
+            WelcomePageId.Lyrics -> WelcomeStageTarget(24f, 23f, 1f, 1f)
+            WelcomePageId.Styles -> WelcomeStageTarget(24f, 23f, 1f, 1f)
+            WelcomePageId.Gapless -> WelcomeStageTarget(24f, 23f, 1f, 1f)
+            WelcomePageId.Preferences -> WelcomeStageTarget(29.7f, 20f, 0.78f, 1f)
         }
     } else {
         when (pageId) {
@@ -296,41 +295,8 @@ private fun FolioWelcomeScreenContent(
         }
     }
 
-    // Shared-element cover fly-in state (Welcome/SignIn -> Lyrics)
-    var rootCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
-    var flyCandidate by remember { mutableStateOf<Pair<String, Rect>?>(null) }
-    var activeFlyRect by remember { mutableStateOf<Rect?>(null) }
-    var hiddenFlyTileKey by remember { mutableStateOf<String?>(null) }
-    val flyProgress = remember { Animatable(0f) }
-    val flyAlpha = remember { Animatable(0f) }
-    var stageRevealAlphaDelay by remember { mutableStateOf(false) }
-
     fun navigateTo(targetPageId: WelcomePageId) {
-        val prev = currentPageId
         currentPageId = targetPageId
-        if (targetPageId == WelcomePageId.Lyrics &&
-            (prev == WelcomePageId.Welcome || prev == WelcomePageId.SignIn) &&
-            !lowPerformance && animated
-        ) {
-            val cand = flyCandidate
-            if (cand != null) {
-                activeFlyRect = cand.second
-                hiddenFlyTileKey = cand.first
-                stageRevealAlphaDelay = true
-                scope.launch {
-                    flyProgress.snapTo(0f)
-                    flyAlpha.snapTo(1f)
-                    launch {
-                        delay(120L)
-                        stageRevealAlphaDelay = false
-                    }
-                    flyProgress.animateTo(1f, spring(dampingRatio = 0.84f, stiffness = 260f))
-                    flyAlpha.animateTo(0f, tween(220))
-                    activeFlyRect = null
-                    hiddenFlyTileKey = null
-                }
-            }
-        }
     }
 
     fun startClosingSequence() {
@@ -441,7 +407,10 @@ private fun FolioWelcomeScreenContent(
     }
 
     // Active showcase track palette colors for album-derived Aura on demo pages
-    val currentShowcaseTrack = demoContent.showcaseTracks.getOrNull(gaplessTrackIdx.coerceAtLeast(0))
+    val showcaseTracks = demoContent.showcaseTracks
+    val gaplessActive = currentPageId == WelcomePageId.Gapless
+    val showcaseTrackIdx = if (gaplessActive && showcaseTracks.isNotEmpty()) gaplessTrackIdx % showcaseTracks.size else 0
+    val currentShowcaseTrack = showcaseTracks.getOrNull(showcaseTrackIdx)
     val paletteResult = rememberArtworkPaletteResult(
         url = currentShowcaseTrack?.artworkUrl,
         fallback = currentShowcaseTrack?.palette.orEmpty(),
@@ -474,7 +443,6 @@ private fun FolioWelcomeScreenContent(
             .fillMaxSize()
             .graphicsLayer { alpha = overlayFadeAlpha.value }
             .background(Color(0xFF08070A))
-            .onGloballyPositioned { rootCoords = it }
             .pointerInput(isClosing) {
                 if (isClosing) return@pointerInput
                 var velocityTracker = VelocityTracker()
@@ -534,13 +502,6 @@ private fun FolioWelcomeScreenContent(
             dragOffsetPx = effectiveDragPx,
             animated = animated,
             lowPerformance = lowPerformance,
-            rootCoords = rootCoords,
-            hiddenFlyTileKey = hiddenFlyTileKey,
-            onReportFlyCandidate = { key, rect ->
-                if (flyCandidate == null || flyCandidate?.first == key) {
-                    flyCandidate = key to rect
-                }
-            },
         )
 
         // Dark radial veil matching H5 `.veil` / `.phone .veil`
@@ -638,19 +599,19 @@ private fun FolioWelcomeScreenContent(
             }
         }
 
-        // 3. Single shared 16:9 Demo Player Screen (pure graphicsLayer translation/scale/alpha)
+        // 3. Single Now Playing preview, measured at the full player size.
+        val screenSize = IntSize(constraints.maxWidth, constraints.maxHeight)
         val stageTarget = stageTargetFor(currentPageId, isPhonePortrait)
         val stageMoveSpec = if (lowPerformance || !animated) {
             tween<Float>(180)
         } else {
             spring(dampingRatio = 0.84f, stiffness = 280f)
         }
-        val stageAlphaTarget = if (stageRevealAlphaDelay) 0f else stageTarget.alpha
         val stageX by animateFloatAsState(stageTarget.xU * uPx, stageMoveSpec, label = "scr-x")
         val stageY by animateFloatAsState(stageTarget.yU * uPx, stageMoveSpec, label = "scr-y")
         val stageScale by animateFloatAsState(stageTarget.scale, stageMoveSpec, label = "scr-s")
         val stageAlpha by animateFloatAsState(
-            targetValue = stageAlphaTarget,
+            targetValue = stageTarget.alpha,
             animationSpec = tween(if (lowPerformance) 150 else 420),
             label = "scr-a",
         )
@@ -659,33 +620,33 @@ private fun FolioWelcomeScreenContent(
         val closeT = closingStageProgress.value
         val baseX = if (isDragging) stageTarget.xU * uPx else stageX
         val fullScreenScale = 100f / 52f
-        val fullScreenY = ((with(density) { maxHeight.toPx() } - with(density) { stageBaseWidthDp.toPx() } * fullScreenScale * 9f / 16f) * 0.5f)
-            .coerceAtLeast(0f)
         val finalStageX = baseX + (0f - baseX) * closeT + effectiveDragPx * (if (lowPerformance) 0f else 0.45f)
-        val finalStageY = stageY + (fullScreenY - stageY) * closeT
+        val finalStageY = stageY * (1f - closeT)
         val finalStageScale = stageScale + (fullScreenScale - stageScale) * closeT
         val finalStageAlpha = stageAlpha * (1f - closeT)
 
-        if (demoContent.showcaseTracks.isNotEmpty() && (finalStageAlpha > 0.005f || (!isClosing && stageTarget.alpha > 0f))) {
+        if (currentShowcaseTrack != null && (finalStageAlpha > 0.005f || (!isClosing && stageTarget.alpha > 0f))) {
             SharedDemoPlayerStage(
-                tracks = demoContent.showcaseTracks,
-                activeTrackIdx = if (currentPageId == WelcomePageId.Gapless) gaplessTrackIdx else 0,
+                tracks = showcaseTracks,
+                activeTrackIdx = showcaseTrackIdx,
                 lyricLines = demoContent.lyricLines,
                 showLyricsDemo = demoContent.showLyricsDemo,
-                posterMode = when (currentPageId) {
-                    WelcomePageId.Styles -> demoPosterMode
-                    WelcomePageId.Preferences -> settingsState.lyricStyle == LyricBackgroundStyle.Soak
-                    else -> false
+                style = if (currentPageId == WelcomePageId.Styles) {
+                    if (demoPosterMode) LyricBackgroundStyle.Soak else LyricBackgroundStyle.Flow
+                } else {
+                    settingsState.lyricStyle
                 },
                 lyricTextSize = settingsState.lyricTextSize,
-                gaplessActive = currentPageId == WelcomePageId.Gapless,
+                gaplessActive = gaplessActive,
                 gaplessProgress = gaplessProgress,
-                showGaplessTag = currentPageId == WelcomePageId.Gapless && showGaplessTag,
+                showGaplessTag = gaplessActive && showGaplessTag,
                 showLoudnessBars = currentPageId == WelcomePageId.Preferences && showLoudnessBars,
                 loudnessMode = settingsState.loudnessMode,
-                beatActive = bgm.isActivelyPlaying,
                 lowPerformance = lowPerformance,
-                animated = animated,
+                reducedMotion = !animated,
+                screenSize = screenSize,
+                statusTop = statusTop,
+                navBottom = navBottom,
                 stageWidthDp = stageBaseWidthDp,
                 u = u,
                 modifier = Modifier
@@ -697,40 +658,6 @@ private fun FolioWelcomeScreenContent(
                         scaleX = finalStageScale
                         scaleY = finalStageScale
                         alpha = finalStageAlpha
-                    },
-            )
-        }
-
-        // Flying cover overlay from Wall -> Lyrics Stage Cover
-        val flyRect = activeFlyRect
-        if (flyRect != null && currentShowcaseTrack != null && flyAlpha.value > 0.01f) {
-            val lyricsStageTarget = stageTargetFor(WelcomePageId.Lyrics, isPhonePortrait)
-            val destStageW = with(density) { (u * 52f).toPx() } * lyricsStageTarget.scale
-            val destStageH = destStageW * 9f / 16f
-            val destCovX = lyricsStageTarget.xU * uPx + destStageW * 0.06f
-            val destCovY = lyricsStageTarget.yU * uPx + destStageH * 0.12f
-            val destCovW = destStageW * 0.32f
-            val t = flyProgress.value
-            val curX = flyRect.left + (destCovX - flyRect.left) * t
-            val curY = flyRect.top + (destCovY - flyRect.top) * t
-            val curScale = 1f + (destCovW / flyRect.width.coerceAtLeast(1f) - 1f) * t
-
-            FolioArtwork(
-                track = currentShowcaseTrack,
-                shape = RoundedCornerShape(u * 0.85f),
-                modifier = Modifier
-                    .size(
-                        width = with(density) { flyRect.width.toDp() },
-                        height = with(density) { flyRect.height.toDp() },
-                    )
-                    .zIndex(5f)
-                    .graphicsLayer {
-                        transformOrigin = TransformOrigin(0f, 0f)
-                        translationX = curX
-                        translationY = curY
-                        scaleX = curScale
-                        scaleY = curScale
-                        alpha = flyAlpha.value
                     },
             )
         }
