@@ -39,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -88,6 +89,7 @@ internal fun WelcomeCoverWall(
     animated: Boolean,
     lowPerformance: Boolean,
     modifier: Modifier = Modifier,
+    pauseMarquee: Boolean = false,
 ) {
     val tileSize = if (isPhonePortrait) 27f else 11f
     val gap = if (isPhonePortrait) 2.6f else 1.2f
@@ -110,7 +112,7 @@ internal fun WelcomeCoverWall(
     val wallAlpha by animateFloatAsState(targetWallAlpha, animSpec, label = "wall-alpha")
     val wallScale by animateFloatAsState(targetWallScale, animSpec, label = "wall-scale")
 
-    val marqueeActive = animated && !lowPerformance && wallAlpha > 0.01f
+    val marqueeActive = animated && !lowPerformance && !pauseMarquee && wallAlpha > 0.01f
     val transition = rememberInfiniteTransition(label = "welcome-wall-marquee")
     val forwardFraction by if (marqueeActive) {
         transition.animateFloat(
@@ -120,7 +122,7 @@ internal fun WelcomeCoverWall(
             label = "wall-fwd",
         )
     } else {
-        remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+        remember { mutableFloatStateOf(0f) }
     }
     val reverseFraction by if (marqueeActive) {
         transition.animateFloat(
@@ -130,7 +132,8 @@ internal fun WelcomeCoverWall(
             label = "wall-rev",
         )
     } else {
-        remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+        // Hold opposing rows at the phase they will start moving from.
+        remember(pauseMarquee) { mutableFloatStateOf(if (pauseMarquee) 1f else 0f) }
     }
 
     BoxWithConstraints(

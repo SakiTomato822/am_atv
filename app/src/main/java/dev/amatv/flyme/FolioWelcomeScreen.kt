@@ -2,6 +2,7 @@ package dev.amatv.flyme
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
@@ -144,9 +145,12 @@ internal fun FolioWelcomeOverlay(
     onClose: () -> Unit,
 ) {
     val lowPerformance = settingsState.lowPerformance
+    val animated = rememberWelcomeAnimationsEnabled()
+    val canPlayIntro = animated && !LocalFolioReducedMotion.current &&
+        !lowPerformance && !LocalFolioBrowseMotion.current.lowPerformance
     AnimatedVisibility(
         visible = open,
-        enter = fadeIn(tween(if (lowPerformance) 150 else 280)),
+        enter = if (canPlayIntro) EnterTransition.None else fadeIn(tween(if (lowPerformance) 150 else 280)),
         exit = fadeOut(tween(if (lowPerformance) 150 else 360)),
         modifier = Modifier
             .fillMaxSize()
@@ -154,6 +158,8 @@ internal fun FolioWelcomeOverlay(
     ) {
         FolioWelcomeScreenContent(
             open = open,
+            animated = animated,
+            canPlayIntro = canPlayIntro,
             settingsStore = settingsStore,
             settingsState = settingsState,
             accountState = accountState,
@@ -175,6 +181,8 @@ internal fun FolioWelcomeOverlay(
 @Composable
 private fun FolioWelcomeScreenContent(
     open: Boolean,
+    animated: Boolean,
+    canPlayIntro: Boolean,
     settingsStore: SettingsStore,
     settingsState: SettingsState,
     accountState: AccountState,
@@ -192,7 +200,6 @@ private fun FolioWelcomeScreenContent(
 ) {
     val motion = LocalFolioBrowseMotion.current
     val lowPerformance = motion.lowPerformance || settingsState.lowPerformance
-    val animated = rememberWelcomeAnimationsEnabled()
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 
@@ -221,6 +228,16 @@ private fun FolioWelcomeScreenContent(
     }
     var currentPageId by remember { mutableStateOf(WelcomePageId.Welcome) }
     var isClosing by remember { mutableStateOf(false) }
+    var introFinished by remember { mutableStateOf(!canPlayIntro) }
+    var introSkipped by remember { mutableStateOf(false) }
+    val introActive = open && canPlayIntro && !introFinished
+    fun finishIntro(skipped: Boolean) {
+        introSkipped = skipped
+        introFinished = true
+    }
+    LaunchedEffect(canPlayIntro) {
+        if (!canPlayIntro) finishIntro(true)
+    }
     val auraGatherScale = remember { Animatable(1f) }
     val ridgeGatherAlpha = remember { Animatable(FolioGatherMotion.WELCOME_RIDGE_BASE_ALPHA) }
     val closingStageProgress = remember { Animatable(0f) }
@@ -399,7 +416,9 @@ private fun FolioWelcomeScreenContent(
     }
 
     BackHandler(enabled = !isClosing) {
-        if (currentIndex > 0) {
+        if (introActive) {
+            finishIntro(true)
+        } else if (currentIndex > 0) {
             navigateTo(pages[currentIndex - 1])
         } else {
             handleSkip()
@@ -437,14 +456,19 @@ private fun FolioWelcomeScreenContent(
         animationSpec = tween(if (lowPerformance) FolioGatherMotion.LOW_PERF_FADE_MS else 300),
         label = "welcome-chrome-alpha",
     )
+    val pageFadeAlpha by animateFloatAsState(
+        targetValue = if (introActive) 0f else 1f,
+        animationSpec = tween(if (introSkipped || !canPlayIntro) 0 else 300),
+        label = "welcome-ink-handoff",
+    )
 
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .graphicsLayer { alpha = overlayFadeAlpha.value }
-            .background(Color(0xFF08070A))
-            .pointerInput(isClosing) {
-                if (isClosing) return@pointerInput
+            .background(WelcomeWallBackground)
+            .pointerInput(isClosing, introActive) {
+                if (isClosing || introActive) return@pointerInput
                 var velocityTracker = VelocityTracker()
                 detectHorizontalDragGestures(
                     onDragStart = {
@@ -494,7 +518,7 @@ private fun FolioWelcomeScreenContent(
         val u = maxWidth / 100f
         val uPx = with(density) { u.toPx() }
 
-        // 1. Moving 5-row cover wall + dark veil
+        val frostCapture = if (introActive) rememberWelcomeFrostCapture(demoContent.wallRows.isNotEmpty()) else null
         WelcomeCoverWall(
             rows = demoContent.wallRows,
             isPhonePortrait = isPhonePortrait,
@@ -502,12 +526,19 @@ private fun FolioWelcomeScreenContent(
             dragOffsetPx = effectiveDragPx,
             animated = animated,
             lowPerformance = lowPerformance,
+            modifier = frostCapture?.wallModifier ?: Modifier,
+            pauseMarquee = introActive,
         )
+        if (frostCapture != null) {
+            WelcomeAcrylic(capture = frostCapture, onFinished = ::finishIntro)
+            return@BoxWithConstraints
+        }
 
         // Dark radial veil matching H5 `.veil` / `.phone .veil`
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .graphicsLayer { alpha = pageFadeAlpha }
                 .background(
                     if (isPhonePortrait) {
                         Brush.verticalGradient(
@@ -532,7 +563,7 @@ private fun FolioWelcomeScreenContent(
             dragOffsetPx = effectiveDragPx,
             gatherScale = auraGatherScale.value,
             ridgeAlpha = ridgeGatherAlpha.value,
-            modifier = Modifier.zIndex(2f),
+            modifier = Modifier.zIndex(2f).graphicsLayer { alpha = pageFadeAlpha },
         )
 
         // 2. Top chrome: Brand mark + Sound button + Skip button
@@ -544,7 +575,7 @@ private fun FolioWelcomeScreenContent(
                     end = u * (if (isPhonePortrait) 5f else 3.6f),
                     top = statusTop + u * (if (isPhonePortrait) 4.2f else 2.2f),
                 )
-                .graphicsLayer { alpha = chromeFadeAlpha }
+                .graphicsLayer { alpha = chromeFadeAlpha * pageFadeAlpha }
                 .zIndex(6f),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
@@ -666,7 +697,7 @@ private fun FolioWelcomeScreenContent(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer { alpha = chromeFadeAlpha }
+                .graphicsLayer { alpha = chromeFadeAlpha * pageFadeAlpha }
                 .zIndex(4f),
         ) {
             WelcomePageTextsLayer(
@@ -714,7 +745,7 @@ private fun FolioWelcomeScreenContent(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = navBottom + u * (if (isPhonePortrait) 4.2f else 2.0f))
-                .graphicsLayer { alpha = chromeFadeAlpha }
+                .graphicsLayer { alpha = chromeFadeAlpha * pageFadeAlpha }
                 .zIndex(6f),
             horizontalArrangement = Arrangement.spacedBy(u * (if (isPhonePortrait) 1.5f else 0.6f)),
             verticalAlignment = Alignment.CenterVertically,
