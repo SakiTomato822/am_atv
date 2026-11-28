@@ -134,6 +134,19 @@ class LoudnessTest {
         assertEquals(-4f, state.gainAt(playing = true, nowMs = 5_000L), 0f)
     }
 
+    @Test fun aModeChangeMidSongRampsFromTheCurrentGain() {
+        val tag = SoundCheck(-10f, -1f)
+        val target = tag.gainFor(LoudnessMode.Standard)
+        val state = NativeTrackLoudness(
+            1L, "apple:1", 0, "1", LoudnessMode.Standard,
+            LoudnessLookup(tag, "cache"), null, carriedGain = 0f,
+        )
+        assertEquals(0f, state.gainAt(playing = true, nowMs = 10_000L), 0f)
+        assertEquals(target / 2, state.gainAt(playing = true, nowMs = 10_500L), 0.001f)
+        assertEquals(target, state.gainAt(playing = true, nowMs = 11_000L), 0f)
+        assertEquals(target, state.currentGain(), 0f)
+    }
+
     @Test fun preservesThePreviewInSessionJsonAndReadsOlderSessions() {
         val track = Track("apple:1", "Song", "Artist", "Album", 1000L, listOf(Color.Black), emptyList(),
             previewUrl = "https://example.com/preview.m4a")

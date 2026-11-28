@@ -10,14 +10,17 @@ internal class NativeTrackLoudness(
     val trackId: String,
     val slot: Int?,
     private val catalogId: String?,
-    private val mode: LoudnessMode,
+    val mode: LoudnessMode,
     private var lookup: LoudnessLookup,
     private var pending: Deferred<LoudnessLookup>?,
+    /** The gain a mode change mid-song leaves behind; the new mode ramps from it instead of jumping. */
+    carriedGain: Float? = null,
 ) {
-    private var started = false
+    private var started = carriedGain != null
     private var rampStartMs: Long? = null
-    private var rampFromGain = 0f
-    private var lastGain = 0f
+    private var rampPending = carriedGain != null
+    private var rampFromGain = carriedGain ?: 0f
+    private var lastGain = carriedGain ?: 0f
     private var effectiveLookup = lookup
     private var album: AlbumLoudness.Summary? = null
     private var loggedAlbum: AlbumLoudness.Summary? = null
@@ -30,6 +33,10 @@ internal class NativeTrackLoudness(
             lookup = runCatching { request.getCompleted() }
                 .getOrElse { LoudnessLookup(null, "missing", "lookup-cancelled") }
             pending = null
+        }
+        if (rampPending) {
+            rampStartMs = nowMs
+            rampPending = false
         }
         album = AlbumLoudness.forTrack(catalogId).takeUnless { mode == LoudnessMode.Off }
         val target = album?.tag?.let { LoudnessLookup(it, "album") }
@@ -47,6 +54,8 @@ internal class NativeTrackLoudness(
         lastGain = minOf(rampGain, target.tag?.maxBoostDb ?: 0f)
         return lastGain
     }
+
+    fun currentGain(): Float = lastGain
 
     fun apply(effect: GaplessFade, session: Int, fadeDb: Float, playing: Boolean, nowMs: Long): Float {
         val gain = gainAt(playing, nowMs)

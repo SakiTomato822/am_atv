@@ -480,8 +480,11 @@ class MusicKitBridge(
             (endedCatalogId != null && endedCatalogId != track.catalogId && lookahead?.catalogId != track.catalogId)
         ) return
         val active = trackLoudness
-        if (active?.generation == generation && active.trackId == track.id && active.slot == slot) return
         val mode = loudnessMode()
+        val sameTrack = active?.generation == generation && active.trackId == track.id && active.slot == slot
+        // A mode change in Settings takes effect on the song that is playing, ramping from its current gain.
+        if (sameTrack && active?.mode == mode) return
+        val carriedGain = active?.takeIf { sameTrack }?.currentGain()
         val cached = if (mode == LoudnessMode.Off) null else loudness.cached(track.catalogId)
         val pending = if (mode == LoudnessMode.Off || cached != null) null else loudness.request(track)
         val lookup = when {
@@ -492,8 +495,8 @@ class MusicKitBridge(
                 LoudnessLookup(null, "missing", "library-upload")
             else -> LoudnessLookup(null, "missing", "no-catalog-id")
         }
-        trackLoudness = NativeTrackLoudness(generation, track.id, slot, track.catalogId, mode, lookup, pending)
-        lastFadeDb = 0f
+        trackLoudness = NativeTrackLoudness(generation, track.id, slot, track.catalogId, mode, lookup, pending, carriedGain)
+        if (carriedGain == null) lastFadeDb = 0f
         tickFade()
     }
 
