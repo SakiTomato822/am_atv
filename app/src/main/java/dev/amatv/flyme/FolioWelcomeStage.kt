@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -169,7 +170,10 @@ internal fun WelcomeCoverWall(
                     val progress = if (rowIdx % 2 == 1) reverseFraction else forwardFraction
                     val rowShiftPx = -halfSpanPx * progress
                     Row(
+                        // Measure both copies at full size: a reverse row starts shifted onto the
+                        // second copy, which a width-bounded Row would squeeze to zero.
                         modifier = Modifier
+                            .wrapContentWidth(Alignment.Start, unbounded = true)
                             .graphicsLayer { translationX = rowShiftPx },
                         horizontalArrangement = Arrangement.spacedBy(gapDp),
                     ) {
