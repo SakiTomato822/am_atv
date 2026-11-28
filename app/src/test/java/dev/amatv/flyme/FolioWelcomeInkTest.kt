@@ -52,4 +52,20 @@ class FolioWelcomeInkTest {
             assertEquals(end, timeline.frameAt(elapsed, skip = true))
         }
     }
+
+    @Test
+    fun requiresSeventyPercentOfVisibleTilesAndKeepsRefreshingUntilAllAreLoaded() {
+        val tiles = List(10) { WelcomeWallTile() }
+        val empty = WelcomeWallArtwork(0, emptySet())
+        val belowThreshold = WelcomeWallArtwork(10, tiles.take(6).toSet())
+        val atThreshold = WelcomeWallArtwork(10, tiles.take(7).toSet())
+        val complete = WelcomeWallArtwork(10, tiles.toSet())
+
+        assertFalse(empty.readyToStart)
+        assertFalse(empty.allLoaded)
+        assertFalse(belowThreshold.readyToStart)
+        assertTrue(atThreshold.readyToStart)
+        assertFalse(atThreshold.allLoaded)
+        assertTrue(complete.allLoaded)
+    }
 }

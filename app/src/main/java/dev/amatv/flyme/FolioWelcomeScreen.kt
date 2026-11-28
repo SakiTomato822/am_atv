@@ -518,7 +518,7 @@ private fun FolioWelcomeScreenContent(
         val u = maxWidth / 100f
         val uPx = with(density) { u.toPx() }
 
-        val frostCapture = if (introActive) rememberWelcomeFrostCapture(demoContent.wallRows.isNotEmpty()) else null
+        val frostCapture = if (introActive) rememberWelcomeFrostCapture() else null
         WelcomeCoverWall(
             rows = demoContent.wallRows,
             isPhonePortrait = isPhonePortrait,
@@ -526,8 +526,7 @@ private fun FolioWelcomeScreenContent(
             dragOffsetPx = effectiveDragPx,
             animated = animated,
             lowPerformance = lowPerformance,
-            modifier = frostCapture?.wallModifier ?: Modifier,
-            pauseMarquee = introActive,
+            frostCapture = frostCapture,
         )
         if (frostCapture != null) {
             WelcomeAcrylic(capture = frostCapture, onFinished = ::finishIntro)

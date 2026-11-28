@@ -4,9 +4,9 @@ import android.graphics.Bitmap
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.unit.IntSize
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -30,30 +31,55 @@ import kotlinx.coroutines.withTimeoutOrNull
 internal val WelcomeWallBackground = Color(0xFF08070A)
 
 @Composable
-internal fun rememberWelcomeFrostCapture(hasWall: Boolean): WelcomeFrostCapture {
+internal fun rememberWelcomeFrostCapture(): WelcomeFrostCapture {
     val wallLayer = rememberGraphicsLayer()
     val frostLayer = rememberGraphicsLayer()
     val capture = remember(wallLayer, frostLayer) { WelcomeFrostCapture(wallLayer, frostLayer) }
-    val wallAvailable by rememberUpdatedState(hasWall)
     LaunchedEffect(capture) {
-        // A cold opening can start while Browse loads its first wall rows.
-        withTimeoutOrNull(500L) { snapshotFlow { wallAvailable }.first { it } }
-        capture.takeSnapshot()
+        val coverage = snapshotFlow { capture.artworkCoverage() }
+        var captured = withTimeoutOrNull(3_000L) { coverage.first { it.readyToStart } }
+            ?: capture.artworkCoverage()
+        while (true) {
+            capture.takeSnapshot()
+            if (captured.allLoaded) break
+            delay(400L)
+            val previous = captured
+            captured = coverage.first { it.allLoaded || (it.loaded.isNotEmpty() && it.loaded != previous.loaded) }
+        }
     }
     return capture
+}
+
+internal class WelcomeWallTile {
+    var loaded by mutableStateOf(false)
+}
+
+internal data class WelcomeWallArtwork(val visibleCount: Int, val loaded: Set<WelcomeWallTile>) {
+    val readyToStart: Boolean get() = visibleCount > 0 && loaded.size * 10 >= visibleCount * 7
+    val allLoaded: Boolean get() = visibleCount > 0 && loaded.size == visibleCount
 }
 
 internal class WelcomeFrostCapture(
     private val wallLayer: GraphicsLayer,
     private val frostLayer: GraphicsLayer,
 ) {
-    private val recorded = CompletableDeferred<Unit>()
-    private var requested by mutableStateOf(false)
+    private val visibleTiles = mutableStateMapOf<WelcomeWallTile, Unit>()
+    private var requested by mutableStateOf<CompletableDeferred<Unit>?>(null)
     var bitmap by mutableStateOf<ImageBitmap?>(null)
         private set
 
+    fun setTileVisible(tile: WelcomeWallTile, visible: Boolean) {
+        if (visible) visibleTiles[tile] = Unit else visibleTiles.remove(tile)
+    }
+
+    fun artworkCoverage() = WelcomeWallArtwork(
+        visibleCount = visibleTiles.size,
+        loaded = visibleTiles.keys.filterTo(mutableSetOf()) { it.loaded },
+    )
+
     val wallModifier = Modifier.drawWithContent {
-        if (requested && !recorded.isCompleted) {
+        val recorded = requested
+        if (recorded != null && !recorded.isCompleted) {
             val wallSize = size
             val smallSize = IntSize(
                 (wallSize.width.toInt() / 16).coerceAtLeast(1),
@@ -75,7 +101,8 @@ internal class WelcomeFrostCapture(
     }
 
     suspend fun takeSnapshot() {
-        requested = true
+        val recorded = CompletableDeferred<Unit>()
+        requested = recorded
         recorded.await()
         val snapshot = frostLayer.toImageBitmap()
         bitmap = withContext(Dispatchers.Default) { blurWelcomeFrost(snapshot) }

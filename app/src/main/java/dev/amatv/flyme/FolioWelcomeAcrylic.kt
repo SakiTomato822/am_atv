@@ -1,6 +1,9 @@
 package dev.amatv.flyme
 
 import android.graphics.Bitmap
+import android.graphics.BlurMaskFilter
+import android.graphics.Canvas as BitmapCanvas
+import android.graphics.Paint as BitmapPaint
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,6 +14,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
@@ -27,6 +31,7 @@ import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -39,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import dev.amatv.R
 import kotlin.math.roundToInt
 import kotlin.random.Random
+import kotlinx.coroutines.flow.first
 
 @Composable
 internal fun WelcomeAcrylic(
@@ -51,16 +57,15 @@ internal fun WelcomeAcrylic(
         val bytes = resources.openRawResource(R.raw.folio_handwriting).use { it.readBytes() }
         WelcomeInkTimeline(parseWelcomeInk(bytes))
     }
-    val frost = capture.bitmap
     val elapsed = remember { mutableFloatStateOf(0f) }
     val skipped = remember { mutableStateOf(false) }
     val finish by rememberUpdatedState(onFinished)
-    LaunchedEffect(frost, timeline, skipped.value) {
+    LaunchedEffect(capture, timeline, skipped.value) {
         if (skipped.value) {
             finish(true)
             return@LaunchedEffect
         }
-        if (frost == null) return@LaunchedEffect
+        snapshotFlow { capture.bitmap != null }.first { it }
         val start = withFrameNanos { it }
         do {
             val time = withFrameNanos { (it - start) / 1_000_000f }
@@ -90,14 +95,15 @@ internal fun WelcomeAcrylic(
                 onDrawBehind {
                     val frame = timeline.frameAt(elapsed.floatValue, skip = skipped.value)
                     if (!frame.finished) {
+                        val frost = capture.bitmap
                         if (frost == null) {
                             drawRect(WelcomeWallBackground)
                         } else {
                             drawImage(frost, dstSize = destination, filterQuality = FilterQuality.Low)
+                            drawRect(tint)
+                            drawRect(grain)
+                            with(ink) { carve(frame) }
                         }
-                        drawRect(tint)
-                        drawRect(grain)
-                        if (frost != null) with(ink) { carve(frame) }
                     }
                 }
             },
@@ -112,6 +118,34 @@ private fun welcomeFrostGrain(): ShaderBrush {
     }
     val image = Bitmap.createBitmap(pixels, 96, 96, Bitmap.Config.ARGB_8888).asImageBitmap()
     return ShaderBrush(ImageShader(image, TileMode.Repeated, TileMode.Repeated))
+}
+
+private class WelcomeExpansionMask(centerlines: Path, size: Size) {
+    private val path = centerlines.asAndroidPath()
+    private val destination = IntSize(size.width.roundToInt(), size.height.roundToInt())
+    private val bitmap = Bitmap.createBitmap(
+        (destination.width / 4).coerceAtLeast(1),
+        (destination.height / 4).coerceAtLeast(1),
+        Bitmap.Config.ARGB_8888,
+    )
+    private val image = bitmap.asImageBitmap()
+    private val canvas = BitmapCanvas(bitmap).apply {
+        scale(bitmap.width / size.width, bitmap.height / size.height)
+    }
+    private val paint = BitmapPaint(BitmapPaint.ANTI_ALIAS_FLAG).apply {
+        style = BitmapPaint.Style.STROKE
+        strokeCap = BitmapPaint.Cap.ROUND
+        strokeJoin = BitmapPaint.Join.ROUND
+    }
+
+    fun DrawScope.carve(width: Float, feather: Float) {
+        // Rasterize the blurred mask in software so it also works on Android 11.
+        bitmap.eraseColor(0)
+        paint.strokeWidth = width
+        paint.maskFilter = BlurMaskFilter(feather * 0.5f, BlurMaskFilter.Blur.NORMAL)
+        canvas.drawPath(path, paint)
+        drawImage(image, dstSize = destination, filterQuality = FilterQuality.Low, blendMode = BlendMode.DstOut)
+    }
 }
 
 private class WelcomeInkMask(strokes: List<List<WelcomeInkPoint>>, size: Size, private val feather: Float) {
@@ -132,6 +166,7 @@ private class WelcomeInkMask(strokes: List<List<WelcomeInkPoint>>, size: Size, p
         }
     }
     private val expansionRadius: Float
+    private val expansionMask by lazy { WelcomeExpansionMask(centerlines, size) }
     private val completed = Outline()
     private val prefix = Outline()
     private val tipSegment = Outline()
@@ -166,13 +201,12 @@ private class WelcomeInkMask(strokes: List<List<WelcomeInkPoint>>, size: Size, p
         }
 
         val growth = expansionRadius * frame.expansion
-        if (growth > 0f) {
-            drawGrowth(growth + feather, 0.36f)
-            if (growth >= baseRadius * 1.25f) {
-                drawGrowth(growth, 1f)
-                return
-            }
+        if (growth >= baseRadius * 1.25f) {
+            val growthFeather = maxOf(feather, growth * 2f * 0.06f)
+            with(expansionMask) { carve(growth * 2f, growthFeather) }
+            return
         }
+        if (growth > 0f) drawGrowth(growth + feather, 0.36f)
         drawPath(completed.softEdge, Color.Black, alpha = 0.36f, blendMode = BlendMode.DstOut)
         if (tip != null) {
             drawPath(prefix.softEdge, Color.Black, alpha = 0.36f, blendMode = BlendMode.DstOut)
