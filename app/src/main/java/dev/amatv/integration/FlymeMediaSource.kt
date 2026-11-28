@@ -160,7 +160,10 @@ internal class FlymeMediaSource(
             reply.writeNoException()
             when (code) {
                 1 -> reply.writeInt(dispatch { play() })
-                2, 26 -> reply.writeInt(dispatch { pause() })
+                2, 26 -> {
+                    Log.i("AMATV-Pause", "source=mediacenter code=$code")
+                    reply.writeInt(dispatch { pause() })
+                }
                 3 -> reply.writeInt(if (snapshot?.canSkipNext == true) dispatch { next() } else 0)
                 4 -> reply.writeInt(if (snapshot?.canSkipPrevious == true) dispatch { previous() } else 0)
                 8 -> { // selecting this source opens its UI; it never silently starts audio
@@ -184,7 +187,10 @@ internal class FlymeMediaSource(
                 25 -> {
                     val focusedPackage = data.readString()
                     if (!focusedPackage.isNullOrBlank() && focusedPackage != context.packageName &&
-                        snapshot?.isPlaying == true) dispatch { pause() }
+                        snapshot?.isPlaying == true) {
+                        Log.i("AMATV-Pause", "source=mediacenter-focus-moved package=$focusedPackage")
+                        dispatch { pause() }
+                    }
                 }
                 33, 34, 35 -> Unit // unsupported void notifications
                 else -> reply.writeInt(0) // explicitly decline unsupported controls
@@ -471,6 +477,7 @@ internal class FlymeMediaSource(
             lastProgressPosition = 0L
         } else {
             Log.w(TAG, "MediaCenter denied playback focus")
+            Log.i("AMATV-Pause", "source=mediacenter-focus-denied")
             dispatch { pause() }
         }
         return accepted

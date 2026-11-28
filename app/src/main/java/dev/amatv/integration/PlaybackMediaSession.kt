@@ -1,5 +1,6 @@
 package dev.amatv.integration
 
+import android.util.Log
 import android.app.PendingIntent
 import android.content.Context
 import android.media.AudioAttributes
@@ -70,13 +71,17 @@ class PlaybackMediaSession(private val context: Context) {
             .build())
         setCallback(object : MediaSession.Callback() {
             override fun onPlay() { callbacks?.play?.invoke() }
-            override fun onPause() { callbacks?.pause?.invoke() }
+            override fun onPause() {
+                Log.i("AMATV-Pause", "source=media-session-pause")
+                callbacks?.pause?.invoke()
+            }
             override fun onStop() {
                 // Stop cancels playback intent through the same application entry
                 // as Pause. A delayed pre-stop snapshot must not reactivate us.
                 acceptPlayingActivation = false
                 activatedByPlayback = false
                 isActive = false
+                Log.i("AMATV-Pause", "source=media-session-stop")
                 callbacks?.pause?.invoke()
             }
             override fun onSkipToNext() { callbacks?.next?.invoke() }

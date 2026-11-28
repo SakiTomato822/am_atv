@@ -1,5 +1,6 @@
 package dev.amatv.integration
 
+import android.util.Log
 import dev.amatv.R
 import dev.amatv.i18n.AppText
 
@@ -385,6 +386,8 @@ class MusicServices(context: Context) : RecommendationProvider, dev.amatv.core.L
         if (stationEngineActive) stationEngine?.play() else bridge.play()
     }
     override fun pause() {
+        // Paired with a preceding source line; an unpaired one came from the app UI or voice.
+        Log.i("AMATV-Pause", "app pause command station=$stationEngineActive")
         mediaSession.playbackPaused()
         flymeMediaSource?.playbackPaused()
         if (stationEngineActive) stationEngine?.pause() else bridge.pause()

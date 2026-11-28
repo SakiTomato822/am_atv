@@ -1,5 +1,6 @@
 package dev.amatv.flyme
 
+import android.util.Log
 import android.app.Activity
 import android.os.Build
 import android.view.KeyEvent
@@ -481,9 +482,15 @@ fun FolioApp(
             .onPreviewKeyEvent { event ->
                 if (event.nativeKeyEvent.action != KeyEvent.ACTION_UP) return@onPreviewKeyEvent false
                 when (event.nativeKeyEvent.keyCode) {
-                    KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> { playbackStore.togglePlayback(); true }
+                    KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                        Log.i("AMATV-Pause", "source=key-play-pause")
+                        playbackStore.togglePlayback(); true
+                    }
                     KeyEvent.KEYCODE_MEDIA_PLAY -> { playbackStore.requestPlayback(); true }
-                    KeyEvent.KEYCODE_MEDIA_PAUSE -> { playbackStore.pausePlayback(); true }
+                    KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                        Log.i("AMATV-Pause", "source=key-pause")
+                        playbackStore.pausePlayback(); true
+                    }
                     KeyEvent.KEYCODE_MEDIA_NEXT -> { playbackStore.skip(1); true }
                     KeyEvent.KEYCODE_MEDIA_PREVIOUS -> { playbackStore.skip(-1); true }
                     KeyEvent.KEYCODE_MEDIA_REWIND -> { playbackStore.seekPlaybackBy(-10_000L); true }

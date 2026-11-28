@@ -1041,6 +1041,11 @@ class MusicKitBridge(
                 controller?.let { readSnapshot(it, generation) }
             } ?: return@readAndDeliver
             val resumed = snapshot.isPlaying && latestSnapshot?.isPlaying != true
+            if (latestSnapshot?.isPlaying == true && !snapshot.isPlaying && !snapshot.isBuffering && desiredPlaying) {
+                // The app did not ask for this pause: the SDK stopped by itself (audio focus, route, error).
+                Log.i("AMATV-Pause", "source=sdk-without-app-command positionMs=${snapshot.positionMs} " +
+                    "durationMs=${snapshot.durationMs} track=${snapshot.currentTrack?.catalogId}")
+            }
             latestSnapshot = snapshot
             if (resumed) restartPlaybackPolls()
             mainHandler.post {
